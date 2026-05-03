@@ -182,7 +182,7 @@ Set up this fresh Obsidian plugin to run a pi-agent inside Obsidian, expose inte
   - Add `path-browserify` only if path helpers need POSIX-style joins/basenames outside simple string utilities.
   - Update `tsconfig.json` for TSX (`jsx: "react-jsx"`) and include `src/**/*.tsx` and test files.
   - Keep esbuild output as Obsidian-compatible CommonJS, but verify the bundle does not externalize mobile-unavailable Node modules.
-- [ ] Set up Vitest.
+- [x] Set up Vitest.
   - Add `vitest` and a `test` script.
   - Add a small `src/test/` or colocated `*.test.ts` setup for pure helpers.
   - Unit-test vault path normalization/validation, exact edit application, grep/find matching helpers, truncation helpers, and chat/session serialization.
@@ -294,3 +294,18 @@ Completed foundation changes:
 - Updated `tsconfig.json` with `jsx: "react-jsx"` and TSX includes.
 - Replaced the sample plugin lifecycle with a minimal pi-obsidian shell and settings tab.
 - Validation: `npm run build` passes after the foundation changes.
+
+### Pure utility and test setup
+
+- [x] Add vault path, exact edit, search matching, truncation, and session JSONL helper tests.
+- [x] Implement the pure helpers used by tools and session storage.
+- [x] Validate with `npm test` and `npm run build`.
+
+Completed utility/test changes:
+- Added pure vault path validation helpers that normalize `@/`, reject absolute paths, reject `..`, and block plugin internals by default.
+- Added exact edit application with unique-match and non-overlap enforcement.
+- Added truncation/line-slicing helpers for tool output.
+- Added simple find/grep matching helpers.
+- Added pi-compatible JSONL session parsing/serialization/context helpers.
+- Added Vitest coverage for those helpers.
+- Validation: `npm test` passes with 18 tests, and `npm run build` passes.
