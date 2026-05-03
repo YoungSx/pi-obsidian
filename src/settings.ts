@@ -4,6 +4,8 @@ import type { KnownProvider, ModelThinkingLevel } from "@mariozechner/pi-ai";
 import type PiObsidianPlugin from "./main";
 import { DEFAULT_MODEL_ID, DEFAULT_PROVIDER, DEFAULT_THINKING_LEVEL } from "./constants";
 
+const OFF_THINKING_LEVEL: ModelThinkingLevel = "off";
+
 export interface PiObsidianSettings {
 	provider: string;
 	modelId: string;
@@ -54,6 +56,17 @@ export function getSupportedThinkingLevelOptions(settings: PiObsidianSettings): 
 	return getSupportedThinkingLevels(getSelectedModel(settings));
 }
 
+export function getPreferredThinkingLevel(settings: PiObsidianSettings): ModelThinkingLevel {
+	const supportedLevels = getSupportedThinkingLevelOptions(settings);
+	if (supportedLevels.includes(settings.thinkingLevel)) {
+		return settings.thinkingLevel;
+	}
+	if (supportedLevels.includes(DEFAULT_THINKING_LEVEL)) {
+		return DEFAULT_THINKING_LEVEL;
+	}
+	return supportedLevels[0] ?? OFF_THINKING_LEVEL;
+}
+
 export class PiObsidianSettingTab extends PluginSettingTab {
 	private readonly plugin: PiObsidianPlugin;
 
@@ -89,7 +102,7 @@ export class PiObsidianSettingTab extends PluginSettingTab {
 				dropdown.onChange(async (provider) => {
 					this.plugin.settings.provider = provider;
 					this.plugin.settings.modelId = getProviderModels(provider)[0]?.id ?? DEFAULT_MODEL_ID;
-					this.plugin.settings.thinkingLevel = getSupportedThinkingLevelOptions(this.plugin.settings)[0] ?? "off";
+					this.plugin.settings.thinkingLevel = getPreferredThinkingLevel(this.plugin.settings);
 					await this.plugin.saveSettings();
 					this.display();
 				});
@@ -107,7 +120,7 @@ export class PiObsidianSettingTab extends PluginSettingTab {
 				dropdown.setValue(this.plugin.settings.modelId);
 				dropdown.onChange(async (modelId) => {
 					this.plugin.settings.modelId = modelId;
-					this.plugin.settings.thinkingLevel = getSupportedThinkingLevelOptions(this.plugin.settings)[0] ?? "off";
+					this.plugin.settings.thinkingLevel = getPreferredThinkingLevel(this.plugin.settings);
 					await this.plugin.saveSettings();
 					this.display();
 				});
@@ -123,7 +136,7 @@ export class PiObsidianSettingTab extends PluginSettingTab {
 				for (const level of levels) {
 					dropdown.addOption(level, level);
 				}
-				dropdown.setValue(levels.includes(this.plugin.settings.thinkingLevel) ? this.plugin.settings.thinkingLevel : levels[0] ?? "off");
+				dropdown.setValue(getPreferredThinkingLevel(this.plugin.settings));
 				dropdown.onChange(async (thinkingLevel) => {
 					this.plugin.settings.thinkingLevel = thinkingLevel as ModelThinkingLevel;
 					await this.plugin.saveSettings();

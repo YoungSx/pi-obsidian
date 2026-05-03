@@ -191,7 +191,7 @@ Set up this fresh Obsidian plugin to run a pi-agent inside Obsidian, expose inte
   - Set `manifest.json` `id` to match this folder (`pi-obsidian`).
   - Set `isDesktopOnly: false`.
   - Remove sample ribbon/status/modal/click/interval code.
-- [ ] Add plugin settings for mobile-safe agent configuration.
+- [x] Add plugin settings for mobile-safe agent configuration.
   - Store settings with Obsidian `loadData()` / `saveData()`.
   - Use pi-ai's built-in model catalog (`getProviders()`, `getModels()`, `getModel()`) rather than maintaining our own hard-coded provider/model list.
   - Default selected provider/model to `deepseek` / `deepseek-v4-pro`.
@@ -201,7 +201,7 @@ Set up this fresh Obsidian plugin to run a pi-agent inside Obsidian, expose inte
   - Skip Codex/OAuth UI and storage entirely for the MVP.
   - Include optional advanced per-provider base URL/headers fields only if needed during implementation; otherwise leave provider-specific extras for follow-up work.
   - Include clear privacy copy: chat prompts, selected vault content exposed by tools, and tool results are sent to the configured model provider.
-- [ ] Add a lightweight embedded agent service around `@mariozechner/pi-agent-core`.
+- [x] Add a lightweight embedded agent service around `@mariozechner/pi-agent-core`.
   - Create an `Agent` with:
     - custom system prompt for Obsidian vault work,
     - configured model and thinking level from pi-ai's model catalog,
@@ -233,12 +233,12 @@ Set up this fresh Obsidian plugin to run a pi-agent inside Obsidian, expose inte
   - `get_active_note`: Obsidian-specific helper to return the current active Markdown file path and optionally content/selection.
   - Validate every path at the tool boundary: vault-relative only, normalize leading `@`, reject absolute paths, reject `..` escapes, avoid `.obsidian/plugins/pi-obsidian` session/settings internals unless explicitly needed.
   - Truncate tool output to avoid flooding model context; keep limits close to pi defaults where reasonable.
-- [ ] Add a React-powered side panel view.
+- [x] Add a React-powered side panel view.
   - Follow the Smart Composer view pattern: `ItemView`, `createRoot`, `registerView`, `getRightLeaf(false)`, `setViewState`, `revealLeaf`.
   - Build a minimal chat interface: message list, input box, send button, abort button, status/error display, and provider/model status.
   - Render streaming assistant text deltas and basic tool-call/result rows.
   - Keep the UI simple; no RAG, mentions, templates, or apply-edit view in this phase.
-- [ ] Wire plugin lifecycle.
+- [x] Wire plugin lifecycle.
   - Register the chat view in `onload()`.
   - Add a stable command such as `open-pi-chat` to open/reveal the side panel.
   - Add a ribbon icon to open chat.
@@ -336,4 +336,20 @@ Completed Obsidian tool changes:
 - `write` creates parent folders and overwrites existing files; `edit` applies exact replacements and both mutating tools run immediately for the MVP.
 - Tool path inputs use the shared vault-relative validation helpers, including plugin-internal path protection.
 - Tool outputs are truncated through the shared truncation helpers.
+- Validation: `npm test` passes with 20 tests, and `npm run build` passes.
+
+### Agent service and React side panel
+
+- [x] Implement embedded `Agent` service with DeepSeek API-key credential injection and session persistence.
+- [x] Add React `ItemView` side panel and wire command/ribbon lifecycle.
+- [x] Validate with `npm test` and `npm run build`.
+
+Completed agent/UI/lifecycle changes:
+- Added `ObsidianAgentService` around `@mariozechner/pi-agent-core` `Agent`.
+- Injects API keys from Obsidian settings via provider id and blocks prompt submission with a user-facing error when the selected provider key is missing.
+- Defaults and settings UI are DeepSeek-first (`deepseek/deepseek-v4-pro`, thinking `high`) while retaining generic provider/model/key storage.
+- Persists `message_end` messages to the JSONL session manager and captures error messages emitted only through `agent_end`.
+- Added a React `ItemView` side panel with transcript rendering, streaming message display, tool call/result rows, send/abort/new-chat actions, and session path display.
+- Wired plugin lifecycle: registers the view, command `open-pi-chat`, ribbon icon, settings tab, and service disposal on unload.
+- Added compact chat CSS.
 - Validation: `npm test` passes with 20 tests, and `npm run build` passes.
