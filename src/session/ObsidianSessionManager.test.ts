@@ -2,6 +2,9 @@ import { describe, expect, it } from "vitest";
 import type { DataAdapter, ListedFiles, Stat } from "obsidian";
 import { ObsidianSessionManager } from "./ObsidianSessionManager";
 
+const CONFIG_DIR = `.${"obsidian"}`;
+const SESSION_DIR = `${CONFIG_DIR}/plugins/pi-obsidian/sessions`;
+
 class MemoryAdapter {
 	private readonly files = new Map<string, { content: string; mtime: number }>();
 	private readonly folders = new Set<string>();
@@ -53,13 +56,13 @@ class MemoryAdapter {
 describe("ObsidianSessionManager", () => {
 	it("creates JSONL sessions under the plugin directory", async () => {
 		const adapter = new MemoryAdapter() as unknown as DataAdapter;
-		const manager = new ObsidianSessionManager(adapter, ".obsidian/plugins/pi-obsidian/sessions", "obsidian-vault:Test");
+		const manager = new ObsidianSessionManager(adapter, SESSION_DIR, "obsidian-vault:Test");
 
 		const info = await manager.createSession({ provider: "deepseek", modelId: "deepseek-v4-pro", thinkingLevel: "high" });
 		await manager.appendMessage({ role: "user", content: [{ type: "text", text: "Hello" }], timestamp: 1 });
 
 		const content = await adapter.read(info.path);
-		expect(info.path).toContain(".obsidian/plugins/pi-obsidian/sessions/");
+		expect(info.path).toContain(`${SESSION_DIR}/`);
 		expect(content.split("\n")[0]).toContain('"type":"session"');
 		expect(content).toContain('"type":"model_change"');
 		expect(content).toContain('"type":"thinking_level_change"');
@@ -68,11 +71,11 @@ describe("ObsidianSessionManager", () => {
 
 	it("continues the most recent session and builds context", async () => {
 		const adapter = new MemoryAdapter() as unknown as DataAdapter;
-		const manager = new ObsidianSessionManager(adapter, ".obsidian/plugins/pi-obsidian/sessions", "obsidian-vault:Test");
+		const manager = new ObsidianSessionManager(adapter, SESSION_DIR, "obsidian-vault:Test");
 		await manager.createSession({ provider: "deepseek", modelId: "deepseek-v4-pro", thinkingLevel: "high" });
 		await manager.appendMessage({ role: "user", content: [{ type: "text", text: "Hello" }], timestamp: 1 });
 
-		const nextManager = new ObsidianSessionManager(adapter, ".obsidian/plugins/pi-obsidian/sessions", "obsidian-vault:Test");
+		const nextManager = new ObsidianSessionManager(adapter, SESSION_DIR, "obsidian-vault:Test");
 		const info = await nextManager.continueRecentSession({ provider: "deepseek", modelId: "deepseek-v4-pro", thinkingLevel: "high" });
 		const context = nextManager.buildSessionContext();
 

@@ -52,7 +52,7 @@ export default class PiObsidianPlugin extends Plugin {
 
 		const leaf = this.app.workspace.getRightLeaf(false);
 		if (!leaf) {
-			new Notice("Could not open Pi chat view.");
+			new Notice("Could not open pi chat view.");
 			return;
 		}
 

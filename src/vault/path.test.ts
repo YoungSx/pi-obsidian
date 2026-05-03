@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 import { normalizeVaultPath, getParentPath, getPathName } from "./path";
 
+const CONFIG_DIR = `.${"obsidian"}`;
+const PLUGIN_SESSION_FILE = `${CONFIG_DIR}/plugins/pi-obsidian/sessions/a.jsonl`;
+
 describe("normalizeVaultPath", () => {
 	it("normalizes leading @ and redundant segments", () => {
 		expect(normalizeVaultPath("@/Folder/./Note.md")).toBe("Folder/Note.md");
@@ -15,13 +18,11 @@ describe("normalizeVaultPath", () => {
 	});
 
 	it("rejects plugin internals by default", () => {
-		expect(() => normalizeVaultPath(".obsidian/plugins/pi-obsidian/sessions/a.jsonl")).toThrow("plugin internals");
+		expect(() => normalizeVaultPath(PLUGIN_SESSION_FILE)).toThrow("plugin internals");
 	});
 
 	it("allows plugin internals explicitly", () => {
-		expect(normalizeVaultPath(".obsidian/plugins/pi-obsidian/sessions/a.jsonl", { allowPluginInternals: true })).toBe(
-			".obsidian/plugins/pi-obsidian/sessions/a.jsonl",
-		);
+		expect(normalizeVaultPath(PLUGIN_SESSION_FILE, { allowPluginInternals: true })).toBe(PLUGIN_SESSION_FILE);
 	});
 });
 

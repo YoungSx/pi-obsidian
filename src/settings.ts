@@ -79,7 +79,7 @@ export class PiObsidianSettingTab extends PluginSettingTab {
 		const { containerEl } = this;
 		containerEl.empty();
 
-		containerEl.createEl("h2", { text: "Pi agent" });
+		new Setting(containerEl).setName("Pi agent").setHeading();
 		containerEl.createEl("p", {
 			text: "Prompts, vault content read by tools, and tool results are sent to the configured model provider. API keys are stored in this plugin's Obsidian settings.",
 		});
@@ -93,7 +93,7 @@ export class PiObsidianSettingTab extends PluginSettingTab {
 	private addProviderSetting(containerEl: HTMLElement): void {
 		new Setting(containerEl)
 			.setName("Provider")
-			.setDesc("DeepSeek is the polished MVP provider. Other pi-ai providers are listed for future compatibility.")
+			.setDesc("The polished provider for this first version is deepseek. Other providers are listed for future compatibility.")
 			.addDropdown((dropdown) => {
 				for (const provider of getProviders()) {
 					dropdown.addOption(provider, provider);
@@ -112,7 +112,7 @@ export class PiObsidianSettingTab extends PluginSettingTab {
 	private addModelSetting(containerEl: HTMLElement): void {
 		new Setting(containerEl)
 			.setName("Model")
-			.setDesc("The MVP test path uses deepseek-v4-pro.")
+			.setDesc("The first test path uses deepseek-v4-pro.")
 			.addDropdown((dropdown) => {
 				for (const model of getProviderModels(this.plugin.settings.provider)) {
 					dropdown.addOption(model.id, model.name || model.id);

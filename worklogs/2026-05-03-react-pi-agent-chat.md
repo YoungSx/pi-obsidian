@@ -364,3 +364,19 @@ Completed documentation/metadata changes:
 - Replaced the sample README with Pi Obsidian setup, usage, tool, privacy, and JSONL session storage notes.
 - Aligned `versions.json` `1.0.0` minimum app version with `manifest.json` (`1.5.7`).
 - Validation: `npm test` passes with 20 tests, and `npm run build` passes.
+
+### Final automated validation
+
+- [x] Run `npm test`.
+- [x] Run `npm run build`.
+- [x] Run `npm run lint`.
+- [x] Inspect generated bundle for obvious externalized Node modules.
+- [ ] Manual Obsidian desktop DeepSeek/API-key test.
+- [ ] Manual Obsidian mobile test.
+
+Validation notes:
+- `npm test` passes with 20 tests.
+- `npm run build` passes.
+- `npm run lint` initially found UI sentence-case and hardcoded `.obsidian` strings in tests; fixed those and lint now passes.
+- Bundle inspection found `require("obsidian")` as expected and a dormant `require("node:fs")` path from pi-ai's environment API-key fallback. The plugin supplies API keys explicitly and blocks prompt submission when the key is missing, so this path should not be reached in the MVP; no `child_process`/shell integration was added.
+- Manual Obsidian desktop/mobile validation still needs a human/device and a DeepSeek API key.
