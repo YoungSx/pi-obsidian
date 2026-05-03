@@ -223,7 +223,7 @@ Set up this fresh Obsidian plugin to run a pi-agent inside Obsidian, expose inte
   - Keep a leaf pointer in memory for appends; recover it from the last valid non-header entry when loading.
   - Keep the format compatible with pi's entry shapes so future import/export with pi CLI sessions is possible.
   - For MVP, no UI branching/compaction is required, but use `parentId` consistently so future tree navigation can be added without rewriting stored sessions.
-- [ ] Reimplement pi-style vault tools with Obsidian APIs.
+- [x] Reimplement pi-style vault tools with Obsidian APIs.
   - `ls`: list vault files/folders under a vault-relative path using `Vault`/`TFolder` APIs.
   - `find`: find files by path/name/glob-like pattern within the vault.
   - `grep`: search text files, initially Markdown-first, with case-sensitive/insensitive and literal/regex options if simple enough.
@@ -322,4 +322,18 @@ Completed JSONL session manager changes:
 - New sessions write a pi-compatible version-3 JSONL header and append `model_change` plus `thinking_level_change` entries.
 - Implemented `createSession`, `continueRecentSession`, `loadSession`, `listSessions`, `appendMessage`, `appendModelChange`, `appendThinkingLevelChange`, `appendSessionInfo`, `buildSessionContext`, and active session info helpers.
 - Added in-memory adapter tests for creating, appending, resuming, and context-building.
+- Validation: `npm test` passes with 20 tests, and `npm run build` passes.
+
+### Obsidian vault tools
+
+- [x] Implement Obsidian-backed `read`, `write`, `edit`, `grep`, `find`, `ls`, and `get_active_note` tools.
+- [x] Validate path handling and exact edits through existing tests.
+- [x] Validate with `npm test` and `npm run build`.
+
+Completed Obsidian tool changes:
+- Added `createObsidianTools(app)` returning pi-agent-core-compatible tools.
+- Implemented `read`, `write`, `edit`, `ls`, `find`, `grep`, and `get_active_note` on top of Obsidian `Vault`/workspace APIs.
+- `write` creates parent folders and overwrites existing files; `edit` applies exact replacements and both mutating tools run immediately for the MVP.
+- Tool path inputs use the shared vault-relative validation helpers, including plugin-internal path protection.
+- Tool outputs are truncated through the shared truncation helpers.
 - Validation: `npm test` passes with 20 tests, and `npm run build` passes.
