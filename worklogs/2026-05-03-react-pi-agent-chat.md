@@ -212,7 +212,7 @@ Set up this fresh Obsidian plugin to run a pi-agent inside Obsidian, expose inte
   - Translate `Agent` events into a React-friendly chat store.
   - Support prompt submit, abort, idle/streaming status, and simple error reporting.
   - Persist transcript updates through our Obsidian-backed session store after relevant events.
-- [ ] Add an Obsidian-backed JSONL session manager.
+- [x] Add an Obsidian-backed JSONL session manager.
   - Do not use pi's Node filesystem `SessionManager`.
   - Store sessions under the plugin directory via `app.vault.adapter`, specifically `${plugin.manifest.dir}/sessions` with a fallback based on `app.vault.configDir` and plugin id.
   - Use pi-compatible JSONL files named `<timestamp>_<sessionId>.jsonl`.
@@ -309,3 +309,17 @@ Completed utility/test changes:
 - Added pi-compatible JSONL session parsing/serialization/context helpers.
 - Added Vitest coverage for those helpers.
 - Validation: `npm test` passes with 18 tests, and `npm run build` passes.
+
+### Obsidian JSONL session manager
+
+- [x] Implement a DataAdapter-backed session manager storing JSONL files under the plugin directory.
+- [x] Add tests with an in-memory adapter.
+- [x] Validate with `npm test` and `npm run build`.
+
+Completed JSONL session manager changes:
+- Added `ObsidianSessionManager` backed by Obsidian `DataAdapter`.
+- Session files are created under `${plugin.manifest.dir}/sessions` with a config-dir fallback.
+- New sessions write a pi-compatible version-3 JSONL header and append `model_change` plus `thinking_level_change` entries.
+- Implemented `createSession`, `continueRecentSession`, `loadSession`, `listSessions`, `appendMessage`, `appendModelChange`, `appendThinkingLevelChange`, `appendSessionInfo`, `buildSessionContext`, and active session info helpers.
+- Added in-memory adapter tests for creating, appending, resuming, and context-building.
+- Validation: `npm test` passes with 20 tests, and `npm run build` passes.
