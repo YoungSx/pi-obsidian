@@ -244,7 +244,7 @@ Set up this fresh Obsidian plugin to run a pi-agent inside Obsidian, expose inte
   - Add a ribbon icon to open chat.
   - Add a settings tab.
   - Dispose/unsubscribe agent service and React roots on unload.
-- [ ] Update documentation and styles.
+- [x] Update documentation and styles.
   - Replace the sample README with setup/usage notes for the side panel.
   - Document mobile ambition and current provider/CORS caveats.
   - Document DeepSeek API-key setup and the default `deepseek/deepseek-v4-pro` MVP test path.
@@ -352,4 +352,15 @@ Completed agent/UI/lifecycle changes:
 - Added a React `ItemView` side panel with transcript rendering, streaming message display, tool call/result rows, send/abort/new-chat actions, and session path display.
 - Wired plugin lifecycle: registers the view, command `open-pi-chat`, ribbon icon, settings tab, and service disposal on unload.
 - Added compact chat CSS.
+- Validation: `npm test` passes with 20 tests, and `npm run build` passes.
+
+### Documentation and release metadata
+
+- [x] Replace sample README with pi-obsidian setup, usage, privacy, and session storage notes.
+- [x] Align `versions.json` minimum app version with `manifest.json`.
+- [x] Validate docs/metadata with tests/build.
+
+Completed documentation/metadata changes:
+- Replaced the sample README with Pi Obsidian setup, usage, tool, privacy, and JSONL session storage notes.
+- Aligned `versions.json` `1.0.0` minimum app version with `manifest.json` (`1.5.7`).
 - Validation: `npm test` passes with 20 tests, and `npm run build` passes.
