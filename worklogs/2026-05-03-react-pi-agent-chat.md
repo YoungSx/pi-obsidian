@@ -15,6 +15,10 @@ Set up this fresh Obsidian plugin to run a pi-agent inside Obsidian, expose inte
 - `manifest.json` — default sample plugin manifest.
 - `README.md` — default sample plugin README.
 - `styles.css` — placeholder stylesheet.
+- `/opt/homebrew/lib/node_modules/@mariozechner/pi-coding-agent/docs/providers.md` — pi provider/auth support.
+- `/opt/homebrew/lib/node_modules/@mariozechner/pi-coding-agent/docs/models.md` — pi model/provider configuration format and supported APIs.
+- `@mariozechner/pi-ai` declarations/source under `/opt/homebrew/lib/node_modules/@mariozechner/pi-coding-agent/node_modules/@mariozechner/pi-ai/dist/` — model catalog, provider streams, and OAuth helpers.
+- Smart Composer Codex OAuth and transport references under `/var/folders/w0/drqb44117xgdx98z9x6_tz8w0000gn/T/tmp.yKZXEiU35D/smart/src/core/llm/` and `/var/folders/w0/drqb44117xgdx98z9x6_tz8w0000gn/T/tmp.yKZXEiU35D/smart/src/utils/llm/`.
 - `/Users/simon/.pi/agent/git/github.com/simon-langoustine/pi-harness/skills/general-development-guidelines/SKILL.md`.
 - `/Users/simon/.pi/agent/git/github.com/simon-langoustine/pi-harness/skills/clean-code/SKILL.md`.
 
@@ -96,6 +100,28 @@ Set up this fresh Obsidian plugin to run a pi-agent inside Obsidian, expose inte
   - Uses `dangerouslyAllowBrowser: true` with OpenAI/Anthropic SDKs, and documents/handles Anthropic browser CORS issues.
   - Uses Obsidian `requestUrl` for some non-streaming fetches and notes that `requestUrl` can bypass CORS but does not support streaming. This suggests streaming provider calls should use direct browser `fetch`/provider SDKs for the MVP, with a later fallback strategy for providers/mobile CORS issues.
   - Uses `path-browserify` and `app.vault.adapter` for JSON persistence under the vault config/plugin area, which is a good model for mobile-compatible session storage.
+- Read pi provider docs from `/opt/homebrew/lib/node_modules/@mariozechner/pi-coding-agent/docs/providers.md`.
+  - Pi's built-in provider catalog includes subscription providers (ChatGPT Plus/Pro via Codex, Claude Pro/Max, GitHub Copilot) and API-key providers.
+  - OpenAI API key maps to provider key `openai`; Codex subscription maps to provider `openai-codex`.
+  - API-key providers listed by pi include Anthropic, Azure OpenAI Responses, OpenAI, DeepSeek, Google Gemini, Mistral, Groq, Cerebras, Cloudflare AI Gateway, Cloudflare Workers AI, xAI, OpenRouter, Vercel AI Gateway, ZAI, OpenCode Zen/Go, Hugging Face, Fireworks, Kimi, MiniMax, and Xiaomi.
+- Read pi models docs from `/opt/homebrew/lib/node_modules/@mariozechner/pi-coding-agent/docs/models.md`.
+  - Built-in and custom models are keyed by provider and model id.
+  - Supported provider API implementations are `openai-completions`, `openai-responses`, `anthropic-messages`, and `google-generative-ai`; pi-ai also contains built-ins for `mistral-conversations`, `google-vertex`, `azure-openai-responses`, `openai-codex-responses`, and Bedrock.
+  - Provider/model configs can include `baseUrl`, `headers`, `authHeader`, `compat`, `thinkingLevelMap`, context window, cost, and model input modality.
+- Inspected `@mariozechner/pi-ai` model catalog at runtime with `getProviders()`/`getModels()`.
+  - Current built-in providers include: `amazon-bedrock`, `anthropic`, `azure-openai-responses`, `cerebras`, `cloudflare-ai-gateway`, `cloudflare-workers-ai`, `deepseek`, `fireworks`, `github-copilot`, `google`, `google-vertex`, `groq`, `huggingface`, `kimi-coding`, `minimax`, `minimax-cn`, `mistral`, `moonshotai`, `moonshotai-cn`, `openai`, `openai-codex`, `opencode`, `opencode-go`, `openrouter`, `vercel-ai-gateway`, `xai`, `xiaomi`, and `zai`.
+  - Many providers share pi-ai's OpenAI/Anthropic/Google/Mistral API adapters, so a generic provider/model selector plus provider credential resolver can support more than the MVP settings UI immediately.
+  - Some providers require extra non-key configuration or environment-style placeholders (`Cloudflare` account/gateway ids, Azure resource/base URL, Google Vertex project/location, Bedrock/AWS credentials). For the MVP, we can expose generic provider API-key storage and implement OpenAI/Codex polished flows first; extra provider-specific settings can be added iteratively.
+- Inspected pi-ai Codex OAuth files:
+  - `dist/utils/oauth/openai-codex.d.ts` explicitly says the exported OpenAI Codex login flow uses Node crypto/http and is intended for CLI use, not browser environments.
+  - `loginOpenAICodex(...)` starts a localhost callback server on port `1455`; that does not work on Obsidian mobile.
+  - `generatePKCE()` in `dist/utils/oauth/pkce.js` uses Web Crypto and is browser-compatible.
+  - `refreshOpenAICodexToken(...)` uses `fetch` and is logically browser-compatible, but importing `@mariozechner/pi-ai/oauth` in a browser esbuild bundle currently fails because the OAuth barrel pulls in Node dynamic imports from multiple providers.
+  - Therefore, for a mobile-compatible plugin bundle, we should use pi-ai's `openai-codex` model/provider streaming support, but implement a small Obsidian-local Codex OAuth helper that mirrors pi-ai's constants/protocol using Web Crypto + browser/manual redirect handling.
+- Inspected Smart Composer's `src/core/llm/codexAuth.ts`.
+  - It implements a browser-compatible PKCE/state/token exchange helper using `crypto.getRandomValues`, `crypto.subtle.digest`, `fetch`, and JWT parsing.
+  - It uses a desktop-only local callback server when available and otherwise can fall back to manual redirect/code entry. This is the right pattern for Obsidian desktop + mobile.
+- Re-ran a browser-bundle spike importing `@mariozechner/pi-ai/oauth`; it failed resolving `node:http` and `node:crypto`. This confirms Codex OAuth should not import that barrel in the mobile plugin bundle.
 
 ## Revised implementation plan
 
@@ -106,6 +132,7 @@ Set up this fresh Obsidian plugin to run a pi-agent inside Obsidian, expose inte
 - Use the lower-level pi packages instead:
   - `@mariozechner/pi-agent-core` for the agent loop, tool execution, message state, aborts, and streaming events.
   - `@mariozechner/pi-ai` for built-in model metadata and provider streaming where browser-compatible.
+- Wire the model/provider layer to pi-ai's built-in catalog so the architecture can support every provider pi-ai can support, while polishing OpenAI API key and Codex OAuth first.
 - Build our own Obsidian-backed storage, settings, and vault-scoped tools.
 - Reimplement pi-style file tools on top of Obsidian APIs and keep tool names compatible where possible (`read`, `write`, `edit`, `grep`, `find`, `ls`).
 - Add Vitest and unit-test the pieces that can be tested outside Obsidian.
@@ -130,17 +157,23 @@ Set up this fresh Obsidian plugin to run a pi-agent inside Obsidian, expose inte
   - Remove sample ribbon/status/modal/click/interval code.
 - [ ] Add plugin settings for mobile-safe agent configuration.
   - Store settings with Obsidian `loadData()` / `saveData()`.
-  - Include provider/model/API-key fields for the MVP instead of reading pi's `~/.pi/agent/auth.json`.
-  - Start with a small provider/model set backed by pi model metadata; likely OpenAI, Anthropic, and Gemini first because Smart Composer shows these are realistic in Obsidian.
-  - Include a custom base URL field where the pi model/provider supports it, but avoid overbuilding provider management in phase 1.
+  - Use pi-ai's built-in model catalog (`getProviders()`, `getModels()`, `getModel()`) rather than maintaining our own hard-coded provider/model list.
+  - Add selected provider/model settings that can point at any pi-ai built-in provider/model.
+  - Add a generic `providerApiKeys: Record<string, string>` setting so API-key providers can be supported by provider id where the pi-ai adapter only needs an API key.
+  - Make OpenAI API key (`providerApiKeys.openai`) the polished MVP API-key path in the settings UI.
+  - Add Codex OAuth credentials in settings (`openai-codex` access token, refresh token, expiry, account id) and a settings button to start/connect Codex.
+  - For Codex OAuth, do not import `@mariozechner/pi-ai/oauth` in the mobile bundle; implement a small Obsidian-compatible PKCE helper based on pi-ai's protocol constants and Smart Composer's browser/mobile pattern, then pass the resulting access token to pi-ai's `openai-codex` provider.
+  - Add token refresh before Codex requests using the same OpenAI token endpoint/protocol as pi-ai.
+  - Include optional advanced per-provider base URL/headers fields only if needed during implementation; otherwise leave provider-specific extras for follow-up work.
   - Include clear privacy copy: chat prompts, selected vault content exposed by tools, and tool results are sent to the configured model provider.
 - [ ] Add a lightweight embedded agent service around `@mariozechner/pi-agent-core`.
   - Create an `Agent` with:
     - custom system prompt for Obsidian vault work,
-    - configured model and thinking level,
-    - explicit API key retrieval from plugin settings,
+    - configured model and thinking level from pi-ai's model catalog,
+    - explicit credential retrieval from plugin settings (`providerApiKeys[provider]` or refreshed Codex OAuth token),
     - Obsidian-backed tools,
-    - a custom `streamFn` wrapper if needed to avoid Node/env code paths and improve error messages.
+    - pi-ai `streamSimple`/built-in provider streaming where possible,
+    - a custom `streamFn` wrapper if needed to inject credentials, avoid Node/env code paths, force Codex transport to an Obsidian-compatible mode, and improve error messages.
   - Translate `Agent` events into a React-friendly chat store.
   - Support prompt submit, abort, idle/streaming status, and simple error reporting.
   - Persist transcript updates through our Obsidian-backed session store after relevant events.
@@ -154,8 +187,8 @@ Set up this fresh Obsidian plugin to run a pi-agent inside Obsidian, expose inte
   - `find`: find files by path/name/glob-like pattern within the vault.
   - `grep`: search text files, initially Markdown-first, with case-sensitive/insensitive and literal/regex options if simple enough.
   - `read`: read a vault-relative Markdown/text file with optional offset/limit and output truncation.
-  - `write`: create or overwrite a vault-relative Markdown/text file; create parent folders via `Vault.createFolder`/adapter as needed.
-  - `edit`: apply one or more exact text replacements, using the same input shape as pi (`{ path, edits: [{ oldText, newText }] }`) and fail if a replacement is not unique.
+  - `write`: create or overwrite a vault-relative Markdown/text file; create parent folders via `Vault.createFolder`/adapter as needed. Mutating tools run immediately for the MVP.
+  - `edit`: apply one or more exact text replacements, using the same input shape as pi (`{ path, edits: [{ oldText, newText }] }`) and fail if a replacement is not unique. Mutating tools run immediately for the MVP.
   - `get_active_note`: Obsidian-specific helper to return the current active Markdown file path and optionally content/selection.
   - Validate every path at the tool boundary: vault-relative only, normalize leading `@`, reject absolute paths, reject `..` escapes, avoid `.obsidian/plugins/pi-obsidian` session/settings internals unless explicitly needed.
   - Truncate tool output to avoid flooding model context; keep limits close to pi defaults where reasonable.
@@ -173,6 +206,7 @@ Set up this fresh Obsidian plugin to run a pi-agent inside Obsidian, expose inte
 - [ ] Update documentation and styles.
   - Replace the sample README with setup/usage notes for the side panel.
   - Document mobile ambition and current provider/CORS caveats.
+  - Document OpenAI API-key setup and Codex OAuth setup, including manual redirect/code paste fallback for mobile.
   - Document that the agent runs inside Obsidian, with vault access only through plugin-provided tools.
   - Add compact CSS for the chat panel in `styles.css`.
 - [ ] Validate.
@@ -185,6 +219,9 @@ Set up this fresh Obsidian plugin to run a pi-agent inside Obsidian, expose inte
 
 ## Open questions for human review
 
-- Provider scope for MVP: is OpenAI + Anthropic + Gemini enough, or should I start with just one provider to reduce mobile/CORS uncertainty?
-- API-key storage: is storing provider API keys in Obsidian plugin data acceptable for this phase, with clear README/settings disclosure?
-- Tool write/edit safety: should `write` and `edit` run immediately for MVP, or should destructive/mutating tools require an in-panel confirmation before execution?
+No open questions at this point. The current plan is ready for implementation with these decisions:
+
+- Use pi-ai's built-in model/provider catalog and streaming support.
+- Polish OpenAI API-key settings and Codex OAuth for the MVP.
+- Store API keys/OAuth credentials in Obsidian plugin settings with clear disclosure.
+- Run `write` and `edit` immediately for the MVP.
