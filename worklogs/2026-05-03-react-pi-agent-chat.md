@@ -175,7 +175,7 @@ Set up this fresh Obsidian plugin to run a pi-agent inside Obsidian, expose inte
 
 ### Action items
 
-- [ ] Create a mobile-compatible React/TypeScript foundation.
+- [x] Create a mobile-compatible React/TypeScript foundation.
   - Add `react`, `react-dom`, `@types/react`, and `@types/react-dom`.
   - Add `@mariozechner/pi-agent-core`, `@mariozechner/pi-ai`, and `typebox`.
   - Do **not** add `@mariozechner/pi-coding-agent` for the MVP mobile build.
@@ -186,7 +186,7 @@ Set up this fresh Obsidian plugin to run a pi-agent inside Obsidian, expose inte
   - Add `vitest` and a `test` script.
   - Add a small `src/test/` or colocated `*.test.ts` setup for pure helpers.
   - Unit-test vault path normalization/validation, exact edit application, grep/find matching helpers, truncation helpers, and chat/session serialization.
-- [ ] Replace sample-plugin metadata and sample lifecycle code.
+- [x] Replace sample-plugin metadata and sample lifecycle code.
   - Rename package/manifest metadata from the Obsidian sample plugin to `pi-obsidian`.
   - Set `manifest.json` `id` to match this folder (`pi-obsidian`).
   - Set `isDesktopOnly: false`.
@@ -276,3 +276,21 @@ No open questions at this point. The current plan is ready for implementation wi
 - After context compaction, re-read this worklog as the source of truth.
 - Reloaded relevant skills: `general-development-guidelines` and `clean-code`.
 - Next step is to commit this revised DeepSeek/API-key/JSONL-session plan, then pause for human review before implementation per the General Development Loop.
+- Human approved implementation after the pause.
+
+## Implementation log
+
+### Foundation start
+
+- [x] Add React/pi/Vitest dependencies and update TypeScript/esbuild settings for TSX and tests.
+- [x] Replace sample plugin metadata and lifecycle shell.
+- [x] Validate foundation with install, tests/build as soon as enough code exists.
+
+Completed foundation changes:
+- Installed runtime dependencies: React, React DOM, `@mariozechner/pi-agent-core`, `@mariozechner/pi-ai`, and `typebox`.
+- Installed dev dependencies: React types, Vitest, and updated `@types/node` to satisfy Vitest's Node type peer range.
+- Updated `package.json` metadata to `pi-obsidian` and added `npm test`.
+- Updated `manifest.json` to `id: pi-obsidian`, `isDesktopOnly: false`, and plugin-specific copy.
+- Updated `tsconfig.json` with `jsx: "react-jsx"` and TSX includes.
+- Replaced the sample plugin lifecycle with a minimal pi-obsidian shell and settings tab.
+- Validation: `npm run build` passes after the foundation changes.
