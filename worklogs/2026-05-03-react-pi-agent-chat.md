@@ -17,6 +17,8 @@ Set up this fresh Obsidian plugin to run a pi-agent inside Obsidian, expose inte
 - `styles.css` — placeholder stylesheet.
 - `/opt/homebrew/lib/node_modules/@mariozechner/pi-coding-agent/docs/providers.md` — pi provider/auth support.
 - `/opt/homebrew/lib/node_modules/@mariozechner/pi-coding-agent/docs/models.md` — pi model/provider configuration format and supported APIs.
+- `/opt/homebrew/lib/node_modules/@mariozechner/pi-coding-agent/docs/sessions.md` — pi session behavior overview.
+- `/opt/homebrew/lib/node_modules/@mariozechner/pi-coding-agent/docs/session-format.md` — JSONL session format and tree structure.
 - `@mariozechner/pi-ai` declarations/source under `/opt/homebrew/lib/node_modules/@mariozechner/pi-coding-agent/node_modules/@mariozechner/pi-ai/dist/` — model catalog, provider streams, and OAuth helpers.
 - Smart Composer Codex OAuth and transport references under `/var/folders/w0/drqb44117xgdx98z9x6_tz8w0000gn/T/tmp.yKZXEiU35D/smart/src/core/llm/` and `/var/folders/w0/drqb44117xgdx98z9x6_tz8w0000gn/T/tmp.yKZXEiU35D/smart/src/utils/llm/`.
 - `/Users/simon/.pi/agent/git/github.com/simon-langoustine/pi-harness/skills/general-development-guidelines/SKILL.md`.
@@ -111,7 +113,7 @@ Set up this fresh Obsidian plugin to run a pi-agent inside Obsidian, expose inte
 - Inspected `@mariozechner/pi-ai` model catalog at runtime with `getProviders()`/`getModels()`.
   - Current built-in providers include: `amazon-bedrock`, `anthropic`, `azure-openai-responses`, `cerebras`, `cloudflare-ai-gateway`, `cloudflare-workers-ai`, `deepseek`, `fireworks`, `github-copilot`, `google`, `google-vertex`, `groq`, `huggingface`, `kimi-coding`, `minimax`, `minimax-cn`, `mistral`, `moonshotai`, `moonshotai-cn`, `openai`, `openai-codex`, `opencode`, `opencode-go`, `openrouter`, `vercel-ai-gateway`, `xai`, `xiaomi`, and `zai`.
   - Many providers share pi-ai's OpenAI/Anthropic/Google/Mistral API adapters, so a generic provider/model selector plus provider credential resolver can support more than the MVP settings UI immediately.
-  - Some providers require extra non-key configuration or environment-style placeholders (`Cloudflare` account/gateway ids, Azure resource/base URL, Google Vertex project/location, Bedrock/AWS credentials). For the MVP, we can expose generic provider API-key storage and implement OpenAI/Codex polished flows first; extra provider-specific settings can be added iteratively.
+  - Some providers require extra non-key configuration or environment-style placeholders (`Cloudflare` account/gateway ids, Azure resource/base URL, Google Vertex project/location, Bedrock/AWS credentials). For the MVP, we can expose generic provider API-key storage and implement DeepSeek as the polished first provider; extra provider-specific settings can be added iteratively.
 - Inspected pi-ai Codex OAuth files:
   - `dist/utils/oauth/openai-codex.d.ts` explicitly says the exported OpenAI Codex login flow uses Node crypto/http and is intended for CLI use, not browser environments.
   - `loginOpenAICodex(...)` starts a localhost callback server on port `1455`; that does not work on Obsidian mobile.
@@ -122,6 +124,39 @@ Set up this fresh Obsidian plugin to run a pi-agent inside Obsidian, expose inte
   - It implements a browser-compatible PKCE/state/token exchange helper using `crypto.getRandomValues`, `crypto.subtle.digest`, `fetch`, and JWT parsing.
   - It uses a desktop-only local callback server when available and otherwise can fall back to manual redirect/code entry. This is the right pattern for Obsidian desktop + mobile.
 - Re-ran a browser-bundle spike importing `@mariozechner/pi-ai/oauth`; it failed resolving `node:http` and `node:crypto`. This confirms Codex OAuth should not import that barrel in the mobile plugin bundle.
+- Human updated MVP direction after the OAuth research:
+  - Skip OAuth flows entirely for the MVP.
+  - Focus provider setup on DeepSeek API key instead of OpenAI API key.
+  - Use `deepseek/deepseek-v4-pro` for MVP testing.
+  - Keep using pi-ai built-in model/provider support where possible.
+  - Add an Obsidian-backed JSONL session manager that stores sessions inside the plugin directory.
+- Read pi session docs from `/opt/homebrew/lib/node_modules/@mariozechner/pi-coding-agent/docs/sessions.md` and `/opt/homebrew/lib/node_modules/@mariozechner/pi-coding-agent/docs/session-format.md`.
+  - Pi sessions are JSONL files with a first-line session header and append-only entries.
+  - Current session format version is `3`.
+  - Entries use short `id` values and `parentId` links to form a tree. The active leaf determines the current context path.
+  - Core entry types needed for the MVP are `session`, `message`, `model_change`, `thinking_level_change`, and `session_info`.
+  - Future-compatible entries include `compaction`, `branch_summary`, `custom`, `custom_message`, and `label`.
+  - `buildSessionContext()` semantics: walk from active leaf to root, extract messages and latest model/thinking settings, and include compaction/branch summaries when present.
+- Inspected `dist/core/session-manager.d.ts` and `dist/core/session-manager.js` for details to mirror in an Obsidian session manager.
+  - Pi creates files named like `<timestamp>_<uuid>.jsonl`.
+  - The header shape is `{ type: "session", version: 3, id, timestamp, cwd, parentSession? }`.
+  - Message entries are `{ type: "message", id, parentId, timestamp, message }` where `message` is an `AgentMessage`.
+  - Model changes are `{ type: "model_change", id, parentId, timestamp, provider, modelId }`.
+  - Thinking-level changes are `{ type: "thinking_level_change", id, parentId, timestamp, thinkingLevel }`.
+  - Pi delays flushing brand-new sessions until an assistant exists, but for Obsidian MVP we can write header/user messages immediately because sessions live inside the vault config/plugin directory and should survive reloads even if interrupted.
+- Inspected Obsidian `obsidian.d.ts` for plugin-directory storage APIs.
+  - `PluginManifest.dir` is the vault path to the plugin folder in the config directory.
+  - `DataAdapter` supports mobile-compatible `exists`, `stat`, `list`, `read`, `write`, `append`, `process`, `mkdir`, `remove`, and related methods.
+  - Session storage path should be `${plugin.manifest.dir}/sessions`, with a fallback to `${app.vault.configDir}/plugins/${plugin.manifest.id}/sessions` if `manifest.dir` is absent.
+- Inspected DeepSeek in pi-ai's model catalog.
+  - `deepseek-v4-pro` is provider `deepseek`, API `openai-completions`, base URL `https://api.deepseek.com`.
+  - It is text-only input, reasoning-capable, context window `1000000`, max tokens `384000`.
+  - It has `compat.thinkingFormat: "deepseek"` and `requiresReasoningContentOnAssistantMessages: true`.
+  - Supported thinking levels from its `thinkingLevelMap` are effectively `off`, `high`, and `xhigh`; `minimal`, `low`, and `medium` are marked unsupported.
+- Inspected pi-ai `openai-completions` provider implementation.
+  - It uses the OpenAI SDK with `dangerouslyAllowBrowser: true`, so DeepSeek should be browser-bundle feasible when an explicit API key is supplied.
+  - It maps DeepSeek thinking requests to `params.thinking = { type: "enabled" | "disabled" }` and sends `reasoning_effort` using the model's `thinkingLevelMap`.
+  - It parses streamed `reasoning_content`/`reasoning`/`reasoning_text` into pi thinking blocks, and parses streamed tool calls into pi tool-call blocks.
 
 ## Revised implementation plan
 
@@ -132,7 +167,8 @@ Set up this fresh Obsidian plugin to run a pi-agent inside Obsidian, expose inte
 - Use the lower-level pi packages instead:
   - `@mariozechner/pi-agent-core` for the agent loop, tool execution, message state, aborts, and streaming events.
   - `@mariozechner/pi-ai` for built-in model metadata and provider streaming where browser-compatible.
-- Wire the model/provider layer to pi-ai's built-in catalog so the architecture can support every provider pi-ai can support, while polishing OpenAI API key and Codex OAuth first.
+- Wire the model/provider layer to pi-ai's built-in catalog so the architecture can support every provider pi-ai can support, while polishing DeepSeek API-key setup first.
+- Skip OAuth flows for the MVP.
 - Build our own Obsidian-backed storage, settings, and vault-scoped tools.
 - Reimplement pi-style file tools on top of Obsidian APIs and keep tool names compatible where possible (`read`, `write`, `edit`, `grep`, `find`, `ls`).
 - Add Vitest and unit-test the pieces that can be tested outside Obsidian.
@@ -158,30 +194,35 @@ Set up this fresh Obsidian plugin to run a pi-agent inside Obsidian, expose inte
 - [ ] Add plugin settings for mobile-safe agent configuration.
   - Store settings with Obsidian `loadData()` / `saveData()`.
   - Use pi-ai's built-in model catalog (`getProviders()`, `getModels()`, `getModel()`) rather than maintaining our own hard-coded provider/model list.
-  - Add selected provider/model settings that can point at any pi-ai built-in provider/model.
-  - Add a generic `providerApiKeys: Record<string, string>` setting so API-key providers can be supported by provider id where the pi-ai adapter only needs an API key.
-  - Make OpenAI API key (`providerApiKeys.openai`) the polished MVP API-key path in the settings UI.
-  - Add Codex OAuth credentials in settings (`openai-codex` access token, refresh token, expiry, account id) and a settings button to start/connect Codex.
-  - For Codex OAuth, do not import `@mariozechner/pi-ai/oauth` in the mobile bundle; implement a small Obsidian-compatible PKCE helper based on pi-ai's protocol constants and Smart Composer's browser/mobile pattern, then pass the resulting access token to pi-ai's `openai-codex` provider.
-  - Add token refresh before Codex requests using the same OpenAI token endpoint/protocol as pi-ai.
+  - Default selected provider/model to `deepseek` / `deepseek-v4-pro`.
+  - Add DeepSeek API key as the polished MVP settings field (`providerApiKeys.deepseek`).
+  - Keep the settings data shape generic: `providerApiKeys: Record<string, string>` and selected provider/model fields, so later provider UIs can reuse it.
+  - Add thinking-level setting with DeepSeek-aware defaults; use `high` by default for `deepseek-v4-pro` and clamp unsupported levels using pi-ai model metadata.
+  - Skip Codex/OAuth UI and storage entirely for the MVP.
   - Include optional advanced per-provider base URL/headers fields only if needed during implementation; otherwise leave provider-specific extras for follow-up work.
   - Include clear privacy copy: chat prompts, selected vault content exposed by tools, and tool results are sent to the configured model provider.
 - [ ] Add a lightweight embedded agent service around `@mariozechner/pi-agent-core`.
   - Create an `Agent` with:
     - custom system prompt for Obsidian vault work,
     - configured model and thinking level from pi-ai's model catalog,
-    - explicit credential retrieval from plugin settings (`providerApiKeys[provider]` or refreshed Codex OAuth token),
+    - explicit credential retrieval from plugin settings (`providerApiKeys[provider]`),
     - Obsidian-backed tools,
     - pi-ai `streamSimple`/built-in provider streaming where possible,
-    - a custom `streamFn` wrapper if needed to inject credentials, avoid Node/env code paths, force Codex transport to an Obsidian-compatible mode, and improve error messages.
+    - a custom `streamFn` wrapper if needed to inject credentials, avoid Node/env code paths, and improve error messages.
   - Translate `Agent` events into a React-friendly chat store.
   - Support prompt submit, abort, idle/streaming status, and simple error reporting.
   - Persist transcript updates through our Obsidian-backed session store after relevant events.
-- [ ] Add Obsidian-backed session storage.
+- [ ] Add an Obsidian-backed JSONL session manager.
   - Do not use pi's Node filesystem `SessionManager`.
-  - For MVP, store one active chat session and settings in plugin data or a JSON file under the plugin's vault config directory via `app.vault.adapter`.
-  - Design the storage boundary so later work can add multiple sessions, branching, export/import, and compaction without changing the UI contract.
-  - Persist `AgentMessage[]` plus minimal metadata (`id`, `title`, `createdAt`, `updatedAt`, selected model).
+  - Store sessions under the plugin directory via `app.vault.adapter`, specifically `${plugin.manifest.dir}/sessions` with a fallback based on `app.vault.configDir` and plugin id.
+  - Use pi-compatible JSONL files named `<timestamp>_<sessionId>.jsonl`.
+  - Write a version-3 session header as the first line: `{ type: "session", version: 3, id, timestamp, cwd }`, where `cwd` can identify the vault (for example `obsidian-vault:<vault name>`).
+  - Append tree-shaped entries with `id`, `parentId`, and ISO `timestamp` fields.
+  - MVP required methods: `createSession`, `loadSession`, `continueRecentSession`, `listSessions`, `appendMessage`, `appendModelChange`, `appendThinkingLevelChange`, `appendSessionInfo`, `buildSessionContext`, and `getActiveSessionInfo`.
+  - Persist `message_end` events for user, assistant, and tool-result messages; also persist initial model/thinking entries for new sessions.
+  - Keep a leaf pointer in memory for appends; recover it from the last valid non-header entry when loading.
+  - Keep the format compatible with pi's entry shapes so future import/export with pi CLI sessions is possible.
+  - For MVP, no UI branching/compaction is required, but use `parentId` consistently so future tree navigation can be added without rewriting stored sessions.
 - [ ] Reimplement pi-style vault tools with Obsidian APIs.
   - `ls`: list vault files/folders under a vault-relative path using `Vault`/`TFolder` APIs.
   - `find`: find files by path/name/glob-like pattern within the vault.
@@ -206,7 +247,8 @@ Set up this fresh Obsidian plugin to run a pi-agent inside Obsidian, expose inte
 - [ ] Update documentation and styles.
   - Replace the sample README with setup/usage notes for the side panel.
   - Document mobile ambition and current provider/CORS caveats.
-  - Document OpenAI API-key setup and Codex OAuth setup, including manual redirect/code paste fallback for mobile.
+  - Document DeepSeek API-key setup and the default `deepseek/deepseek-v4-pro` MVP test path.
+  - Document JSONL session storage under the plugin directory.
   - Document that the agent runs inside Obsidian, with vault access only through plugin-provided tools.
   - Add compact CSS for the chat panel in `styles.css`.
 - [ ] Validate.
@@ -214,7 +256,8 @@ Set up this fresh Obsidian plugin to run a pi-agent inside Obsidian, expose inte
   - Run `npm test`.
   - Run `npm run build` and inspect for mobile-unavailable externalized Node modules.
   - Run `npm run lint` if install succeeds.
-  - Manual Obsidian desktop test: enable plugin, configure provider/key/model, open side panel, send a prompt, verify streaming and tool usage.
+  - Manual Obsidian desktop test: enable plugin, configure DeepSeek API key, confirm selected model is `deepseek-v4-pro`, open side panel, send a prompt, verify streaming and tool usage.
+  - Verify a `.jsonl` session file is created/appended under the plugin `sessions/` directory.
   - Manual Obsidian mobile test is expected but may need the human/device; document exact steps and any provider/CORS issues.
 
 ## Open questions for human review
@@ -222,6 +265,14 @@ Set up this fresh Obsidian plugin to run a pi-agent inside Obsidian, expose inte
 No open questions at this point. The current plan is ready for implementation with these decisions:
 
 - Use pi-ai's built-in model/provider catalog and streaming support.
-- Polish OpenAI API-key settings and Codex OAuth for the MVP.
-- Store API keys/OAuth credentials in Obsidian plugin settings with clear disclosure.
+- Skip OAuth flows for the MVP.
+- Polish DeepSeek API-key settings and default to `deepseek/deepseek-v4-pro` for MVP testing.
+- Store API keys in Obsidian plugin settings with clear disclosure.
+- Store agent sessions as pi-compatible JSONL files under the plugin directory.
 - Run `write` and `edit` immediately for the MVP.
+
+## Resumption notes
+
+- After context compaction, re-read this worklog as the source of truth.
+- Reloaded relevant skills: `general-development-guidelines` and `clean-code`.
+- Next step is to commit this revised DeepSeek/API-key/JSONL-session plan, then pause for human review before implementation per the General Development Loop.
