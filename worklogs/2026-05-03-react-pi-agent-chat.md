@@ -459,3 +459,5 @@ Release prep notes:
   - `npm test` passes with 28 tests.
   - `npm run build` passes.
   - `npm run lint` passes.
+- Pushed commit `0cffba6 fix: refresh lockfile for npm ci`.
+- Watched GitHub Actions run `25298613644`; Node 20 and Node 22 jobs now pass.
