@@ -256,8 +256,8 @@ Set up this fresh Obsidian plugin to run a pi-agent inside Obsidian, expose inte
   - Run `npm test`.
   - Run `npm run build` and inspect for mobile-unavailable externalized Node modules.
   - Run `npm run lint` if install succeeds.
-  - Manual Obsidian desktop test: enable plugin, configure DeepSeek API key, confirm selected model is `deepseek-v4-pro`, open side panel, send a prompt, verify streaming and tool usage.
-  - Verify a `.jsonl` session file is created/appended under the plugin `sessions/` directory.
+  - [x] Manual Obsidian desktop test: enabled plugin, configured DeepSeek API key, confirmed chat and tool calls work on desktop.
+  - [x] Verify a `.jsonl` session file is created/appended under the plugin `sessions/` directory during desktop testing.
   - Manual Obsidian mobile test is expected but may need the human/device; document exact steps and any provider/CORS issues.
 
 ## Open questions for human review
@@ -431,3 +431,16 @@ Follow-up bugfix notes:
 - `PiChatApp` registers its current `sendPrompt` callback with the controller while mounted.
 - Existing textarea native/React handlers remain in place for Ctrl+Enter and fallback handling.
 - Validation: `npm test` passes with 28 tests, `npm run build` passes, and `npm run lint` passes.
+
+### Release prep and PR setup
+
+- Human manually tested desktop features and tool calls successfully after the Cmd+Enter fix.
+- [x] Check off manual Obsidian desktop testing for the MVP.
+- [x] Change plugin/package version to `0.0.1`.
+- [x] Validate after version change.
+- [ ] Commit release-prep changes.
+- [ ] Push branch and open a PR.
+
+Release prep notes:
+- Updated `package.json`, `package-lock.json`, `manifest.json`, and `versions.json` to `0.0.1`.
+- Validation after version change: `npm test` passes with 28 tests, `npm run build` passes, and `npm run lint` passes.
