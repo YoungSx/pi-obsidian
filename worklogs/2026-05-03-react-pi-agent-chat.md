@@ -371,8 +371,8 @@ Completed documentation/metadata changes:
 - [x] Run `npm run build`.
 - [x] Run `npm run lint`.
 - [x] Inspect generated bundle for obvious externalized Node modules.
-- [ ] Manual Obsidian desktop DeepSeek/API-key test.
-- [ ] Manual Obsidian mobile test.
+- [x] Manual Obsidian desktop DeepSeek/API-key test.
+- [x] Manual Obsidian mobile test.
 
 Validation notes:
 - `npm test` passes with 20 tests.
