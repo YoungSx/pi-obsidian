@@ -396,3 +396,4 @@ Bugfix notes:
 - Changed `sendPrompt()` to publish a final settled snapshot in `finally` after `agent.prompt()` resolves.
 - Changed `abort()` to wait for agent idle settlement and then publish a settled snapshot.
 - Validation: `npm test` passes with 21 tests, `npm run build` passes, and `npm run lint` passes.
+- Added `sessions/` to `.gitignore` because manual Obsidian testing creates JSONL session files inside the plugin directory during local development.
