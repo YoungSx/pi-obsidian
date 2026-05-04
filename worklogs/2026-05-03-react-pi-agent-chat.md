@@ -447,3 +447,15 @@ Release prep notes:
 - Release-prep commit: `b56cf0c chore: prepare version 0.0.1`.
 - Pushed branch `feature/react-pi-agent-chat` to `origin`.
 - Opened PR: https://github.com/lhr0909/pi-obsidian/pull/1
+
+### CI fix: npm 10 package-lock mismatch
+
+- GitHub CI failed at `npm ci` on Node 22/npm 10.9.7 with missing `esbuild@0.28.0` and `@esbuild/*@0.28.0` entries.
+- Local npm 11 accepted the lockfile, but reproducing with `npx npm@10.9.7 ci --ignore-scripts` failed with the same error.
+- Ran `npx npm@10.9.7 install --package-lock-only --ignore-scripts` to regenerate `package-lock.json` in a form npm 10 accepts.
+- This also corrected the package lock root name from `obsidian-sample-plugin` to `pi-obsidian`.
+- Validation after lock refresh:
+  - `npx npm@10.9.7 ci --ignore-scripts` passes.
+  - `npm test` passes with 28 tests.
+  - `npm run build` passes.
+  - `npm run lint` passes.
