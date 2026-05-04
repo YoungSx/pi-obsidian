@@ -1,99 +1,71 @@
-import {App, Editor, MarkdownView, Modal, Notice, Plugin} from 'obsidian';
-import {DEFAULT_SETTINGS, MyPluginSettings, SampleSettingTab} from "./settings";
+import { Notice, Plugin } from "obsidian";
+import { PiObsidianSettingTab, type PiObsidianSettings, normalizeSettings } from "./settings";
+import { VIEW_TYPE_PI_CHAT } from "./constants";
+import { ObsidianSessionManager } from "./session/ObsidianSessionManager";
+import { ObsidianAgentService } from "./agent/ObsidianAgentService";
+import { PiChatView } from "./ui/PiChatView";
 
-// Remember to rename these classes and interfaces!
+export default class PiObsidianPlugin extends Plugin {
+	settings: PiObsidianSettings;
+	private agentService: ObsidianAgentService | null = null;
 
-export default class MyPlugin extends Plugin {
-	settings: MyPluginSettings;
-
-	async onload() {
+	async onload(): Promise<void> {
 		await this.loadSettings();
 
-		// This creates an icon in the left ribbon.
-		this.addRibbonIcon('dice', 'Sample', (evt: MouseEvent) => {
-			// Called when the user clicks the icon.
-			new Notice('This is a notice!');
-		});
+		const sessionManager = ObsidianSessionManager.forPlugin(this.app, this);
+		this.agentService = new ObsidianAgentService(this.app, () => this.settings, sessionManager);
 
-		// This adds a status bar item to the bottom of the app. Does not work on mobile apps.
-		const statusBarItemEl = this.addStatusBarItem();
-		statusBarItemEl.setText('Status bar text');
-
-		// This adds a simple command that can be triggered anywhere
+		this.registerView(VIEW_TYPE_PI_CHAT, (leaf) => new PiChatView(leaf, this.requireAgentService()));
+		this.addSettingTab(new PiObsidianSettingTab(this.app, this));
 		this.addCommand({
-			id: 'open-modal-simple',
-			name: 'Open modal (simple)',
+			id: "open-pi-chat",
+			name: "Open pi chat",
 			callback: () => {
-				new SampleModal(this.app).open();
-			}
+				void this.activateChatView();
+			},
 		});
-		// This adds an editor command that can perform some operation on the current editor instance
-		this.addCommand({
-			id: 'replace-selected',
-			name: 'Replace selected content',
-			editorCallback: (editor: Editor, view: MarkdownView) => {
-				editor.replaceSelection('Sample editor command');
-			}
+		this.addRibbonIcon("bot", "Open pi chat", () => {
+			void this.activateChatView();
 		});
-		// This adds a complex command that can check whether the current state of the app allows execution of the command
-		this.addCommand({
-			id: 'open-modal-complex',
-			name: 'Open modal (complex)',
-			checkCallback: (checking: boolean) => {
-				// Conditions to check
-				const markdownView = this.app.workspace.getActiveViewOfType(MarkdownView);
-				if (markdownView) {
-					// If checking is true, we're simply "checking" if the command can be run.
-					// If checking is false, then we want to actually perform the operation.
-					if (!checking) {
-						new SampleModal(this.app).open();
-					}
-
-					// This command will only show up in Command Palette when the check function returns true
-					return true;
-				}
-				return false;
-			}
-		});
-
-		// This adds a settings tab so the user can configure various aspects of the plugin
-		this.addSettingTab(new SampleSettingTab(this.app, this));
-
-		// If the plugin hooks up any global DOM events (on parts of the app that doesn't belong to this plugin)
-		// Using this function will automatically remove the event listener when this plugin is disabled.
-		this.registerDomEvent(document, 'click', (evt: MouseEvent) => {
-			new Notice("Click");
-		});
-
-		// When registering intervals, this function will automatically clear the interval when the plugin is disabled.
-		this.registerInterval(window.setInterval(() => console.log('setInterval'), 5 * 60 * 1000));
-
 	}
 
-	onunload() {
+	onunload(): void {
+		this.agentService?.dispose();
+		this.agentService = null;
 	}
 
-	async loadSettings() {
-		this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData() as Partial<MyPluginSettings>);
+	async loadSettings(): Promise<void> {
+		this.settings = normalizeSettings(await this.loadData() as Partial<PiObsidianSettings> | null);
 	}
 
-	async saveSettings() {
+	async saveSettings(): Promise<void> {
 		await this.saveData(this.settings);
+		await this.agentService?.refreshConfiguration();
+	}
+
+	private async activateChatView(): Promise<void> {
+		const existingLeaf = this.app.workspace.getLeavesOfType(VIEW_TYPE_PI_CHAT)[0];
+		if (existingLeaf) {
+			await this.app.workspace.revealLeaf(existingLeaf);
+			return;
+		}
+
+		const leaf = this.app.workspace.getRightLeaf(false);
+		if (!leaf) {
+			new Notice("Could not open pi chat view.");
+			return;
+		}
+
+		await leaf.setViewState({ type: VIEW_TYPE_PI_CHAT, active: true });
+		await this.app.workspace.revealLeaf(leaf);
+	}
+
+	private requireAgentService(): ObsidianAgentService {
+		if (!this.agentService) {
+			throw new Error("Pi agent service is not initialized.");
+		}
+		return this.agentService;
 	}
 }
 
-class SampleModal extends Modal {
-	constructor(app: App) {
-		super(app);
-	}
-
-	onOpen() {
-		let {contentEl} = this;
-		contentEl.setText('Woah!');
-	}
-
-	onClose() {
-		const {contentEl} = this;
-		contentEl.empty();
-	}
-}
+export { VIEW_TYPE_PI_CHAT };

@@ -1,8 +1,112 @@
-/*
+.pi-chat-view {
+	height: 100%;
+	padding: 0;
+}
 
-This CSS file will be included with your plugin, and
-available in the app when your plugin is enabled.
+.pi-chat {
+	display: flex;
+	flex-direction: column;
+	height: 100%;
+	gap: 0.75rem;
+	padding: 0.75rem;
+}
 
-If your plugin does not need CSS, delete this file.
+.pi-chat__header {
+	display: flex;
+	align-items: flex-start;
+	justify-content: space-between;
+	gap: 0.75rem;
+}
 
-*/
+.pi-chat__header h2 {
+	margin: 0;
+}
+
+.pi-chat__header p,
+.pi-chat__session,
+.pi-chat__composer-actions,
+.pi-chat__empty {
+	color: var(--text-muted);
+	font-size: var(--font-ui-smaller);
+}
+
+.pi-chat__session {
+	word-break: break-all;
+}
+
+.pi-chat__error {
+	border: 1px solid var(--text-error);
+	border-radius: 6px;
+	color: var(--text-error);
+	padding: 0.5rem;
+}
+
+.pi-chat__messages {
+	display: flex;
+	flex: 1;
+	flex-direction: column;
+	gap: 0.75rem;
+	overflow-y: auto;
+}
+
+.pi-chat__message {
+	border: 1px solid var(--background-modifier-border);
+	border-radius: 8px;
+	padding: 0.6rem;
+}
+
+.pi-chat__message--user {
+	background: var(--background-secondary);
+}
+
+.pi-chat__message-role {
+	color: var(--text-muted);
+	font-size: var(--font-ui-smaller);
+	font-weight: 600;
+	margin-bottom: 0.35rem;
+	text-transform: uppercase;
+}
+
+.pi-chat__text {
+	background: transparent;
+	font-family: var(--font-interface);
+	margin: 0;
+	white-space: pre-wrap;
+}
+
+.pi-chat__thinking,
+.pi-chat__tool-call,
+.pi-chat__tool-result,
+.pi-chat__tool-status {
+	background: var(--background-secondary);
+	border-radius: 6px;
+	margin-top: 0.4rem;
+	padding: 0.45rem;
+}
+
+.pi-chat__tool-result--error {
+	border: 1px solid var(--text-error);
+}
+
+.pi-chat__tool-call pre {
+	white-space: pre-wrap;
+}
+
+.pi-chat__composer {
+	display: flex;
+	flex-direction: column;
+	gap: 0.5rem;
+}
+
+.pi-chat__composer textarea {
+	min-height: 6rem;
+	resize: vertical;
+	width: 100%;
+}
+
+.pi-chat__composer-actions {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 0.5rem;
+}

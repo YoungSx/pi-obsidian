@@ -1,90 +1,73 @@
-# Obsidian Sample Plugin
+# Pi Obsidian
 
-This is a sample plugin for Obsidian (https://obsidian.md).
+Pi Obsidian runs a pi-style coding agent inside Obsidian and exposes vault-scoped Obsidian tools to the model. The MVP uses a React chat side panel and defaults to DeepSeek's `deepseek-v4-pro` model.
 
-This project uses TypeScript to provide type checking and documentation.
-The repo depends on the latest plugin API (obsidian.d.ts) in TypeScript Definition format, which contains TSDoc comments describing what it does.
+## MVP status
 
-This sample plugin demonstrates some of the basic functionality the plugin API can do.
-- Adds a ribbon icon, which shows a Notice when clicked.
-- Adds a command "Open modal (simple)" which opens a Modal.
-- Adds a plugin setting tab to the settings page.
-- Registers a global click event and output 'click' to the console.
-- Registers a global interval which logs 'setInterval' to the console.
+- Runs in Obsidian desktop and mobile (`isDesktopOnly: false`).
+- Uses `@mariozechner/pi-agent-core` and `@mariozechner/pi-ai` in the plugin bundle.
+- Defaults to provider `deepseek` and model `deepseek-v4-pro`.
+- Stores API keys in Obsidian plugin data.
+- Stores chat sessions as pi-compatible JSONL files under this plugin directory.
+- Mutating tools (`write` and `edit`) run immediately.
 
-## First time developing plugins?
+## Setup
 
-Quick starting guide for new plugin devs:
+1. Run `npm install`.
+2. Run `npm run build`.
+3. Reload Obsidian and enable **Pi Obsidian** in **Settings → Community plugins**.
+4. Open **Settings → Pi Obsidian**.
+5. Paste a DeepSeek API key.
+6. Run the command **Open pi chat** or select the ribbon bot icon.
 
-- Check if [someone already developed a plugin for what you want](https://obsidian.md/plugins)! There might be an existing plugin similar enough that you can partner up with.
-- Make a copy of this repo as a template with the "Use this template" button (login to GitHub if you don't see it).
-- Clone your repo to a local development folder. For convenience, you can place this folder in your `.obsidian/plugins/your-plugin-name` folder.
-- Install NodeJS, then run `npm i` in the command line under your repo folder.
-- Run `npm run dev` to compile your plugin from `main.ts` to `main.js`.
-- Make changes to `main.ts` (or create new `.ts` files). Those changes should be automatically compiled into `main.js`.
-- Reload Obsidian to load the new version of your plugin.
-- Enable plugin in settings window.
-- For updates to the Obsidian API run `npm update` in the command line under your repo folder.
+## Chat usage
 
-## Releasing new releases
+The side panel supports:
 
-- Update your `manifest.json` with your new version number, such as `1.0.1`, and the minimum Obsidian version required for your latest release.
-- Update your `versions.json` file with `"new-plugin-version": "minimum-obsidian-version"` so older versions of Obsidian can download an older version of your plugin that's compatible.
-- Create new GitHub release using your new version number as the "Tag version". Use the exact version number, don't include a prefix `v`. See here for an example: https://github.com/obsidianmd/obsidian-sample-plugin/releases
-- Upload the files `manifest.json`, `main.js`, `styles.css` as binary attachments. Note: The manifest.json file must be in two places, first the root path of your repository and also in the release.
-- Publish the release.
+- Streaming chat responses.
+- Abort while the agent is responding.
+- Starting a new JSONL-backed chat session.
+- Viewing basic tool calls and tool results in the transcript.
 
-> You can simplify the version bump process by running `npm version patch`, `npm version minor` or `npm version major` after updating `minAppVersion` manually in `manifest.json`.
-> The command will bump version in `manifest.json` and `package.json`, and add the entry for the new version to `versions.json`
+Press **Ctrl/⌘+Enter** in the composer to send.
 
-## Adding your plugin to the community plugin list
+## Tools
 
-- Check the [plugin guidelines](https://docs.obsidian.md/Plugins/Releasing/Plugin+guidelines).
-- Publish an initial version.
-- Make sure you have a `README.md` file in the root of your repo.
-- Make a pull request at https://github.com/obsidianmd/obsidian-releases to add your plugin.
+The agent can use these vault-scoped tools:
 
-## How to use
+- `get_active_note`: return the active Markdown note path and optionally selection/content.
+- `read`: read a vault-relative text or Markdown file.
+- `write`: create or overwrite a vault-relative text or Markdown file.
+- `edit`: apply exact text replacements; each `oldText` must match exactly once.
+- `ls`: list a vault folder.
+- `find`: find files by substring or simple glob pattern.
+- `grep`: search text files.
 
-- Clone this repo.
-- Make sure your NodeJS is at least v16 (`node --version`).
-- `npm i` or `yarn` to install dependencies.
-- `npm run dev` to start compilation in watch mode.
+Tool paths must be vault-relative. Absolute paths and `..` path escapes are rejected. The plugin also blocks tool access to `.obsidian/plugins/pi-obsidian` internals by default.
 
-## Manually installing the plugin
+## Session storage
 
-- Copy over `main.js`, `styles.css`, `manifest.json` to your vault `VaultFolder/.obsidian/plugins/your-plugin-id/`.
+Sessions are stored as JSONL files under:
 
-## Improve code quality with eslint
-- [ESLint](https://eslint.org/) is a tool that analyzes your code to quickly find problems. You can run ESLint against your plugin to find common bugs and ways to improve your code. 
-- This project already has eslint preconfigured, you can invoke a check by running`npm run lint`
-- Together with a custom eslint [plugin](https://github.com/obsidianmd/eslint-plugin) for Obsidan specific code guidelines.
-- A GitHub action is preconfigured to automatically lint every commit on all branches.
-
-## Funding URL
-
-You can include funding URLs where people who use your plugin can financially support it.
-
-The simple way is to set the `fundingUrl` field to your link in your `manifest.json` file:
-
-```json
-{
-    "fundingUrl": "https://buymeacoffee.com"
-}
+```text
+<vault config dir>/plugins/pi-obsidian/sessions/
 ```
 
-If you have multiple URLs, you can also do:
+Each file starts with a pi-compatible version 3 `session` header and then appends tree-shaped entries using `id` and `parentId`.
 
-```json
-{
-    "fundingUrl": {
-        "Buy Me a Coffee": "https://buymeacoffee.com",
-        "GitHub Sponsor": "https://github.com/sponsors",
-        "Patreon": "https://www.patreon.com/"
-    }
-}
+## Privacy and provider disclosure
+
+Prompts, assistant-visible conversation history, vault content returned by tools, and tool results are sent to the configured model provider. For the MVP that provider is DeepSeek unless you change settings.
+
+API keys are saved with Obsidian plugin data using `loadData()` / `saveData()`. Do not use this plugin with vault content you do not want sent to your selected provider.
+
+## Development
+
+```bash
+npm install
+npm test
+npm run build
+npm run lint
 ```
 
-## API Documentation
-
-See https://docs.obsidian.md
+Release artifacts are `main.js`, `manifest.json`, and `styles.css` at the plugin root.
