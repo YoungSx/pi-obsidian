@@ -1,5 +1,5 @@
 import type { App } from "obsidian";
-import { Agent, type AgentEvent, type AgentMessage, type ThinkingLevel } from "@mariozechner/pi-agent-core";
+import { Agent, type AgentEvent, type AgentMessage, type StreamFn, type ThinkingLevel } from "@mariozechner/pi-agent-core";
 import { createObsidianTools } from "../tools/obsidianTools";
 import { getPreferredThinkingLevel, getSelectedModel, type PiObsidianSettings } from "../settings";
 import { ObsidianSessionManager, type ActiveSessionInfo, type SessionDefaults } from "../session/ObsidianSessionManager";
@@ -19,10 +19,15 @@ export interface ChatSnapshot {
 
 type SnapshotListener = (snapshot: ChatSnapshot) => void;
 
+export interface ObsidianAgentServiceOptions {
+	streamFn?: StreamFn;
+}
+
 export class ObsidianAgentService {
 	private readonly app: App;
 	private readonly getSettings: () => PiObsidianSettings;
 	private readonly sessionManager: ObsidianSessionManager;
+	private readonly streamFn: StreamFn | undefined;
 	private readonly listeners = new Set<SnapshotListener>();
 	private agent: Agent | null = null;
 	private unsubscribeAgent: (() => void) | null = null;
@@ -31,10 +36,11 @@ export class ObsidianAgentService {
 	private persistedMessages = new WeakSet<object>();
 	private errorMessage: string | undefined;
 
-	constructor(app: App, getSettings: () => PiObsidianSettings, sessionManager: ObsidianSessionManager) {
+	constructor(app: App, getSettings: () => PiObsidianSettings, sessionManager: ObsidianSessionManager, options: ObsidianAgentServiceOptions = {}) {
 		this.app = app;
 		this.getSettings = getSettings;
 		this.sessionManager = sessionManager;
+		this.streamFn = options.streamFn;
 	}
 
 	subscribe(listener: SnapshotListener): () => void {
@@ -84,12 +90,19 @@ export class ObsidianAgentService {
 			this.notify();
 			await agent.prompt(trimmedPrompt);
 		} catch (error) {
-			this.setError(error instanceof Error ? error.message : String(error));
+			this.errorMessage = error instanceof Error ? error.message : String(error);
+		} finally {
+			this.notifySettledState();
 		}
 	}
 
 	abort(): void {
-		this.agent?.abort();
+		const agent = this.agent;
+		if (!agent) {
+			return;
+		}
+		agent.abort();
+		void agent.waitForIdle().then(() => this.notifySettledState());
 	}
 
 	async newSession(): Promise<void> {
@@ -151,6 +164,7 @@ export class ObsidianAgentService {
 		const settings = this.getSettings();
 		const model = getSelectedModel(settings);
 		const agent = new Agent({
+			streamFn: this.streamFn,
 			initialState: {
 				systemPrompt: OBSIDIAN_AGENT_SYSTEM_PROMPT,
 				model,
@@ -220,6 +234,13 @@ export class ObsidianAgentService {
 
 	private setError(message: string): void {
 		this.errorMessage = message;
+		this.notify();
+	}
+
+	private notifySettledState(): void {
+		if (this.sessionManager.getActiveSessionPath()) {
+			this.sessionInfo = this.sessionManager.getActiveSessionInfo();
+		}
 		this.notify();
 	}
 

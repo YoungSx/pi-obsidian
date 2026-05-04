@@ -380,3 +380,19 @@ Validation notes:
 - `npm run lint` initially found UI sentence-case and hardcoded `.obsidian` strings in tests; fixed those and lint now passes.
 - Bundle inspection found `require("obsidian")` as expected and a dormant `require("node:fs")` path from pi-ai's environment API-key fallback. The plugin supplies API keys explicitly and blocks prompt submission when the key is missing, so this path should not be reached in the MVP; no `child_process`/shell integration was added.
 - Manual Obsidian desktop/mobile validation still needs a human/device and a DeepSeek API key.
+
+### Bugfix: chat remains in abort state after a completed response
+
+- Human tested with a DeepSeek API key and provided a screenshot showing the assistant completed a response, but the composer still showed **Abort**.
+- Screenshot reviewed: the assistant response is complete, but the UI snapshot still has `isStreaming: true`.
+- Hypothesis: `pi-agent-core` emits `agent_end` before its internal `finishRun()` clears `state.isStreaming`; `ObsidianAgentService` notifies listeners during `agent_end`, then `sendPrompt()` returns without sending a final settled snapshot.
+- [x] Add a regression test around the service notification sequence using a fake stream function.
+- [x] Notify the React store after prompt/abort runs settle so the final snapshot has `isStreaming: false`.
+- [x] Validate with `npm test`, `npm run build`, and `npm run lint`.
+
+Bugfix notes:
+- Confirmed the likely issue: `pi-agent-core` clears `state.isStreaming` after awaited `agent_end` listeners settle, but our service only notified during agent events.
+- Added a test-only injectable `streamFn` option to `ObsidianAgentService` and a regression test asserting the final snapshot after `sendPrompt()` has `isStreaming: false` and contains the user/assistant messages.
+- Changed `sendPrompt()` to publish a final settled snapshot in `finally` after `agent.prompt()` resolves.
+- Changed `abort()` to wait for agent idle settlement and then publish a settled snapshot.
+- Validation: `npm test` passes with 21 tests, `npm run build` passes, and `npm run lint` passes.
