@@ -414,3 +414,20 @@ Bugfix notes:
 - Added a textarea ref and native `keydown` capture listener in `PiChatApp` that uses the same detector and sends before the event bubbles further.
 - Kept the React `onKeyDown` path as a secondary handler.
 - Validation: `npm test` passes with 26 tests, `npm run build` passes, and `npm run lint` passes.
+
+### Follow-up: Cmd+Enter still does not submit
+
+- Human retested after the native textarea listener change: **Ctrl+Enter** submits, but **Cmd+Enter** still does not on macOS.
+- Likely cause: Obsidian's keymap intercepts Mod+Enter before the event reaches the textarea-level React/native handlers.
+- Plan:
+  - [x] Add an Obsidian view `Scope` handler for `Mod+Enter` while the chat view is focused.
+  - [x] Bridge that scope handler to the React composer through a small controller so it submits the current input value.
+  - [x] Keep the existing textarea native/React handlers for Ctrl+Enter and fallback behavior.
+  - [x] Validate with `npm test`, `npm run build`, and `npm run lint`.
+
+Follow-up bugfix notes:
+- Added `ChatInputController` as a small bridge from Obsidian view-scope hotkeys to the React composer submit handler.
+- `PiChatView` now creates an Obsidian `Scope`, registers `Mod+Enter`, prevents default propagation, and calls the controller.
+- `PiChatApp` registers its current `sendPrompt` callback with the controller while mounted.
+- Existing textarea native/React handlers remain in place for Ctrl+Enter and fallback handling.
+- Validation: `npm test` passes with 28 tests, `npm run build` passes, and `npm run lint` passes.

@@ -2,13 +2,15 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import type { AgentMessage } from "@mariozechner/pi-agent-core";
 import type { AssistantMessage, ToolResultMessage, UserMessage } from "@mariozechner/pi-ai";
 import type { ChatSnapshot, ObsidianAgentService } from "../agent/ObsidianAgentService";
+import type { ChatInputController } from "./ChatInputController";
 import { isSendShortcut } from "./keyboard";
 
 interface PiChatAppProps {
 	service: ObsidianAgentService;
+	inputController?: ChatInputController;
 }
 
-export function PiChatApp({ service }: PiChatAppProps): React.JSX.Element {
+export function PiChatApp({ service, inputController }: PiChatAppProps): React.JSX.Element {
 	const [snapshot, setSnapshot] = useState<ChatSnapshot>(() => service.getSnapshot());
 	const [input, setInput] = useState("");
 	const textareaRef = useRef<HTMLTextAreaElement | null>(null);
@@ -39,6 +41,16 @@ export function PiChatApp({ service }: PiChatAppProps): React.JSX.Element {
 	sendPromptRef.current = () => {
 		void sendPrompt();
 	};
+
+	useEffect(() => {
+		if (!inputController) {
+			return undefined;
+		}
+		inputController.setSubmitHandler(() => sendPromptRef.current());
+		return () => {
+			inputController.setSubmitHandler(null);
+		};
+	}, [inputController]);
 
 	useEffect(() => {
 		const textarea = textareaRef.current;
