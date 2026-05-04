@@ -397,3 +397,20 @@ Bugfix notes:
 - Changed `abort()` to wait for agent idle settlement and then publish a settled snapshot.
 - Validation: `npm test` passes with 21 tests, `npm run build` passes, and `npm run lint` passes.
 - Added `sessions/` to `.gitignore` because manual Obsidian testing creates JSONL session files inside the plugin directory during local development.
+
+### Bugfix: Command+Enter does not submit on macOS
+
+- Human manually tested desktop features and tool calls successfully.
+- Remaining desktop UX bug: **Cmd+Enter** does not submit the chat composer on macOS.
+- Current code uses React `onKeyDown` on the textarea and checks `event.key === "Enter" && (event.metaKey || event.ctrlKey)`.
+- Plan:
+  - [x] Extract and test a pure send-shortcut detector that handles `Enter`, `NumpadEnter`, `metaKey`, and `ctrlKey`.
+  - [x] Add a native textarea `keydown` capture listener in addition to React handling so Obsidian/React delegated event interactions do not swallow the shortcut.
+  - [x] Prevent default and stop propagation for the shortcut before sending.
+  - [x] Validate with `npm test`, `npm run build`, and `npm run lint`.
+
+Bugfix notes:
+- Added `src/ui/keyboard.ts` with `isSendShortcut()` and tests for Command+Enter, Ctrl+Enter, numpad Enter, plain Enter, composing input, and Shift+Enter.
+- Added a textarea ref and native `keydown` capture listener in `PiChatApp` that uses the same detector and sends before the event bubbles further.
+- Kept the React `onKeyDown` path as a secondary handler.
+- Validation: `npm test` passes with 26 tests, `npm run build` passes, and `npm run lint` passes.

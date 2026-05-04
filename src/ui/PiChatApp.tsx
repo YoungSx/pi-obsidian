@@ -1,7 +1,8 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import type { AgentMessage } from "@mariozechner/pi-agent-core";
 import type { AssistantMessage, ToolResultMessage, UserMessage } from "@mariozechner/pi-ai";
 import type { ChatSnapshot, ObsidianAgentService } from "../agent/ObsidianAgentService";
+import { isSendShortcut } from "./keyboard";
 
 interface PiChatAppProps {
 	service: ObsidianAgentService;
@@ -10,6 +11,8 @@ interface PiChatAppProps {
 export function PiChatApp({ service }: PiChatAppProps): React.JSX.Element {
 	const [snapshot, setSnapshot] = useState<ChatSnapshot>(() => service.getSnapshot());
 	const [input, setInput] = useState("");
+	const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+	const sendPromptRef = useRef<() => void>(() => undefined);
 
 	useEffect(() => {
 		const unsubscribe = service.subscribe(setSnapshot);
@@ -33,11 +36,38 @@ export function PiChatApp({ service }: PiChatAppProps): React.JSX.Element {
 		await service.sendPrompt(prompt);
 	};
 
-	const handleKeyDown = (event: React.KeyboardEvent<HTMLTextAreaElement>): void => {
-		if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
-			event.preventDefault();
-			void sendPrompt();
+	sendPromptRef.current = () => {
+		void sendPrompt();
+	};
+
+	useEffect(() => {
+		const textarea = textareaRef.current;
+		if (!textarea) {
+			return undefined;
 		}
+
+		const handleNativeKeyDown = (event: KeyboardEvent): void => {
+			if (!isSendShortcut(event)) {
+				return;
+			}
+			event.preventDefault();
+			event.stopPropagation();
+			sendPromptRef.current();
+		};
+
+		textarea.addEventListener("keydown", handleNativeKeyDown, { capture: true });
+		return () => {
+			textarea.removeEventListener("keydown", handleNativeKeyDown, { capture: true });
+		};
+	}, []);
+
+	const handleKeyDown = (event: React.KeyboardEvent<HTMLTextAreaElement>): void => {
+		if (!isSendShortcut(event)) {
+			return;
+		}
+		event.preventDefault();
+		event.stopPropagation();
+		void sendPrompt();
 	};
 
 	return (
@@ -62,6 +92,7 @@ export function PiChatApp({ service }: PiChatAppProps): React.JSX.Element {
 
 			<footer className="pi-chat__composer">
 				<textarea
+					ref={textareaRef}
 					value={input}
 					onChange={(event) => setInput(event.currentTarget.value)}
 					onKeyDown={handleKeyDown}
