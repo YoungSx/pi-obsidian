@@ -438,9 +438,12 @@ Follow-up bugfix notes:
 - [x] Check off manual Obsidian desktop testing for the MVP.
 - [x] Change plugin/package version to `0.0.1`.
 - [x] Validate after version change.
-- [ ] Commit release-prep changes.
-- [ ] Push branch and open a PR.
+- [x] Commit release-prep changes.
+- [x] Push branch and open a PR.
 
 Release prep notes:
 - Updated `package.json`, `package-lock.json`, `manifest.json`, and `versions.json` to `0.0.1`.
 - Validation after version change: `npm test` passes with 28 tests, `npm run build` passes, and `npm run lint` passes.
+- Release-prep commit: `b56cf0c chore: prepare version 0.0.1`.
+- Pushed branch `feature/react-pi-agent-chat` to `origin`.
+- Opened PR: https://github.com/lhr0909/pi-obsidian/pull/1
