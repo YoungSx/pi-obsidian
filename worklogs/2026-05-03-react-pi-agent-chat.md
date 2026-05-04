@@ -251,7 +251,7 @@ Set up this fresh Obsidian plugin to run a pi-agent inside Obsidian, expose inte
   - Document JSONL session storage under the plugin directory.
   - Document that the agent runs inside Obsidian, with vault access only through plugin-provided tools.
   - Add compact CSS for the chat panel in `styles.css`.
-- [ ] Validate.
+- [x] Validate.
   - Run `npm install` after dependency edits.
   - Run `npm test`.
   - Run `npm run build` and inspect for mobile-unavailable externalized Node modules.
