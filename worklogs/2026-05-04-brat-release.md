@@ -32,6 +32,37 @@ Check the Obsidian BRAT plugin release/install process and prepare a GitHub rele
 
 - [x] Research BRAT installation/release requirements.
 - [x] Confirm this repo has the required release artifacts and version metadata.
-- [ ] Build and validate release artifacts.
-- [ ] Create a GitHub release/tag for version `0.0.1` with the required assets.
-- [ ] Document install steps for BRAT/mobile testing.
+- [x] Build and validate release artifacts.
+- [x] Create a GitHub release/tag for version `0.0.1` with the required assets.
+- [x] Document install steps for BRAT/mobile testing.
+
+## Release actions
+
+- Ran `npm ci`.
+- Ran `npm test`: 28 tests passed.
+- Ran `npm run build`: produced `main.js`.
+- Ran `npm run lint`: passed.
+- Verified release artifacts exist locally:
+  - `main.js` (2.3 MB)
+  - `manifest.json` (`version: 0.0.1`, `isDesktopOnly: false`)
+  - `styles.css`
+- Committed this release worklog on `master`: `74d0733 docs: plan brat release`.
+- Pushed `master` to `origin`.
+- Created GitHub pre-release `0.0.1` with assets `main.js`, `manifest.json`, and `styles.css`.
+- Release URL: https://github.com/lhr0909/pi-obsidian/releases/tag/0.0.1
+
+## BRAT/mobile install steps
+
+1. In the real vault, install/enable the BRAT plugin if it is not already installed.
+2. In BRAT settings, choose **Add beta plugin**.
+3. Enter the repository path: `lhr0909/pi-obsidian`.
+4. Let BRAT install the latest release/pre-release. It should resolve `0.0.1` and download release assets from GitHub.
+5. Enable **Pi Obsidian** in **Settings → Community plugins**.
+6. Configure the DeepSeek API key in **Settings → Pi Obsidian**.
+7. Open **Pi chat** from the command palette or ribbon and run mobile tests.
+
+## Notes
+
+- The release is marked as a GitHub pre-release, which BRAT supports for beta testing.
+- BRAT v1.1.0+ is expected; no `manifest-beta.json` is needed.
+- The version in the release tag/name and released `manifest.json` all match `0.0.1`.
