@@ -12,3 +12,7 @@
 {"type":"task_created","taskId":"task-1","title":"Add tested Markdown task parsing and formatting utilities for vault task discovery.","createdAt":"2026-05-07T13:19:56.180Z"}
 {"type":"task_created","taskId":"task-2","title":"Register read-only agent task tools for listing tasks and summarizing tasks across the vault, a folder, or a note.","createdAt":"2026-05-07T13:19:56.180Z"}
 {"type":"task_created","taskId":"task-3","title":"Update agent guidance for task-specific tools and validate with tests/build.","createdAt":"2026-05-07T13:19:56.180Z"}
+{"type":"observation_added","observationId":"observation-11","source":"User clarification","observation":"Implementation should use Obsidian built-in `metadataCache` task discovery, following the sibling `obsidian-plugin-task-properties` pattern, rather than direct Markdown checkbox parsing as the primary discovery mechanism.","createdAt":"2026-05-07T13:23:28.837Z"}
+{"type":"task_canceled","taskId":"task-1","canceledAt":"2026-05-07T13:23:41.246Z","reason":"User requested built-in metadataCache discovery rather than direct Markdown task parsing."}
+{"type":"task_log_added","logId":"log-1","taskId":"task-1","content":"Replaced with a metadataCache-focused extraction/formatting task to follow the sibling task-properties plugin pattern.","createdAt":"2026-05-07T13:23:41.246Z"}
+{"type":"task_created","taskId":"task-4","title":"Add tested metadataCache task extraction and formatting utilities.","createdAt":"2026-05-07T13:23:45.456Z"}
