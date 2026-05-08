@@ -52,3 +52,6 @@
 {"type":"task_log_added","logId":"log-19","taskId":"task-6","content":"Release validation and artifact build are complete.","createdAt":"2026-05-08T09:13:55.528Z"}
 {"type":"task_started","taskId":"task-7","startedAt":"2026-05-08T09:14:21.882Z"}
 {"type":"task_log_added","logId":"log-20","taskId":"task-7","content":"Starting final release publishing: push master and create GitHub release 0.0.2 with Obsidian release assets.","createdAt":"2026-05-08T09:14:21.882Z"}
+{"type":"task_log_added","logId":"log-21","taskId":"task-7","content":"Published release 0.0.2:\n- Pushed `master` to `origin/master`.\n- Created GitHub release/tag `0.0.2`: https://github.com/lhr0909/pi-obsidian/releases/tag/0.0.2\n- Attached release assets: `main.js`, `manifest.json`, `styles.css`.","createdAt":"2026-05-08T09:15:02.700Z"}
+{"type":"task_finished","taskId":"task-7","finishedAt":"2026-05-08T09:15:06.917Z"}
+{"type":"task_log_added","logId":"log-22","taskId":"task-7","content":"Release publishing is complete and the 0.0.2 release is available with all Obsidian plugin assets attached.","createdAt":"2026-05-08T09:15:06.917Z"}
