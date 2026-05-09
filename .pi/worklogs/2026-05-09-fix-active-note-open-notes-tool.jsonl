@@ -56,3 +56,11 @@
 {"type":"task_log_added","logId":"log-19","taskId":"task-7","content":"Final diff review found the expected changes only: active-note API switch, new `get_open_notes` implementation, targeted tests, README entry, system prompt guidance, and structured worklog updates.","createdAt":"2026-05-09T06:40:51.574Z"}
 {"type":"task_finished","taskId":"task-7","finishedAt":"2026-05-09T06:40:53.922Z"}
 {"type":"task_log_added","logId":"log-20","taskId":"task-7","content":"Staging and committing the completed source, test, documentation, and worklog updates.","createdAt":"2026-05-09T06:40:53.922Z"}
+{"type":"observation_added","observationId":"observation-17","source":"human review","observation":"User approved the completed changes and asked to set up a pull request.","createdAt":"2026-05-09T07:03:52.529Z"}
+{"type":"task_created","taskId":"task-8","title":"Push branch and create pull request","createdAt":"2026-05-09T07:03:54.531Z"}
+{"type":"task_started","taskId":"task-8","startedAt":"2026-05-09T07:03:57.077Z"}
+{"type":"task_log_added","logId":"log-21","taskId":"task-8","content":"Preparing the feature branch for PR creation: checking status/remotes, pushing the branch, and creating a GitHub pull request with a concise summary and validation notes.","createdAt":"2026-05-09T07:03:57.077Z"}
+{"type":"task_log_added","logId":"log-22","taskId":"task-8","content":"Pushed branch with `git push -u origin fix-active-note-open-notes` and created PR via GitHub CLI:\nhttps://github.com/lhr0909/pi-obsidian/pull/13","createdAt":"2026-05-09T07:04:22.691Z"}
+{"type":"task_finished","taskId":"task-8","finishedAt":"2026-05-09T07:04:25.281Z"}
+{"type":"task_log_added","logId":"log-23","taskId":"task-8","content":"Pull request created successfully: https://github.com/lhr0909/pi-obsidian/pull/13","createdAt":"2026-05-09T07:04:25.281Z"}
+{"type":"observation_added","observationId":"observation-18","source":"gh pr create","observation":"Created pull request https://github.com/lhr0909/pi-obsidian/pull/13 from `fix-active-note-open-notes` into `master`.","createdAt":"2026-05-09T07:04:28.064Z"}
