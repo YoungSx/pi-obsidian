@@ -1,4 +1,4 @@
-import { MarkdownView, TFile, TFolder, type App } from "obsidian";
+import { MarkdownView, TFile, TFolder, type App, type MarkdownFileInfo, type WorkspaceLeaf } from "obsidian";
 import type { AgentTool, AgentToolResult } from "@mariozechner/pi-agent-core";
 import { Type } from "typebox";
 import { applyExactEdits } from "../vault/edit";
@@ -15,6 +15,8 @@ import {
 	type VaultTask,
 } from "../vault/tasks";
 import { formatTextSlice, sliceTextByLines, truncateToolOutput } from "../vault/truncate";
+
+const MARKDOWN_VIEW_TYPE = "markdown";
 
 const TEXT_EXTENSIONS = new Set([
 	"md",
@@ -88,6 +90,8 @@ const ActiveNoteParameters = Type.Object({
 	includeSelection: Type.Optional(Type.Boolean()),
 });
 
+const OpenNotesParameters = Type.Object({});
+
 export function createObsidianTools(app: App): AgentTool[] {
 	return [
 		createReadTool(app),
@@ -99,6 +103,7 @@ export function createObsidianTools(app: App): AgentTool[] {
 		createListTasksTool(app),
 		createSummarizeTasksTool(app),
 		createActiveNoteTool(app),
+		createOpenNotesTool(app),
 	];
 }
 
@@ -303,14 +308,14 @@ function createActiveNoteTool(app: App): AgentTool<typeof ActiveNoteParameters> 
 		description: "Return the active Markdown note path, with optional selected text and file content.",
 		parameters: ActiveNoteParameters,
 		execute: async (_toolCallId, params) => {
-			const view = app.workspace.getActiveViewOfType(MarkdownView);
-			const file = view?.file;
-			if (!view || !file) {
+			const file = app.workspace.getActiveFile();
+			if (!file || !isMarkdownFile(file)) {
 				throw new Error("No active Markdown note.");
 			}
 
 			const lines = [`Active note: ${file.path}`];
-			const selection = params.includeSelection ? view.editor.getSelection() : "";
+			const noteInfo = getMarkdownFileInfo(app, file);
+			const selection = params.includeSelection ? noteInfo?.editor?.getSelection() ?? "" : "";
 			if (params.includeSelection) {
 				lines.push("", "Selection:", selection || "(no selection)");
 			}
@@ -320,6 +325,21 @@ function createActiveNoteTool(app: App): AgentTool<typeof ActiveNoteParameters> 
 			}
 
 			return textResult(lines.join("\n"), { path: file.path, hasSelection: selection.length > 0 });
+		},
+	};
+}
+
+function createOpenNotesTool(app: App): AgentTool<typeof OpenNotesParameters> {
+	return {
+		name: "get_open_notes",
+		label: "Get open notes",
+		description: "Return Markdown notes currently open in Obsidian tabs, marking the active note.",
+		parameters: OpenNotesParameters,
+		execute: async () => {
+			const activePath = getActiveMarkdownPath(app);
+			const notes = getOpenMarkdownNotes(app, activePath);
+			const text = notes.length === 0 ? "No open Markdown notes." : formatOpenNotes(notes);
+			return textResult(text, { activePath, count: notes.length, notes });
 		},
 	};
 }
@@ -385,6 +405,70 @@ function getTaskScopeFiles(app: App, path?: string): TFile[] {
 
 function getMarkdownFiles(app: App): TFile[] {
 	return app.vault.getMarkdownFiles().slice().sort(compareFiles);
+}
+
+function getMarkdownFileInfo(app: App, file: TFile): MarkdownFileInfo | null {
+	const activeEditor = app.workspace.activeEditor;
+	if (isMarkdownFileInfoForFile(activeEditor, file)) {
+		return activeEditor;
+	}
+
+	const recentRootLeaf = app.workspace.getMostRecentLeaf(app.workspace.rootSplit);
+	if (isMarkdownViewForFile(recentRootLeaf?.view, file)) {
+		return recentRootLeaf.view;
+	}
+
+	for (const leaf of app.workspace.getLeavesOfType(MARKDOWN_VIEW_TYPE)) {
+		if (isMarkdownViewForFile(leaf.view, file)) {
+			return leaf.view;
+		}
+	}
+	return null;
+}
+
+interface OpenNoteTab {
+	path: string;
+	active: boolean;
+}
+
+function getActiveMarkdownPath(app: App): string {
+	const file = app.workspace.getActiveFile();
+	return file && isMarkdownFile(file) ? file.path : "";
+}
+
+function getOpenMarkdownNotes(app: App, activePath: string): OpenNoteTab[] {
+	return app.workspace
+		.getLeavesOfType(MARKDOWN_VIEW_TYPE)
+		.map(getMarkdownLeafPath)
+		.filter((path): path is string => path !== null)
+		.map((path) => ({ path, active: path === activePath }));
+}
+
+function getMarkdownLeafPath(leaf: WorkspaceLeaf): string | null {
+	const state = leaf.getViewState();
+	if (state.type !== MARKDOWN_VIEW_TYPE) {
+		return null;
+	}
+
+	const stateFile = state.state?.file;
+	if (typeof stateFile === "string") {
+		return stateFile;
+	}
+
+	return leaf.view instanceof MarkdownView ? leaf.view.file?.path ?? null : null;
+}
+
+function formatOpenNotes(notes: OpenNoteTab[]): string {
+	const lines = notes.map((note, index) => `${index + 1}. ${note.path}${note.active ? " (active)" : ""}`);
+	return ["Open Markdown notes:", ...lines].join("\n");
+}
+
+function isMarkdownFileInfoForFile(info: MarkdownFileInfo | null | undefined, file: TFile): info is MarkdownFileInfo {
+	return info?.file?.path === file.path;
+}
+
+function isMarkdownViewForFile(view: unknown, file: TFile): view is MarkdownView {
+	return view instanceof MarkdownView && view.file?.path === file.path;
 }
 
 function compareTasks(left: VaultTask, right: VaultTask): number {

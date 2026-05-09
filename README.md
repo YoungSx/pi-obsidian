@@ -36,6 +36,7 @@ Press **Ctrl/⌘+Enter** in the composer to send.
 The agent can use these vault-scoped tools:
 
 - `get_active_note`: return the active Markdown note path and optionally selection/content.
+- `get_open_notes`: list Markdown notes currently open in Obsidian tabs and mark the active note.
 - `read`: read a vault-relative text or Markdown file.
 - `write`: create or overwrite a vault-relative text or Markdown file.
 - `edit`: apply exact text replacements; each `oldText` must match exactly once.
