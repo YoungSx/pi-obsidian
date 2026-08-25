@@ -1,9 +1,10 @@
-import { Notice, Plugin } from "obsidian";
+import { Notice, Plugin, type Editor } from "obsidian";
 import { PiObsidianSettingTab, type PiObsidianSettings, normalizeSettings } from "./settings";
 import { VIEW_TYPE_PI_CHAT } from "./constants";
 import { ObsidianSessionManager } from "./session/ObsidianSessionManager";
 import { ObsidianAgentService } from "./agent/ObsidianAgentService";
 import { PiChatView } from "./ui/PiChatView";
+import { requestNoteReference, warnIfTruncated } from "./ui/noteReferenceCommand";
 
 export default class PiObsidianPlugin extends Plugin {
 	// Fresh defaults until `onload` loads persisted data; `normalizeSettings` deep-copies
@@ -63,9 +64,39 @@ export default class PiObsidianPlugin extends Plugin {
 				return true;
 			},
 		});
+		this.addCommand({
+			id: "ask-pi-about-selection",
+			name: "Ask pi about selection",
+			editorCallback: (editor, info) => {
+				void this.askPiAboutSelection(editor, info.file?.path ?? null);
+			},
+		});
+		this.addCommand({
+			id: "ask-pi-about-note",
+			name: "Ask pi about this note",
+			editorCallback: (editor, info) => {
+				void this.askPiAboutSelection(editor, info.file?.path ?? null, { selectionOnly: false });
+			},
+		});
 		this.addRibbonIcon("bot", "Open pi chat", () => {
 			void this.activateChatView();
 		});
+		this.registerEvent(
+			this.app.workspace.on("editor-menu", (menu, editor, info) => {
+				const path = info.file?.path;
+				if (!path || !editor.getSelection().trim()) {
+					return;
+				}
+				menu.addItem((item) =>
+					item
+						.setTitle("Ask pi about selection")
+						.setIcon("bot")
+						.onClick(() => {
+							void this.askPiAboutSelection(editor, path);
+						}),
+				);
+			}),
+		);
 	}
 
 	onunload(): void {
@@ -86,6 +117,37 @@ export default class PiObsidianPlugin extends Plugin {
 		await this.activateChatView();
 		await this.requireAgentService().newSession();
 		this.findChatView()?.focusInput();
+	}
+
+	/**
+	 * Opens the panel and prefills a reference to the note (and selection).
+	 *
+	 * `activateChatView` must be awaited before the prefill: the view mounts
+	 * React asynchronously, and the controller latches the text until the
+	 * composer registers, so ordering here is what keeps the reference from
+	 * landing in a not-yet-existing input.
+	 */
+	private async askPiAboutSelection(editor: Editor, path: string | null, options = { selectionOnly: true }): Promise<void> {
+		const handled = requestNoteReference(editor, path, {
+			...options,
+			deliver: (text, truncated) => {
+				void this.deliverReference(text);
+				warnIfTruncated(truncated);
+			},
+		});
+		if (handled) {
+			return;
+		}
+		new Notice("No active note to ask pi about.");
+	}
+
+	private async deliverReference(text: string): Promise<void> {
+		await this.activateChatView();
+		const view = this.findChatView();
+		// Prefill first, then focus: the composer places the caret at the end of
+		// its draft, so the user can type the question straight away.
+		view?.prefillComposer(text);
+		view?.focusInput();
 	}
 
 	private findChatView(): PiChatView | null {

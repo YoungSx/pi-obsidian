@@ -1,10 +1,12 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { flushSync } from "react-dom";
 import type { ChatSnapshot, ObsidianAgentService } from "../agent/ObsidianAgentService";
 import type { ActiveSessionInfo } from "../session/ObsidianSessionManager";
 import type { ChatInputController } from "./ChatInputController";
 import { ChatComposer } from "./ChatComposer";
 import { ChatHeader } from "./ChatHeader";
 import { MessageList } from "./MessageList";
+import { appendToDraft } from "./noteReference";
 
 interface PiChatAppProps {
 	service: ObsidianAgentService;
@@ -57,6 +59,13 @@ export function PiChatApp({ service, inputController }: PiChatAppProps): React.J
 		void sendPrompt();
 	};
 
+	const handleFocusRequested = useCallback(
+		(focus: (() => void) | null) => {
+			inputController?.setFocusHandler(focus);
+		},
+		[inputController],
+	);
+
 	useEffect(() => {
 		if (!inputController) {
 			return undefined;
@@ -67,12 +76,22 @@ export function PiChatApp({ service, inputController }: PiChatAppProps): React.J
 		};
 	}, [inputController]);
 
-	const handleFocusRequested = useCallback(
-		(focus: (() => void) | null) => {
-			inputController?.setFocusHandler(focus);
-		},
-		[inputController],
-	);
+	useEffect(() => {
+		if (!inputController) {
+			return undefined;
+		}
+		inputController.setPrefillHandler((text) => {
+			// Appends to the current draft instead of replacing it, so a prefill that
+			// lands mid-typing never wipes the user's text.
+			flushSync(() => {
+				setInput((current) => appendToDraft(current, text));
+			});
+			inputController.notifyPrefillCommitted();
+		});
+		return () => {
+			inputController.setPrefillHandler(null);
+		};
+	}, [inputController]);
 
 	return (
 		<div className="pi-chat">

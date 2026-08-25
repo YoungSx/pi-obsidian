@@ -39,6 +39,17 @@ export class PiChatView extends ItemView {
 		this.inputController.focus();
 	}
 
+	/**
+	 * Queues a reference prefill for the composer.
+	 *
+	 * Safe to call before the React tree exists: the controller latches the text
+	 * until `PiChatApp` registers its handler, which is what makes
+	 * `activateChatView()` + prefill work in a single awaited sequence.
+	 */
+	prefillComposer(text: string): void {
+		this.inputController.prefill(text);
+	}
+
 	async onOpen(): Promise<void> {
 		this.contentEl.empty();
 		this.contentEl.addClass("pi-chat-view");
@@ -49,6 +60,7 @@ export class PiChatView extends ItemView {
 	async onClose(): Promise<void> {
 		this.inputController.setSubmitHandler(null);
 		this.inputController.setFocusHandler(null);
+		this.inputController.setPrefillHandler(null);
 		this.root?.unmount();
 		this.root = null;
 	}

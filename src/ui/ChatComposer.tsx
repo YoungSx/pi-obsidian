@@ -42,7 +42,17 @@ export function ChatComposer({ input, isStreaming, onInputChange, onSend, onAbor
 		if (!onFocusRequested) {
 			return undefined;
 		}
-		onFocusRequested(() => textareaRef.current?.focus());
+		onFocusRequested(() => {
+			const textarea = textareaRef.current;
+			if (!textarea) {
+				return;
+			}
+			textarea.focus();
+			// A prefill may have appended to the draft; the caret must follow it or
+			// the user's next keystroke would land before the quoted text.
+			const end = textarea.value.length;
+			textarea.setSelectionRange(end, end);
+		});
 		return () => {
 			onFocusRequested(null);
 		};
