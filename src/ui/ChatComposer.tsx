@@ -7,9 +7,11 @@ interface ChatComposerProps {
 	onInputChange: (value: string) => void;
 	onSend: () => void;
 	onAbort: () => void;
+	/** Receives the textarea focus function, so commands outside React can focus it. */
+	onFocusRequested?: (focus: (() => void) | null) => void;
 }
 
-export function ChatComposer({ input, isStreaming, onInputChange, onSend, onAbort }: ChatComposerProps): React.JSX.Element {
+export function ChatComposer({ input, isStreaming, onInputChange, onSend, onAbort, onFocusRequested }: ChatComposerProps): React.JSX.Element {
 	const textareaRef = useRef<HTMLTextAreaElement | null>(null);
 	const onSendRef = useRef<() => void>(onSend);
 
@@ -35,6 +37,16 @@ export function ChatComposer({ input, isStreaming, onInputChange, onSend, onAbor
 			textarea.removeEventListener("keydown", handleNativeKeyDown, { capture: true });
 		};
 	}, []);
+
+	useEffect(() => {
+		if (!onFocusRequested) {
+			return undefined;
+		}
+		onFocusRequested(() => textareaRef.current?.focus());
+		return () => {
+			onFocusRequested(null);
+		};
+	}, [onFocusRequested]);
 
 	const handleKeyDown = (event: React.KeyboardEvent<HTMLTextAreaElement>): void => {
 		if (!isSendShortcut(event)) {

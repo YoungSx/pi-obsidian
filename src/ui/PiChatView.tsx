@@ -35,6 +35,10 @@ export class PiChatView extends ItemView {
 		return "bot";
 	}
 
+	focusInput(): void {
+		this.inputController.focus();
+	}
+
 	async onOpen(): Promise<void> {
 		this.contentEl.empty();
 		this.contentEl.addClass("pi-chat-view");
@@ -44,6 +48,7 @@ export class PiChatView extends ItemView {
 
 	async onClose(): Promise<void> {
 		this.inputController.setSubmitHandler(null);
+		this.inputController.setFocusHandler(null);
 		this.root?.unmount();
 		this.root = null;
 	}

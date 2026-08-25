@@ -26,6 +26,43 @@ export default class PiObsidianPlugin extends Plugin {
 				void this.activateChatView();
 			},
 		});
+		this.addCommand({
+			id: "new-pi-chat",
+			name: "New pi chat",
+			callback: () => {
+				void this.startNewChat();
+			},
+		});
+		this.addCommand({
+			id: "abort-pi-chat",
+			name: "Stop pi response",
+			// `checking` asks whether the command should be listed at all, so the abort
+			// must stay behind the `!checking` guard or merely opening the palette fires it.
+			checkCallback: (checking) => {
+				const service = this.agentService;
+				if (!service?.getSnapshot().isStreaming) {
+					return false;
+				}
+				if (!checking) {
+					service.abort();
+				}
+				return true;
+			},
+		});
+		this.addCommand({
+			id: "focus-pi-chat",
+			name: "Focus pi chat input",
+			checkCallback: (checking) => {
+				const view = this.findChatView();
+				if (!view) {
+					return false;
+				}
+				if (!checking) {
+					view.focusInput();
+				}
+				return true;
+			},
+		});
 		this.addRibbonIcon("bot", "Open pi chat", () => {
 			void this.activateChatView();
 		});
@@ -43,6 +80,17 @@ export default class PiObsidianPlugin extends Plugin {
 	async saveSettings(): Promise<void> {
 		await this.saveData(this.settings);
 		await this.agentService?.refreshConfiguration();
+	}
+
+	private async startNewChat(): Promise<void> {
+		await this.activateChatView();
+		await this.requireAgentService().newSession();
+		this.findChatView()?.focusInput();
+	}
+
+	private findChatView(): PiChatView | null {
+		const view = this.app.workspace.getLeavesOfType(VIEW_TYPE_PI_CHAT)[0]?.view;
+		return view instanceof PiChatView ? view : null;
 	}
 
 	private async activateChatView(): Promise<void> {

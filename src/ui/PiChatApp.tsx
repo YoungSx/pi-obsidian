@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ChatSnapshot, ObsidianAgentService } from "../agent/ObsidianAgentService";
 import type { ActiveSessionInfo } from "../session/ObsidianSessionManager";
 import type { ChatInputController } from "./ChatInputController";
@@ -65,6 +65,13 @@ export function PiChatApp({ service, inputController }: PiChatAppProps): React.J
 		};
 	}, [inputController]);
 
+	const handleFocusRequested = useCallback(
+		(focus: (() => void) | null) => {
+			inputController?.setFocusHandler(focus);
+		},
+		[inputController],
+	);
+
 	return (
 		<div className="pi-chat">
 			<ChatHeader
@@ -84,6 +91,7 @@ export function PiChatApp({ service, inputController }: PiChatAppProps): React.J
 				onInputChange={setInput}
 				onSend={() => void sendPrompt()}
 				onAbort={() => service.abort()}
+				onFocusRequested={handleFocusRequested}
 			/>
 		</div>
 	);
