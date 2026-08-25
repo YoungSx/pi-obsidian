@@ -5,6 +5,7 @@ import type { BuiltinProvider } from "@earendil-works/pi-ai/providers/all";
 import type { ModelThinkingLevel } from "@earendil-works/pi-ai";
 import type PiObsidianPlugin from "./main";
 import { DEFAULT_MODEL_ID, DEFAULT_PROVIDER, DEFAULT_THINKING_LEVEL } from "./constants";
+import type { NetworkTransport } from "./net/obsidianFetch";
 
 const OFF_THINKING_LEVEL: ModelThinkingLevel = "off";
 
@@ -13,6 +14,7 @@ export interface PiObsidianSettings {
 	modelId: string;
 	thinkingLevel: ModelThinkingLevel;
 	providerApiKeys: Record<string, string>;
+	networkTransport: NetworkTransport;
 }
 
 export const DEFAULT_SETTINGS: PiObsidianSettings = {
@@ -20,6 +22,7 @@ export const DEFAULT_SETTINGS: PiObsidianSettings = {
 	modelId: DEFAULT_MODEL_ID,
 	thinkingLevel: DEFAULT_THINKING_LEVEL,
 	providerApiKeys: {},
+	networkTransport: "requestUrl",
 };
 
 export function normalizeSettings(data: Partial<PiObsidianSettings> | null | undefined): PiObsidianSettings {
@@ -27,12 +30,14 @@ export function normalizeSettings(data: Partial<PiObsidianSettings> | null | und
 	const modelId = data?.modelId || DEFAULT_MODEL_ID;
 	const thinkingLevel = data?.thinkingLevel || DEFAULT_THINKING_LEVEL;
 	const providerApiKeys = data?.providerApiKeys || {};
+	const networkTransport: NetworkTransport = data?.networkTransport === "fetch" ? "fetch" : "requestUrl";
 
 	return {
 		provider,
 		modelId,
 		thinkingLevel,
 		providerApiKeys: { ...providerApiKeys },
+		networkTransport,
 	};
 }
 
@@ -89,6 +94,7 @@ export class PiObsidianSettingTab extends PluginSettingTab {
 		this.addProviderSetting(containerEl);
 		this.addModelSetting(containerEl);
 		this.addThinkingSetting(containerEl);
+		this.addNetworkTransportSetting(containerEl);
 		this.addApiKeySetting(containerEl);
 	}
 
@@ -146,13 +152,33 @@ export class PiObsidianSettingTab extends PluginSettingTab {
 			});
 	}
 
+	private addNetworkTransportSetting(containerEl: HTMLElement): void {
+		new Setting(containerEl)
+			.setName("Network transport")
+			.setDesc(
+				"The request URL transport bypasses browser restrictions everywhere but buffers responses — tokens appear all at once. The fetch transport streams incrementally but may be blocked.",
+			)
+			.addDropdown((dropdown) => {
+				dropdown.addOption("requestUrl", "Request URL (buffered, works everywhere)");
+				dropdown.addOption("fetch", "Fetch (streams, may be blocked)");
+				dropdown.setValue(this.plugin.settings.networkTransport);
+				dropdown.onChange(async (transport) => {
+					this.plugin.settings.networkTransport = transport as NetworkTransport;
+					await this.plugin.saveSettings();
+					this.display();
+				});
+			});
+	}
+
 	private addApiKeySetting(containerEl: HTMLElement): void {
 		const provider = this.plugin.settings.provider;
 		const label = provider === DEFAULT_PROVIDER ? "DeepSeek API key" : `${provider} API key`;
 
 		new Setting(containerEl)
 			.setName(label)
-			.setDesc("Stored locally in Obsidian plugin data and sent only to the selected provider for model requests.")
+			.setDesc(
+				"Stored in plaintext inside this vault's config folder and sent only to the selected provider. Anyone with vault access (or a sync target) can read it — use a restricted, low-limit key.",
+			)
 			.addText((text) => {
 				text.inputEl.type = "password";
 				text.setPlaceholder("Enter API key");

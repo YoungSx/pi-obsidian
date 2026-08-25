@@ -67,15 +67,55 @@ export function createSessionHeader(id: string, cwd: string, timestamp = new Dat
 	};
 }
 
+/**
+ * Parses a session file into entries. Malformed lines are skipped rather than
+ * thrown, so one corrupted write (e.g. an interrupted append) cannot make the
+ * whole session unreadable.
+ *
+ * Version policy: the header carries the schema version that wrote it. Files
+ * from older versions are read best-effort — unknown entry types are skipped
+ * by {@link buildSessionContext}'s type checks, and missing fields surface as
+ * ordinary `undefined`s instead of parse errors. When this plugin's writer
+ * bumps {@link CURRENT_SESSION_VERSION}, add a migration here that upgrades
+ * old headers/entries in place before they reach consumers.
+ */
 export function parseSessionEntries(content: string): SessionEntry[] {
 	const entries: SessionEntry[] = [];
 	for (const line of content.split("\n")) {
 		if (!line.trim()) {
 			continue;
 		}
-		entries.push(JSON.parse(line) as SessionEntry);
+		try {
+			const parsed: unknown = JSON.parse(line);
+			if (isSessionEntry(parsed)) {
+				entries.push(parsed);
+			}
+		} catch {
+			// Skip malformed lines; keep the rest of the session readable.
+		}
 	}
 	return entries;
+}
+
+function isSessionEntry(value: unknown): value is SessionEntry {
+	if (typeof value !== "object" || value === null || typeof (value as { id?: unknown }).id !== "string") {
+		return false;
+	}
+	const entry = value as Record<string, unknown>;
+	switch (entry.type) {
+		case "session":
+			return typeof entry.timestamp === "string" && typeof entry.cwd === "string";
+		case "message":
+			return typeof entry.parentId === "string" || entry.parentId === null;
+		case "model_change":
+			return typeof entry.provider === "string" && typeof entry.modelId === "string";
+		case "thinking_level_change":
+			return typeof entry.thinkingLevel === "string";
+		case "session_info":
+			return true;
+		default:
+			return false;
+	}
 }
 
 export function serializeSessionEntries(entries: SessionEntry[]): string {

@@ -7,9 +7,26 @@ Pi Obsidian runs a pi-style coding agent inside Obsidian and exposes vault-scope
 - Runs in Obsidian desktop and mobile (`isDesktopOnly: false`).
 - Uses `@earendil-works/pi-agent-core` and `@earendil-works/pi-ai` in the plugin bundle.
 - Defaults to provider `deepseek` and model `deepseek-v4-pro`.
-- Stores API keys in Obsidian plugin data.
+- Stores API keys in Obsidian plugin data (plaintext — see limitations).
 - Stores chat sessions as pi-compatible JSONL files under this plugin directory.
+- Provider requests go through a pluggable transport: Obsidian `requestUrl`
+  (CORS-safe, buffered) by default, or native `fetch` (streams, may hit CORS).
 - Mutating tools (`write` and `edit`) run immediately.
+
+## Known limitations
+
+- **No confirmation before `write`/`edit`.** The agent can modify notes without
+  asking. Use it on vaults you are willing to have changed, or review the
+  transcript after each turn.
+- **API keys are plaintext.** Keys live unencrypted in
+  `<vault>/.obsidian/plugins/pi-obsidian/data.json` and any vault sync copies
+  them along with your notes. Prefer restricted / low-limit keys.
+- **Streaming depends on transport choice.** The default `requestUrl`
+  transport buffers the entire response, so tokens appear all at once. Switch
+  to the `fetch` transport in settings for incremental streaming where the
+  provider allows browser origins.
+- **No bash tool.** Obsidian has no shell access; only the vault tools listed
+  below are available to the agent.
 
 ## Setup
 
@@ -59,7 +76,7 @@ Each file starts with a pi-compatible version 3 `session` header and then append
 
 Prompts, assistant-visible conversation history, vault content returned by tools, and tool results are sent to the configured model provider. For the MVP that provider is DeepSeek unless you change settings.
 
-API keys are saved with Obsidian plugin data using `loadData()` / `saveData()`. Do not use this plugin with vault content you do not want sent to your selected provider.
+API keys are saved with Obsidian plugin data using `loadData()` / `saveData()`. They are stored in plaintext (see limitations) and sent only to the selected provider for model requests. Do not use this plugin with vault content you do not want sent to your selected provider.
 
 ## Development
 

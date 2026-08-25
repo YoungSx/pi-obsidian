@@ -71,6 +71,7 @@ describe("ObsidianAgentService", () => {
 			modelId: "deepseek-v4-pro",
 			thinkingLevel: "high",
 			providerApiKeys: { deepseek: "test-key" },
+			networkTransport: "requestUrl",
 		};
 		const sessionManager = new ObsidianSessionManager(adapter, `.${"obsidian"}/plugins/pi-obsidian/sessions`, "obsidian-vault:Test");
 		const service = new ObsidianAgentService(createFakeApp(adapter), () => settings, sessionManager, { streamFn: createFakeStreamFn() });
