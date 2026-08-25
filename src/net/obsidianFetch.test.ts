@@ -1,6 +1,7 @@
 import { describe, expect, it, mock, beforeEach } from "bun:test";
 import { installObsidianStub, requestUrlMock } from "../testing/obsidianStub";
 
+/** The subset of Obsidian's `RequestUrlResponse` that these tests rely on. */
 interface MockRequestUrlResponse {
 	status: number;
 	headers: Record<string, string>;
@@ -8,6 +9,10 @@ interface MockRequestUrlResponse {
 }
 
 installObsidianStub();
+
+function mockResponse(response: MockRequestUrlResponse): MockRequestUrlResponse {
+	return response;
+}
 
 const { createObsidianRequestUrlFetch, createFetchForTransport } = await import("./obsidianFetch");
 
@@ -18,11 +23,11 @@ function textToArrayBuffer(text: string): ArrayBuffer {
 describe("createObsidianRequestUrlFetch", () => {
 	beforeEach(() => {
 		requestUrlMock.mockReset();
-		requestUrlMock.mockResolvedValue({
+		requestUrlMock.mockResolvedValue(mockResponse({
 			status: 200,
 			headers: { "content-type": "application/json" },
 			arrayBuffer: textToArrayBuffer('{"ok":true}'),
-		});
+		}));
 	});
 
 	it("forwards url, method, headers and string body", async () => {
@@ -56,11 +61,11 @@ describe("createObsidianRequestUrlFetch", () => {
 	});
 
 	it("preserves non-2xx responses instead of throwing", async () => {
-		requestUrlMock.mockResolvedValue({
+		requestUrlMock.mockResolvedValue(mockResponse({
 			status: 429,
 			headers: {},
 			arrayBuffer: textToArrayBuffer('{"error":"rate limit"}'),
-		});
+		}));
 		const obsidianFetch = createObsidianRequestUrlFetch();
 
 		const response = await obsidianFetch("https://api.example.com/v1/chat", { method: "POST", body: "{}" });
@@ -148,7 +153,7 @@ describe("createObsidianRequestUrlFetch", () => {
 describe("createFetchForTransport", () => {
 	it("returns the requestUrl transport by default", async () => {
 		requestUrlMock.mockReset();
-		requestUrlMock.mockResolvedValue({ status: 200, headers: {}, arrayBuffer: textToArrayBuffer("{}") });
+		requestUrlMock.mockResolvedValue(mockResponse({ status: 200, headers: {}, arrayBuffer: textToArrayBuffer("{}") }));
 
 		const fetchImpl = createFetchForTransport("requestUrl");
 		await fetchImpl("https://api.example.com/v1/models");
