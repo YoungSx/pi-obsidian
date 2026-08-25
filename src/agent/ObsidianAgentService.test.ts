@@ -1,8 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
 import type { App, DataAdapter, ListedFiles, Stat } from "obsidian";
-import type { Api, AssistantMessage, Context, Model, SimpleStreamOptions } from "@mariozechner/pi-ai";
-import { createAssistantMessageEventStream } from "@mariozechner/pi-ai";
-import type { StreamFn } from "@mariozechner/pi-agent-core";
+import type { Api, AssistantMessage, Context, Model, SimpleStreamOptions } from "@earendil-works/pi-ai";
+import { createAssistantMessageEventStream } from "@earendil-works/pi-ai";
+import type { StreamFn } from "@earendil-works/pi-agent-core";
 import { ObsidianSessionManager } from "../session/ObsidianSessionManager";
 import type { PiObsidianSettings } from "../settings";
 import { ObsidianAgentService } from "./ObsidianAgentService";

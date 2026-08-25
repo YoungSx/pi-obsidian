@@ -5,7 +5,7 @@ Pi Obsidian runs a pi-style coding agent inside Obsidian and exposes vault-scope
 ## MVP status
 
 - Runs in Obsidian desktop and mobile (`isDesktopOnly: false`).
-- Uses `@mariozechner/pi-agent-core` and `@mariozechner/pi-ai` in the plugin bundle.
+- Uses `@earendil-works/pi-agent-core` and `@earendil-works/pi-ai` in the plugin bundle.
 - Defaults to provider `deepseek` and model `deepseek-v4-pro`.
 - Stores API keys in Obsidian plugin data.
 - Stores chat sessions as pi-compatible JSONL files under this plugin directory.

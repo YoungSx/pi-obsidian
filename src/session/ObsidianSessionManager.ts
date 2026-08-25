@@ -1,5 +1,5 @@
 import type { App, DataAdapter, Plugin } from "obsidian";
-import type { AgentMessage, ThinkingLevel } from "@mariozechner/pi-agent-core";
+import type { AgentMessage, ThinkingLevel } from "@earendil-works/pi-agent-core";
 import { normalizeFolderPath } from "../vault/path";
 import {
 	buildSessionContext,
@@ -264,11 +264,18 @@ function getSessionModifiedTime(entries: SessionEntry[], fallback: number): numb
 }
 
 function extractMessageText(message: AgentMessage): string {
-	if (typeof message.content === "string") {
-		return message.content;
+	if (!("content" in message)) {
+		return "";
 	}
-	return message.content
-		.filter((content) => content.type === "text")
-		.map((content) => content.text)
+	const content = message.content;
+	if (typeof content === "string") {
+		return content;
+	}
+	if (!Array.isArray(content)) {
+		return "";
+	}
+	return content
+		.filter((part): part is { type: "text"; text: string } => part.type === "text")
+		.map((part) => part.text)
 		.join("\n");
 }

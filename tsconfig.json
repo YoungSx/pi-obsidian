@@ -9,7 +9,7 @@
 		"noImplicitAny": true,
 		"noImplicitThis": true,
 		"noImplicitReturns": true,
-		"moduleResolution": "node",
+		"moduleResolution": "bundler",
 		"jsx": "react-jsx",
 		"importHelpers": true,
 		"noUncheckedIndexedAccess": true,

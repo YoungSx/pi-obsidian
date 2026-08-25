@@ -1,6 +1,8 @@
 import { App, PluginSettingTab, Setting } from "obsidian";
-import { getModels, getProviders, getSupportedThinkingLevels } from "@mariozechner/pi-ai";
-import type { KnownProvider, ModelThinkingLevel } from "@mariozechner/pi-ai";
+import { getSupportedThinkingLevels } from "@earendil-works/pi-ai";
+import { getBuiltinModels, getBuiltinProviders } from "@earendil-works/pi-ai/providers/all";
+import type { BuiltinProvider } from "@earendil-works/pi-ai/providers/all";
+import type { ModelThinkingLevel } from "@earendil-works/pi-ai";
 import type PiObsidianPlugin from "./main";
 import { DEFAULT_MODEL_ID, DEFAULT_PROVIDER, DEFAULT_THINKING_LEVEL } from "./constants";
 
@@ -35,7 +37,7 @@ export function normalizeSettings(data: Partial<PiObsidianSettings> | null | und
 }
 
 export function getProviderModels(provider: string) {
-	return getModels(provider as KnownProvider);
+	return getBuiltinModels(provider as BuiltinProvider);
 }
 
 export function getSelectedModel(settings: PiObsidianSettings) {
@@ -95,7 +97,7 @@ export class PiObsidianSettingTab extends PluginSettingTab {
 			.setName("Provider")
 			.setDesc("The polished provider for this first version is deepseek. Other providers are listed for future compatibility.")
 			.addDropdown((dropdown) => {
-				for (const provider of getProviders()) {
+				for (const provider of getBuiltinProviders()) {
 					dropdown.addOption(provider, provider);
 				}
 				dropdown.setValue(this.plugin.settings.provider);

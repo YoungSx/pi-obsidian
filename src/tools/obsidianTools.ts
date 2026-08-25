@@ -1,5 +1,5 @@
 import { MarkdownView, TFile, TFolder, type App } from "obsidian";
-import type { AgentTool, AgentToolResult } from "@mariozechner/pi-agent-core";
+import type { AgentTool, AgentToolResult } from "@earendil-works/pi-agent-core";
 import { Type } from "typebox";
 import { applyExactEdits } from "../vault/edit";
 import { normalizeFolderPath, normalizeVaultPath, getParentPath } from "../vault/path";

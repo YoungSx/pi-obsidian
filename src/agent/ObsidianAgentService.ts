@@ -1,5 +1,6 @@
 import type { App } from "obsidian";
-import { Agent, type AgentEvent, type AgentMessage, type StreamFn, type ThinkingLevel } from "@mariozechner/pi-agent-core";
+import { Agent, type AgentEvent, type AgentMessage, type StreamFn, type ThinkingLevel } from "@earendil-works/pi-agent-core";
+import { streamSimple } from "@earendil-works/pi-ai/compat";
 import { createObsidianTools } from "../tools/obsidianTools";
 import { getPreferredThinkingLevel, getSelectedModel, type PiObsidianSettings } from "../settings";
 import { ObsidianSessionManager, type ActiveSessionInfo, type SessionDefaults } from "../session/ObsidianSessionManager";
@@ -164,7 +165,7 @@ export class ObsidianAgentService {
 		const settings = this.getSettings();
 		const model = getSelectedModel(settings);
 		const agent = new Agent({
-			streamFn: this.streamFn,
+			streamFn: this.streamFn ?? streamSimple,
 			initialState: {
 				systemPrompt: OBSIDIAN_AGENT_SYSTEM_PROMPT,
 				model,

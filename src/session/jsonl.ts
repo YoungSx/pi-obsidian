@@ -1,4 +1,4 @@
-import type { AgentMessage, ThinkingLevel } from "@mariozechner/pi-agent-core";
+import type { AgentMessage, ThinkingLevel } from "@earendil-works/pi-agent-core";
 
 export const CURRENT_SESSION_VERSION = 3;
 

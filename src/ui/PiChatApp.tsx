@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import type { AgentMessage } from "@mariozechner/pi-agent-core";
-import type { AssistantMessage, ToolResultMessage, UserMessage } from "@mariozechner/pi-ai";
+import type { AgentMessage } from "@earendil-works/pi-agent-core";
+import type { AssistantMessage, ToolResultMessage, UserMessage } from "@earendil-works/pi-ai";
 import type { ChatSnapshot, ObsidianAgentService } from "../agent/ObsidianAgentService";
 import type { ChatInputController } from "./ChatInputController";
 import { isSendShortcut } from "./keyboard";
@@ -153,7 +153,10 @@ function renderMessageContent(message: AgentMessage): React.ReactNode {
 	if (message.role === "assistant") {
 		return renderAssistantMessage(message);
 	}
-	return renderToolResultMessage(message);
+	if (message.role === "toolResult") {
+		return renderToolResultMessage(message);
+	}
+	return renderFallbackMessage(message);
 }
 
 function renderUserMessage(message: UserMessage): React.ReactNode {
@@ -197,6 +200,32 @@ function renderToolResultMessage(message: ToolResultMessage): React.ReactNode {
 			})}
 		</div>
 	);
+}
+
+/**
+ * Renders harness message variants that the chat panel does not model yet
+ * (bashExecution, custom, branchSummary, compactionSummary). These arrive via
+ * pi-agent-core's `CustomAgentMessages` declaration merging.
+ */
+function renderFallbackMessage(message: AgentMessage): React.ReactNode {
+	if (message.role === "bashExecution") {
+		return <TextBlock text={`$ ${message.command}\n${message.output}`} />;
+	}
+	if (message.role === "branchSummary" || message.role === "compactionSummary") {
+		return <TextBlock text={message.summary} />;
+	}
+	if (message.role === "custom") {
+		if (typeof message.content === "string") {
+			return <TextBlock text={message.content} />;
+		}
+		return message.content.map((content, index) => {
+			if (content.type === "text") {
+				return <TextBlock key={index} text={content.text} />;
+			}
+			return <div key={index}>[image: {content.mimeType}]</div>;
+		});
+	}
+	return null;
 }
 
 function TextBlock({ text }: { text: string }): React.JSX.Element {
