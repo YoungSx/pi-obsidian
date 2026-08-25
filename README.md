@@ -81,8 +81,8 @@ API keys are saved with Obsidian plugin data using `loadData()` / `saveData()`. 
 ## Development
 
 ```bash
-npm install
-npm test
+bun install
+bun test
 npm run build
 npm run lint
 ```

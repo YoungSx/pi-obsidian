@@ -1,13 +1,16 @@
-import { describe, expect, it, vi } from "vitest";
-import type { App, CachedMetadata, ListItemCache, Loc } from "obsidian";
-import { TFile, TFolder } from "obsidian";
-import { createObsidianTools } from "./obsidianTools";
+import { describe, expect, it, mock } from "bun:test";
+import type { App, CachedMetadata, ListItemCache, Loc, TFile, TFolder } from "obsidian";
 
-vi.mock("obsidian", () => ({
+void mock.module("obsidian", () => ({
 	MarkdownView: class MarkdownView {},
 	TFile: class TFile {},
 	TFolder: class TFolder {},
 }));
+
+// Dynamic imports so the mocked module wins over any cached real one.
+// Runtime classes come from the mocked module; types stay type-only.
+const { TFile: TFileClass, TFolder: TFolderClass } = await import("obsidian");
+const { createObsidianTools } = await import("./obsidianTools");
 
 describe("task tools", () => {
 	it("lists todo tasks from Obsidian metadata cache", async () => {
@@ -90,14 +93,14 @@ function createTaskApp(fixtures: TaskFileFixture[]): App {
 }
 
 function makeFile(path: string): TFile {
-	const file = new TFile();
+	const file = new TFileClass();
 	file.path = path;
 	file.extension = path.split(".").pop() ?? "";
 	return file;
 }
 
 function makeFolder(path: string): TFolder {
-	const folder = new TFolder();
+	const folder = new TFolderClass();
 	folder.path = path;
 	folder.children = [];
 	return folder;

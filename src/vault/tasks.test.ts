@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "bun:test";
 import type { CachedMetadata, ListItemCache, Loc } from "obsidian";
 import { countTasks, extractTasksFromMetadata, filterTasks, formatTaskList, formatTaskSummary, summarizeTasks } from "./tasks";
 

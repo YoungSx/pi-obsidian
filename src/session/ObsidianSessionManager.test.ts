@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "bun:test";
 import type { DataAdapter, ListedFiles, Stat } from "obsidian";
 import { ObsidianSessionManager } from "./ObsidianSessionManager";
 

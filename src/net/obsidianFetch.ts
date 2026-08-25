@@ -106,7 +106,7 @@ async function resolveBody(
 		return body;
 	}
 	if (ArrayBuffer.isView(body)) {
-		return body.buffer.slice(body.byteOffset, body.byteOffset + body.byteLength);
+		return body.buffer.slice(body.byteOffset, body.byteOffset + body.byteLength) as ArrayBuffer;
 	}
 	if (typeof Blob !== "undefined" && body instanceof Blob) {
 		return await body.arrayBuffer();

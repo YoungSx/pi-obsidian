@@ -1,4 +1,4 @@
-import { describe, expect, it, vi, beforeEach } from "vitest";
+import { describe, expect, it, mock, beforeEach } from "bun:test";
 
 interface MockRequestUrlResponse {
 	status: number;
@@ -6,10 +6,11 @@ interface MockRequestUrlResponse {
 	arrayBuffer: ArrayBuffer;
 }
 
-const requestUrlMock = vi.fn<(params: unknown) => Promise<MockRequestUrlResponse>>();
+const requestUrlMock = mock<(params: unknown) => Promise<MockRequestUrlResponse>>();
 
-vi.mock("obsidian", () => ({
-	requestUrl: async (params: unknown) => await Promise.resolve(requestUrlMock(params)),
+// bun's matchers throw synchronously; no awaiting needed.
+void mock.module("obsidian", () => ({
+	requestUrl: async (params: unknown): Promise<MockRequestUrlResponse> => await requestUrlMock(params),
 }));
 
 const { createObsidianRequestUrlFetch, createFetchForTransport } = await import("./obsidianFetch");
@@ -55,7 +56,7 @@ describe("createObsidianRequestUrlFetch", () => {
 		const response = await obsidianFetch("https://api.example.com/v1/chat", { method: "POST", body: "{}" });
 
 		expect(response.status).toBe(200);
-		await expect(response.text()).resolves.toBe('{"ok":true}');
+		expect(response.text()).resolves.toBe('{"ok":true}');
 	});
 
 	it("preserves non-2xx responses instead of throwing", async () => {
@@ -69,7 +70,7 @@ describe("createObsidianRequestUrlFetch", () => {
 		const response = await obsidianFetch("https://api.example.com/v1/chat", { method: "POST", body: "{}" });
 
 		expect(response.status).toBe(429);
-		await expect(response.text()).resolves.toContain("rate limit");
+		expect(response.text()).resolves.toContain("rate limit");
 	});
 
 	it("strips headers that requestUrl manages itself", async () => {
@@ -116,14 +117,14 @@ describe("createObsidianRequestUrlFetch", () => {
 		const controller = new AbortController();
 		controller.abort();
 
-		await expect(
+		expect(
 			obsidianFetch("https://api.example.com/v1/chat", { method: "POST", body: "{}", signal: controller.signal }),
 		).rejects.toThrow(/aborted/i);
 		expect(requestUrlMock).not.toHaveBeenCalled();
 	});
 
 	it("rejects when the signal aborts mid-flight", async () => {
-		requestUrlMock.mockReturnValue(new Promise(() => undefined));
+		requestUrlMock.mockReturnValue(new Promise<never>(() => undefined));
 		const obsidianFetch = createObsidianRequestUrlFetch();
 		const controller = new AbortController();
 
@@ -134,7 +135,7 @@ describe("createObsidianRequestUrlFetch", () => {
 		});
 		controller.abort();
 
-		await expect(pending).rejects.toThrow(/aborted/i);
+		expect(pending).rejects.toThrow(/aborted/i);
 	});
 
 	it("defaults to GET without a body", async () => {
@@ -161,7 +162,8 @@ describe("createFetchForTransport", () => {
 
 	it("returns a native fetch wrapper for the fetch transport", async () => {
 		requestUrlMock.mockReset();
-		const nativeFetch = vi.fn().mockResolvedValue(new Response("{}", { status: 200 }));
+		const nativeFetch = mock<() => Promise<Response>>();
+		nativeFetch.mockResolvedValue(new Response("{}", { status: 200 }));
 		const original = globalThis.fetch;
 		globalThis.fetch = nativeFetch as unknown as typeof globalThis.fetch;
 

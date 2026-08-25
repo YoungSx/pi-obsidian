@@ -1,19 +1,25 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "bun:test";
 import type { App, DataAdapter, ListedFiles, Stat } from "obsidian";
 import type { Api, AssistantMessage, Context, Model, SimpleStreamOptions } from "@earendil-works/pi-ai";
 import { createAssistantMessageEventStream } from "@earendil-works/pi-ai";
 import type { StreamFn } from "@earendil-works/pi-agent-core";
+import { mock } from "bun:test";
 import { ObsidianSessionManager } from "../session/ObsidianSessionManager";
 import type { PiObsidianSettings } from "../settings";
-import { ObsidianAgentService } from "./ObsidianAgentService";
 
-vi.mock("obsidian", () => ({
+void mock.module("obsidian", () => ({
 	MarkdownView: class MarkdownView {},
 	PluginSettingTab: class PluginSettingTab {},
 	Setting: class Setting {},
 	TFile: class TFile {},
 	TFolder: class TFolder {},
+	requestUrl: async () => {
+		throw new Error("requestUrl is not available in tests");
+	},
 }));
+
+// Dynamic imports so the mocked module wins over any cached real one.
+const { ObsidianAgentService } = await import("./ObsidianAgentService");
 
 class MemoryAdapter {
 	private readonly files = new Map<string, { content: string; mtime: number }>();
