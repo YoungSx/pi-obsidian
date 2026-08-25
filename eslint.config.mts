@@ -24,6 +24,9 @@ export default tseslint.config(
 	...obsidianmd.configs.recommended,
 	globalIgnores([
 		"node_modules",
+		// Nested agent worktrees are separate checkouts; linting them here would
+		// report the same files twice and fail on their own build artifacts.
+		".claude",
 		"dist",
 		"esbuild.config.mjs",
 		"eslint.config.js",
