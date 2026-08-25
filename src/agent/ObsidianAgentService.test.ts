@@ -63,6 +63,33 @@ class MemoryAdapter {
 			folders: [...this.folders.values()].filter((folderPath) => getParent(folderPath) === path),
 		};
 	}
+
+	/** Stands in for a vault whose OS trash works, matching the preferred path. */
+	async trashSystem(path: string): Promise<boolean> {
+		this.files.delete(path);
+		return true;
+	}
+
+	async trashLocal(path: string): Promise<void> {
+		this.files.delete(path);
+	}
+}
+
+/** A vault whose OS trash is disabled, so deletion has to reach `.trash`. */
+class LocalTrashOnlyAdapter extends MemoryAdapter {
+	async trashSystem(): Promise<boolean> {
+		return false;
+	}
+}
+
+class UntrashableAdapter extends MemoryAdapter {
+	async trashSystem(): Promise<boolean> {
+		throw new Error("Trash is unavailable.");
+	}
+
+	async trashLocal(): Promise<void> {
+		throw new Error("Trash is unavailable.");
+	}
 }
 
 describe("ObsidianAgentService", () => {
@@ -107,6 +134,129 @@ describe("ObsidianAgentService", () => {
 		expect(JSON.stringify(restored.messages)).not.toContain("Second conversation");
 	});
 
+	it("keeps a renamed session's name after the transcript is reloaded", async () => {
+		const service = createService();
+		await service.sendPrompt("First conversation");
+		const renamed = service.getSnapshot().session;
+
+		await service.renameSession("Release notes");
+		expect(service.getSnapshot().session?.name).toBe("Release notes");
+
+		await service.newSession();
+		await service.openSession(renamed?.path ?? "");
+
+		expect(service.getSnapshot().session?.name).toBe("Release notes");
+	});
+
+	it("appends the rename rather than rewriting the log", async () => {
+		const adapter = new MemoryAdapter();
+		const service = createService(adapter);
+		await service.sendPrompt("First conversation");
+		const session = service.getSnapshot().session;
+
+		await service.renameSession("Release notes");
+
+		const content = await adapter.read(session?.path ?? "");
+		expect(content).toContain('"type":"session_info"');
+		expect(content).toContain("First conversation");
+		expect(content.split("\n")[0]).toContain('"type":"session"');
+	});
+
+	it("clearing the name falls back to the derived label", async () => {
+		const service = createService();
+		await service.sendPrompt("First conversation");
+		await service.renameSession("Release notes");
+
+		await service.renameSession("   ");
+
+		expect(service.getSnapshot().session?.name).toBeUndefined();
+	});
+
+	it("adopts the next stored session when the active one is deleted", async () => {
+		const service = createService();
+		await service.sendPrompt("First conversation");
+		const firstSession = service.getSnapshot().session;
+		await service.newSession();
+		await service.sendPrompt("Second conversation");
+		const secondSession = service.getSnapshot().session;
+
+		await service.deleteSession(secondSession?.path ?? "");
+
+		const snapshot = service.getSnapshot();
+		expect(snapshot.errorMessage).toBeUndefined();
+		expect(snapshot.session?.id).toBe(firstSession?.id);
+		expect(await service.listSessions()).toHaveLength(1);
+	});
+
+	it("starts a fresh session when the last one is deleted", async () => {
+		const service = createService();
+		await service.sendPrompt("Only conversation");
+		const onlySession = service.getSnapshot().session;
+
+		await service.deleteSession(onlySession?.path ?? "");
+
+		const snapshot = service.getSnapshot();
+		expect(snapshot.errorMessage).toBeUndefined();
+		expect(snapshot.session).toBeDefined();
+		expect(snapshot.session?.id).not.toBe(onlySession?.id);
+		expect(snapshot.messages).toHaveLength(0);
+	});
+
+	it("leaves the active session untouched when another one is deleted", async () => {
+		const service = createService();
+		await service.sendPrompt("First conversation");
+		const firstSession = service.getSnapshot().session;
+		await service.newSession();
+		await service.sendPrompt("Second conversation");
+		const activeSession = service.getSnapshot().session;
+
+		await service.deleteSession(firstSession?.path ?? "");
+
+		const snapshot = service.getSnapshot();
+		expect(snapshot.session?.id).toBe(activeSession?.id);
+		expect(JSON.stringify(snapshot.messages)).toContain("Second conversation");
+		expect(await service.listSessions()).toHaveLength(1);
+	});
+
+	it("bumps the session revision so the chat list reloads after deleting another session", async () => {
+		const service = createService();
+		await service.sendPrompt("First conversation");
+		const firstSession = service.getSnapshot().session;
+		await service.newSession();
+		await service.sendPrompt("Second conversation");
+		const before = service.getSnapshot();
+
+		await service.deleteSession(firstSession?.path ?? "");
+
+		const after = service.getSnapshot();
+		expect(after.session?.id).toBe(before.session?.id);
+		expect(after.sessionRevision).toBeGreaterThan(before.sessionRevision);
+	});
+
+	it("falls back to the vault trash when the system trash refuses", async () => {
+		const service = createService(new LocalTrashOnlyAdapter());
+		await service.sendPrompt("Only conversation");
+		const onlySession = service.getSnapshot().session;
+
+		await service.deleteSession(onlySession?.path ?? "");
+
+		expect(service.getSnapshot().errorMessage).toBeUndefined();
+		expect((await service.listSessions()).map((session) => session.id)).not.toContain(onlySession?.id);
+	});
+
+	it("keeps the active session when trashing fails", async () => {
+		const service = createService(new UntrashableAdapter());
+		await service.sendPrompt("Only conversation");
+		const onlySession = service.getSnapshot().session;
+
+		await service.deleteSession(onlySession?.path ?? "");
+
+		const snapshot = service.getSnapshot();
+		expect(snapshot.errorMessage).toBe("Trash is unavailable.");
+		expect(snapshot.session?.id).toBe(onlySession?.id);
+		expect(JSON.stringify(snapshot.messages)).toContain("Only conversation");
+	});
+
 	it("surfaces an error instead of throwing when a session cannot be opened", async () => {
 		const service = createService();
 		await service.initialize();
@@ -117,8 +267,8 @@ describe("ObsidianAgentService", () => {
 	});
 });
 
-function createService(): ObsidianAgentServiceType {
-	const adapter = new MemoryAdapter() as unknown as DataAdapter;
+function createService(memoryAdapter: MemoryAdapter = new MemoryAdapter()): ObsidianAgentServiceType {
+	const adapter = asDataAdapter(memoryAdapter);
 	const settings: PiObsidianSettings = {
 		provider: "deepseek",
 		modelId: "deepseek-v4-pro",
@@ -170,6 +320,11 @@ function createFakeApp(adapter: DataAdapter): App {
 			getActiveViewOfType: () => null,
 		},
 	} as unknown as App;
+}
+
+/** `MemoryAdapter` covers only the calls the session manager makes. */
+function asDataAdapter(adapter: MemoryAdapter): DataAdapter {
+	return adapter as unknown as DataAdapter;
 }
 
 function getParent(path: string): string {

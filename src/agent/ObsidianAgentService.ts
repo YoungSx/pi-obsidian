@@ -19,6 +19,13 @@ export interface ChatSnapshot {
 	modelId: string;
 	thinkingLevel: ThinkingLevel;
 	session?: ActiveSessionInfo;
+	/**
+	 * Bumped whenever the set of stored sessions or their labels changes. The
+	 * active session's id cannot detect that: deleting a different session or
+	 * renaming the current one leaves it untouched, so a list rendered from it
+	 * alone would go stale.
+	 */
+	sessionRevision: number;
 	usage: UsageTotals;
 }
 
@@ -38,6 +45,7 @@ export class ObsidianAgentService {
 	private unsubscribeAgent: (() => void) | null = null;
 	private initialization: Promise<void> | null = null;
 	private sessionInfo: ActiveSessionInfo | undefined;
+	private sessionRevision = 0;
 	private persistedMessages = new WeakSet<object>();
 	private errorMessage: string | undefined;
 	private modelsBundle: ObsidianModelsBundle | null = null;
@@ -130,6 +138,7 @@ export class ObsidianAgentService {
 		this.compactionUsage = [];
 		this.replaceAgent([]);
 		this.errorMessage = undefined;
+		this.sessionRevision += 1;
 		this.notify();
 	}
 
@@ -171,8 +180,61 @@ export class ObsidianAgentService {
 		this.notify();
 	}
 
+	/** Labels the active session; an empty name clears it back to the derived label. */
+	async renameSession(name: string): Promise<void> {
+		await this.initialize();
+		if (!this.sessionManager.getActiveSessionPath()) {
+			return;
+		}
+
+		const trimmedName = name.trim();
+		await this.sessionManager.appendSessionInfo(trimmedName || undefined);
+		this.sessionInfo = this.sessionManager.getActiveSessionInfo();
+		this.sessionRevision += 1;
+		this.notify();
+	}
+
+	/**
+	 * Trashes a stored session. Deleting the active one leaves the manager without
+	 * an active session, so a replacement is adopted here before anything reads
+	 * `getActiveSessionInfo` — the next stored session, or a fresh one when the
+	 * vault has none left.
+	 */
+	async deleteSession(path: string): Promise<void> {
+		await this.initialize();
+		const wasActive = this.sessionManager.getActiveSessionPath() === path;
+		if (wasActive) {
+			this.agent?.abort();
+			this.compactionController?.abort();
+		}
+
+		try {
+			await this.sessionManager.deleteSession(path);
+		} catch (error) {
+			this.setError(error instanceof Error ? error.message : String(error));
+			return;
+		}
+
+		this.sessionRevision += 1;
+		if (!wasActive) {
+			this.errorMessage = undefined;
+			this.notify();
+			return;
+		}
+
+		const replacement = (await this.sessionManager.listSessions())[0];
+		if (replacement) {
+			await this.openSession(replacement.path);
+		}
+		if (!this.sessionManager.getActiveSessionPath()) {
+			await this.newSession();
+		}
+	}
+
 	async refreshConfiguration(): Promise<void> {
-		if (!this.agent) {
+		// A just-trashed session leaves nothing to append to; the session adopted in
+		// its place runs `ensureConfiguration` itself.
+		if (!this.agent || !this.sessionManager.getActiveSessionPath()) {
 			return;
 		}
 		const defaults = this.getSessionDefaults();
@@ -180,7 +242,7 @@ export class ObsidianAgentService {
 		this.agent.state.thinkingLevel = defaults.thinkingLevel;
 		this.agent.state.tools = createObsidianTools(this.app);
 		await this.sessionManager.ensureConfiguration(defaults);
-		this.sessionInfo = this.sessionManager.getActiveSessionInfo();
+		this.refreshSessionInfo();
 		this.notify();
 	}
 
@@ -190,6 +252,11 @@ export class ObsidianAgentService {
 		this.compactionController?.abort();
 		this.agent?.abort();
 		this.listeners.clear();
+	}
+
+	/** Modals are opened from the chat UI, whose only dependency is this service. */
+	getApp(): App {
+		return this.app;
 	}
 
 	getSnapshot(): ChatSnapshot {
@@ -205,6 +272,7 @@ export class ObsidianAgentService {
 			modelId: settings.modelId,
 			thinkingLevel: getPreferredThinkingLevel(settings),
 			session: this.sessionInfo,
+			sessionRevision: this.sessionRevision,
 			usage: sumUsage(agent?.state.messages ?? [], this.compactionUsage),
 		};
 	}
@@ -256,7 +324,7 @@ export class ObsidianAgentService {
 		} catch (error) {
 			this.errorMessage = error instanceof Error ? error.message : String(error);
 		}
-		this.sessionInfo = this.sessionManager.getActiveSessionInfo();
+		this.refreshSessionInfo();
 		this.notify();
 	}
 
@@ -304,7 +372,7 @@ export class ObsidianAgentService {
 			this.compactionUsage = [...this.compactionUsage, outcome.result.usage];
 		}
 		await this.sessionManager.appendCompaction(outcome.result);
-		this.sessionInfo = this.sessionManager.getActiveSessionInfo();
+		this.refreshSessionInfo();
 		this.notify();
 	}
 
@@ -354,10 +422,18 @@ export class ObsidianAgentService {
 	}
 
 	private notifySettledState(): void {
+		this.refreshSessionInfo();
+		this.notify();
+	}
+
+	/**
+	 * Skipped while no session is active — trashing the active session leaves that
+	 * gap until a replacement is adopted, and `getActiveSessionInfo` throws in it.
+	 */
+	private refreshSessionInfo(): void {
 		if (this.sessionManager.getActiveSessionPath()) {
 			this.sessionInfo = this.sessionManager.getActiveSessionInfo();
 		}
-		this.notify();
 	}
 
 	private notify(): void {

@@ -23,6 +23,8 @@ const obsidianStub = {
 	MarkdownView: class MarkdownView {},
 	ItemView: class ItemView {},
 	Plugin: class Plugin {},
+	Modal: class Modal {},
+	FuzzySuggestModal: class FuzzySuggestModal {},
 	PluginSettingTab: class PluginSettingTab {},
 	Setting: class Setting {},
 	Notice: class Notice {},

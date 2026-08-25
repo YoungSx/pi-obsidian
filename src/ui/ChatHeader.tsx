@@ -1,16 +1,37 @@
 import React from "react";
+import type { App } from "obsidian";
 import type { ChatSnapshot } from "../agent/ObsidianAgentService";
 import type { ActiveSessionInfo } from "../session/ObsidianSessionManager";
 import { formatCost, formatTokens } from "../agent/usage";
+import { describeSession, openSessionDeleteConfirm, openSessionPicker, openSessionRename } from "./sessionDialogs";
 
 interface ChatHeaderProps {
+	app: App;
 	snapshot: ChatSnapshot;
 	sessions: ActiveSessionInfo[];
 	onOpenSession: (path: string) => void;
 	onNewSession: () => void;
+	onRenameSession: (name: string) => void;
+	onDeleteSession: (path: string) => void;
 }
 
-export function ChatHeader({ snapshot, sessions, onOpenSession, onNewSession }: ChatHeaderProps): React.JSX.Element {
+export function ChatHeader({
+	app,
+	snapshot,
+	sessions,
+	onOpenSession,
+	onNewSession,
+	onRenameSession,
+	onDeleteSession,
+}: ChatHeaderProps): React.JSX.Element {
+	const activeSession = snapshot.session;
+	const openPicker = (): void => {
+		openSessionPicker(app, sessions, {
+			onOpen: onOpenSession,
+			onDelete: (session) => openSessionDeleteConfirm(app, session, () => onDeleteSession(session.path)),
+		});
+	};
+
 	return (
 		<>
 			<header className="pi-chat__header">
@@ -25,18 +46,27 @@ export function ChatHeader({ snapshot, sessions, onOpenSession, onNewSession }: 
 				</div>
 				<div className="pi-chat__header-actions">
 					{sessions.length > 1 ? (
-						<select
-							aria-label="Chat session"
-							value={snapshot.session?.path ?? ""}
+						<button type="button" onClick={openPicker} disabled={snapshot.isStreaming}>
+							Chats
+						</button>
+					) : null}
+					{activeSession ? (
+						<button
+							type="button"
+							onClick={() => openSessionRename(app, activeSession, onRenameSession)}
 							disabled={snapshot.isStreaming}
-							onChange={(event) => onOpenSession(event.currentTarget.value)}
 						>
-							{sessions.map((session) => (
-								<option key={session.path} value={session.path}>
-									{describeSession(session)}
-								</option>
-							))}
-						</select>
+							Rename
+						</button>
+					) : null}
+					{activeSession ? (
+						<button
+							type="button"
+							onClick={() => openSessionDeleteConfirm(app, activeSession, () => onDeleteSession(activeSession.path))}
+							disabled={snapshot.isStreaming}
+						>
+							Delete
+						</button>
 					) : null}
 					<button type="button" onClick={onNewSession} disabled={snapshot.isStreaming}>
 						New chat
@@ -44,14 +74,7 @@ export function ChatHeader({ snapshot, sessions, onOpenSession, onNewSession }: 
 				</div>
 			</header>
 
-			{snapshot.session ? <div className="pi-chat__session">{describeSession(snapshot.session)}</div> : null}
+			{activeSession ? <div className="pi-chat__session">{describeSession(activeSession)}</div> : null}
 		</>
 	);
-}
-
-/** Prefers an explicit name, then the opening question, then the timestamp. */
-function describeSession(session: ActiveSessionInfo): string {
-	const label = session.name?.trim() || session.firstMessage.trim().split("\n")[0] || "Untitled chat";
-	const summary = label.length > 60 ? `${label.slice(0, 60)}…` : label;
-	return `${summary} · ${new Date(session.updatedAt).toLocaleString()}`;
 }

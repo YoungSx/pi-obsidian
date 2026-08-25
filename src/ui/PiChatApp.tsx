@@ -33,7 +33,9 @@ export function PiChatApp({ service, inputController }: PiChatAppProps): React.J
 		return () => {
 			cancelled = true;
 		};
-	}, [service, snapshot.session?.id]);
+		// Keyed on the revision rather than the active session: deleting or renaming
+		// a different chat leaves `session.id` untouched, so the list would go stale.
+	}, [service, snapshot.sessionRevision]);
 
 	const visibleMessages = useMemo(() => {
 		if (!snapshot.streamingMessage) {
@@ -75,10 +77,13 @@ export function PiChatApp({ service, inputController }: PiChatAppProps): React.J
 	return (
 		<div className="pi-chat">
 			<ChatHeader
+				app={service.getApp()}
 				snapshot={snapshot}
 				sessions={sessions}
 				onOpenSession={(path) => void service.openSession(path)}
 				onNewSession={() => void service.newSession()}
+				onRenameSession={(name) => void service.renameSession(name)}
+				onDeleteSession={(path) => void service.deleteSession(path)}
 			/>
 
 			{snapshot.errorMessage ? <div className="pi-chat__error">{snapshot.errorMessage}</div> : null}

@@ -93,6 +93,28 @@ export class ObsidianSessionManager {
 		return this.getActiveSessionInfo();
 	}
 
+	/**
+	 * Moves a session file to trash rather than removing it: the JSONL log is the
+	 * only copy of a conversation, so a misclick has to stay recoverable. The
+	 * system trash is preferred because it is where users already look, and it
+	 * reports failure (disabled by the OS or the user) instead of throwing, so the
+	 * vault-local `.trash` folder covers that case.
+	 *
+	 * Deleting the active session leaves no active session; callers must adopt a
+	 * replacement before touching `getActiveSessionInfo`, which throws without one.
+	 */
+	async deleteSession(path: string): Promise<void> {
+		const sessionPath = normalizeFolderPath(path, { allowPluginInternals: true });
+		if (!(await this.adapter.trashSystem(sessionPath))) {
+			await this.adapter.trashLocal(sessionPath);
+		}
+		if (this.sessionFile === sessionPath) {
+			this.sessionFile = null;
+			this.entries = [];
+			this.leafId = null;
+		}
+	}
+
 	async listSessions(): Promise<ActiveSessionInfo[]> {
 		await this.ensureSessionDirectory();
 		const listing = await this.adapter.list(this.sessionDir);
