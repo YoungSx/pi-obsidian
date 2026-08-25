@@ -1,23 +1,14 @@
 import { describe, expect, it } from "bun:test";
+import { installObsidianStub } from "../testing/obsidianStub";
 import type { App, DataAdapter, ListedFiles, Stat } from "obsidian";
 import type { Api, AssistantMessage, Context, Model, SimpleStreamOptions } from "@earendil-works/pi-ai";
 import { createAssistantMessageEventStream } from "@earendil-works/pi-ai";
 import type { StreamFn } from "@earendil-works/pi-agent-core";
-import { mock } from "bun:test";
 import { ObsidianSessionManager } from "../session/ObsidianSessionManager";
 import type { PiObsidianSettings } from "../settings";
 import type { ObsidianAgentService as ObsidianAgentServiceType } from "./ObsidianAgentService";
 
-void mock.module("obsidian", () => ({
-	MarkdownView: class MarkdownView {},
-	PluginSettingTab: class PluginSettingTab {},
-	Setting: class Setting {},
-	TFile: class TFile {},
-	TFolder: class TFolder {},
-	requestUrl: async () => {
-		throw new Error("requestUrl is not available in tests");
-	},
-}));
+installObsidianStub();
 
 // Dynamic imports so the mocked module wins over any cached real one.
 const { ObsidianAgentService } = await import("./ObsidianAgentService");

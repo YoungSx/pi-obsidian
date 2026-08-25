@@ -1,4 +1,5 @@
 import { describe, expect, it, mock, beforeEach } from "bun:test";
+import { installObsidianStub, requestUrlMock } from "../testing/obsidianStub";
 
 interface MockRequestUrlResponse {
 	status: number;
@@ -6,12 +7,7 @@ interface MockRequestUrlResponse {
 	arrayBuffer: ArrayBuffer;
 }
 
-const requestUrlMock = mock<(params: unknown) => Promise<MockRequestUrlResponse>>();
-
-// bun's matchers throw synchronously; no awaiting needed.
-void mock.module("obsidian", () => ({
-	requestUrl: async (params: unknown): Promise<MockRequestUrlResponse> => await requestUrlMock(params),
-}));
+installObsidianStub();
 
 const { createObsidianRequestUrlFetch, createFetchForTransport } = await import("./obsidianFetch");
 

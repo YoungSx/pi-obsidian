@@ -1,11 +1,8 @@
-import { describe, expect, it, mock } from "bun:test";
+import { describe, expect, it } from "bun:test";
+import { installObsidianStub } from "../testing/obsidianStub";
 import type { App, CachedMetadata, ListItemCache, Loc, TFile, TFolder } from "obsidian";
 
-void mock.module("obsidian", () => ({
-	MarkdownView: class MarkdownView {},
-	TFile: class TFile {},
-	TFolder: class TFolder {},
-}));
+installObsidianStub();
 
 // Dynamic imports so the mocked module wins over any cached real one.
 // Runtime classes come from the mocked module; types stay type-only.
