@@ -54,7 +54,7 @@ export class PiChatView extends ItemView {
 		this.contentEl.empty();
 		this.contentEl.addClass("pi-chat-view");
 		this.root = createRoot(this.contentEl);
-		this.root.render(<PiChatApp service={this.service} inputController={this.inputController} />);
+		this.root.render(<PiChatApp service={this.service} inputController={this.inputController} component={this} />);
 	}
 
 	async onClose(): Promise<void> {

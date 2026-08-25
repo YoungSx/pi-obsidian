@@ -1,8 +1,10 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { flushSync } from "react-dom";
+import type { Component } from "obsidian";
 import type { ChatSnapshot, ObsidianAgentService } from "../agent/ObsidianAgentService";
 import type { ActiveSessionInfo } from "../session/ObsidianSessionManager";
 import type { ChatInputController } from "./ChatInputController";
+import { getActiveNotePath } from "./activeNotePath";
 import { ChatComposer } from "./ChatComposer";
 import { ChatHeader } from "./ChatHeader";
 import { MessageList } from "./MessageList";
@@ -11,13 +13,20 @@ import { appendToDraft } from "./noteReference";
 interface PiChatAppProps {
 	service: ObsidianAgentService;
 	inputController?: ChatInputController;
+	/** Parent Obsidian component owning rendered Markdown child components. */
+	component: Component;
 }
 
-export function PiChatApp({ service, inputController }: PiChatAppProps): React.JSX.Element {
+export function PiChatApp({ service, inputController, component }: PiChatAppProps): React.JSX.Element {
 	const [snapshot, setSnapshot] = useState<ChatSnapshot>(() => service.getSnapshot());
 	const [input, setInput] = useState("");
 	const [sessions, setSessions] = useState<ActiveSessionInfo[]>([]);
 	const sendPromptRef = useRef<() => void>(() => undefined);
+
+	const app = service.getApp();
+	// Recomputed per render (not memoized on identity) so switching the active
+	// note re-points `sourcePath`; reading the workspace is cheap.
+	const sourcePath = getActiveNotePath(app);
 
 	useEffect(() => {
 		const unsubscribe = service.subscribe(setSnapshot);
@@ -107,7 +116,14 @@ export function PiChatApp({ service, inputController }: PiChatAppProps): React.J
 
 			{snapshot.errorMessage ? <div className="pi-chat__error">{snapshot.errorMessage}</div> : null}
 
-			<MessageList messages={visibleMessages} pendingToolCalls={snapshot.pendingToolCalls} />
+			<MessageList
+				messages={visibleMessages}
+				isStreaming={snapshot.isStreaming}
+				pendingToolCalls={snapshot.pendingToolCalls}
+				app={app}
+				component={component}
+				sourcePath={sourcePath}
+			/>
 
 			<ChatComposer
 				input={input}

@@ -94,6 +94,27 @@
 	white-space: pre-wrap;
 }
 
+/* Rendered Markdown (assistant/user text). Obsidian's renderer emits its own
+   block elements; keep them tight so messages stay scannable. */
+.pi-chat__markdown > :first-child {
+	margin-top: 0;
+}
+
+.pi-chat__markdown > :last-child {
+	margin-bottom: 0;
+}
+
+.pi-chat__markdown pre {
+	white-space: pre-wrap;
+}
+
+.pi-chat__markdown p,
+.pi-chat__markdown ul,
+.pi-chat__markdown ol,
+.pi-chat__markdown blockquote {
+	margin-block: 0.4em;
+}
+
 .pi-chat__thinking,
 .pi-chat__tool-call,
 .pi-chat__tool-result,

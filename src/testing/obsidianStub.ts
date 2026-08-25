@@ -19,9 +19,39 @@ export function installObsidianStub(): void {
 /** Mutable handle so a test can assert on or reconfigure `requestUrl`. */
 export const requestUrlMock = mock<(params: unknown) => Promise<unknown>>();
 
+/** Arguments of the most recent `MarkdownRenderer.render` call. */
+export interface MarkdownRenderCall {
+	app: unknown;
+	markdown: string;
+	el: HTMLElement;
+	sourcePath: string;
+	component: unknown;
+}
+
+/** Mutable handle so a test can inspect or reconfigure `MarkdownRenderer.render`. */
+export const markdownRenderMock = mock<(call: MarkdownRenderCall) => Promise<void>>();
+
+/**
+ * Records the call and, by default, appends a marker element so tests can
+ * observe that something was rendered into `el`. Reconfigure via
+ * `markdownRenderMock.mockImplementation(...)` to throw instead.
+ */
+markdownRenderMock.mockImplementation(async ({ el }: MarkdownRenderCall) => {
+	const marker = (el.ownerDocument ?? globalThis.document)?.createElement("p");
+	if (!marker) {
+		return;
+	}
+	marker.className = "stub-rendered";
+	el.appendChild(marker);
+});
+
 const obsidianStub = {
 	MarkdownView: class MarkdownView {},
 	ItemView: class ItemView {},
+	MarkdownRenderer: {
+		render: async (app: unknown, markdown: string, el: HTMLElement, sourcePath: string, component: unknown): Promise<void> =>
+			await markdownRenderMock({ app, markdown, el, sourcePath, component }),
+	},
 	Plugin: class Plugin {},
 	Modal: class Modal {},
 	FuzzySuggestModal: class FuzzySuggestModal {},
