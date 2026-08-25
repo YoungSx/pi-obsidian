@@ -1,3 +1,5 @@
+import { truncateLine } from "@earendil-works/pi-agent-core";
+
 export interface GrepMatch {
 	path: string;
 	lineNumber: number;
@@ -47,7 +49,11 @@ export function formatGrepMatches(matches: GrepMatch[], truncated: boolean): str
 	if (matches.length === 0) {
 		return "No matches.";
 	}
-	const body = matches.map((match) => `${match.path}:${match.lineNumber}: ${match.line}`).join("\n");
+	// Long matches (minified assets, base64 blobs) would otherwise flood the model's
+	// context, so each line is capped using pi's shared grep line limit.
+	const body = matches
+		.map((match) => `${match.path}:${match.lineNumber}: ${truncateLine(match.line).text}`)
+		.join("\n");
 	return truncated ? `${body}\n\n[Matches truncated.]` : body;
 }
 

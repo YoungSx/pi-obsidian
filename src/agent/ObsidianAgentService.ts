@@ -1,6 +1,9 @@
 import type { App } from "obsidian";
-import { Agent, type AgentEvent, type AgentMessage, type StreamFn, type ThinkingLevel } from "@earendil-works/pi-agent-core";
-import { createObsidianStreamFn } from "../net/streamFn";
+import type { Usage } from "@earendil-works/pi-ai";
+import { Agent, convertToLlm, type AgentEvent, type AgentMessage, type StreamFn, type ThinkingLevel } from "@earendil-works/pi-agent-core";
+import { createObsidianModels, createObsidianStreamFn, withRequestDefaults, type ObsidianModelsBundle } from "../net/streamFn";
+import { compactIfNeeded, type CompactResult } from "./compaction";
+import { sumUsage, type UsageTotals } from "./usage";
 import { createObsidianTools } from "../tools/obsidianTools";
 import { getPreferredThinkingLevel, getSelectedModel, type PiObsidianSettings } from "../settings";
 import { ObsidianSessionManager, type ActiveSessionInfo, type SessionDefaults } from "../session/ObsidianSessionManager";
@@ -16,6 +19,7 @@ export interface ChatSnapshot {
 	modelId: string;
 	thinkingLevel: ThinkingLevel;
 	session?: ActiveSessionInfo;
+	usage: UsageTotals;
 }
 
 type SnapshotListener = (snapshot: ChatSnapshot) => void;
@@ -36,6 +40,13 @@ export class ObsidianAgentService {
 	private sessionInfo: ActiveSessionInfo | undefined;
 	private persistedMessages = new WeakSet<object>();
 	private errorMessage: string | undefined;
+	private modelsBundle: ObsidianModelsBundle | null = null;
+	private lastCompaction: CompactResult | undefined;
+	/** Compaction bills a separate request whose usage is not in the transcript. */
+	private compactionUsage: Usage[] = [];
+	/** Guards the pre-prompt compaction window, where `agent.state.isStreaming` is still false. */
+	private compaction: Promise<void> | null = null;
+	private compactionController: AbortController | null = null;
 
 	constructor(app: App, getSettings: () => PiObsidianSettings, sessionManager: ObsidianSessionManager, options: ObsidianAgentServiceOptions = {}) {
 		this.app = app;
@@ -89,6 +100,7 @@ export class ObsidianAgentService {
 		try {
 			this.errorMessage = undefined;
 			this.notify();
+			await this.compactContextIfNeeded(agent);
 			await agent.prompt(trimmedPrompt);
 		} catch (error) {
 			this.errorMessage = error instanceof Error ? error.message : String(error);
@@ -98,6 +110,9 @@ export class ObsidianAgentService {
 	}
 
 	abort(): void {
+		// Compaction runs before the agent starts streaming, so it has its own
+		// controller; `agent.abort()` cannot reach it.
+		this.compactionController?.abort();
 		const agent = this.agent;
 		if (!agent) {
 			return;
@@ -111,8 +126,48 @@ export class ObsidianAgentService {
 		const defaults = this.getSessionDefaults();
 		this.sessionInfo = await this.sessionManager.createSession(defaults);
 		this.persistedMessages = new WeakSet<object>();
+		this.lastCompaction = undefined;
+		this.compactionUsage = [];
 		this.replaceAgent([]);
 		this.errorMessage = undefined;
+		this.notify();
+	}
+
+	/** Sessions for this vault, newest first. */
+	async listSessions(): Promise<ActiveSessionInfo[]> {
+		await this.initialize();
+		return this.sessionManager.listSessions();
+	}
+
+	/** Switches to a stored session, replacing the transcript with its history. */
+	async openSession(path: string): Promise<void> {
+		await this.initialize();
+		if (this.sessionManager.getActiveSessionPath() === path) {
+			return;
+		}
+
+		this.agent?.abort();
+		this.compactionController?.abort();
+		try {
+			this.sessionInfo = await this.sessionManager.loadSession(path);
+		} catch (error) {
+			this.setError(error instanceof Error ? error.message : String(error));
+			return;
+		}
+
+		const context = this.sessionManager.buildSessionContext();
+		this.lastCompaction = this.sessionManager.getLastCompaction();
+		// Usage is per-transcript, and a reloaded session's compaction cost was
+		// already paid in an earlier run, so the running total starts from history.
+		this.compactionUsage = [];
+		this.persistedMessages = new WeakSet<object>();
+		for (const message of context.messages) {
+			this.persistedMessages.add(message);
+		}
+		this.replaceAgent(context.messages);
+		this.errorMessage = undefined;
+		await this.sessionManager.ensureConfiguration(this.getSessionDefaults());
+		this.sessionInfo = this.sessionManager.getActiveSessionInfo();
 		this.notify();
 	}
 
@@ -132,6 +187,7 @@ export class ObsidianAgentService {
 	dispose(): void {
 		this.unsubscribeAgent?.();
 		this.unsubscribeAgent = null;
+		this.compactionController?.abort();
 		this.agent?.abort();
 		this.listeners.clear();
 	}
@@ -147,8 +203,9 @@ export class ObsidianAgentService {
 			errorMessage: this.errorMessage ?? agent?.state.errorMessage,
 			provider: settings.provider,
 			modelId: settings.modelId,
-			thinkingLevel: getPreferredThinkingLevel(settings) as ThinkingLevel,
+			thinkingLevel: getPreferredThinkingLevel(settings),
 			session: this.sessionInfo,
+			usage: sumUsage(agent?.state.messages ?? [], this.compactionUsage),
 		};
 	}
 
@@ -156,6 +213,7 @@ export class ObsidianAgentService {
 		const defaults = this.getSessionDefaults();
 		this.sessionInfo = await this.sessionManager.continueRecentSession(defaults);
 		const context = this.sessionManager.buildSessionContext();
+		this.lastCompaction = this.sessionManager.getLastCompaction();
 		this.replaceAgent(context.messages);
 		this.notify();
 	}
@@ -166,10 +224,14 @@ export class ObsidianAgentService {
 		const model = getSelectedModel(settings);
 		const agent = new Agent({
 			streamFn: this.streamFn ?? createObsidianStreamFn({ transport: settings.networkTransport }),
+			// pi's converter renders compaction summaries into the request. The agent's
+			// default one silently filters that role out, which would discard every
+			// compacted turn without surfacing an error.
+			convertToLlm,
 			initialState: {
 				systemPrompt: OBSIDIAN_AGENT_SYSTEM_PROMPT,
 				model,
-				thinkingLevel: getPreferredThinkingLevel(settings) as ThinkingLevel,
+				thinkingLevel: getPreferredThinkingLevel(settings),
 				tools: createObsidianTools(this.app),
 				messages,
 			},
@@ -198,6 +260,59 @@ export class ObsidianAgentService {
 		this.notify();
 	}
 
+	/**
+	 * Summarizes older history before prompting when the context is nearly full.
+	 *
+	 * This runs while the agent is still idle, so `agent.state.isStreaming` cannot
+	 * guard it — concurrent callers are serialized on `compaction` instead. A
+	 * failed compaction is surfaced but not fatal: the prompt still goes out and
+	 * the provider decides whether the context fits.
+	 */
+	private async compactContextIfNeeded(agent: Agent): Promise<void> {
+		this.compaction ??= this.runCompaction(agent);
+		try {
+			await this.compaction;
+		} finally {
+			this.compaction = null;
+			this.compactionController = null;
+		}
+	}
+
+	private async runCompaction(agent: Agent): Promise<void> {
+		const controller = new AbortController();
+		this.compactionController = controller;
+		const outcome = await compactIfNeeded({
+			messages: agent.state.messages,
+			model: getSelectedModel(this.getSettings()),
+			models: withRequestDefaults(this.requireModelsBundle(), (provider) => this.getApiKey(provider)),
+			thinkingLevel: agent.state.thinkingLevel,
+			previous: this.lastCompaction,
+			signal: controller.signal,
+		});
+
+		if (outcome.status === "failed") {
+			this.setError(`Could not compact the conversation: ${outcome.message}`);
+			return;
+		}
+		if (outcome.status === "skipped") {
+			return;
+		}
+
+		agent.state.messages = outcome.messages;
+		this.lastCompaction = outcome.result;
+		if (outcome.result.usage) {
+			this.compactionUsage = [...this.compactionUsage, outcome.result.usage];
+		}
+		await this.sessionManager.appendCompaction(outcome.result);
+		this.sessionInfo = this.sessionManager.getActiveSessionInfo();
+		this.notify();
+	}
+
+	private requireModelsBundle(): ObsidianModelsBundle {
+		this.modelsBundle ??= createObsidianModels({ transport: this.getSettings().networkTransport });
+		return this.modelsBundle;
+	}
+
 	private async persistMessage(message: AgentMessage): Promise<void> {
 		const key = message as object;
 		if (this.persistedMessages.has(key)) {
@@ -213,7 +328,7 @@ export class ObsidianAgentService {
 		return {
 			provider: model.provider,
 			modelId: model.id,
-			thinkingLevel: getPreferredThinkingLevel(settings) as ThinkingLevel,
+			thinkingLevel: getPreferredThinkingLevel(settings),
 		};
 	}
 

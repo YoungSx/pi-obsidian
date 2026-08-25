@@ -22,6 +22,37 @@ describe("JSONL session helpers", () => {
 		expect(entries).toEqual([header]);
 	});
 
+	it("restarts context at the newest compaction so reloads keep it compacted", () => {
+		const entries: SessionEntry[] = [
+			createSessionHeader("session-1", "obsidian-vault:Test", "2026-05-03T00:00:00.000Z"),
+			{
+				type: "message",
+				id: "old",
+				parentId: null,
+				timestamp: "2026-05-03T00:00:01.000Z",
+				message: { role: "user", content: [{ type: "text", text: "ANCIENT HISTORY" }], timestamp: 1 },
+			},
+			{
+				type: "compaction",
+				id: "compacted",
+				parentId: "old",
+				timestamp: "2026-05-03T00:00:02.000Z",
+				summary: "SUMMARY OF ANCIENT HISTORY",
+				tokensBefore: 4_000,
+				retainedTail: [{ role: "user", content: [{ type: "text", text: "recent question" }], timestamp: 2 }],
+			},
+		];
+
+		const context = buildSessionContext(entries);
+		const serialized = JSON.stringify(context.messages);
+		expect(serialized).toContain("SUMMARY OF ANCIENT HISTORY");
+		expect(serialized).toContain("recent question");
+		// Replaying the pre-compaction turn would undo compaction on every reload.
+		expect(context.messages).toHaveLength(2);
+		expect(serialized).not.toContain('"text":"ANCIENT HISTORY"');
+		expect(context.messages[0]?.role).toBe("compactionSummary");
+	});
+
 	it("builds context by following the selected leaf path", () => {
 		const entries: SessionEntry[] = [
 			createSessionHeader("session-1", "obsidian-vault:Test", "2026-05-03T00:00:00.000Z"),

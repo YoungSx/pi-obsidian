@@ -108,7 +108,8 @@ function createReadTool(app: App): AgentTool<typeof ReadParameters> {
 		label: "Read file",
 		description: "Read a vault-relative Markdown/text file. Use offset and limit for large files.",
 		parameters: ReadParameters,
-		execute: async (_toolCallId, params) => {
+		execute: async (_toolCallId, params, signal) => {
+			throwIfAborted(signal);
 			const path = normalizeVaultPath(params.path);
 			const file = getVaultFile(app, path);
 			const content = await app.vault.read(file);
@@ -125,7 +126,8 @@ function createWriteTool(app: App): AgentTool<typeof WriteParameters> {
 		description: "Create or overwrite a vault-relative Markdown/text file. Parent folders are created when needed.",
 		parameters: WriteParameters,
 		executionMode: "sequential",
-		execute: async (_toolCallId, params) => {
+		execute: async (_toolCallId, params, signal) => {
+			throwIfAborted(signal);
 			const path = normalizeVaultPath(params.path);
 			await ensureParentFolders(app, path);
 			const existing = app.vault.getAbstractFileByPath(path);
@@ -137,6 +139,7 @@ function createWriteTool(app: App): AgentTool<typeof WriteParameters> {
 			} else {
 				await app.vault.create(path, params.content);
 			}
+			throwIfAborted(signal);
 			return textResult(`Wrote ${params.content.length} characters to ${path}.`, { path, bytes: params.content.length });
 		},
 	};
@@ -149,10 +152,12 @@ function createEditTool(app: App): AgentTool<typeof EditParameters> {
 		description: "Apply one or more exact text replacements to a vault-relative file. Each oldText must match exactly once in the original file.",
 		parameters: EditParameters,
 		executionMode: "sequential",
-		execute: async (_toolCallId, params) => {
+		execute: async (_toolCallId, params, signal) => {
+			throwIfAborted(signal);
 			const path = normalizeVaultPath(params.path);
 			const file = getVaultFile(app, path);
 			const content = await app.vault.read(file);
+			throwIfAborted(signal);
 			const updatedContent = applyExactEdits(content, params.edits);
 			await app.vault.modify(file, updatedContent);
 			return textResult(`Applied ${params.edits.length} edit${params.edits.length === 1 ? "" : "s"} to ${path}.`, {
@@ -169,7 +174,8 @@ function createLsTool(app: App): AgentTool<typeof LsParameters> {
 		label: "List folder",
 		description: "List files and folders at a vault-relative folder path.",
 		parameters: LsParameters,
-		execute: async (_toolCallId, params) => {
+		execute: async (_toolCallId, params, signal) => {
+			throwIfAborted(signal);
 			const path = normalizeFolderPath(params.path ?? "");
 			const folder = path ? app.vault.getFolderByPath(path) : app.vault.getRoot();
 			if (!folder) {
@@ -190,7 +196,8 @@ function createFindTool(app: App): AgentTool<typeof FindParameters> {
 		label: "Find files",
 		description: "Find vault files by case-insensitive substring or simple * and ? glob pattern.",
 		parameters: FindParameters,
-		execute: async (_toolCallId, params) => {
+		execute: async (_toolCallId, params, signal) => {
+			throwIfAborted(signal);
 			const maxResults = params.maxResults ?? 100;
 			const matches = app.vault
 				.getFiles()
@@ -215,11 +222,13 @@ function createGrepTool(app: App): AgentTool<typeof GrepParameters> {
 		label: "Search file text",
 		description: "Search text files in the vault. Supports literal matching by default and regex matching when regex is true.",
 		parameters: GrepParameters,
-		execute: async (_toolCallId, params) => {
+		execute: async (_toolCallId, params, signal) => {
+			throwIfAborted(signal);
 			const maxMatches = params.maxMatches ?? 100;
 			const rootPath = params.path ? normalizeFolderPath(params.path) : "";
 			const matches: GrepMatch[] = [];
 			for (const file of getSearchableFiles(app, rootPath)) {
+				throwIfAborted(signal);
 				const content = await app.vault.cachedRead(file);
 				const remainingMatches = maxMatches - matches.length;
 				matches.push(
@@ -249,9 +258,10 @@ function createListTasksTool(app: App): AgentTool<typeof ListTasksParameters> {
 		description:
 			"List tasks discovered from Obsidian's metadata cache across the vault, a folder, or a Markdown note. Defaults to todo tasks; set status to all or done when needed.",
 		parameters: ListTasksParameters,
-		execute: async (_toolCallId, params) => {
+		execute: async (_toolCallId, params, signal) => {
+			throwIfAborted(signal);
 			const maxResults = params.maxResults ?? 100;
-			const tasks = filterTasks(await getCachedTasks(app, params.path), { status: params.status, query: params.query });
+			const tasks = filterTasks(await getCachedTasks(app, params.path, signal), { status: params.status, query: params.query });
 			const visibleTasks = tasks.slice(0, maxResults);
 			const truncated = tasks.length > visibleTasks.length;
 			return textResult(formatTaskList(visibleTasks, truncated), {
@@ -273,10 +283,11 @@ function createSummarizeTasksTool(app: App): AgentTool<typeof SummarizeTasksPara
 		description:
 			"Summarize task counts discovered from Obsidian's metadata cache by Markdown note. Searches the whole vault by default, or a vault-relative folder/note path.",
 		parameters: SummarizeTasksParameters,
-		execute: async (_toolCallId, params) => {
+		execute: async (_toolCallId, params, signal) => {
+			throwIfAborted(signal);
 			const maxResults = params.maxResults ?? 100;
 			const status: TaskStatusFilter = params.status ?? "all";
-			const tasks = filterTasks(await getCachedTasks(app, params.path), { status, query: params.query });
+			const tasks = filterTasks(await getCachedTasks(app, params.path, signal), { status, query: params.query });
 			const summaries = summarizeTasks(tasks);
 			const visibleSummaries = summaries.slice(0, maxResults);
 			const truncated = summaries.length > visibleSummaries.length;
@@ -302,7 +313,8 @@ function createActiveNoteTool(app: App): AgentTool<typeof ActiveNoteParameters> 
 		label: "Get active note",
 		description: "Return the active Markdown note path, with optional selected text and file content.",
 		parameters: ActiveNoteParameters,
-		execute: async (_toolCallId, params) => {
+		execute: async (_toolCallId, params, signal) => {
+			throwIfAborted(signal);
 			const view = app.workspace.getActiveViewOfType(MarkdownView);
 			const file = view?.file;
 			if (!view || !file) {
@@ -322,6 +334,12 @@ function createActiveNoteTool(app: App): AgentTool<typeof ActiveNoteParameters> 
 			return textResult(lines.join("\n"), { path: file.path, hasSelection: selection.length > 0 });
 		},
 	};
+}
+
+function throwIfAborted(signal: AbortSignal | undefined): void {
+	if (signal?.aborted) {
+		throw new Error("Operation aborted");
+	}
 }
 
 function getVaultFile(app: App, path: string): TFile {
@@ -347,9 +365,10 @@ async function ensureParentFolders(app: App, path: string): Promise<void> {
 	}
 }
 
-async function getCachedTasks(app: App, path?: string): Promise<VaultTask[]> {
+async function getCachedTasks(app: App, path?: string, signal?: AbortSignal): Promise<VaultTask[]> {
 	const tasks: VaultTask[] = [];
 	for (const file of getTaskScopeFiles(app, path)) {
+		throwIfAborted(signal);
 		const metadata = app.metadataCache.getFileCache(file);
 		if (!metadata?.listItems?.some((item) => item.task !== undefined)) {
 			continue;

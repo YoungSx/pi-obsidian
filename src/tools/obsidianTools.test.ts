@@ -124,3 +124,77 @@ function positionAtLine(line: number): { start: Loc; end: Loc } {
 		end: { line, col: 1, offset: 1 },
 	};
 }
+
+describe("abort handling", () => {
+	it("rejects every tool when the signal is already aborted", async () => {
+		const app = createTaskApp([
+			{
+				path: "Note.md",
+				content: "- [ ] Task",
+				metadata: metadataWithItems([taskItem(0, " ")]),
+			},
+		]);
+		const controller = new AbortController();
+		controller.abort();
+
+		// A tool that ignores the signal resolves normally, and pi-agent-core then
+		// records that stale result as a success, so every tool must reject instead.
+		for (const tool of createObsidianTools(app)) {
+			const params = { path: "Note.md", pattern: "Task", content: "x", edits: [] };
+			const error = await tool.execute("tool-call", params as never, controller.signal).then(
+				() => null,
+				(reason: unknown) => reason,
+			);
+			expect(error, `${tool.name} ignored the aborted signal`).toBeInstanceOf(Error);
+			expect((error as Error).message).toBe("Operation aborted");
+		}
+	});
+
+	it("rejects even when there is nothing to scan", async () => {
+		// With an empty vault the scan loop never runs, so only the entry check can
+		// stop the tool from reporting a successful empty result.
+		const app = createTaskApp([]);
+		const controller = new AbortController();
+		controller.abort();
+		const tool = getTaskTool(app, "list_tasks");
+
+		const error = await tool.execute("tool-call", { maxResults: 10 } as never, controller.signal).then(
+			() => null,
+			(reason: unknown) => reason,
+		);
+
+		expect((error as Error | null)?.message).toBe("Operation aborted");
+	});
+
+	it("stops scanning mid-loop once the signal aborts", async () => {
+		const controller = new AbortController();
+		let readCount = 0;
+		const app = createTaskApp([
+			{ path: "A.md", content: "- [ ] one", metadata: metadataWithItems([taskItem(0, " ")]) },
+			{ path: "B.md", content: "- [ ] two", metadata: metadataWithItems([taskItem(0, " ")]) },
+		]);
+		const vault = app.vault as unknown as { cachedRead: (file: TFile) => Promise<string> };
+		const originalRead = vault.cachedRead.bind(vault);
+		vault.cachedRead = async (file: TFile) => {
+			readCount += 1;
+			controller.abort();
+			return originalRead(file);
+		};
+		const tool = getTaskTool(app, "list_tasks");
+
+		const error = await tool.execute("tool-call", { maxResults: 10 } as never, controller.signal).then(
+			() => null,
+			(reason: unknown) => reason,
+		);
+		expect((error as Error | null)?.message).toBe("Operation aborted");
+		expect(readCount).toBeLessThanOrEqual(1);
+	});
+});
+
+function getTaskTool(app: App, name: string) {
+	const tool = createObsidianTools(app).find((candidate) => candidate.name === name);
+	if (!tool) {
+		throw new Error(`Missing tool: ${name}`);
+	}
+	return tool;
+}

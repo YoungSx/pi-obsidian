@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import { normalizeVaultPath, getParentPath, getPathName } from "./path";
+import { normalizeVaultPath, getParentPath } from "./path";
 
 const CONFIG_DIR = `.${"obsidian"}`;
 const PLUGIN_SESSION_FILE = `${CONFIG_DIR}/plugins/pi-obsidian/sessions/a.jsonl`;
@@ -27,8 +27,7 @@ describe("normalizeVaultPath", () => {
 });
 
 describe("path helpers", () => {
-	it("extracts parent and name", () => {
+	it("extracts the parent folder", () => {
 		expect(getParentPath("Folder/Note.md")).toBe("Folder");
-		expect(getPathName("Folder/Note.md")).toBe("Note.md");
 	});
 });

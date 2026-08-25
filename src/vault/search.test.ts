@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import { grepContent, matchesFindPattern } from "./search";
+import { formatGrepMatches, grepContent, matchesFindPattern } from "./search";
 
 describe("matchesFindPattern", () => {
 	it("matches plain substrings case-insensitively", () => {
@@ -24,5 +24,21 @@ describe("grepContent", () => {
 	it("supports regex matching", () => {
 		const matches = grepContent("Note.md", "todo: one\ndone: two", "^todo", { regex: true });
 		expect(matches).toHaveLength(1);
+	});
+});
+
+describe("formatGrepMatches", () => {
+	it("caps long match lines so one minified line cannot flood the context", () => {
+		const longLine = "x".repeat(900);
+		const output = formatGrepMatches([{ path: "Bundle.md", lineNumber: 1, line: longLine }], false);
+
+		expect(output).toContain("... [truncated]");
+		expect(output.length).toBeLessThan(longLine.length);
+	});
+
+	it("leaves short match lines intact", () => {
+		expect(formatGrepMatches([{ path: "Note.md", lineNumber: 2, line: "second line" }], false)).toBe(
+			"Note.md:2: second line",
+		);
 	});
 });

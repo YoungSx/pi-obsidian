@@ -29,11 +29,6 @@ export function getParentPath(path: string): string {
 	return index === -1 ? "" : path.slice(0, index);
 }
 
-export function getPathName(path: string): string {
-	const index = path.lastIndexOf("/");
-	return index === -1 ? path : path.slice(index + 1);
-}
-
 function stripLeadingAt(input: string): string {
 	if (input === "@") {
 		return "";

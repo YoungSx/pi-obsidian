@@ -6,7 +6,9 @@ import { ObsidianAgentService } from "./agent/ObsidianAgentService";
 import { PiChatView } from "./ui/PiChatView";
 
 export default class PiObsidianPlugin extends Plugin {
-	settings: PiObsidianSettings;
+	// Fresh defaults until `onload` loads persisted data; `normalizeSettings` deep-copies
+	// so the shared DEFAULT_SETTINGS object is never mutated in place.
+	settings: PiObsidianSettings = normalizeSettings(null);
 	private agentService: ObsidianAgentService | null = null;
 
 	async onload(): Promise<void> {

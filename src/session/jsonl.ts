@@ -1,6 +1,9 @@
-import type { AgentMessage, ThinkingLevel } from "@earendil-works/pi-agent-core";
+import { createCompactionSummaryMessage, type AgentMessage, type ThinkingLevel } from "@earendil-works/pi-agent-core";
+import type { Usage } from "@earendil-works/pi-ai";
 
-export const CURRENT_SESSION_VERSION = 3;
+// Version 4 adds `compaction` entries. Older files stay readable: v3 had no
+// compaction, so nothing in this schema is reinterpreted.
+export const CURRENT_SESSION_VERSION = 4;
 
 export interface SessionHeaderEntry {
 	type: "session";
@@ -36,6 +39,17 @@ export interface ThinkingLevelChangeSessionEntry {
 	thinkingLevel: ThinkingLevel;
 }
 
+export interface CompactionSessionEntry {
+	type: "compaction";
+	id: string;
+	parentId: string | null;
+	timestamp: string;
+	summary: string;
+	tokensBefore: number;
+	retainedTail: AgentMessage[];
+	usage?: Usage;
+}
+
 export interface SessionInfoEntry {
 	type: "session_info";
 	id: string;
@@ -49,6 +63,7 @@ export type SessionEntry =
 	| MessageSessionEntry
 	| ModelChangeSessionEntry
 	| ThinkingLevelChangeSessionEntry
+	| CompactionSessionEntry
 	| SessionInfoEntry;
 
 export interface SessionContext {
@@ -111,6 +126,8 @@ function isSessionEntry(value: unknown): value is SessionEntry {
 			return typeof entry.provider === "string" && typeof entry.modelId === "string";
 		case "thinking_level_change":
 			return typeof entry.thinkingLevel === "string";
+		case "compaction":
+			return typeof entry.summary === "string" && Array.isArray(entry.retainedTail);
 		case "session_info":
 			return true;
 		default:
@@ -129,12 +146,11 @@ export function buildSessionContext(entries: SessionEntry[], leafId?: string | n
 	let thinkingLevel: ThinkingLevel = "off";
 	const messages: AgentMessage[] = [];
 
+	// Model and thinking level are derived from the whole path, because a
+	// compaction does not undo configuration chosen before it.
 	for (const entry of path) {
-		if (entry.type === "message") {
-			messages.push(entry.message);
-			if (entry.message.role === "assistant") {
-				model = { provider: entry.message.provider, modelId: entry.message.model };
-			}
+		if (entry.type === "message" && entry.message.role === "assistant") {
+			model = { provider: entry.message.provider, modelId: entry.message.model };
 		}
 		if (entry.type === "model_change") {
 			model = { provider: entry.provider, modelId: entry.modelId };
@@ -144,7 +160,33 @@ export function buildSessionContext(entries: SessionEntry[], leafId?: string | n
 		}
 	}
 
+	// Messages restart at the newest compaction, matching pi's own context
+	// transform. Replaying entries from before it would undo the compaction on
+	// every reload and immediately re-trigger summarization.
+	for (const entry of getContextEntries(path)) {
+		if (entry.type === "message") {
+			messages.push(entry.message);
+			continue;
+		}
+		if (entry.type === "compaction") {
+			messages.push(
+				createCompactionSummaryMessage(entry.summary, entry.tokensBefore, entry.timestamp),
+				...entry.retainedTail,
+			);
+		}
+	}
+
 	return { messages, model, thinkingLevel };
+}
+
+/** Drops everything before the newest compaction, mirroring pi's `defaultContextEntryTransform`. */
+function getContextEntries(path: Exclude<SessionEntry, SessionHeaderEntry>[]): Exclude<SessionEntry, SessionHeaderEntry>[] {
+	for (let index = path.length - 1; index >= 0; index -= 1) {
+		if (path[index]?.type === "compaction") {
+			return path.slice(index);
+		}
+	}
+	return path;
 }
 
 export function getLastLeafId(entries: SessionEntry[]): string | null {

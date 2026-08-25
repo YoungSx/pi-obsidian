@@ -34,6 +34,22 @@
 	word-break: break-all;
 }
 
+/* Colour and size are inherited from the `.pi-chat__header p` rule above. */
+.pi-chat__usage {
+	margin: 0.15rem 0 0;
+}
+
+.pi-chat__header-actions {
+	display: flex;
+	align-items: center;
+	flex-shrink: 0;
+	gap: 0.4rem;
+}
+
+.pi-chat__header-actions select {
+	max-width: 12rem;
+}
+
 .pi-chat__error {
 	border: 1px solid var(--text-error);
 	border-radius: 6px;

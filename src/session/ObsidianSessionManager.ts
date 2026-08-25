@@ -1,5 +1,5 @@
 import type { App, DataAdapter, Plugin } from "obsidian";
-import type { AgentMessage, ThinkingLevel } from "@earendil-works/pi-agent-core";
+import type { AgentMessage, CompactResult, ThinkingLevel } from "@earendil-works/pi-agent-core";
 import { normalizeFolderPath } from "../vault/path";
 import {
 	buildSessionContext,
@@ -9,6 +9,7 @@ import {
 	getLastLeafId,
 	parseSessionEntries,
 	serializeSessionEntries,
+	type CompactionSessionEntry,
 	type MessageSessionEntry,
 	type ModelChangeSessionEntry,
 	type SessionContext,
@@ -134,6 +135,19 @@ export class ObsidianSessionManager {
 		});
 	}
 
+	async appendCompaction(result: CompactResult): Promise<string> {
+		return this.appendEntry<CompactionSessionEntry>({
+			type: "compaction",
+			id: createEntryId(this.entries),
+			parentId: this.leafId,
+			timestamp: new Date().toISOString(),
+			summary: result.summary,
+			tokensBefore: result.tokensBefore,
+			retainedTail: result.retainedTail,
+			usage: result.usage,
+		});
+	}
+
 	async appendSessionInfo(name: string | undefined): Promise<string> {
 		return this.appendEntry<SessionInfoEntry>({
 			type: "session_info",
@@ -146,6 +160,20 @@ export class ObsidianSessionManager {
 
 	buildSessionContext(): SessionContext {
 		return buildSessionContext(this.entries, this.leafId);
+	}
+
+	/**
+	 * Newest persisted compaction, so a reloaded session updates that summary
+	 * rather than summarizing its own summary from scratch.
+	 */
+	getLastCompaction(): CompactResult | undefined {
+		for (let index = this.entries.length - 1; index >= 0; index -= 1) {
+			const entry = this.entries[index];
+			if (entry?.type === "compaction") {
+				return { summary: entry.summary, tokensBefore: entry.tokensBefore, retainedTail: entry.retainedTail, usage: entry.usage };
+			}
+		}
+		return undefined;
 	}
 
 	getActiveSessionInfo(): ActiveSessionInfo {

@@ -6,6 +6,7 @@ import type { StreamFn } from "@earendil-works/pi-agent-core";
 import { mock } from "bun:test";
 import { ObsidianSessionManager } from "../session/ObsidianSessionManager";
 import type { PiObsidianSettings } from "../settings";
+import type { ObsidianAgentService as ObsidianAgentServiceType } from "./ObsidianAgentService";
 
 void mock.module("obsidian", () => ({
 	MarkdownView: class MarkdownView {},
@@ -20,6 +21,10 @@ void mock.module("obsidian", () => ({
 
 // Dynamic imports so the mocked module wins over any cached real one.
 const { ObsidianAgentService } = await import("./ObsidianAgentService");
+
+// Tests drive ObsidianSessionManager directly, so the directory is supplied here
+// rather than derived from a Vault; `Vault#configDir` is used in production code.
+const SESSION_DIR = `.${"obsidian"}/plugins/pi-obsidian/sessions`;
 
 class MemoryAdapter {
 	private readonly files = new Map<string, { content: string; mtime: number }>();
@@ -71,16 +76,7 @@ class MemoryAdapter {
 
 describe("ObsidianAgentService", () => {
 	it("notifies listeners after a prompt settles", async () => {
-		const adapter = new MemoryAdapter() as unknown as DataAdapter;
-		const settings: PiObsidianSettings = {
-			provider: "deepseek",
-			modelId: "deepseek-v4-pro",
-			thinkingLevel: "high",
-			providerApiKeys: { deepseek: "test-key" },
-			networkTransport: "requestUrl",
-		};
-		const sessionManager = new ObsidianSessionManager(adapter, `.${"obsidian"}/plugins/pi-obsidian/sessions`, "obsidian-vault:Test");
-		const service = new ObsidianAgentService(createFakeApp(adapter), () => settings, sessionManager, { streamFn: createFakeStreamFn() });
+		const service = createService();
 		const snapshots = [service.getSnapshot()];
 		service.subscribe((snapshot) => snapshots.push(snapshot));
 
@@ -90,7 +86,58 @@ describe("ObsidianAgentService", () => {
 		expect(lastSnapshot?.isStreaming).toBe(false);
 		expect(lastSnapshot?.messages.map((message) => message.role)).toEqual(["user", "assistant"]);
 	});
+
+	it("reports usage once the provider has charged for a turn", async () => {
+		const service = createService();
+
+		expect(service.getSnapshot().usage.requests).toBe(0);
+		await service.sendPrompt("Hello");
+
+		expect(service.getSnapshot().usage.requests).toBe(1);
+	});
+
+	it("switches back to an earlier session and restores its transcript", async () => {
+		const service = createService();
+		await service.sendPrompt("First conversation");
+		const firstSession = service.getSnapshot().session;
+
+		await service.newSession();
+		await service.sendPrompt("Second conversation");
+		expect(service.getSnapshot().session?.id).not.toBe(firstSession?.id);
+
+		const sessions = await service.listSessions();
+		expect(sessions.length).toBeGreaterThanOrEqual(2);
+
+		await service.openSession(firstSession?.path ?? "");
+
+		const restored = service.getSnapshot();
+		expect(restored.session?.id).toBe(firstSession?.id);
+		expect(JSON.stringify(restored.messages)).toContain("First conversation");
+		expect(JSON.stringify(restored.messages)).not.toContain("Second conversation");
+	});
+
+	it("surfaces an error instead of throwing when a session cannot be opened", async () => {
+		const service = createService();
+		await service.initialize();
+
+		await service.openSession(`${SESSION_DIR}/missing.jsonl`);
+
+		expect(service.getSnapshot().errorMessage).toBeTruthy();
+	});
 });
+
+function createService(): ObsidianAgentServiceType {
+	const adapter = new MemoryAdapter() as unknown as DataAdapter;
+	const settings: PiObsidianSettings = {
+		provider: "deepseek",
+		modelId: "deepseek-v4-pro",
+		thinkingLevel: "high",
+		providerApiKeys: { deepseek: "test-key" },
+		networkTransport: "requestUrl",
+	};
+	const sessionManager = new ObsidianSessionManager(adapter, SESSION_DIR, "obsidian-vault:Test");
+	return new ObsidianAgentService(createFakeApp(adapter), () => settings, sessionManager, { streamFn: createFakeStreamFn() });
+}
 
 function createFakeStreamFn(): StreamFn {
 	return (model: Model<Api>, _context: Context, _options?: SimpleStreamOptions) => {

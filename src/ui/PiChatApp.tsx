@@ -2,8 +2,10 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import type { AssistantMessage, ToolResultMessage, UserMessage } from "@earendil-works/pi-ai";
 import type { ChatSnapshot, ObsidianAgentService } from "../agent/ObsidianAgentService";
+import type { ActiveSessionInfo } from "../session/ObsidianSessionManager";
 import type { ChatInputController } from "./ChatInputController";
 import { isSendShortcut } from "./keyboard";
+import { formatCost, formatTokens } from "../agent/usage";
 
 interface PiChatAppProps {
 	service: ObsidianAgentService;
@@ -13,6 +15,7 @@ interface PiChatAppProps {
 export function PiChatApp({ service, inputController }: PiChatAppProps): React.JSX.Element {
 	const [snapshot, setSnapshot] = useState<ChatSnapshot>(() => service.getSnapshot());
 	const [input, setInput] = useState("");
+	const [sessions, setSessions] = useState<ActiveSessionInfo[]>([]);
 	const textareaRef = useRef<HTMLTextAreaElement | null>(null);
 	const sendPromptRef = useRef<() => void>(() => undefined);
 
@@ -21,6 +24,18 @@ export function PiChatApp({ service, inputController }: PiChatAppProps): React.J
 		void service.initialize();
 		return unsubscribe;
 	}, [service]);
+
+	useEffect(() => {
+		let cancelled = false;
+		void service.listSessions().then((loaded) => {
+			if (!cancelled) {
+				setSessions(loaded);
+			}
+		});
+		return () => {
+			cancelled = true;
+		};
+	}, [service, snapshot.session?.id]);
 
 	const visibleMessages = useMemo(() => {
 		if (!snapshot.streamingMessage) {
@@ -88,13 +103,34 @@ export function PiChatApp({ service, inputController }: PiChatAppProps): React.J
 				<div>
 					<h2>Pi chat</h2>
 					<p>{snapshot.provider}/{snapshot.modelId} · thinking {snapshot.thinkingLevel}</p>
+					{snapshot.usage.requests > 0 ? (
+						<p className="pi-chat__usage">
+							{formatTokens(snapshot.usage.tokens)} tokens · {formatCost(snapshot.usage.cost)}
+						</p>
+					) : null}
 				</div>
-				<button type="button" onClick={() => void service.newSession()} disabled={snapshot.isStreaming}>
-					New chat
-				</button>
+				<div className="pi-chat__header-actions">
+					{sessions.length > 1 ? (
+						<select
+							aria-label="Chat session"
+							value={snapshot.session?.path ?? ""}
+							disabled={snapshot.isStreaming}
+							onChange={(event) => void service.openSession(event.currentTarget.value)}
+						>
+							{sessions.map((session) => (
+								<option key={session.path} value={session.path}>
+									{describeSession(session)}
+								</option>
+							))}
+						</select>
+					) : null}
+					<button type="button" onClick={() => void service.newSession()} disabled={snapshot.isStreaming}>
+						New chat
+					</button>
+				</div>
 			</header>
 
-			{snapshot.session ? <div className="pi-chat__session">Session: {snapshot.session.path}</div> : null}
+			{snapshot.session ? <div className="pi-chat__session">{describeSession(snapshot.session)}</div> : null}
 			{snapshot.errorMessage ? <div className="pi-chat__error">{snapshot.errorMessage}</div> : null}
 
 			<main className="pi-chat__messages">
@@ -126,6 +162,13 @@ export function PiChatApp({ service, inputController }: PiChatAppProps): React.J
 			</footer>
 		</div>
 	);
+}
+
+/** Prefers an explicit name, then the opening question, then the timestamp. */
+function describeSession(session: ActiveSessionInfo): string {
+	const label = session.name?.trim() || session.firstMessage.trim().split("\n")[0] || "Untitled chat";
+	const summary = label.length > 60 ? `${label.slice(0, 60)}…` : label;
+	return `${summary} · ${new Date(session.updatedAt).toLocaleString()}`;
 }
 
 function EmptyState(): React.JSX.Element {

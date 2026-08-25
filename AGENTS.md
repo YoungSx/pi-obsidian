@@ -8,17 +8,18 @@
 
 ## Environment & tooling
 
-- Node.js: use current LTS (Node 18+ recommended).
-- **Package manager: npm** (required for this sample - `package.json` defines npm scripts and dependencies).
+- Runtime: Bun (this project is bun-first). Node.js current LTS also works for the esbuild bundle step.
+- **Package manager: bun** — install deps with `bun install`; `bun.lock` is the committed lockfile.
+- **Test runner: bun test** — tests use `bun:test`, not Vitest or Jest.
 - **Bundler: esbuild** (required for this sample - `esbuild.config.mjs` and build scripts depend on it). Alternative bundlers like Rollup or webpack are acceptable for other projects if they bundle all external dependencies into `main.js`.
 - Types: `obsidian` type definitions.
 
-**Note**: This sample project has specific technical dependencies on npm and esbuild. If you're creating a plugin from scratch, you can choose different tools, but you'll need to replace the build configuration accordingly.
+**Note**: `build` and `lint` stay as npm scripts because they shell out to `tsc`, `esbuild`, and `eslint`; dependency install and tests go through bun.
 
 ### Install
 
 ```bash
-npm install
+bun install
 ```
 
 ### Dev (watch)
@@ -33,10 +34,15 @@ npm run dev
 npm run build
 ```
 
+### Test
+
+```bash
+bun test
+```
+
 ## Linting
 
-- To use eslint install eslint from terminal: `npm install -g eslint`
-- To use eslint to analyze this project use this command: `eslint main.ts`
+- Run the project's lint script: `npm run lint` (wraps `eslint .` with the flat config in `eslint.config.mts`).
 - eslint will then create a report with suggestions for code improvement by file and line number.
 - If your source code is in a folder, such as `src`, you can use eslint with this command to analyze all files in that folder: `eslint ./src/`
 
