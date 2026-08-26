@@ -41,6 +41,91 @@
 	margin: 0.15rem 0 0;
 }
 
+/* --- context-window indicator --- */
+
+.pi-chat__context {
+	align-items: center;
+	display: flex;
+	gap: 0.45rem;
+	margin: 0.15rem 0 0;
+}
+
+/* Thin occupancy bar; the fill colour carries the ok/warn/near state. */
+.pi-chat__context-bar {
+	background: var(--background-modifier-border);
+	border-radius: 3px;
+	flex-shrink: 0;
+	height: 4px;
+	overflow: hidden;
+	width: 5rem;
+}
+
+.pi-chat__context-bar-fill {
+	background: var(--text-muted);
+	display: block;
+	height: 100%;
+	transition: width 0.2s ease-out;
+}
+
+.pi-chat__context--warn .pi-chat__context-bar-fill,
+.pi-chat__context--warn {
+	color: var(--text-warning, var(--text-accent));
+}
+
+.pi-chat__context--near .pi-chat__context-bar-fill {
+	background: var(--text-error);
+}
+
+.pi-chat__context--near {
+	color: var(--text-error);
+	font-weight: 600;
+}
+
+/* Shown while the summarization request is in flight (it is a real LLM call). */
+.pi-chat__compacting {
+	animation: pi-compaction-pulse 1.2s ease-in-out infinite;
+	color: var(--text-faint);
+	font-size: var(--font-ui-smaller);
+	margin-top: -0.35rem;
+}
+
+@keyframes pi-compaction-pulse {
+
+	0%,
+	100% {
+		opacity: 1;
+	}
+
+	50% {
+		opacity: 0.45;
+	}
+}
+
+/* --- compaction divider --- */
+
+/*
+ * Marks where summarized history begins, so scrolling back explains why earlier
+ * turns are gone instead of looking like a broken transcript.
+ */
+.pi-chat__compaction {
+	border-top: 1px dashed var(--background-modifier-border-hover);
+	color: var(--text-muted);
+	font-size: var(--font-ui-smaller);
+	margin: 0.75rem 0;
+	padding-top: 0.6rem;
+}
+
+.pi-chat__compaction-heading {
+	font-weight: 600;
+	margin-bottom: 0.25rem;
+}
+
+.pi-chat__compaction .pi-chat__text {
+	font-size: var(--font-ui-smaller);
+	max-height: 12rem;
+	overflow-y: auto;
+}
+
 .pi-chat__header-actions {
 	display: flex;
 	align-items: center;

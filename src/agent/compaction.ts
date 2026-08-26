@@ -31,6 +31,13 @@ export interface CompactionRequest {
 	previous?: CompactResult;
 	settings?: CompactionSettings;
 	signal?: AbortSignal;
+	/**
+	 * Summarize even when the context still fits, for the manual "compact now"
+	 * command. The cut point and retention budget stay pi's own — forcing only
+	 * skips the threshold check, it never re-summarizes more than
+	 * `keepRecentTokens` leaves behind.
+	 */
+	force?: boolean;
 }
 
 /**
@@ -44,7 +51,7 @@ export interface CompactionRequest {
 export async function compactIfNeeded(request: CompactionRequest): Promise<CompactionOutcome> {
 	const settings = request.settings ?? DEFAULT_COMPACTION_SETTINGS;
 	const contextTokens = estimateContextTokens(request.messages).tokens;
-	if (!shouldCompact(contextTokens, request.model.contextWindow, settings)) {
+	if (!request.force && !shouldCompact(contextTokens, request.model.contextWindow, settings)) {
 		return { status: "skipped" };
 	}
 

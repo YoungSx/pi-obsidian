@@ -1,5 +1,5 @@
 import React from "react";
-import type { AgentMessage } from "@earendil-works/pi-agent-core";
+import type { AgentMessage, CompactionSummaryMessage } from "@earendil-works/pi-agent-core";
 import type { AssistantMessage, ToolResultMessage, UserMessage } from "@earendil-works/pi-ai";
 import type { App, Component } from "obsidian";
 import type { TextBlockKind } from "./markdownPolicy";
@@ -63,11 +63,33 @@ interface MessageRowProps {
 }
 
 function MessageRow({ message, isStreaming, renderContext }: MessageRowProps): React.JSX.Element {
+	// The summary fronts a compacted transcript; it reads as a divider ("history
+	// above this was summarized"), not as one more message bubble.
+	if (message.role === "compactionSummary") {
+		return <CompactionDivider message={message} renderContext={renderContext} />;
+	}
 	return (
 		<article className={`pi-chat__message pi-chat__message--${message.role}`}>
 			<div className="pi-chat__message-role">{message.role}</div>
 			<div className="pi-chat__message-content">{renderMessageContent(message, { isStreaming, renderContext })}</div>
 		</article>
+	);
+}
+
+/**
+ * Visible marker that everything above it was summarized.
+ *
+ * Rendered outside the normal message card so scrolling back makes it obvious
+ * why earlier turns are gone — the raw summary text stays below the heading,
+ * plain-text rendered via the harness kind so its formatting is never distorted
+ * by the Markdown pipeline.
+ */
+function CompactionDivider({ message, renderContext }: { message: CompactionSummaryMessage; renderContext: MessageContext }): React.JSX.Element {
+	return (
+		<section aria-label="Compacted history" className="pi-chat__compaction">
+			<div className="pi-chat__compaction-heading">Earlier history was summarized to fit the context window.</div>
+			<Block text={message.summary} kind="harness" isStreaming={false} context={renderContext} />
+		</section>
 	);
 }
 

@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
+import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import type { App, Component } from "obsidian";
 import type { ToolResultMessage } from "@earendil-works/pi-ai";
 import type { createRoot } from "react-dom/client";
@@ -40,6 +41,30 @@ beforeEach(() => {
 
 afterEach(() => {
 	document.body.replaceChildren();
+});
+
+describe("MessageList compaction divider", () => {
+	it("renders the summary as a labelled divider instead of a plain message bubble", async () => {
+		const host = renderMessages([compactionSummary("Summary of everything earlier")]);
+		await flushRender();
+
+		const divider = host.querySelector("section.pi-chat__compaction");
+		expect(divider).not.toBeNull();
+		expect(divider?.getAttribute("aria-label")).toBe("Compacted history");
+		expect(divider?.querySelector(".pi-chat__compaction-heading")?.textContent).toContain("summarized");
+		expect(divider?.textContent).toContain("Summary of everything earlier");
+		// Not modelled as a normal message card.
+		expect(host.querySelector("article.pi-chat__message--compactionSummary")).toBeNull();
+	});
+
+	it("keeps the summary text verbatim instead of running it through Markdown", async () => {
+		renderMessages([compactionSummary("**not** markdown #heading")]);
+		await flushRender();
+
+		expect(markdownRenderMock).toHaveBeenCalledTimes(0);
+		const text = document.querySelector(".pi-chat__compaction pre");
+		expect(text?.textContent).toBe("**not** markdown #heading");
+	});
 });
 
 describe("MessageList tool-result diff", () => {
@@ -88,6 +113,10 @@ function toolResult(details: Record<string, unknown>): ToolResultMessage {
 		isError: false,
 		timestamp: Date.now(),
 	};
+}
+
+function compactionSummary(text: string): AgentMessage {
+	return { role: "compactionSummary", summary: text, tokensBefore: 40_000, timestamp: Date.now() } as AgentMessage;
 }
 
 const roots = new WeakMap<HTMLElement, import("react-dom/client").Root>();

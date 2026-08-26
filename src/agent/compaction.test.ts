@@ -43,6 +43,33 @@ describe("compactIfNeeded", () => {
 		expect(outcome.result.tokensBefore).toBeGreaterThan(0);
 	});
 
+	it("compacts a fitting context when forced, for the manual command", async () => {
+		const outcome = await compactIfNeeded({
+			messages: [userMessage("short"), assistantMessage("short answer", EMPTY_USAGE)],
+			model: createModel({ contextWindow: 1_000_000 }),
+			models: createModels("MANUAL SUMMARY"),
+			thinkingLevel: "off",
+			force: true,
+		});
+
+		expect(outcome.status).toBe("compacted");
+		if (outcome.status !== "compacted") {
+			return;
+		}
+		expect(outcome.result.summary).toContain("MANUAL SUMMARY");
+	});
+
+	it("still skips when not forced and the context fits", async () => {
+		const outcome = await compactIfNeeded({
+			messages: [userMessage("short"), assistantMessage("short answer", EMPTY_USAGE)],
+			model: createModel({ contextWindow: 1_000_000 }),
+			models: createModels(),
+			thinkingLevel: "off",
+		});
+
+		expect(outcome.status).toBe("skipped");
+	});
+
 	it("reports provider failures instead of throwing", async () => {
 		const outcome = await compactIfNeeded({
 			messages: buildOverflowingHistory(),

@@ -3,7 +3,7 @@ import type { Usage } from "@earendil-works/pi-ai";
 import { Agent, convertToLlm, type AgentEvent, type AgentMessage, type StreamFn, type ThinkingLevel } from "@earendil-works/pi-agent-core";
 import { createObsidianModels, createObsidianStreamFn, withRequestDefaults, type ObsidianModelsBundle } from "../net/streamFn";
 import { compactIfNeeded, type CompactResult } from "./compaction";
-import { sumUsage, type UsageTotals } from "./usage";
+import { measureContextFill, sumUsage, type ContextFill, type UsageTotals } from "./usage";
 import { createObsidianTools } from "../tools/obsidianTools";
 import { getPreferredThinkingLevel, getSelectedModel, type PiObsidianSettings } from "../settings";
 import { ObsidianSessionManager, type ActiveSessionInfo, type SessionDefaults } from "../session/ObsidianSessionManager";
@@ -27,6 +27,15 @@ export interface ChatSnapshot {
 	 */
 	sessionRevision: number;
 	usage: UsageTotals;
+	/**
+	 * How much of the model's context window the conversation occupies. The
+	 * estimate is heuristic until the first assistant usage lands, which
+	 * `ContextFill.heuristicOnly` reports so the UI never shows a made-up
+	 * number as if the provider had measured it.
+	 */
+	contextFill: ContextFill | null;
+	/** True while a pre-prompt compaction request is in flight (a real LLM call). */
+	isCompacting: boolean;
 }
 
 type SnapshotListener = (snapshot: ChatSnapshot) => void;
@@ -53,7 +62,9 @@ export class ObsidianAgentService {
 	/** Compaction bills a separate request whose usage is not in the transcript. */
 	private compactionUsage: Usage[] = [];
 	/** Guards the pre-prompt compaction window, where `agent.state.isStreaming` is still false. */
-	private compaction: Promise<void> | null = null;
+	private compaction: Promise<boolean> | null = null;
+	/** Mirrors `compaction` for the snapshot: true from launch until it settles. */
+	private isCompacting = false;
 	private compactionController: AbortController | null = null;
 
 	constructor(app: App, getSettings: () => PiObsidianSettings, sessionManager: ObsidianSessionManager, options: ObsidianAgentServiceOptions = {}) {
@@ -262,8 +273,9 @@ export class ObsidianAgentService {
 	getSnapshot(): ChatSnapshot {
 		const settings = this.getSettings();
 		const agent = this.agent;
+		const messages = agent?.state.messages ?? [];
 		return {
-			messages: agent?.state.messages ?? [],
+			messages,
 			streamingMessage: agent?.state.streamingMessage,
 			isStreaming: agent?.state.isStreaming ?? false,
 			pendingToolCalls: [...(agent?.state.pendingToolCalls ?? new Set<string>())],
@@ -273,7 +285,14 @@ export class ObsidianAgentService {
 			thinkingLevel: getPreferredThinkingLevel(settings),
 			session: this.sessionInfo,
 			sessionRevision: this.sessionRevision,
-			usage: sumUsage(agent?.state.messages ?? [], this.compactionUsage),
+			usage: sumUsage(messages, this.compactionUsage),
+			contextFill: measureContextFill(
+				messages,
+				// Falls back to the selected model so the indicator exists before the
+				// agent is built; the window is a static field of the model spec.
+				agent?.state.model.contextWindow ?? getSelectedModel(settings).contextWindow,
+			),
+			isCompacting: this.isCompacting,
 		};
 	}
 
@@ -337,33 +356,89 @@ export class ObsidianAgentService {
 	 * the provider decides whether the context fits.
 	 */
 	private async compactContextIfNeeded(agent: Agent): Promise<void> {
-		this.compaction ??= this.runCompaction(agent);
+		await this.runExclusiveCompaction(agent);
+	}
+
+	/**
+	 * Compacts on demand from the command palette, regardless of the threshold.
+	 *
+	 * "Skipped" is a real outcome worth reporting — a fresh conversation has
+	 * nothing older than `keepRecentTokens` for pi to summarize — so it lands
+	 * on the error line instead of vanishing; that field is the header's only
+	 * transient-message channel today. A failed compaction is already surfaced
+	 * by {@link runCompaction} and must not be overwritten with "nothing".
+	 */
+	async compactNow(): Promise<void> {
+		await this.initialize();
+		const agent = this.requireAgent();
+		if (agent.state.isStreaming) {
+			return;
+		}
+		if (!this.hasApiKey()) {
+			this.setError(`Add a ${this.getSettings().provider} API key in plugin settings before compacting.`);
+			return;
+		}
+
 		try {
-			await this.compaction;
+			this.errorMessage = undefined;
+			const compacted = await this.runExclusiveCompaction(agent, true);
+			if (!compacted && !this.errorMessage) {
+				this.setError("Nothing to compact yet.");
+			}
+		} finally {
+			this.notifySettledState();
+		}
+	}
+
+	/**
+	 * Runs at most one compaction at a time and owns the `isCompacting`
+	 * lifecycle around it: set before the request launches (the header needs to
+	 * show "Compacting context…" while the LLM call is in flight), cleared in a
+	 * finally so an abort or failure cannot leave the banner stuck.
+	 *
+	 * Returns whether anything was compacted; failures are surfaced, not thrown.
+	 */
+	private async runExclusiveCompaction(agent: Agent, force = false): Promise<boolean> {
+		if (!this.compaction) {
+			this.compactionController = new AbortController();
+			this.compaction = this.trackCompaction(agent, this.compactionController.signal, force);
+		}
+		try {
+			return await this.compaction;
 		} finally {
 			this.compaction = null;
 			this.compactionController = null;
 		}
 	}
 
-	private async runCompaction(agent: Agent): Promise<void> {
-		const controller = new AbortController();
-		this.compactionController = controller;
+	private async trackCompaction(agent: Agent, signal: AbortSignal, force: boolean): Promise<boolean> {
+		this.isCompacting = true;
+		try {
+			this.notify();
+			return await this.performCompaction(agent, signal, force);
+		} finally {
+			this.isCompacting = false;
+			this.notify();
+		}
+	}
+
+	private async performCompaction(agent: Agent, signal: AbortSignal, force: boolean): Promise<boolean> {
 		const outcome = await compactIfNeeded({
 			messages: agent.state.messages,
 			model: getSelectedModel(this.getSettings()),
 			models: withRequestDefaults(this.requireModelsBundle(), (provider) => this.getApiKey(provider)),
 			thinkingLevel: agent.state.thinkingLevel,
 			previous: this.lastCompaction,
-			signal: controller.signal,
+			signal,
+			force,
 		});
 
 		if (outcome.status === "failed") {
 			this.setError(`Could not compact the conversation: ${outcome.message}`);
-			return;
+			return false;
 		}
 		if (outcome.status === "skipped") {
-			return;
+			return false;
 		}
 
 		agent.state.messages = outcome.messages;
@@ -374,6 +449,7 @@ export class ObsidianAgentService {
 		await this.sessionManager.appendCompaction(outcome.result);
 		this.refreshSessionInfo();
 		this.notify();
+		return true;
 	}
 
 	private requireModelsBundle(): ObsidianModelsBundle {

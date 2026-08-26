@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import { installObsidianStub } from "../testing/obsidianStub";
+import { installObsidianStub, requestUrlMock } from "../testing/obsidianStub";
 import type { App, DataAdapter, ListedFiles, Stat } from "obsidian";
 import type { Api, AssistantMessage, Context, Model, SimpleStreamOptions } from "@earendil-works/pi-ai";
 import { createAssistantMessageEventStream } from "@earendil-works/pi-ai";
@@ -265,7 +265,86 @@ describe("ObsidianAgentService", () => {
 
 		expect(service.getSnapshot().errorMessage).toBeTruthy();
 	});
+
+	it("reports context fill against the model's window, heuristic before any usage", async () => {
+		const service = createService();
+		const fresh = service.getSnapshot().contextFill;
+		expect(fresh?.heuristicOnly).toBe(true);
+		// deepseek-v4-pro ships a 1M window; the plugin does not override it.
+		expect(fresh?.contextWindow).toBe(1_000_000);
+
+		await service.sendPrompt("Hello");
+
+		const after = service.getSnapshot().contextFill;
+		expect(after?.heuristicOnly).toBe(false);
+		// The fake turn reports 1_010 total tokens against a 1M window.
+		expect(after?.tokens).toBe(1_010);
+	});
+
+	it("flips isCompacting while a forced compaction request is in flight", async () => {
+		requestUrlMock.mockImplementation(async () => sseResponse([summaryChunk(), usageChunk()]));
+		const service = createService();
+		await service.sendPrompt("Long conversation");
+		const seen = [service.getSnapshot()];
+		service.subscribe((snapshot) => seen.push(snapshot));
+
+		await service.compactNow();
+
+		expect(seen.some((snapshot) => snapshot.isCompacting)).toBe(true);
+		const finalSnapshot = seen[seen.length - 1];
+		expect(finalSnapshot?.isCompacting).toBe(false);
+		expect(finalSnapshot?.messages[0]?.role).toBe("compactionSummary");
+		// Compaction bills its own request; it must show up in the running total.
+		expect(finalSnapshot?.usage.requests).toBe(2);
+	});
+
+	it("reports when there was nothing to compact instead of staying silent", async () => {
+		requestUrlMock.mockImplementation(async () => sseResponse([summaryChunk(), usageChunk()]));
+		const service = createService();
+		await service.compactNow();
+
+		expect(service.getSnapshot().errorMessage).toBe("Nothing to compact yet.");
+		expect(service.getSnapshot().messages).toHaveLength(0);
+	});
+
+	it("keeps the compaction summary visible in the transcript after compaction", async () => {
+		requestUrlMock.mockImplementation(async () => sseResponse([summaryChunk("EARLIER HISTORY SUMMARIZED"), usageChunk()]));
+		const service = createService();
+		await service.sendPrompt("Long conversation");
+
+		await service.compactNow();
+
+		const snapshot = service.getSnapshot();
+		expect(snapshot.messages[0]?.role).toBe("compactionSummary");
+		expect(JSON.stringify(snapshot.messages)).toContain("EARLIER HISTORY SUMMARIZED");
+		// The retained tail keeps the recent exchange so the agent can still see it.
+		expect(snapshot.messages.some((message) => message.role === "user")).toBe(true);
+	});
 });
+
+/** Wraps SSE frames in the buffered body Obsidian's `requestUrl` returns. */
+function sseResponse(frames: object[]): { status: number; headers: Record<string, string>; arrayBuffer: ArrayBuffer } {
+	const body = frames.map((frame) => `data: ${JSON.stringify(frame)}\n\n`).join("") + "data: [DONE]\n\n";
+	return {
+		status: 200,
+		headers: { "content-type": "text/event-stream" },
+		arrayBuffer: new TextEncoder().encode(body).buffer as ArrayBuffer,
+	};
+}
+
+/** A chat-completions chunk carrying part of the summarizer's answer. */
+function summaryChunk(text = "SUMMARY OF EARLIER TURNS"): object {
+	return { id: "c1", choices: [{ delta: { content: text }, finish_reason: null }] };
+}
+
+/** Final chunk with finish_reason and usage, as OpenAI-compatible providers emit. */
+function usageChunk(): object {
+	return {
+		id: "c1",
+		choices: [{ delta: {}, finish_reason: "stop" }],
+		usage: { prompt_tokens: 500, completion_tokens: 100, total_tokens: 600 },
+	};
+}
 
 function createService(memoryAdapter: MemoryAdapter = new MemoryAdapter()): ObsidianAgentServiceType {
 	const adapter = asDataAdapter(memoryAdapter);
@@ -290,11 +369,11 @@ function createFakeStreamFn(): StreamFn {
 			provider: model.provider,
 			model: model.id,
 			usage: {
-				input: 0,
-				output: 0,
+				input: 1_000,
+				output: 10,
 				cacheRead: 0,
 				cacheWrite: 0,
-				totalTokens: 0,
+				totalTokens: 1_010,
 				cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
 			},
 			stopReason: "stop",

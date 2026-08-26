@@ -1,7 +1,7 @@
 import { describe, expect, it } from "bun:test";
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import type { Usage } from "@earendil-works/pi-ai";
-import { formatCost, formatTokens, sumUsage } from "./usage";
+import { formatCost, formatTokens, measureContextFill, sumUsage } from "./usage";
 
 describe("sumUsage", () => {
 	it("reports no requests for a transcript without assistant turns", () => {
@@ -44,6 +44,48 @@ describe("formatting", () => {
 		expect(formatCost(0)).toBe("$0");
 		expect(formatCost(0.0021)).toBe("$0.0021");
 		expect(formatCost(1.5)).toBe("$1.50");
+	});
+});
+
+describe("measureContextFill", () => {
+	it("marks a fresh conversation as heuristic-only, before any usage exists", () => {
+		const fill = measureContextFill([userMessage("hello")], 100_000);
+
+		expect(fill.heuristicOnly).toBe(true);
+		expect(fill.tokens).toBeGreaterThan(0);
+	});
+
+	it("trusts provider usage once an assistant turn has reported it", () => {
+		const messages = [
+			userMessage("first"),
+			assistantMessage(usage({ input: 4_000, output: 0, totalTokens: 4_000, cost: 0 })),
+			userMessage("tiny trailing prompt"),
+		];
+
+		const fill = measureContextFill(messages, 10_000);
+
+		expect(fill.heuristicOnly).toBe(false);
+		expect(fill.ratio).toBeGreaterThan(0.4);
+	});
+
+	it("derives the compaction threshold from the same reserve pi compacts on", () => {
+		const fill = measureContextFill([], 1_000_000);
+
+		// DEFAULT_COMPACTION_SETTINGS.reserveTokens is 16_384 → threshold at ~98.4%.
+		expect(fill.compactionRatio).toBeCloseTo((1_000_000 - 16_384) / 1_000_000, 6);
+	});
+
+	it("orders occupancy by reported usage so the meter can colour itself", () => {
+		const ratioAt = (tokens: number): number =>
+			measureContextFill([assistantMessage(usage({ input: tokens, output: 0, totalTokens: tokens, cost: 0 }))], 10_000).ratio;
+
+		expect(ratioAt(9_000)).toBeGreaterThan(ratioAt(7_000));
+	});
+
+	it("reports the window the caller passed, not a hardcoded one", () => {
+		const fill = measureContextFill([], 128_000);
+
+		expect(fill.contextWindow).toBe(128_000);
 	});
 });
 
