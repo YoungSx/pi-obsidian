@@ -12,9 +12,21 @@ import {
 import { getParentPath, normalizeVaultPath } from "./path";
 
 /**
- * Spike for issue #16: exposes an Obsidian vault as pi's {@link ExecutionEnv}
- * so the native harness tools (`createReadTool` / `createWriteTool` /
- * `createEditTool`) can operate on vault notes without touching disk paths.
+ * Resolves to `true` when `fileManager` is present (desktop + most mobile
+ * setups). The Obsidian `App` type declares `fileManager` as non-optional, but
+ * the test harness constructs `App` stubs from partial objects, and older
+ * mobile builds have been observed without it. Treating it as optional here
+ * keeps the env usable in those contexts — `remove`/`renameFile` fall back to
+ * `vault.delete` (permanent) only when the file manager is genuinely absent.
+ */
+function hasFileManager(app: App): app is App & { fileManager: App["fileManager"] } {
+	return typeof (app as unknown as { fileManager?: unknown }).fileManager === "object";
+}
+
+/**
+ * Exposes an Obsidian vault as pi's {@link ExecutionEnv} so the native
+ * harness tools (`createReadTool` / `createWriteTool` / `createEditTool`)
+ * can operate on vault notes without touching disk paths.
  *
  * Path space: pi addresses files with absolute paths, so this environment uses
  * `/`-prefixed vault-relative paths (`/Notes/Idea.md`) and reports `cwd` as `/`.
@@ -27,7 +39,7 @@ import { getParentPath, normalizeVaultPath } from "./path";
  * {@link Result} carrying a {@link FileError}. Abort signals are honored
  * between steps because vault calls themselves cannot be cancelled.
  *
- * Deliberate stubs (issue #16 flags both):
+ * Deliberate stubs:
  * - {@linkcode exec} returns `shell_unavailable`; an Obsidian plugin has no
  *   process environment to run commands in.
  * - {@linkcode createTempDir}/{@linkcode createTempFile} return
@@ -37,10 +49,14 @@ import { getParentPath, normalizeVaultPath } from "./path";
 export class VaultExecutionEnv implements ExecutionEnv {
 	readonly cwd = "/";
 
-	private readonly vault: App["vault"];
+	private readonly app: App;
 
 	constructor(app: App) {
-		this.vault = app.vault;
+		this.app = app;
+	}
+
+	private get vault(): App["vault"] {
+		return this.app.vault;
 	}
 
 	async absolutePath(path: string): Promise<Result<string, FileError>> {
@@ -163,11 +179,13 @@ export class VaultExecutionEnv implements ExecutionEnv {
 				return err(new FileError("not_found", `File not found: ${sourcePath}`, sourcePath));
 			}
 			// The FileSystem contract replaces an existing destination, while
-			// `vault.rename` refuses; drop the destination first to match. Note
-			// this loses the link-updates `FileManager.renameFile` would perform.
+			// `vault.rename` refuses; trash the destination first to match. Using
+			// `trashFile` respects the user's deletion preference (`.trash/` or OS
+			// trash) and keeps the operation reversible. Note this loses the
+			// link-updates `FileManager.renameFile` would perform.
 			const destination = this.vault.getAbstractFileByPath(destinationInner);
 			if (destination instanceof TFile || destination instanceof TFolder) {
-				await this.vault.delete(destination, true);
+				await this.trash(destination);
 			}
 			await this.vault.rename(source, destinationInner);
 			return ok(undefined);
@@ -270,10 +288,11 @@ export class VaultExecutionEnv implements ExecutionEnv {
 				}
 				return err(new FileError("not_found", `File not found: ${path}`, path));
 			}
-			// Obsidian models neither `recursive` nor hidden-only subtrees; its
-			// `force` flag ("delete even if the folder has hidden children") is the
-			// closest capability, so both options fold into it.
-			await this.vault.delete(existing, options?.recursive === true || options?.force === true);
+			// Send to trash (recoverable) via `FileManager.trashFile` when
+			// available — respects the user's "delete to .trash/ or OS trash"
+			// preference. Falls back to `vault.delete` with the recursive/force
+			// flag only when `fileManager` is absent (test stubs, edge mobile).
+			await this.trash(existing, options?.recursive === true || options?.force === true);
 			return ok(undefined);
 		});
 	}
@@ -320,6 +339,22 @@ export class VaultExecutionEnv implements ExecutionEnv {
 			return ok({ file: existing });
 		}
 		return err(new FileError("not_found", `File not found: ${path}`, path));
+	}
+
+	/**
+	 * Trashes a file or folder, preferring `FileManager.trashFile` (which
+	 * respects the user's deletion preference) and falling back to
+	 * `vault.delete(force)` only when the file manager is unavailable.
+	 */
+	private async trash(target: TFile | TFolder, force = false): Promise<void> {
+		if (hasFileManager(this.app)) {
+			await this.app.fileManager.trashFile(target);
+			return;
+		}
+		// Fallback for environments where fileManager is absent (test stubs,
+		// edge mobile). Permanent delete is the only option here.
+		// eslint-disable-next-line obsidianmd/prefer-file-manager-trash-file
+		await this.vault.delete(target, force);
 	}
 
 	private async run<T>(path: string, operation: () => Promise<Result<T, FileError>>): Promise<Result<T, FileError>> {

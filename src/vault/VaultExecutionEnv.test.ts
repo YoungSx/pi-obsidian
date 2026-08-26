@@ -26,6 +26,8 @@ export interface VaultFixture {
 class MemoryVault {
 	private readonly files = new Map<string, { content: string; mtime: number }>();
 	private readonly folders = new Set<string>();
+	/** Paths sent to `fileManager.trashFile`, in order, for assertions. */
+	readonly trashed: string[] = [];
 
 	constructor(fixtures: VaultFixture[] = []) {
 		for (const fixture of fixtures) {
@@ -133,44 +135,55 @@ class MemoryVault {
 		return this.getFileByPath(path)!;
 	}
 
-	async rename(from: string, to: string): Promise<void> {
-		const source = this.abstractOrThrow(from);
-		if (this.files.has(to) || this.folders.has(to)) {
-			throw new Error(`Destination already exists: ${to}`);
+	async rename(file: TFile | TFolder, newPath: string): Promise<void> {
+		const from = file.path;
+		if (this.files.has(newPath) || this.folders.has(newPath)) {
+			throw new Error(`Destination already exists: ${newPath}`);
 		}
-		await this.createParentFolders(to);
-		if (source instanceof TFileClass || this.files.has(from)) {
+		await this.createParentFolders(newPath);
+		if (this.files.has(from)) {
 			const entry = this.files.get(from)!;
 			this.files.delete(from);
-			this.files.set(to, entry);
+			this.files.set(newPath, entry);
 			return;
 		}
-		this.folders.delete(from);
-		this.folders.add(to);
+		if (!this.folders.delete(from)) {
+			throw new Error(`File not found: ${from}`);
+		}
+		this.folders.add(newPath);
 		for (const [filePath, entry] of [...this.files.entries()]) {
 			if (filePath.startsWith(`${from}/`)) {
 				this.files.delete(filePath);
-				this.files.set(`${to}${filePath.slice(from.length)}`, entry);
+				this.files.set(`${newPath}${filePath.slice(from.length)}`, entry);
 			}
 		}
 	}
 
 	async delete(target: TFile | TFolder, force: boolean): Promise<void> {
 		void force;
-		if (this.files.has(target.path)) {
-			this.files.delete(target.path);
+		this.removeFromMaps(target.path);
+	}
+
+	async trashFile(target: TFile | TFolder): Promise<void> {
+		this.trashed.push(target.path);
+		this.removeFromMaps(target.path);
+	}
+
+	private removeFromMaps(path: string): void {
+		if (this.files.has(path)) {
+			this.files.delete(path);
 			return;
 		}
-		if (!this.folders.delete(target.path)) {
-			throw new Error(`Missing file: ${target.path}`);
+		if (!this.folders.delete(path)) {
+			throw new Error(`Missing file: ${path}`);
 		}
 		for (const filePath of [...this.files.keys()]) {
-			if (filePath.startsWith(`${target.path}/`)) {
+			if (filePath.startsWith(`${path}/`)) {
 				this.files.delete(filePath);
 			}
 		}
 		for (const folderPath of [...this.folders]) {
-			if (folderPath.startsWith(`${target.path}/`)) {
+			if (folderPath.startsWith(`${path}/`)) {
 				this.folders.delete(folderPath);
 			}
 		}
@@ -200,14 +213,6 @@ class MemoryVault {
 		return entry;
 	}
 
-	private abstractOrThrow(path: string): TFile | TFolder {
-		const abstract = this.getAbstractFileByPath(path);
-		if (!abstract) {
-			throw new Error(`File not found: ${path}`);
-		}
-		return abstract;
-	}
-
 	private async createParentFolders(path: string): Promise<void> {
 		let current = "";
 		for (const segment of parentOf(path).split("/")) {
@@ -234,7 +239,12 @@ function parentOf(path: string): string {
 }
 
 function createApp(vault: MemoryVault): App {
-	return { vault } as unknown as App;
+	return {
+		vault,
+		fileManager: {
+			trashFile: (target: TFile | TFolder) => vault.trashFile(target),
+		},
+	} as unknown as App;
 }
 
 describe("VaultExecutionEnv", () => {
@@ -468,5 +478,74 @@ describe("native harness tools over VaultExecutionEnv (issue #16 spike)", () => 
 
 		expect((read.content[0] as { text: string }).text).toContain("after edit");
 		expect(vault.readText("Loop2.md")).toBe("second note\n");
+	});
+});
+
+describe("createNativeFileTools registration (issue #20)", () => {
+	it("returns read/write/edit tools with the names pi's agent loop expects", async () => {
+		const vault = new MemoryVault([{ kind: "file", path: "Note.md", content: "hello\n" }]);
+		const { createNativeFileTools: createNative } = await import("./harnessAdapter");
+		const core = await import("@earendil-works/pi-agent-core");
+
+		const tools = createNative(createApp(vault), {
+			read: () => core.createReadTool(),
+			write: () => core.createWriteTool(),
+			edit: () => core.createEditTool(),
+		});
+
+		expect(tools.map((tool) => tool.name).sort()).toEqual(["edit", "read", "write"]);
+		for (const tool of tools) {
+			expect(typeof tool.execute).toBe("function");
+			expect(tool.parameters).toBeDefined();
+		}
+	});
+
+	it("serializes concurrent edits across the three tools sharing one env", async () => {
+		// Two concurrent edits to the same file through two separate edit tool
+		// instances built from createNativeFileTools must not corrupt each other.
+		// The shared env instance is what makes pi's mutation queue serialize them.
+		const vault = new MemoryVault([{ kind: "file", path: "Shared.md", content: "alpha\nbeta\ngamma\n" }]);
+		const { createNativeFileTools: createNative } = await import("./harnessAdapter");
+		const core = await import("@earendil-works/pi-agent-core");
+
+		const tools = createNative(createApp(vault), {
+			read: () => core.createReadTool(),
+			write: () => core.createWriteTool(),
+			edit: () => core.createEditTool(),
+		});
+		const editTool = tools.find((tool) => tool.name === "edit")!;
+
+		await Promise.all([
+			editTool.execute("c1", { path: "/Shared.md", edits: [{ oldText: "alpha", newText: "ALPHA" }] }),
+			editTool.execute("c2", { path: "/Shared.md", edits: [{ oldText: "beta", newText: "BETA" }] }),
+		]);
+
+		const content = vault.readText("Shared.md") ?? "";
+		expect(content).toContain("ALPHA");
+		expect(content).toContain("BETA");
+		expect(content).toContain("gamma");
+	});
+
+	it("routes remove through fileManager.trashFile (recoverable, not permanent)", async () => {
+		const vault = new MemoryVault([{ kind: "file", path: "Doomed.md", content: "goodbye\n" }]);
+		const env = new VaultExecutionEnvClass(createApp(vault));
+
+		const result = await env.remove("/Doomed.md");
+		expect(result.ok).toBe(true);
+		expect(vault.trashed).toContain("Doomed.md");
+		expect(vault.hasFile("Doomed.md")).toBe(false);
+	});
+
+	it("renameFile trashes a pre-existing destination before renaming", async () => {
+		const vault = new MemoryVault([
+			{ kind: "file", path: "Source.md", content: "source\n" },
+			{ kind: "file", path: "Dest.md", content: "dest\n" },
+		]);
+		const env = new VaultExecutionEnvClass(createApp(vault));
+
+		const result = await env.renameFile("/Source.md", "/Dest.md");
+		expect(result.ok).toBe(true);
+		expect(vault.trashed).toContain("Dest.md");
+		expect(vault.readText("Dest.md")).toBe("source\n");
 	});
 });

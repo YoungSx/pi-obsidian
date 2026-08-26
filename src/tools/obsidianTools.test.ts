@@ -75,13 +75,25 @@ interface TaskFileFixture {
 
 function createTaskApp(fixtures: TaskFileFixture[]): App {
 	const files = fixtures.map((fixture) => makeFile(fixture.path));
+	const paths = new Set(fixtures.map((fixture) => fixture.path));
 	const contentByPath = new Map(fixtures.map((fixture) => [fixture.path, fixture.content]));
 	const metadataByPath = new Map(fixtures.map((fixture) => [fixture.path, fixture.metadata]));
 	return {
 		vault: {
 			getMarkdownFiles: () => files,
 			getAbstractFileByPath: (path: string) => files.find((file) => file.path === path) ?? makeFolder(path),
+			getFileByPath: (path: string) => files.find((file) => file.path === path) ?? null,
+			getFolderByPath: () => null,
+			getRoot: () => makeFolder(""),
 			cachedRead: async (file: TFile) => contentByPath.get(file.path) ?? "",
+			read: async (file: TFile) => contentByPath.get(file.path) ?? "",
+			readBinary: async (file: TFile) => new TextEncoder().encode(contentByPath.get(file.path) ?? "").buffer as ArrayBuffer,
+			adapter: {
+				exists: async (path: string) => paths.has(path),
+			},
+		},
+		fileManager: {
+			trashFile: async () => {},
 		},
 		metadataCache: {
 			getFileCache: (file: TFile) => metadataByPath.get(file.path) ?? null,
@@ -136,8 +148,10 @@ describe("abort handling", () => {
 
 		// A tool that ignores the signal resolves normally, and pi-agent-core then
 		// records that stale result as a success, so every tool must reject instead.
+		// The native edit tool validates `edits` is non-empty before checking the
+		// signal, so it gets a real edit pair; other tools ignore the extra fields.
 		for (const tool of createObsidianTools(app)) {
-			const params = { path: "Note.md", pattern: "Task", content: "x", edits: [] };
+			const params = { path: "Note.md", pattern: "Task", content: "x", edits: [{ oldText: "Task", newText: "Done" }] };
 			const error = await tool.execute("tool-call", params as never, controller.signal).then(
 				() => null,
 				(reason: unknown) => reason,

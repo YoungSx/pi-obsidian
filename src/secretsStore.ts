@@ -39,7 +39,10 @@ export async function createSecretEnvironment(options: CreateSecretStoreOptions 
 		return { codec: () => PLAINTEXT_CODEC };
 	}
 
-	const safeStorage = options.safeStorage ?? (await import("electron")).safeStorage;
+	// Only touch electron when no override is injected — tests pass a mock, and
+	// mobile has already returned above. The dynamic import keeps esbuild from
+	// bundling electron into the plugin output.
+	const safeStorage: SafeStorageLike = options.safeStorage ?? (await import("electron")).safeStorage;
 	try {
 		if (!safeStorage.isEncryptionAvailable()) {
 			return { codec: () => PLAINTEXT_CODEC };
