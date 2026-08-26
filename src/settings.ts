@@ -5,6 +5,7 @@ import type { BuiltinProvider } from "@earendil-works/pi-ai/providers/all";
 import type { Model, ModelThinkingLevel } from "@earendil-works/pi-ai";
 import type PiObsidianPlugin from "./main";
 import { DEFAULT_MODEL_ID, DEFAULT_PROVIDER, DEFAULT_THINKING_LEVEL } from "./constants";
+import type { SecretEnvironment } from "./secretsStore";
 import type { NetworkTransport } from "./net/obsidianFetch";
 import {
 	buildCustomEndpointModel,
@@ -147,10 +148,18 @@ export function getPreferredThinkingLevel(settings: PiObsidianSettings): ModelTh
 
 export class PiObsidianSettingTab extends PluginSettingTab {
 	private readonly plugin: PiObsidianPlugin;
+	private readonly secretEnvironment: SecretEnvironment | null;
 
-	constructor(app: App, plugin: PiObsidianPlugin) {
+	constructor(app: App, plugin: PiObsidianPlugin, secretEnvironment?: SecretEnvironment) {
 		super(app, plugin);
 		this.plugin = plugin;
+		this.secretEnvironment = secretEnvironment ?? null;
+	}
+
+	/** Whether this device can encrypt secrets at rest (OS keychain available). */
+	get encryptionAvailable(): boolean {
+		const codec = this.secretEnvironment?.codec();
+		return !!codec && codec.canRoundTrip;
 	}
 
 	display(): void {
@@ -159,9 +168,8 @@ export class PiObsidianSettingTab extends PluginSettingTab {
 
 		new Setting(containerEl).setName("Pi agent").setHeading();
 		containerEl.createEl("p", {
-			text: "Prompts, vault content read by tools, and tool results are sent to the configured model provider. API keys are stored in this plugin's Obsidian settings.",
+			text: "Prompts, vault content read by tools, and tool results are sent to the configured model provider. API keys are stored in this plugin's Obsidian settings, encrypted with your operating system's keychain where supported.",
 		});
-
 		this.addCustomEndpointSetting(containerEl);
 		this.addProviderSetting(containerEl);
 		this.addModelSetting(containerEl);
@@ -217,7 +225,7 @@ export class PiObsidianSettingTab extends PluginSettingTab {
 		new Setting(containerEl)
 			.setName("Custom API key")
 			.setDesc(
-				"Sent only to your endpoint as a bearer token. Stored in plaintext inside this vault's config folder — use a restricted, low-limit key.",
+				"Sent only to your endpoint as a bearer token. Encrypted with your operating system's keychain where supported — otherwise stored in plaintext inside the vault config. Use a restricted, low-limit key.",
 			)
 			.addText((text) => {
 				text.inputEl.type = "password";
@@ -336,12 +344,15 @@ export class PiObsidianSettingTab extends PluginSettingTab {
 		const provider = settings.provider;
 		const label = provider === DEFAULT_PROVIDER ? "DeepSeek API key" : `${provider} API key`;
 
-		new Setting(containerEl)
+		const setting = new Setting(containerEl)
 			.setName(label)
 			.setDesc(
-				"Stored in plaintext inside this vault's config folder and sent only to the selected provider. Anyone with vault access (or a sync target) can read it — use a restricted, low-limit key.",
-			)
-			.addText((text) => {
+				"Sent only to the selected provider. Encrypted with your operating system's keychain where supported — otherwise stored in plaintext inside the vault config. Use a restricted, low-limit key.",
+			);
+		if (!this.encryptionAvailable) {
+			setting.setDesc("This device does not support encrypted storage, so API keys are saved as plaintext in the vault config. Use a restricted, low-limit key.");
+		}
+		setting.addText((text) => {
 				text.inputEl.type = "password";
 				text.setPlaceholder("Enter API key");
 				text.setValue(settings.providerApiKeys[provider] ?? "");

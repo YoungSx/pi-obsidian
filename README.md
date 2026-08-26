@@ -7,7 +7,8 @@ Pi Obsidian runs a pi-style coding agent inside Obsidian and exposes vault-scope
 - Runs in Obsidian desktop and mobile (`isDesktopOnly: false`).
 - Uses `@earendil-works/pi-agent-core` and `@earendil-works/pi-ai` in the plugin bundle.
 - Defaults to provider `deepseek` and model `deepseek-v4-pro`.
-- Stores API keys in Obsidian plugin data (plaintext — see limitations).
+- Stores API keys in Obsidian plugin data, encrypted with your operating
+  system's keychain where supported (plaintext fallback — see limitations).
 - Stores chat sessions as pi-compatible JSONL files under this plugin directory.
 - Provider requests go through a pluggable transport: Obsidian `requestUrl`
   (CORS-safe, buffered) by default, or native `fetch` (streams, may hit CORS).
@@ -18,9 +19,14 @@ Pi Obsidian runs a pi-style coding agent inside Obsidian and exposes vault-scope
 - **No confirmation before `write`/`edit`.** The agent can modify notes without
   asking. Use it on vaults you are willing to have changed, or review the
   transcript after each turn.
-- **API keys are plaintext.** Keys live unencrypted in
-  `<vault>/.obsidian/plugins/pi-obsidian/data.json` and any vault sync copies
-  them along with your notes. Prefer restricted / low-limit keys.
+- **Key encryption is device-local.** On desktop, keys are encrypted with
+  Electron `safeStorage` (DPAPI on Windows, Keychain on macOS, libsecret on
+  Linux) before they are written to
+  `<vault>/.obsidian/plugins/pi-obsidian/data.json`. The ciphertext only
+  decodes on the machine whose keychain produced it, so vault sync does not
+  carry usable keys to other devices — re-enter the key once per device. On
+  mobile, and on desktops without a keyring service, keys fall back to
+  plaintext in that same file; prefer restricted / low-limit keys.
 - **Streaming depends on transport choice.** The default `requestUrl`
   transport buffers the entire response, so tokens appear all at once. Switch
   to the `fetch` transport in settings for incremental streaming where the
@@ -76,7 +82,7 @@ Each file starts with a pi-compatible version 3 `session` header and then append
 
 Prompts, assistant-visible conversation history, vault content returned by tools, and tool results are sent to the configured model provider. For the MVP that provider is DeepSeek unless you change settings.
 
-API keys are saved with Obsidian plugin data using `loadData()` / `saveData()`. They are stored in plaintext (see limitations) and sent only to the selected provider for model requests. Do not use this plugin with vault content you do not want sent to your selected provider.
+API keys are saved with Obsidian plugin data using `loadData()` / `saveData()`. On desktop they are sealed with Electron `safeStorage` before being written; where that is unavailable (mobile, keyring-less Linux) they remain plaintext (see limitations). Keys are sent only to the selected provider for model requests. Do not use this plugin with vault content you do not want sent to your selected provider.
 
 ## Development
 

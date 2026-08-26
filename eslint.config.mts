@@ -8,6 +8,10 @@ export default tseslint.config(
 		languageOptions: {
 			globals: {
 				...globals.browser,
+				// Electron's safeStorage (API-key encryption) hands back Buffers,
+				// so the desktop path references the Node global inside this
+				// browser-globals config.
+				Buffer: "readonly",
 			},
 			parserOptions: {
 				projectService: {

@@ -1,16 +1,50 @@
 import { Notice, Plugin, type Editor } from "obsidian";
-import { PiObsidianSettingTab, type PiObsidianSettings, normalizeSettings } from "./settings";
+import { PiObsidianSettingTab, normalizeSettings, type PiObsidianSettings } from "./settings";
+import { normalizeCustomEndpoint } from "./customEndpoint";
 import { VIEW_TYPE_PI_CHAT } from "./constants";
+import type { SecretCodec } from "./secrets";
+import {
+	hasPersistedPlaintextSecrets,
+	persistedFormChanged,
+	sealApiKeyMap,
+	sealCustomEndpointApiKey,
+	unsealApiKeyMap,
+	unsealCustomEndpointApiKey,
+} from "./secrets";
+import { createSecretEnvironment, type SecretEnvironment } from "./secretsStore";
 import { ObsidianSessionManager } from "./session/ObsidianSessionManager";
 import { ObsidianAgentService } from "./agent/ObsidianAgentService";
 import { PiChatView } from "./ui/PiChatView";
 import { requestNoteReference, warnIfTruncated } from "./ui/noteReferenceCommand";
+
+/** Persists `settings` with every non-empty secret sealed through `codec`. */
+function sealCurrentSettings(settings: PiObsidianSettings, codec: SecretCodec): Partial<PiObsidianSettings> {
+	const customEndpoint = settings.customEndpoint
+		? { ...settings.customEndpoint, apiKey: sealCustomEndpointApiKey(settings.customEndpoint.apiKey, codec) }
+		: undefined;
+	return {
+		...settings,
+		providerApiKeys: sealApiKeyMap(settings.providerApiKeys, codec),
+		customEndpoint,
+	};
+}
 
 export default class PiObsidianPlugin extends Plugin {
 	// Fresh defaults until `onload` loads persisted data; `normalizeSettings` deep-copies
 	// so the shared DEFAULT_SETTINGS object is never mutated in place.
 	settings: PiObsidianSettings = normalizeSettings(null);
 	private agentService: ObsidianAgentService | null = null;
+	/**
+	 * Resolved once per load. In-memory settings always hold plaintext; this
+	 * codec is what converts to and from the persisted form at the
+	 * `loadData`/`saveData` boundary.
+	 */
+	private secretEnvironment: Promise<SecretEnvironment> | null = null;
+
+	private async requireSecretEnvironment(): Promise<SecretEnvironment> {
+		this.secretEnvironment ??= createSecretEnvironment();
+		return await this.secretEnvironment;
+	}
 
 	async onload(): Promise<void> {
 		await this.loadSettings();
@@ -19,7 +53,7 @@ export default class PiObsidianPlugin extends Plugin {
 		this.agentService = new ObsidianAgentService(this.app, () => this.settings, sessionManager);
 
 		this.registerView(VIEW_TYPE_PI_CHAT, (leaf) => new PiChatView(leaf, this.requireAgentService()));
-		this.addSettingTab(new PiObsidianSettingTab(this.app, this));
+		this.addSettingTab(new PiObsidianSettingTab(this.app, this, await this.requireSecretEnvironment()));
 		this.addCommand({
 			id: "open-pi-chat",
 			name: "Open pi chat",
@@ -104,12 +138,75 @@ export default class PiObsidianPlugin extends Plugin {
 		this.agentService = null;
 	}
 
+	/**
+	 * Loads persisted settings, unsealing stored API keys into the plaintext
+	 * in-memory shape.
+	 *
+	 * Migration is folded in here: a vault whose keys were written by an
+	 * older build (or by a device without encryption) holds plaintext. When
+	 * this device can encrypt, those keys are re-sealed and written back
+	 * immediately so no later save has to remember to do it. The rewrite is
+	 * skipped when anything about the loaded data looks wrong — a failed
+	 * migration keeps the old file rather than destroying it.
+	 */
 	async loadSettings(): Promise<void> {
-		this.settings = normalizeSettings(await this.loadData() as Partial<PiObsidianSettings> | null);
+		const environment = await this.requireSecretEnvironment();
+		const codec = environment.codec();
+		const raw = await this.loadData() as Partial<PiObsidianSettings> | null;
+
+		// Snapshot the persisted secret values verbatim: migration compares
+		// its output against these, not against the normalized settings.
+		const loadedProviderApiKeys: Record<string, string> = {};
+		for (const [provider, value] of Object.entries(raw?.providerApiKeys ?? {})) {
+			if (typeof value === "string") {
+				loadedProviderApiKeys[provider] = value;
+			}
+		}
+		const loadedEndpointApiKey = raw?.customEndpoint && typeof raw.customEndpoint.apiKey === "string" ? raw.customEndpoint.apiKey : "";
+
+		const customEndpoint = normalizeCustomEndpoint(raw?.customEndpoint);
+		const unsealedCustomEndpoint = customEndpoint
+			? { ...customEndpoint, apiKey: unsealCustomEndpointApiKey(loadedEndpointApiKey, codec) }
+			: undefined;
+		this.settings = normalizeSettings({
+			...raw,
+			providerApiKeys: unsealApiKeyMap(loadedProviderApiKeys, codec),
+			customEndpoint: unsealedCustomEndpoint,
+		});
+
+		await this.migratePlaintextSecrets(codec, loadedProviderApiKeys, loadedEndpointApiKey);
+	}
+
+	/**
+	 * Re-seals plaintext secrets when this device can encrypt.
+	 *
+	 * Runs once per load; idempotent because a vault whose secrets are all
+	 * already sealed produces byte-identical persisted values and is left
+	 * alone. Failure keeps the previous data.json — an unreadable keychain
+	 * must never cost the user their key.
+	 */
+	private async migratePlaintextSecrets(
+		codec: SecretCodec,
+		loadedProviderApiKeys: Record<string, string>,
+		loadedEndpointApiKey: string,
+	): Promise<void> {
+		if (!codec.canRoundTrip || !hasPersistedPlaintextSecrets(loadedProviderApiKeys, loadedEndpointApiKey)) {
+			return;
+		}
+		try {
+			const sealed = sealCurrentSettings(this.settings, codec);
+			if (persistedFormChanged(sealed.providerApiKeys ?? {}, sealed.customEndpoint?.apiKey ?? "", loadedProviderApiKeys, loadedEndpointApiKey)) {
+				await this.saveData(sealed);
+			}
+		} catch {
+			// Deliberately swallowed: keeping the old plaintext file beats a
+			// failed write that destroys it. The next load retries.
+		}
 	}
 
 	async saveSettings(): Promise<void> {
-		await this.saveData(this.settings);
+		const environment = await this.requireSecretEnvironment();
+		await this.saveData(sealCurrentSettings(this.settings, environment.codec()));
 		await this.agentService?.refreshConfiguration();
 	}
 
