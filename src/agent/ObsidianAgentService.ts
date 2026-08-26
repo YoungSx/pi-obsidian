@@ -44,6 +44,8 @@ export interface ChatSnapshot {
 	contextFill: ContextFill | null;
 	/** True while a pre-prompt compaction request is in flight (a real LLM call). */
 	isCompacting: boolean;
+	/** Whether the active model target has a credential ready for requests. */
+	isConfigured?: boolean;
 }
 
 type SnapshotListener = (snapshot: ChatSnapshot) => void;
@@ -107,34 +109,37 @@ export class ObsidianAgentService {
 		}
 	}
 
-	async sendPrompt(prompt: string): Promise<void> {
+	async sendPrompt(prompt: string): Promise<boolean> {
 		const trimmedPrompt = prompt.trim();
 		if (!trimmedPrompt) {
-			return;
+			return false;
 		}
 
 		await this.initialize();
 		const agent = this.requireAgent();
 		if (agent.state.isStreaming) {
 			this.setError("The agent is already responding.");
-			return;
+			return false;
 		}
 		if (!this.hasApiKey()) {
 			this.setError(`${describeModelTarget(this.getSettings())} needs an API key in plugin settings before sending a prompt.`);
-			return;
+			return false;
 		}
 
 		await this.refreshConfiguration();
+		let sent = false;
 		try {
 			this.errorMessage = undefined;
 			this.notify();
 			await this.compactContextIfNeeded(agent);
 			await agent.prompt(trimmedPrompt);
+			sent = true;
 		} catch (error) {
 			this.errorMessage = error instanceof Error ? error.message : String(error);
 		} finally {
 			this.notifySettledState();
 		}
+		return sent;
 	}
 
 	abort(): void {
@@ -283,14 +288,15 @@ export class ObsidianAgentService {
 		const settings = this.getSettings();
 		const agent = this.agent;
 		const messages = agent?.state.messages ?? [];
+		const model = getSelectedModel(settings);
 		return {
 			messages,
 			streamingMessage: agent?.state.streamingMessage,
 			isStreaming: agent?.state.isStreaming ?? false,
 			pendingToolCalls: [...(agent?.state.pendingToolCalls ?? new Set<string>())],
 			errorMessage: this.errorMessage ?? agent?.state.errorMessage,
-			provider: settings.provider,
-			modelId: settings.modelId,
+			provider: model.provider,
+			modelId: model.id,
 			thinkingLevel: getPreferredThinkingLevel(settings),
 			session: this.sessionInfo,
 			sessionRevision: this.sessionRevision,
@@ -302,6 +308,7 @@ export class ObsidianAgentService {
 				agent?.state.model.contextWindow ?? getSelectedModel(settings).contextWindow,
 			),
 			isCompacting: this.isCompacting,
+			isConfigured: this.hasApiKey(),
 		};
 	}
 

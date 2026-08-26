@@ -1,9 +1,12 @@
 import React, { useEffect, useRef } from "react";
+import { IconButton } from "./ObsidianIcon";
 import { isSendShortcut } from "./keyboard";
 
 interface ChatComposerProps {
 	input: string;
 	isStreaming: boolean;
+	isCompacting: boolean;
+	isInitializing: boolean;
 	onInputChange: (value: string) => void;
 	onSend: () => void;
 	onAbort: () => void;
@@ -11,9 +14,19 @@ interface ChatComposerProps {
 	onFocusRequested?: (focus: (() => void) | null) => void;
 }
 
-export function ChatComposer({ input, isStreaming, onInputChange, onSend, onAbort, onFocusRequested }: ChatComposerProps): React.JSX.Element {
+export function ChatComposer({
+	input,
+	isStreaming,
+	isCompacting,
+	isInitializing,
+	onInputChange,
+	onSend,
+	onAbort,
+	onFocusRequested,
+}: ChatComposerProps): React.JSX.Element {
 	const textareaRef = useRef<HTMLTextAreaElement | null>(null);
 	const onSendRef = useRef<() => void>(onSend);
+	const isBusy = isStreaming || isCompacting;
 
 	onSendRef.current = onSend;
 
@@ -48,8 +61,6 @@ export function ChatComposer({ input, isStreaming, onInputChange, onSend, onAbor
 				return;
 			}
 			textarea.focus();
-			// A prefill may have appended to the draft; the caret must follow it or
-			// the user's next keystroke would land before the quoted text.
 			const end = textarea.value.length;
 			textarea.setSelectionRange(end, end);
 		});
@@ -69,26 +80,38 @@ export function ChatComposer({ input, isStreaming, onInputChange, onSend, onAbor
 
 	return (
 		<footer className="pi-chat__composer">
-			<textarea
-				ref={textareaRef}
-				value={input}
-				onChange={(event) => onInputChange(event.currentTarget.value)}
-				onKeyDown={handleKeyDown}
-				placeholder="Ask Pi to inspect or edit your vault…"
-				aria-label="Message Pi"
-				rows={4}
-			/>
-			<div className="pi-chat__composer-actions">
-				<span id="pi-chat-send-hint">Press Ctrl/⌘+Enter to send.</span>
-				{isStreaming ? (
-					<button type="button" onClick={onAbort} aria-describedby="pi-chat-send-hint" aria-label="Stop response">
-						Stop
-					</button>
-				) : (
-					<button type="button" onClick={onSend} disabled={!input.trim()} aria-describedby="pi-chat-send-hint">
-						Send
-					</button>
-				)}
+			<div className="pi-chat__composer-shell">
+				<textarea
+					ref={textareaRef}
+					value={input}
+					onChange={(event) => onInputChange(event.currentTarget.value)}
+					onKeyDown={handleKeyDown}
+					placeholder="Ask Pi…"
+					aria-label="Message Pi"
+					aria-keyshortcuts="Control+Enter Meta+Enter"
+					rows={2}
+				/>
+				<div className="pi-chat__composer-bar">
+					<span className="pi-chat__composer-status" role="status" aria-live="polite">
+						{isInitializing ? "Opening chat…" : isCompacting ? "Preparing context…" : isStreaming ? "Pi is responding…" : ""}
+					</span>
+					{isBusy ? (
+						<IconButton
+							icon="square"
+							label={isCompacting ? "Stop compaction" : "Stop response"}
+							onClick={onAbort}
+							className="pi-chat__stop-button"
+						/>
+					) : (
+						<IconButton
+							icon="send"
+							label="Send message"
+							onClick={onSend}
+							disabled={isInitializing || !input.trim()}
+							className="pi-chat__send-button mod-cta"
+						/>
+					)}
+				</div>
 			</div>
 		</footer>
 	);

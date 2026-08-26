@@ -1,34 +1,59 @@
+/* Pi Obsidian — chat panel.
+ *
+ * Every colour, radius, spacing and font comes from Obsidian's semantic CSS
+ * variables, so the panel inherits whatever theme (light/dark/community) the
+ * vault runs. No hardcoded hex/rgb anywhere; the only custom property below is
+ * `--pi-context-ratio`, an inline state value, not a theme token. */
+
 .pi-chat-view {
 	height: 100%;
 	padding: 0;
 }
 
+/* --- shell --- */
+
 .pi-chat {
 	display: flex;
 	flex-direction: column;
 	height: 100%;
-	gap: 0.75rem;
-	padding: 0.75rem;
+	gap: var(--size-4-2);
+	padding: var(--size-4-2);
 }
 
-/* --- header --- */
+/* --- chrome: header + status bar --- */
 
 /*
- * The leaf tab already names the view ("Pi chat"), so the header carries only
- * live status: model line, context meter, session spend and the active chat's
- * label. Everything here is metadata; the meter is the one element allowed to
- * raise its voice (state colour).
+ * The leaf tab already names the view ("Pi chat"), so the chrome carries only
+ * live metadata: who you are talking to, how full the context is, and the
+ * actions that steer the session. Two stacked rows so a narrow leaf never
+ * forces the title and the buttons to fight for one line.
  */
-.pi-chat__header {
+.pi-chat__chrome {
 	display: flex;
-	align-items: flex-start;
-	justify-content: space-between;
-	gap: 0.75rem;
+	flex-direction: column;
+	gap: var(--size-4-1);
+	flex-shrink: 0;
 }
 
-.pi-chat__header-info {
-	flex: 1;
+.pi-chat__header {
+	align-items: flex-start;
+	display: flex;
+	gap: var(--size-4-2);
+	justify-content: space-between;
+}
+
+.pi-chat__identity {
+	flex: 1 1 auto;
 	min-width: 0;
+}
+
+.pi-chat__title {
+	font-size: var(--font-ui-medium);
+	font-weight: var(--font-semibold);
+	margin: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
 }
 
 /* Provider/model strings can be long ("openrouter/anthropic/…"); wrap instead
@@ -36,22 +61,49 @@
 .pi-chat__model {
 	color: var(--text-muted);
 	font-size: var(--font-ui-smaller);
-	margin: 0;
+	margin: var(--size-4-1) 0 0;
 	overflow-wrap: anywhere;
 }
 
-.pi-chat__session,
-.pi-chat__usage {
-	color: var(--text-faint);
-	font-size: var(--font-ui-smaller);
-	margin: 0.15rem 0 0;
-	word-break: break-all;
+.pi-chat__header-actions {
+	align-items: center;
+	display: flex;
+	flex-shrink: 0;
+	flex-wrap: wrap;
+	gap: var(--size-4-1);
+	justify-content: flex-end;
 }
 
-.pi-chat__composer-actions,
-.pi-chat__empty {
+/* Native Obsidian icon button — rides on `clickable-icon` so hover/focus/
+ * disabled states come from the theme, not from us. We only enforce the
+ * 44px touch floor and a focus ring for keyboard users. */
+.pi-chat__icon-button {
+	align-items: center;
+	border-radius: var(--radius-s);
+	display: inline-flex;
+	height: var(--size-4-4);
+	justify-content: center;
+	min-width: var(--size-4-4);
+}
+
+.pi-chat__icon-button:focus-visible {
+	outline: 2px solid var(--background-modifier-border-focus);
+	outline-offset: 1px;
+}
+
+.pi-chat__icon-button:disabled {
+	opacity: var(--icon-opacity);
+}
+
+/* --- status bar --- */
+
+.pi-chat__statusbar {
+	align-items: center;
 	color: var(--text-muted);
+	display: flex;
+	flex-wrap: wrap;
 	font-size: var(--font-ui-smaller);
+	gap: var(--size-4-2);
 }
 
 /* --- context-window indicator --- */
@@ -59,18 +111,21 @@
 .pi-chat__context {
 	align-items: center;
 	display: flex;
-	gap: 0.45rem;
-	margin: 0.15rem 0 0;
+	gap: var(--size-4-1);
+}
+
+.pi-chat__context-label {
+	color: var(--text-muted);
 }
 
 /* Thin occupancy bar; the fill colour carries the ok/warn/near state. */
 .pi-chat__context-bar {
 	background: var(--background-modifier-border);
-	border-radius: 3px;
+	border-radius: var(--radius-s);
 	flex-shrink: 0;
 	height: 4px;
 	overflow: hidden;
-	width: 5rem;
+	width: 4.5rem;
 }
 
 /*
@@ -82,7 +137,10 @@
 	background: var(--text-muted);
 	display: block;
 	height: 100%;
+	/* `width` is driven by the inline --pi-context-ratio; transition only the
+	 * visual, not layout, and skip it entirely under reduced-motion. */
 	transition: width 0.2s ease-out;
+	width: calc(var(--pi-context-ratio, 0) * 100%);
 }
 
 .pi-chat__context--warn .pi-chat__context-bar-fill {
@@ -93,24 +151,44 @@
 	background: var(--text-error);
 }
 
-/* Plain var(): a fallback argument only fires when the variable is undefined,
-   and painting a warning state in accent blue is wrong on every theme that
-   defines the variable. */
+.pi-chat__context-value {
+	font-variant-numeric: tabular-nums;
+}
+
+/* State word is mirrored from the bar colour so the level is legible without
+ * sight — required by the a11y contract, not cosmetic. */
+.pi-chat__context-state {
+	color: var(--text-muted);
+}
+
 .pi-chat__context--warn {
+	color: var(--text-warning);
+}
+
+.pi-chat__context--warn .pi-chat__context-state {
 	color: var(--text-warning);
 }
 
 .pi-chat__context--near {
 	color: var(--text-error);
-	font-weight: 600;
+	font-weight: var(--font-semibold);
+}
+
+.pi-chat__context--near .pi-chat__context-state {
+	color: var(--text-error);
+}
+
+.pi-chat__usage {
+	color: var(--text-faint);
+	font-variant-numeric: tabular-nums;
 }
 
 /* Shown while the summarization request is in flight (it is a real LLM call). */
 .pi-chat__compacting {
-	animation: pi-compaction-pulse 1.2s ease-in-out infinite;
+	align-items: center;
 	color: var(--text-faint);
-	font-size: var(--font-ui-smaller);
-	margin-top: -0.35rem;
+	display: inline-flex;
+	gap: var(--size-4-1);
 }
 
 @keyframes pi-compaction-pulse {
@@ -125,15 +203,57 @@
 	}
 }
 
+.pi-chat__compacting .pi-chat__spinner,
+.pi-chat__compacting svg {
+	animation: pi-compaction-pulse 1.2s ease-in-out infinite;
+}
+
 @media (prefers-reduced-motion: reduce) {
 
-	.pi-chat__compacting {
+	.pi-chat__compacting .pi-chat__spinner,
+	.pi-chat__compacting svg {
 		animation: none;
 	}
 
 	.pi-chat__context-bar-fill {
 		transition: none;
 	}
+}
+
+/* --- error banner --- */
+
+.pi-chat__error {
+	background: var(--background-modifier-error);
+	border: 1px solid var(--text-error);
+	border-radius: var(--radius-s);
+	color: var(--text-error);
+	padding: var(--size-4-2);
+}
+
+/* --- transcript --- */
+
+.pi-chat__transcript {
+	display: flex;
+	flex: 1 1 auto;
+	flex-direction: column;
+	min-height: 0;
+	position: relative;
+}
+
+.pi-chat__messages {
+	display: flex;
+	flex: 1 1 auto;
+	flex-direction: column;
+	gap: var(--size-4-2);
+	overflow-y: auto;
+	/* Focusable log: keyboard users can scroll the transcript without tabbing
+	 * through every message. The outline stays on the theme's focus colour. */
+	scrollbar-gutter: stable;
+}
+
+.pi-chat__messages:focus-visible {
+	outline: 2px solid var(--background-modifier-border-focus);
+	outline-offset: -2px;
 }
 
 /* --- compaction divider --- */
@@ -146,76 +266,57 @@
 	border-top: 1px dashed var(--background-modifier-border-hover);
 	color: var(--text-muted);
 	font-size: var(--font-ui-smaller);
-	margin: 0.75rem 0;
-	padding-top: 0.6rem;
+	margin: var(--size-4-2) 0;
+	padding-top: var(--size-4-2);
 }
 
 .pi-chat__compaction-heading {
-	font-weight: 600;
-	margin-bottom: 0.25rem;
+	font-weight: var(--font-semibold);
+	margin-bottom: var(--size-4-1);
 }
 
-.pi-chat__compaction .pi-chat__text {
+.pi-chat__compaction pre {
 	font-size: var(--font-ui-smaller);
 	max-height: 12rem;
 	overflow-y: auto;
-}
-
-.pi-chat__header-actions {
-	display: flex;
-	align-items: center;
-	flex-shrink: 0;
-	gap: 0.4rem;
-	/* Wrap rather than overflow on narrow phone panes. */
-	flex-wrap: wrap;
-	justify-content: flex-end;
-}
-
-.pi-chat__error {
-	border: 1px solid var(--text-error);
-	border-radius: var(--radius-s);
-	color: var(--text-error);
-	padding: 0.5rem;
-}
-
-/* Screen-reader-only annotation; extends a visible label instead of replacing
-   it (keeps the accessible name a superset of the visible text). */
-.pi-chat__visually-hidden {
-	border: 0;
-	clip-path: inset(50%);
-	height: 1px;
-	overflow: hidden;
-	position: absolute;
-	white-space: nowrap;
-	width: 1px;
+	white-space: pre-wrap;
 }
 
 /* --- messages --- */
 
-.pi-chat__messages {
-	display: flex;
-	flex: 1;
-	flex-direction: column;
-	gap: 0.75rem;
-	overflow-y: auto;
-}
-
 .pi-chat__message {
 	border: 1px solid var(--background-modifier-border);
 	border-radius: var(--radius-m);
-	padding: 0.6rem;
+	padding: var(--size-4-2);
 }
 
 .pi-chat__message--user {
+	align-self: flex-end;
 	background: var(--background-secondary);
+	max-width: 90%;
+}
+
+.pi-chat__message--assistant {
+	background: var(--background-primary);
 }
 
 .pi-chat__message-role {
+	align-items: center;
 	color: var(--text-muted);
+	display: flex;
 	font-size: var(--font-ui-smaller);
-	font-weight: 600;
-	margin-bottom: 0.35rem;
+	font-weight: var(--font-semibold);
+	gap: var(--size-4-1);
+	margin-bottom: var(--size-4-1);
 	text-transform: uppercase;
+}
+
+.pi-chat__message-content > :first-child {
+	margin-top: 0;
+}
+
+.pi-chat__message-content > :last-child {
+	margin-bottom: 0;
 }
 
 .pi-chat__text {
@@ -246,18 +347,31 @@
 	margin-block: 0.4em;
 }
 
+/* --- tool trace --- */
+
 .pi-chat__thinking,
 .pi-chat__tool-call,
-.pi-chat__tool-result,
-.pi-chat__tool-status {
+.pi-chat__tool-result {
 	background: var(--background-secondary);
 	border-radius: var(--radius-s);
-	margin-top: 0.4rem;
-	padding: 0.45rem;
+	margin-top: var(--size-4-1);
+	padding: var(--size-4-2);
 }
 
 .pi-chat__tool-result--error {
 	border: 1px solid var(--text-error);
+}
+
+.pi-chat__tool-status {
+	align-items: center;
+	background: var(--background-secondary);
+	border-radius: var(--radius-s);
+	color: var(--text-muted);
+	display: inline-flex;
+	font-size: var(--font-ui-smaller);
+	gap: var(--size-4-1);
+	margin-top: var(--size-4-2);
+	padding: var(--size-4-2);
 }
 
 /* Collapsed diff attached to write/edit tool results. */
@@ -271,30 +385,169 @@
 
 .pi-chat__diff[open] > summary {
 	color: var(--text-muted);
-	margin-bottom: 0.25rem;
+	margin-bottom: var(--size-4-1);
 }
 
 .pi-chat__tool-call pre {
 	white-space: pre-wrap;
 }
 
+/* --- "jump to latest" button --- */
+
+.pi-chat__latest {
+	align-self: center;
+	background: var(--background-secondary);
+	border: 1px solid var(--background-modifier-border);
+	border-radius: var(--radius-m);
+	box-shadow: var(--shadow-s);
+	color: var(--text-normal);
+	font-size: var(--font-ui-smaller);
+	margin-top: calc(var(--size-4-1) * -1);
+	padding: var(--size-4-1) var(--size-4-2);
+	position: sticky;
+	bottom: var(--size-4-1);
+}
+
+.pi-chat__latest:hover {
+	background: var(--background-modifier-hover);
+}
+
+/* --- empty state --- */
+
+.pi-chat__empty {
+	align-items: center;
+	color: var(--text-muted);
+	display: flex;
+	flex: 1 1 auto;
+	flex-direction: column;
+	font-size: var(--font-ui-smaller);
+	gap: var(--size-4-2);
+	justify-content: center;
+	padding: var(--size-4-4);
+	text-align: center;
+}
+
+.pi-chat__empty-icon {
+	--icon-size: var(--size-4-6);
+	color: var(--text-faint);
+}
+
+.pi-chat__empty-title {
+	color: var(--text-normal);
+	font-size: var(--font-ui-small);
+	font-weight: var(--font-semibold);
+	margin: 0;
+}
+
+.pi-chat__spinner {
+	animation: pi-spin 1.1s linear infinite;
+}
+
+@keyframes pi-spin {
+	to {
+		transform: rotate(360deg);
+	}
+}
+
 /* --- composer --- */
 
 .pi-chat__composer {
+	border-top: 1px solid var(--background-modifier-border);
+	flex-shrink: 0;
+	padding-top: var(--size-4-2);
+}
+
+.pi-chat__composer-shell {
+	background: var(--background-secondary);
+	border: 1px solid var(--background-modifier-border);
+	border-radius: var(--radius-m);
 	display: flex;
 	flex-direction: column;
-	gap: 0.5rem;
+	gap: var(--size-4-2);
+	padding: var(--size-4-2);
+}
+
+.pi-chat__composer-shell:focus-within {
+	border-color: var(--background-modifier-border-focus);
 }
 
 .pi-chat__composer textarea {
-	min-height: 6rem;
+	background: var(--background-primary);
+	border: none;
+	border-radius: var(--radius-s);
+	color: var(--text-normal);
+	font-family: var(--font-interface);
+	font-size: var(--font-ui-small);
+	min-height: 5rem;
 	resize: vertical;
 	width: 100%;
 }
 
-.pi-chat__composer-actions {
-	display: flex;
+.pi-chat__composer textarea:focus {
+	outline: 2px solid var(--background-modifier-border-focus);
+	outline-offset: -1px;
+}
+
+.pi-chat__composer-bar {
 	align-items: center;
+	display: flex;
+	gap: var(--size-4-2);
 	justify-content: space-between;
-	gap: 0.5rem;
+}
+
+.pi-chat__composer-status {
+	color: var(--text-muted);
+	flex: 1 1 auto;
+	font-size: var(--font-ui-smaller);
+	min-width: 0;
+}
+
+/* Send rides on Obsidian's `mod-cta` (call-to-action) accent; Stop is a plain
+ * icon button so it never competes visually with Send. */
+.pi-chat__send-button.mod-cta {
+	height: var(--size-4-4);
+	min-width: var(--size-4-4);
+}
+
+.pi-chat__stop-button {
+	color: var(--text-error);
+}
+
+/* --- screen-reader-only --- */
+
+.pi-chat__visually-hidden {
+	border: 0;
+	clip-path: inset(50%);
+	height: 1px;
+	overflow: hidden;
+	position: absolute;
+	white-space: nowrap;
+	width: 1px;
+}
+
+/* --- narrow leaf / mobile --- */
+
+/*
+ * Below ~32rem the identity and actions stop fitting on one row. Drop the
+ * model line into the status bar, let the action toolbar wrap below the title,
+ * and stop constraining user messages to 90% so they don't clip on phones.
+ */
+@media (max-width: 32rem) {
+
+	.pi-chat__header {
+		flex-wrap: wrap;
+	}
+
+	.pi-chat__header-actions {
+		flex-basis: 100%;
+		justify-content: flex-start;
+	}
+
+	.pi-chat__message--user {
+		max-width: 100%;
+	}
+
+	.pi-chat__context-bar {
+		width: 3rem;
+	}
 }

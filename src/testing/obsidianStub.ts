@@ -69,6 +69,13 @@ const obsidianStub = {
 	},
 	Plugin: class Plugin {},
 	Modal: class Modal {},
+	Menu: class Menu {
+		addItem(): this {
+			return this;
+		}
+		showAtMouseEvent(): void {}
+		showAtPosition(): void {}
+	},
 	FuzzySuggestModal: class FuzzySuggestModal {},
 	PluginSettingTab: class PluginSettingTab {},
 	Setting: class Setting {},
@@ -78,6 +85,7 @@ const obsidianStub = {
 	TFolder: class TFolder {},
 	Platform: platformMock,
 	requestUrl: async (params: unknown): Promise<unknown> => await requestUrlMock(params),
+	setIcon: () => undefined,
 };
 
 /**

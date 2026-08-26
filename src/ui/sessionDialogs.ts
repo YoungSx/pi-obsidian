@@ -6,13 +6,20 @@ export interface SessionPickerActions {
 	onDelete: (session: ActiveSessionInfo) => void;
 }
 
+export function sessionTitle(session: ActiveSessionInfo | undefined): string {
+	if (!session) {
+		return "New chat";
+	}
+	return session.name?.trim() || session.firstMessage.trim().split("\n")[0] || "Untitled chat";
+}
+
 /**
  * Prefers an explicit name, then the opening question, then the timestamp. Lives
  * beside the dialogs because the header, the picker rows and the delete
  * confirmation all have to name a session the same way.
  */
 export function describeSession(session: ActiveSessionInfo): string {
-	const label = session.name?.trim() || session.firstMessage.trim().split("\n")[0] || "Untitled chat";
+	const label = sessionTitle(session);
 	const summary = label.length > 60 ? `${label.slice(0, 60)}…` : label;
 	return `${summary} · ${new Date(session.updatedAt).toLocaleString()}`;
 }
@@ -91,7 +98,7 @@ class SessionNameModal extends Modal {
 						this.name = value;
 					});
 				text.inputEl.addEventListener("keydown", (event) => {
-					if (event.key !== "Enter") {
+					if (event.key !== "Enter" || event.isComposing) {
 						return;
 					}
 					event.preventDefault();

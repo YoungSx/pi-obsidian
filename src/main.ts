@@ -75,7 +75,7 @@ export default class PiObsidianPlugin extends Plugin {
 			// must stay behind the `!checking` guard or merely opening the palette fires it.
 			checkCallback: (checking) => {
 				const service = this.agentService;
-				if (!service?.getSnapshot().isStreaming) {
+				if (!service || (service.getSnapshot().isStreaming === false && !service.getSnapshot().isCompacting)) {
 					return false;
 				}
 				if (!checking) {

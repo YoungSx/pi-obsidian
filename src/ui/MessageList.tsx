@@ -1,15 +1,18 @@
-import React from "react";
+import React, { useEffect, useRef, useState } from "react";
 import type { AgentMessage, CompactionSummaryMessage } from "@earendil-works/pi-agent-core";
 import type { AssistantMessage, ToolResultMessage, UserMessage } from "@earendil-works/pi-ai";
 import type { App, Component } from "obsidian";
 import type { TextBlockKind } from "./markdownPolicy";
 import { MarkdownText } from "./MarkdownText";
+import { ObsidianIcon } from "./ObsidianIcon";
 
 export interface MessageListProps {
 	messages: AgentMessage[];
 	/** True while the agent turn is in flight; the last message is the streaming one. */
 	isStreaming: boolean;
 	pendingToolCalls: string[];
+	isInitializing?: boolean;
+	isConfigured?: boolean;
 	/** Render context for `MarkdownRenderer.render`; supplied by the view. */
 	app: App;
 	component: Component;
@@ -32,30 +35,111 @@ function streamingIndex(isStreaming: boolean, messageCount: number): number | nu
 	return messageCount - 1;
 }
 
-export function MessageList({ messages, isStreaming, pendingToolCalls, app, component, sourcePath }: MessageListProps): React.JSX.Element {
+export function MessageList({
+	messages,
+	isStreaming,
+	pendingToolCalls,
+	isInitializing = false,
+	isConfigured = true,
+	app,
+	component,
+	sourcePath,
+}: MessageListProps): React.JSX.Element {
 	const context: MessageContext = { app, component, sourcePath };
 	const activeIndex = streamingIndex(isStreaming, messages.length);
+	const transcriptRef = useRef<HTMLElement | null>(null);
+	const shouldFollowRef = useRef(true);
+	const [isAtLatest, setIsAtLatest] = useState(true);
+
+	useEffect(() => {
+		const transcript = transcriptRef.current;
+		if (!transcript || !shouldFollowRef.current) {
+			return;
+		}
+		const frame = window.requestAnimationFrame(() => {
+			transcript.scrollTop = transcript.scrollHeight;
+		});
+		return () => window.cancelAnimationFrame(frame);
+	}, [messages, pendingToolCalls, isStreaming]);
+
+	const updateFollowState = (): void => {
+		const transcript = transcriptRef.current;
+		if (!transcript) {
+			return;
+		}
+		const distanceFromBottom = transcript.scrollHeight - transcript.scrollTop - transcript.clientHeight;
+		const atLatest = distanceFromBottom < 72;
+		shouldFollowRef.current = atLatest;
+		setIsAtLatest(atLatest);
+	};
+
+	const scrollToLatest = (): void => {
+		const transcript = transcriptRef.current;
+		if (!transcript) {
+			return;
+		}
+		shouldFollowRef.current = true;
+		setIsAtLatest(true);
+		transcript.scrollTo({ top: transcript.scrollHeight, behavior: "smooth" });
+	};
+
 	return (
-		<main className="pi-chat__messages">
-			{messages.length === 0 ? (
-				<EmptyState />
-			) : (
-				messages.map((message, index) => <MessageRow key={index} message={message} isStreaming={index === activeIndex} renderContext={context} />)
-			)}
-			{pendingToolCalls.length > 0 ? (
-				<div aria-label="Tools running" className="pi-chat__tool-status" role="status">
-					Running tools: {pendingToolCalls.join(", ")}
-				</div>
+		<div className="pi-chat__transcript">
+			<main
+				ref={transcriptRef}
+				className="pi-chat__messages"
+				role="log"
+				aria-label="Conversation"
+				aria-live="polite"
+				aria-relevant="additions text"
+				aria-busy={isStreaming || isInitializing}
+				tabIndex={0}
+				onScroll={updateFollowState}
+			>
+				{messages.length === 0 ? (
+					<EmptyState isInitializing={isInitializing} isConfigured={isConfigured} />
+				) : (
+					messages.map((message, index) => <MessageRow key={index} message={message} isStreaming={index === activeIndex} renderContext={context} />)
+				)}
+				{pendingToolCalls.length > 0 ? (
+					<div aria-label="Tools running" className="pi-chat__tool-status" role="status">
+						<ObsidianIcon name="loader-circle" />
+						Running tools: {pendingToolCalls.join(", ")}
+					</div>
+				) : null}
+			</main>
+			{!isAtLatest ? (
+				<button type="button" className="pi-chat__latest" onClick={scrollToLatest}>
+					<ObsidianIcon name="arrow-down" />
+					Latest
+				</button>
 			) : null}
-		</main>
+		</div>
 	);
 }
 
-function EmptyState(): React.JSX.Element {
+function EmptyState({ isInitializing, isConfigured }: { isInitializing: boolean; isConfigured: boolean }): React.JSX.Element {
+	if (isInitializing) {
+		return (
+			<div className="pi-chat__empty" role="status">
+				<ObsidianIcon name="loader-circle" className="pi-chat__empty-icon pi-chat__spinner" />
+				<p>Opening chat…</p>
+			</div>
+		);
+	}
+	if (!isConfigured) {
+		return (
+			<div className="pi-chat__empty">
+				<ObsidianIcon name="key-round" className="pi-chat__empty-icon" />
+				<p className="pi-chat__empty-title">Connect a model to start</p>
+				<p>Add an API key in <strong>Settings → Pi Obsidian</strong>.</p>
+			</div>
+		);
+	}
 	return (
 		<div className="pi-chat__empty">
-			<p>Ask Pi about your active note or vault.</p>
-			<p>Pi can read and edit notes, and search the vault with its built-in tools.</p>
+			<ObsidianIcon name="message-circle" className="pi-chat__empty-icon" />
+			<p className="pi-chat__empty-title">Start a conversation</p>
 		</div>
 	);
 }
@@ -73,8 +157,11 @@ function MessageRow({ message, isStreaming, renderContext }: MessageRowProps): R
 		return <CompactionDivider message={message} renderContext={renderContext} />;
 	}
 	return (
-		<article className={`pi-chat__message pi-chat__message--${message.role}`}>
-			<div className="pi-chat__message-role">{roleLabel(message.role)}</div>
+		<article className={`pi-chat__message pi-chat__message--${message.role}`} aria-busy={isStreaming}>
+			<div className="pi-chat__message-role">
+				<ObsidianIcon name={roleIcon(message.role)} />
+				{roleLabel(message.role)}
+			</div>
 			<div className="pi-chat__message-content">{renderMessageContent(message, { isStreaming, renderContext })}</div>
 		</article>
 	);
@@ -86,10 +173,30 @@ function MessageRow({ message, isStreaming, renderContext }: MessageRowProps): R
  * the CSS uppercase transform keeps its look.
  */
 function roleLabel(role: string): string {
-	if (role === "toolResult") {
-		return "tool result";
+	switch (role) {
+		case "user":
+			return "user";
+		case "assistant":
+			return "Pi";
+		case "toolResult":
+			return "tool result";
+		case "bashExecution":
+			return "command";
+		case "branchSummary":
+			return "summary";
+		default:
+			return "Pi";
 	}
-	return role;
+}
+
+function roleIcon(role: string): string {
+	if (role === "user") {
+		return "user";
+	}
+	if (role === "toolResult" || role === "bashExecution") {
+		return "wrench";
+	}
+	return "sparkles";
 }
 
 /**
