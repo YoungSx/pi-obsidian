@@ -1,0 +1,90 @@
+import type { AgentHarnessTool, ExecutionEnv, ExecutionToolContext } from "@earendil-works/pi-agent-core";
+import type { AgentTool, AgentToolUpdateCallback, AgentToolResult } from "@earendil-works/pi-agent-core";
+import type { TSchema } from "typebox";
+import { VaultExecutionEnv } from "./VaultExecutionEnv";
+import type { App } from "obsidian";
+
+/**
+ * Spike bridge for issue #16 between pi's two tool shapes.
+ *
+ * pi ships two execute contracts:
+ * - {@link AgentTool} (what the low-level `Agent` runs): four parameters.
+ * - {@link AgentHarnessTool} (what `createReadTool` / `createWriteTool` /
+ *   `createEditTool` produce): five parameters — the extra trailing
+ *   `context` carries the turn's `{ env }`.
+ *
+ * The low-level agent loop (`agent-loop.js`, `executePreparedToolCall`) always
+ * calls `execute(id, args, signal, onUpdate)`; there is no hook to inject a
+ * context. Closing over the environment is therefore the whole adaptation:
+ * {@link adaptHarnessTool} binds a fixed context once and hands back a plain
+ * `AgentTool` the existing `Agent` can register unchanged.
+ */
+
+/** Static context or per-call resolver, mirroring pi's harness source shape. */
+export type HarnessContextSource<TContext> = TContext | (() => TContext | Promise<TContext>);
+
+export interface HarnessToolContextOptions<TContext> {
+	/** Context passed as the fifth `execute` argument. Resolved lazily when a function. */
+	context: HarnessContextSource<TContext>;
+}
+
+/**
+ * Wraps a 5-parameter harness tool as a 4-parameter {@link AgentTool}.
+ *
+ * Everything except `execute` is carried over verbatim (name, label,
+ * description, parameters schema, `prepareArguments`, `executionMode`), so
+ * schema validation and argument repair keep working under the low-level
+ * agent exactly as they do under the harness.
+ */
+export function adaptHarnessTool<TContext extends object | undefined, TParameters extends TSchema = TSchema, TDetails = unknown>(
+	tool: AgentHarnessTool<TContext, TParameters, TDetails>,
+	options: HarnessToolContextOptions<TContext>,
+): AgentTool<TParameters, TDetails> {
+	const source: HarnessContextSource<TContext> = options.context;
+	const resolveContext = async (): Promise<TContext> => {
+		if (typeof source === "function") {
+			return await (source as () => TContext | Promise<TContext>)();
+		}
+		return source;
+	};
+	return {
+		...tool,
+		execute: async (
+			toolCallId: string,
+			params,
+			signal?: AbortSignal,
+			onUpdate?: AgentToolUpdateCallback<TDetails>,
+		): Promise<AgentToolResult<TDetails>> => {
+			const resolved = await resolveContext();
+			return await tool.execute(toolCallId, params, signal, onUpdate, resolved);
+		},
+	};
+}
+
+/**
+ * Builds the `{ env }` context pi's execution tools read, bound to a vault.
+ * Returns the environment too so callers can reuse one instance for several
+ * tools — pi's file mutation queue keys its per-path locks off the env object
+ * identity (`states.get(env)`), so sharing one instance across read/write/edit
+ * is what actually serializes their mutations.
+ */
+export function createVaultHarnessContext(app: App): { env: ExecutionEnv } {
+	return { env: new VaultExecutionEnv(app) };
+}
+
+/** Convenience: adapt all three native execution tools onto one vault env. */
+export function createNativeFileTools(
+	app: App,
+	factories: {
+		read: () => AgentHarnessTool<ExecutionToolContext>;
+		write: () => AgentHarnessTool<ExecutionToolContext>;
+		edit: () => AgentHarnessTool<ExecutionToolContext>;
+	},
+): AgentTool[] {
+	const context = createVaultHarnessContext(app);
+	return [
+		adaptHarnessTool(factories.read(), { context }),
+		adaptHarnessTool(factories.write(), { context }),
+		adaptHarnessTool(factories.edit(), { context }),
+	];
+}
