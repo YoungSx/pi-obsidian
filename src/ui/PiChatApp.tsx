@@ -21,6 +21,8 @@ export function PiChatApp({ service, inputController, component }: PiChatAppProp
 	const [snapshot, setSnapshot] = useState<ChatSnapshot>(() => service.getSnapshot());
 	const [input, setInput] = useState("");
 	const [sessions, setSessions] = useState<ActiveSessionInfo[]>([]);
+	const [isInitializing, setIsInitializing] = useState(true);
+	const [initializationError, setInitializationError] = useState<string>();
 	const sendPromptRef = useRef<() => void>(() => undefined);
 
 	const app = service.getApp();
@@ -30,7 +32,11 @@ export function PiChatApp({ service, inputController, component }: PiChatAppProp
 
 	useEffect(() => {
 		const unsubscribe = service.subscribe(setSnapshot);
-		void service.initialize();
+		void service
+			.initialize()
+			.then(() => setInitializationError(undefined))
+			.catch((error: unknown) => setInitializationError(error instanceof Error ? error.message : String(error)))
+			.finally(() => setIsInitializing(false));
 		return unsubscribe;
 	}, [service]);
 
@@ -57,11 +63,18 @@ export function PiChatApp({ service, inputController, component }: PiChatAppProp
 
 	const sendPrompt = async (): Promise<void> => {
 		const prompt = input.trim();
-		if (!prompt) {
+		if (!prompt || snapshot.isStreaming || snapshot.isCompacting || isInitializing) {
+			return;
+		}
+		if (!snapshot.isConfigured) {
+			await service.sendPrompt(prompt);
 			return;
 		}
 		setInput("");
-		await service.sendPrompt(prompt);
+		const sent = await service.sendPrompt(prompt);
+		if (!sent) {
+			setInput((current) => current || prompt);
+		}
 	};
 
 	sendPromptRef.current = () => {
@@ -103,7 +116,7 @@ export function PiChatApp({ service, inputController, component }: PiChatAppProp
 	}, [inputController]);
 
 	return (
-		<div className="pi-chat">
+		<div className="pi-chat" aria-busy={snapshot.isStreaming || snapshot.isCompacting || isInitializing}>
 			<ChatHeader
 				app={service.getApp()}
 				snapshot={snapshot}
@@ -114,12 +127,18 @@ export function PiChatApp({ service, inputController, component }: PiChatAppProp
 				onDeleteSession={(path) => void service.deleteSession(path)}
 			/>
 
-			{snapshot.errorMessage ? <div className="pi-chat__error">{snapshot.errorMessage}</div> : null}
+			{snapshot.errorMessage || initializationError ? (
+				<div className="pi-chat__error" role="alert" aria-live="assertive" aria-atomic="true">
+					{snapshot.errorMessage ?? initializationError}
+				</div>
+			) : null}
 
 			<MessageList
 				messages={visibleMessages}
 				isStreaming={snapshot.isStreaming}
 				pendingToolCalls={snapshot.pendingToolCalls}
+				isInitializing={isInitializing}
+				isConfigured={snapshot.isConfigured ?? false}
 				app={app}
 				component={component}
 				sourcePath={sourcePath}
@@ -128,6 +147,8 @@ export function PiChatApp({ service, inputController, component }: PiChatAppProp
 			<ChatComposer
 				input={input}
 				isStreaming={snapshot.isStreaming}
+				isCompacting={snapshot.isCompacting}
+				isInitializing={isInitializing}
 				onInputChange={setInput}
 				onSend={() => void sendPrompt()}
 				onAbort={() => service.abort()}
