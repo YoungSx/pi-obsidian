@@ -129,6 +129,20 @@
 	border: 1px solid var(--text-error);
 }
 
+/* Collapsed diff attached to write/edit tool results. */
+.pi-chat__diff > summary {
+	color: var(--text-success);
+	cursor: pointer;
+	font-family: var(--font-monospace);
+	font-size: var(--font-ui-smaller);
+	user-select: none;
+}
+
+.pi-chat__diff[open] > summary {
+	color: var(--text-muted);
+	margin-bottom: 0.25rem;
+}
+
 .pi-chat__tool-call pre {
 	white-space: pre-wrap;
 }

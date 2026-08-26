@@ -142,6 +142,7 @@ function renderAssistantMessage(message: AssistantMessage, args: RenderArgs): Re
 }
 
 function renderToolResultMessage(message: ToolResultMessage, context: MessageContext): React.ReactNode {
+	const diff = extractDiff(message.details);
 	return (
 		<div className={message.isError ? "pi-chat__tool-result pi-chat__tool-result--error" : "pi-chat__tool-result"}>
 			<div>Tool result: <strong>{message.toolName}</strong></div>
@@ -151,7 +152,54 @@ function renderToolResultMessage(message: ToolResultMessage, context: MessageCon
 				}
 				return <div key={index}>[image: {content.mimeType}]</div>;
 			})}
+			{diff ? <DiffDetails diff={diff} context={context} /> : null}
 		</div>
+	);
+}
+
+/**
+ * Pulls the diff a write/edit tool attached to its result details.
+ *
+ * `details` is untyped on `ToolResultMessage`, and every other tool leaves it
+ * without a diff field, so anything that is not a non-empty string is treated
+ * as "no diff to show".
+ */
+function extractDiff(details: unknown): string | null {
+	if (!details || typeof details !== "object") {
+		return null;
+	}
+	const diff = (details as { diff?: unknown }).diff;
+	return typeof diff === "string" && diff.length > 0 ? diff : null;
+}
+
+/**
+ * Collapsed-by-default view of what write/edit changed.
+ *
+ * The summary counts the diff's own `+`/`-` lines so no extra state has to flow
+ * from the tool; the body renders as a ```diff fence inside Obsidian's Markdown
+ * pipeline, which highlights added/removed lines for free.
+ *
+ * The fence travels as kind `"assistant"` because that is the existing
+ * markdown-rendered kind closest to settled, tool-generated text;
+ * `markdownPolicy.ts` belongs to the separate markdown-rendering workstream,
+ * so introducing a dedicated `"diff"` kind there was deliberately avoided.
+ */
+function DiffDetails({ diff, context }: { diff: string; context: MessageContext }): React.JSX.Element {
+	let added = 0;
+	let removed = 0;
+	for (const line of diff.split("\n")) {
+		if (line.startsWith("+")) {
+			added += 1;
+		} else if (line.startsWith("-")) {
+			removed += 1;
+		}
+	}
+	const summary = `+${added} -${removed}`;
+	return (
+		<details className="pi-chat__diff">
+			<summary>{summary}</summary>
+			<Block text={`\`\`\`diff\n${diff}\n\`\`\``} kind="assistant" isStreaming={false} context={context} />
+		</details>
 	);
 }
 
