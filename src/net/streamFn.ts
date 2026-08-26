@@ -1,8 +1,11 @@
 import type { StreamFn } from "@earendil-works/pi-agent-core";
 import { builtinProviders } from "@earendil-works/pi-ai/providers/all";
-import { createModels } from "@earendil-works/pi-ai";
-import type { Api, Model, Models } from "@earendil-works/pi-ai";
+import { openAICompletionsApi } from "@earendil-works/pi-ai/api/openai-completions.lazy";
+import { createModels, createProvider } from "@earendil-works/pi-ai";
+import type { Api, Model, Models, Provider } from "@earendil-works/pi-ai";
 import { createFetchForTransport, type NetworkTransport } from "./obsidianFetch";
+import { CUSTOM_ENDPOINT_PROVIDER } from "../constants";
+import { isCustomEndpointActive, type CustomEndpointConfig } from "../customEndpoint";
 
 /**
  * Provider plumbing for the agent.
@@ -30,13 +33,49 @@ export interface ObsidianModelsBundle {
 	fetch: typeof globalThis.fetch;
 }
 
-/** Builds the `Models` collection with every builtin provider registered. */
-export function createObsidianModels(options: { transport: NetworkTransport }): ObsidianModelsBundle {
+/** Builds the `Models` collection with every builtin provider registered, plus the user's custom endpoint when one is configured. */
+export function createObsidianModels(options: { transport: NetworkTransport; customEndpoint?: CustomEndpointConfig | null }): ObsidianModelsBundle {
 	const models = createModels();
 	for (const provider of builtinProviders()) {
 		models.setProvider(provider);
 	}
+	// A custom endpoint is not in any catalog, so its provider has to be
+	// registered here — `streamSimple` throws "Unknown provider" otherwise.
+	if (isCustomEndpointActive(options.customEndpoint)) {
+		models.setProvider(createCustomEndpointProvider());
+	}
 	return { models, fetch: createFetchForTransport(options.transport) };
+}
+
+/**
+ * Provider backing user-configured OpenAI-compatible endpoints.
+ *
+ * Auth resolves only from the credential pi hands it — the plugin always
+ * passes an explicit key per request (`withRequestDefaults` for compaction,
+ * the agent's `getApiKey` for turns), which pi-ai forwards as a synthetic
+ * api_key credential. Resolving to nothing without one keeps ambient env
+ * vars out of the picture and lets a missing key surface as the plugin's own
+ * settings error rather than a silent env fallback.
+ */
+function createCustomEndpointProvider(): Provider<"openai-completions"> {
+	return createProvider<"openai-completions">({
+		id: CUSTOM_ENDPOINT_PROVIDER,
+		name: "Custom endpoint",
+		auth: {
+			apiKey: {
+				name: "Custom endpoint API key",
+				resolve: async ({ credential }) => {
+					const apiKey = credential?.type === "api_key" ? credential.key?.trim() : undefined;
+					if (!apiKey) {
+						return undefined;
+					}
+					return { auth: { apiKey }, source: "plugin settings" };
+				},
+			},
+		},
+		models: [],
+		api: openAICompletionsApi(),
+	});
 }
 
 /**
@@ -58,7 +97,7 @@ export function withRequestDefaults(bundle: ObsidianModelsBundle, getApiKey: (pr
 }
 
 /** Builds the stream function used by the agent for ordinary turns. */
-export function createObsidianStreamFn(options: { transport: NetworkTransport }): StreamFn {
+export function createObsidianStreamFn(options: { transport: NetworkTransport; customEndpoint?: CustomEndpointConfig | null }): StreamFn {
 	const { models, fetch: fetchImpl } = createObsidianModels(options);
 	return (model, context, streamOptions) =>
 		models.streamSimple(model, context, {

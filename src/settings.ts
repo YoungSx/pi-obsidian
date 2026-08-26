@@ -2,12 +2,23 @@ import { App, PluginSettingTab, Setting } from "obsidian";
 import { getSupportedThinkingLevels } from "@earendil-works/pi-ai";
 import { getBuiltinModels, getBuiltinProviders } from "@earendil-works/pi-ai/providers/all";
 import type { BuiltinProvider } from "@earendil-works/pi-ai/providers/all";
-import type { ModelThinkingLevel } from "@earendil-works/pi-ai";
+import type { Model, ModelThinkingLevel } from "@earendil-works/pi-ai";
 import type PiObsidianPlugin from "./main";
 import { DEFAULT_MODEL_ID, DEFAULT_PROVIDER, DEFAULT_THINKING_LEVEL } from "./constants";
 import type { NetworkTransport } from "./net/obsidianFetch";
+import {
+	buildCustomEndpointModel,
+	DEFAULT_CUSTOM_ENDPOINT_CONTEXT_WINDOW,
+	emptyCustomEndpoint,
+	isCustomEndpointActive,
+	normalizeCustomEndpoint,
+	type CustomEndpointConfig,
+} from "./customEndpoint";
 
 const OFF_THINKING_LEVEL: ModelThinkingLevel = "off";
+
+/** Human-readable form of the default context window, e.g. "128k". */
+const DEFAULT_CUSTOM_ENDPOINT_CONTEXT_WINDOW_LABEL = `${Math.round(DEFAULT_CUSTOM_ENDPOINT_CONTEXT_WINDOW / 1000)}k`;
 
 export interface PiObsidianSettings {
 	provider: string;
@@ -15,6 +26,12 @@ export interface PiObsidianSettings {
 	thinkingLevel: ModelThinkingLevel;
 	providerApiKeys: Record<string, string>;
 	networkTransport: NetworkTransport;
+	/**
+	 * User-supplied OpenAI-compatible endpoint. While active it replaces the
+	 * built-in provider catalog entirely; `undefined` means the user has never
+	 * touched the custom-endpoint form.
+	 */
+	customEndpoint?: CustomEndpointConfig;
 }
 
 export const DEFAULT_SETTINGS: PiObsidianSettings = {
@@ -38,6 +55,9 @@ export function normalizeSettings(data: Partial<PiObsidianSettings> | null | und
 		thinkingLevel,
 		providerApiKeys: { ...providerApiKeys },
 		networkTransport,
+		// Absent in older vaults; normalizeCustomEndpoint drops empty objects so
+		// a cleared form does not resurrect itself as an active endpoint.
+		customEndpoint: normalizeCustomEndpoint(data?.customEndpoint),
 	};
 }
 
@@ -45,7 +65,24 @@ export function getProviderModels(provider: string) {
 	return getBuiltinModels(provider as BuiltinProvider);
 }
 
-export function getSelectedModel(settings: PiObsidianSettings) {
+/** Whether the user's custom endpoint currently serves all model requests. */
+export function isUsingCustomEndpoint(settings: PiObsidianSettings): boolean {
+	return isCustomEndpointActive(settings.customEndpoint);
+}
+
+/**
+ * Resolves the model every request goes out on.
+ *
+ * The custom endpoint wins outright when configured: mixing it with a builtin
+ * catalog entry would mean the dropdown's provider/model pair silently
+ * overrides what the user typed at the top of the panel. Only when no
+ * endpoint is configured do the builtin providers apply.
+ */
+export function getSelectedModel(settings: PiObsidianSettings): Model<string> {
+	if (isUsingCustomEndpoint(settings)) {
+		return buildCustomEndpointModel(settings.customEndpoint as CustomEndpointConfig);
+	}
+
 	const models = getProviderModels(settings.provider);
 	const selectedModel = models.find((model) => model.id === settings.modelId);
 	if (selectedModel) {
@@ -57,6 +94,40 @@ export function getSelectedModel(settings: PiObsidianSettings) {
 		throw new Error(`Default model ${DEFAULT_PROVIDER}/${DEFAULT_MODEL_ID} is not available.`);
 	}
 	return fallbackModel;
+}
+
+/**
+ * API key for the resolved configuration.
+ *
+ * Custom endpoints store their key under {@link CUSTOM_ENDPOINT_PROVIDER}
+ * inside `providerApiKeys`, keeping one lookup path for both modes. Falls back
+ * to the per-provider map only when the endpoint form holds nothing, so a
+ * leftover DeepSeek key is never silently reused against a different server.
+ */
+export function getConfiguredApiKey(settings: PiObsidianSettings): string | undefined {
+	if (isUsingCustomEndpoint(settings)) {
+		const apiKey = settings.customEndpoint?.apiKey.trim();
+		if (apiKey) {
+			return apiKey;
+		}
+		return undefined;
+	}
+	const apiKey = settings.providerApiKeys[settings.provider]?.trim();
+	return apiKey || undefined;
+}
+
+/**
+ * Names whatever requests currently target, for user-facing messages.
+ *
+ * The custom endpoint is described by its model id — "custom endpoint
+ * (my-model)" — rather than the synthetic provider constant, which would mean
+ * nothing to a user reading an error.
+ */
+export function describeModelTarget(settings: PiObsidianSettings): string {
+	if (isUsingCustomEndpoint(settings)) {
+		return `The custom endpoint (${settings.customEndpoint?.modelId})`;
+	}
+	return `${settings.provider}/${settings.modelId}`.replace(/^./, (first) => first.toUpperCase());
 }
 
 export function getSupportedThinkingLevelOptions(settings: PiObsidianSettings): ModelThinkingLevel[] {
@@ -91,6 +162,7 @@ export class PiObsidianSettingTab extends PluginSettingTab {
 			text: "Prompts, vault content read by tools, and tool results are sent to the configured model provider. API keys are stored in this plugin's Obsidian settings.",
 		});
 
+		this.addCustomEndpointSetting(containerEl);
 		this.addProviderSetting(containerEl);
 		this.addModelSetting(containerEl);
 		this.addThinkingSetting(containerEl);
@@ -98,15 +170,92 @@ export class PiObsidianSettingTab extends PluginSettingTab {
 		this.addApiKeySetting(containerEl);
 	}
 
+	/**
+	 * The custom-endpoint form leads the panel because it is what most BYOK
+	 * users arrive to configure, and while it holds a base URL and model it
+	 * outranks everything below: the builtin provider/model dropdowns stay
+	 * visible but disabled so the active configuration is never ambiguous.
+	 */
+	private addCustomEndpointSetting(containerEl: HTMLElement): void {
+		const stored = this.plugin.settings.customEndpoint;
+		const baseUrl = stored?.baseUrl ?? "";
+		const apiKey = stored?.apiKey ?? "";
+		const modelId = stored?.modelId ?? "";
+		const contextWindow = stored?.contextWindow ? String(stored.contextWindow) : "";
+
+		const save = async (patch: Partial<CustomEndpointConfig>): Promise<void> => {
+			const activeBefore = isUsingCustomEndpoint(this.plugin.settings);
+			const current = this.plugin.settings.customEndpoint ?? emptyCustomEndpoint();
+			this.plugin.settings.customEndpoint = normalizeCustomEndpoint({ ...current, ...patch });
+			await this.plugin.saveSettings();
+			// Only activation flips re-render: they disable/annotate the controls
+			// below. Redrawing on every keystroke would steal focus mid-typing.
+			if (isUsingCustomEndpoint(this.plugin.settings) !== activeBefore) {
+				this.display();
+			}
+		};
+
+		new Setting(containerEl)
+			.setName("Custom endpoint")
+			.setClass("pi-custom-endpoint")
+			.setDesc(
+				"OpenAI-compatible base URL, e.g. https://api.example.com/v1 — a gateway, proxy, or self-hosted server. When both this and a model ID are set they replace the providers below.",
+			)
+			.addText((text) => {
+				text.setPlaceholder("https://api.example.com/v1");
+				text.setValue(baseUrl);
+				text.onChange((value) => void save({ baseUrl: value }));
+			});
+		new Setting(containerEl)
+			.setName("Custom model ID")
+			.setDesc("Model identifier exactly as your endpoint expects it, for example `gpt-4o-mini`.")
+			.addText((text) => {
+				text.setPlaceholder("`gpt-4o-mini`");
+				text.setValue(modelId);
+				text.onChange((value) => void save({ modelId: value }));
+			});
+		new Setting(containerEl)
+			.setName("Custom API key")
+			.setDesc(
+				"Sent only to your endpoint as a bearer token. Stored in plaintext inside this vault's config folder — use a restricted, low-limit key.",
+			)
+			.addText((text) => {
+				text.inputEl.type = "password";
+				text.setPlaceholder("Enter API key");
+				text.setValue(apiKey);
+				text.onChange((value) => void save({ apiKey: value }));
+			});
+		new Setting(containerEl)
+			.setName("Context window override")
+			.setDesc(`Tokens of context your endpoint accepts; compaction plans against this. Leave blank for ${DEFAULT_CUSTOM_ENDPOINT_CONTEXT_WINDOW_LABEL}.`)
+			.addText((text) => {
+				text.inputEl.type = "number";
+				text.setPlaceholder(String(DEFAULT_CUSTOM_ENDPOINT_CONTEXT_WINDOW));
+				text.setValue(contextWindow);
+				text.onChange((value) => {
+					const parsed = Number.parseInt(value, 10);
+					void save({ contextWindow: Number.isInteger(parsed) && parsed > 0 ? parsed : undefined });
+				});
+			});
+	}
+
 	private addProviderSetting(containerEl: HTMLElement): void {
+		const customActive = isUsingCustomEndpoint(this.plugin.settings);
+
 		new Setting(containerEl)
 			.setName("Provider")
-			.setDesc("The polished provider for this first version is deepseek. Other providers are listed for future compatibility.")
+			.setDesc(
+				customActive
+					? "Not in use — the custom endpoint above serves all requests. Clear the endpoint base URL or the model ID to re-enable providers."
+					: "The polished provider for this first version is deepseek. Other providers are listed for future compatibility.",
+			)
+			.setClass(customActive ? "pi-provider-inactive" : "pi-provider-active")
 			.addDropdown((dropdown) => {
 				for (const provider of getBuiltinProviders()) {
 					dropdown.addOption(provider, provider);
 				}
 				dropdown.setValue(this.plugin.settings.provider);
+				dropdown.setDisabled(customActive);
 				dropdown.onChange(async (provider) => {
 					this.plugin.settings.provider = provider;
 					this.plugin.settings.modelId = getProviderModels(provider)[0]?.id ?? DEFAULT_MODEL_ID;
@@ -118,14 +267,22 @@ export class PiObsidianSettingTab extends PluginSettingTab {
 	}
 
 	private addModelSetting(containerEl: HTMLElement): void {
+		const customActive = isUsingCustomEndpoint(this.plugin.settings);
+
 		new Setting(containerEl)
 			.setName("Model")
-			.setDesc("The first test path uses deepseek-v4-pro.")
+			.setDesc(
+				customActive
+					? "Not in use — the custom endpoint above serves all requests."
+					: "The first test path uses deepseek-v4-pro.",
+			)
+			.setClass(customActive ? "pi-model-inactive" : "pi-model-active")
 			.addDropdown((dropdown) => {
 				for (const model of getProviderModels(this.plugin.settings.provider)) {
 					dropdown.addOption(model.id, model.name || model.id);
 				}
 				dropdown.setValue(this.plugin.settings.modelId);
+				dropdown.setDisabled(customActive);
 				dropdown.onChange(async (modelId) => {
 					this.plugin.settings.modelId = modelId;
 					this.plugin.settings.thinkingLevel = getPreferredThinkingLevel(this.plugin.settings);
@@ -171,7 +328,12 @@ export class PiObsidianSettingTab extends PluginSettingTab {
 	}
 
 	private addApiKeySetting(containerEl: HTMLElement): void {
-		const provider = this.plugin.settings.provider;
+		const settings = this.plugin.settings;
+		if (isUsingCustomEndpoint(settings)) {
+			return;
+		}
+
+		const provider = settings.provider;
 		const label = provider === DEFAULT_PROVIDER ? "DeepSeek API key" : `${provider} API key`;
 
 		new Setting(containerEl)
@@ -182,7 +344,7 @@ export class PiObsidianSettingTab extends PluginSettingTab {
 			.addText((text) => {
 				text.inputEl.type = "password";
 				text.setPlaceholder("Enter API key");
-				text.setValue(this.plugin.settings.providerApiKeys[provider] ?? "");
+				text.setValue(settings.providerApiKeys[provider] ?? "");
 				text.onChange(async (apiKey) => {
 					this.plugin.settings.providerApiKeys[provider] = apiKey.trim();
 					await this.plugin.saveSettings();

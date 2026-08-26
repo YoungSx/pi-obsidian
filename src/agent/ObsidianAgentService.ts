@@ -5,7 +5,15 @@ import { createObsidianModels, createObsidianStreamFn, withRequestDefaults, type
 import { compactIfNeeded, type CompactResult } from "./compaction";
 import { measureContextFill, sumUsage, type ContextFill, type UsageTotals } from "./usage";
 import { createObsidianTools } from "../tools/obsidianTools";
-import { getPreferredThinkingLevel, getSelectedModel, type PiObsidianSettings } from "../settings";
+import {
+	describeModelTarget,
+	getConfiguredApiKey,
+	getPreferredThinkingLevel,
+	getSelectedModel,
+	isUsingCustomEndpoint,
+	type PiObsidianSettings,
+} from "../settings";
+import { CUSTOM_ENDPOINT_PROVIDER } from "../constants";
 import { ObsidianSessionManager, type ActiveSessionInfo, type SessionDefaults } from "../session/ObsidianSessionManager";
 import { OBSIDIAN_AGENT_SYSTEM_PROMPT } from "./systemPrompt";
 
@@ -58,6 +66,7 @@ export class ObsidianAgentService {
 	private persistedMessages = new WeakSet<object>();
 	private errorMessage: string | undefined;
 	private modelsBundle: ObsidianModelsBundle | null = null;
+	private modelsBundleKey: string | null = null;
 	private lastCompaction: CompactResult | undefined;
 	/** Compaction bills a separate request whose usage is not in the transcript. */
 	private compactionUsage: Usage[] = [];
@@ -111,7 +120,7 @@ export class ObsidianAgentService {
 			return;
 		}
 		if (!this.hasApiKey()) {
-			this.setError(`Add a ${this.getSettings().provider} API key in plugin settings before sending a prompt.`);
+			this.setError(`${describeModelTarget(this.getSettings())} needs an API key in plugin settings before sending a prompt.`);
 			return;
 		}
 
@@ -310,7 +319,9 @@ export class ObsidianAgentService {
 		const settings = this.getSettings();
 		const model = getSelectedModel(settings);
 		const agent = new Agent({
-			streamFn: this.streamFn ?? createObsidianStreamFn({ transport: settings.networkTransport }),
+			// The custom endpoint rides the same transport as builtin providers;
+			// only the provider registration differs, which streamFn handles.
+			streamFn: this.streamFn ?? createObsidianStreamFn({ transport: settings.networkTransport, customEndpoint: settings.customEndpoint }),
 			// pi's converter renders compaction summaries into the request. The agent's
 			// default one silently filters that role out, which would discard every
 			// compacted turn without surfacing an error.
@@ -375,7 +386,7 @@ export class ObsidianAgentService {
 			return;
 		}
 		if (!this.hasApiKey()) {
-			this.setError(`Add a ${this.getSettings().provider} API key in plugin settings before compacting.`);
+			this.setError(`${describeModelTarget(this.getSettings())} needs an API key in plugin settings before compacting.`);
 			return;
 		}
 
@@ -453,7 +464,17 @@ export class ObsidianAgentService {
 	}
 
 	private requireModelsBundle(): ObsidianModelsBundle {
-		this.modelsBundle ??= createObsidianModels({ transport: this.getSettings().networkTransport });
+		// Rebuilt when the endpoint changes so the custom provider registration
+		// tracks settings; cached otherwise, since transports are stateless.
+		const settings = this.getSettings();
+		const bundleKey = `${settings.networkTransport}:${settings.customEndpoint?.baseUrl ?? ""}`;
+		if (!this.modelsBundle || this.modelsBundleKey !== bundleKey) {
+			this.modelsBundle = createObsidianModels({
+				transport: settings.networkTransport,
+				customEndpoint: settings.customEndpoint,
+			});
+			this.modelsBundleKey = bundleKey;
+		}
 		return this.modelsBundle;
 	}
 
@@ -477,12 +498,16 @@ export class ObsidianAgentService {
 	}
 
 	private getApiKey(provider: string): string | undefined {
-		const apiKey = this.getSettings().providerApiKeys[provider]?.trim();
+		const settings = this.getSettings();
+		if (isUsingCustomEndpoint(settings) && provider === CUSTOM_ENDPOINT_PROVIDER) {
+			return getConfiguredApiKey(settings);
+		}
+		const apiKey = settings.providerApiKeys[provider]?.trim();
 		return apiKey || undefined;
 	}
 
 	private hasApiKey(): boolean {
-		return !!this.getApiKey(this.getSessionDefaults().provider);
+		return !!getConfiguredApiKey(this.getSettings());
 	}
 
 	private requireAgent(): Agent {
