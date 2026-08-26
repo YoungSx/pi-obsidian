@@ -36,9 +36,10 @@ export function ChatHeader({
 	return (
 		<>
 			<header className="pi-chat__header">
-				<div>
-					<h2>Pi chat</h2>
-					<p>{snapshot.provider}/{snapshot.modelId} · thinking {snapshot.thinkingLevel}</p>
+				<div className="pi-chat__header-info">
+					{/* No visible view title: the leaf tab already says "Pi chat", and a
+					    second heading only spends vertical space in a sidebar pane. */}
+					<p className="pi-chat__model">{snapshot.provider}/{snapshot.modelId} · thinking {snapshot.thinkingLevel}</p>
 					<ContextMeter fill={snapshot.contextFill} />
 					{snapshot.usage.requests > 0 ? (
 						<p className="pi-chat__usage">
@@ -46,7 +47,7 @@ export function ChatHeader({
 						</p>
 					) : null}
 				</div>
-				<div className="pi-chat__header-actions">
+				<div className="pi-chat__header-actions" role="toolbar" aria-label="Chat actions">
 					{sessions.length > 1 ? (
 						<button type="button" onClick={openPicker} disabled={snapshot.isStreaming}>
 							Chats
@@ -64,7 +65,9 @@ export function ChatHeader({
 					{activeSession ? (
 						<button
 							type="button"
-							onClick={() => openSessionDeleteConfirm(app, activeSession, () => onDeleteSession(activeSession.path))}
+							onClick={() =>
+								openSessionDeleteConfirm(app, activeSession, () => onDeleteSession(activeSession.path))
+							}
 							disabled={snapshot.isStreaming}
 						>
 							Delete
@@ -76,7 +79,9 @@ export function ChatHeader({
 				</div>
 			</header>
 
-			{snapshot.isCompacting ? <div className="pi-chat__compacting">Compacting context…</div> : null}
+			{snapshot.isCompacting ? (
+				<div className="pi-chat__compacting" role="status">Compacting context…</div>
+			) : null}
 			{activeSession ? <div className="pi-chat__session">{describeSession(activeSession)}</div> : null}
 		</>
 	);
@@ -102,6 +107,8 @@ function ContextMeter({ fill }: { fill: ContextFill | null }): React.JSX.Element
 				<span className="pi-chat__context-bar-fill" style={{ width: `${Math.min(percent, 100)}%` }} />
 			</span>
 			~{formatTokens(fill.tokens)} / {formatTokens(fill.contextWindow)} ({percent}%)
+			{/* Colour alone must not carry the state; name it for screen readers. */}
+			<span className="pi-chat__visually-hidden">, {level === "near" ? "context nearly full" : level === "warn" ? "context filling up" : "ok"}</span>
 		</p>
 	);
 

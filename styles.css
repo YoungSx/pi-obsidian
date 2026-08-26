@@ -13,6 +13,12 @@
 
 /* --- header --- */
 
+/*
+ * The leaf tab already names the view ("Pi chat"), so the header carries only
+ * live status: model line, context meter, session spend and the active chat's
+ * label. Everything here is metadata; the meter is the one element allowed to
+ * raise its voice (state colour).
+ */
 .pi-chat__header {
 	display: flex;
 	align-items: flex-start;
@@ -20,25 +26,32 @@
 	gap: 0.75rem;
 }
 
-.pi-chat__header h2 {
-	margin: 0;
+.pi-chat__header-info {
+	flex: 1;
+	min-width: 0;
 }
 
-.pi-chat__header p,
+/* Provider/model strings can be long ("openrouter/anthropic/…"); wrap instead
+   of pushing the action buttons out of the pane. */
+.pi-chat__model {
+	color: var(--text-muted);
+	font-size: var(--font-ui-smaller);
+	margin: 0;
+	overflow-wrap: anywhere;
+}
+
 .pi-chat__session,
+.pi-chat__usage {
+	color: var(--text-faint);
+	font-size: var(--font-ui-smaller);
+	margin: 0.15rem 0 0;
+	word-break: break-all;
+}
+
 .pi-chat__composer-actions,
 .pi-chat__empty {
 	color: var(--text-muted);
 	font-size: var(--font-ui-smaller);
-}
-
-.pi-chat__session {
-	word-break: break-all;
-}
-
-/* Colour and size are inherited from the `.pi-chat__header p` rule above. */
-.pi-chat__usage {
-	margin: 0.15rem 0 0;
 }
 
 /* --- context-window indicator --- */
@@ -60,6 +73,11 @@
 	width: 5rem;
 }
 
+/*
+ * The fill paints with `background`, so each state band must override
+ * `background` on the fill element specifically — a `color` override here is
+ * invisible (that bug shipped once: the warn band rendered grey).
+ */
 .pi-chat__context-bar-fill {
 	background: var(--text-muted);
 	display: block;
@@ -67,13 +85,19 @@
 	transition: width 0.2s ease-out;
 }
 
-.pi-chat__context--warn .pi-chat__context-bar-fill,
-.pi-chat__context--warn {
-	color: var(--text-warning, var(--text-accent));
+.pi-chat__context--warn .pi-chat__context-bar-fill {
+	background: var(--text-warning);
 }
 
 .pi-chat__context--near .pi-chat__context-bar-fill {
 	background: var(--text-error);
+}
+
+/* Plain var(): a fallback argument only fires when the variable is undefined,
+   and painting a warning state in accent blue is wrong on every theme that
+   defines the variable. */
+.pi-chat__context--warn {
+	color: var(--text-warning);
 }
 
 .pi-chat__context--near {
@@ -98,6 +122,17 @@
 
 	50% {
 		opacity: 0.45;
+	}
+}
+
+@media (prefers-reduced-motion: reduce) {
+
+	.pi-chat__compacting {
+		animation: none;
+	}
+
+	.pi-chat__context-bar-fill {
+		transition: none;
 	}
 }
 
@@ -131,17 +166,28 @@
 	align-items: center;
 	flex-shrink: 0;
 	gap: 0.4rem;
-}
-
-.pi-chat__header-actions select {
-	max-width: 12rem;
+	/* Wrap rather than overflow on narrow phone panes. */
+	flex-wrap: wrap;
+	justify-content: flex-end;
 }
 
 .pi-chat__error {
 	border: 1px solid var(--text-error);
-	border-radius: 6px;
+	border-radius: var(--radius-s);
 	color: var(--text-error);
 	padding: 0.5rem;
+}
+
+/* Screen-reader-only annotation; extends a visible label instead of replacing
+   it (keeps the accessible name a superset of the visible text). */
+.pi-chat__visually-hidden {
+	border: 0;
+	clip-path: inset(50%);
+	height: 1px;
+	overflow: hidden;
+	position: absolute;
+	white-space: nowrap;
+	width: 1px;
 }
 
 /* --- messages --- */
@@ -156,7 +202,7 @@
 
 .pi-chat__message {
 	border: 1px solid var(--background-modifier-border);
-	border-radius: 8px;
+	border-radius: var(--radius-m);
 	padding: 0.6rem;
 }
 
@@ -205,7 +251,7 @@
 .pi-chat__tool-result,
 .pi-chat__tool-status {
 	background: var(--background-secondary);
-	border-radius: 6px;
+	border-radius: var(--radius-s);
 	margin-top: 0.4rem;
 	padding: 0.45rem;
 }

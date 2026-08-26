@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import type { App, Component } from "obsidian";
-import type { ToolResultMessage } from "@earendil-works/pi-ai";
+import type { ToolResultMessage, UserMessage } from "@earendil-works/pi-ai";
 import type { createRoot } from "react-dom/client";
 import { flushRender, installDom } from "../testing/dom";
 import { installObsidianStub, markdownRenderMock } from "../testing/obsidianStub";
@@ -65,6 +65,47 @@ describe("MessageList compaction divider", () => {
 		const text = document.querySelector(".pi-chat__compaction pre");
 		expect(text?.textContent).toBe("**not** markdown #heading");
 	});
+
+	it("announces running tools as a status region", async () => {
+		const host = renderMessages([]);
+		await flushRender();
+		// Re-render with pending tools through the same host.
+		const root = roots.get(host)!;
+		root.render(
+			<MessageList messages={[]} isStreaming={false} pendingToolCalls={["read", "grep"]} app={app} component={component} sourcePath="" />,
+		);
+		await flushRender();
+
+		const status = host.querySelector(".pi-chat__tool-status");
+		expect(status?.getAttribute("role")).toBe("status");
+		expect(status?.textContent).toContain("Running tools: read, grep");
+	});
+});
+
+describe("MessageList message chrome", () => {
+	beforeEach(() => {
+		createRootSync = createRootImpl;
+		markdownRenderMock.mockReset();
+		markdownRenderMock.mockImplementation(async ({ el }: { el: HTMLElement }) => {
+			const rendered = document.createElement("p");
+			rendered.className = "stub-rendered";
+			el.appendChild(rendered);
+		});
+	});
+
+	afterEach(() => {
+		document.body.replaceChildren();
+	});
+
+	it("labels message roles in human vocabulary, not internal enum names", async () => {
+		const host = renderMessages([userMessage("hi"), toolResult({})]);
+		await flushRender();
+
+		const roles = Array.from(host.querySelectorAll(".pi-chat__message-role"), (el) => el.textContent);
+		expect(roles).toContain("user");
+		expect(roles).toContain("tool result");
+		expect(roles).not.toContain("toolResult");
+	});
 });
 
 describe("MessageList tool-result diff", () => {
@@ -117,6 +158,10 @@ function toolResult(details: Record<string, unknown>): ToolResultMessage {
 
 function compactionSummary(text: string): AgentMessage {
 	return { role: "compactionSummary", summary: text, tokensBefore: 40_000, timestamp: Date.now() } as AgentMessage;
+}
+
+function userMessage(text: string): UserMessage {
+	return { role: "user", content: text, timestamp: Date.now() };
 }
 
 const roots = new WeakMap<HTMLElement, import("react-dom/client").Root>();

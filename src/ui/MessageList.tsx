@@ -42,7 +42,11 @@ export function MessageList({ messages, isStreaming, pendingToolCalls, app, comp
 			) : (
 				messages.map((message, index) => <MessageRow key={index} message={message} isStreaming={index === activeIndex} renderContext={context} />)
 			)}
-			{pendingToolCalls.length > 0 ? <div className="pi-chat__tool-status">Running tools: {pendingToolCalls.join(", ")}</div> : null}
+			{pendingToolCalls.length > 0 ? (
+				<div aria-label="Tools running" className="pi-chat__tool-status" role="status">
+					Running tools: {pendingToolCalls.join(", ")}
+				</div>
+			) : null}
 		</main>
 	);
 }
@@ -51,7 +55,7 @@ function EmptyState(): React.JSX.Element {
 	return (
 		<div className="pi-chat__empty">
 			<p>Ask Pi about your active note or vault.</p>
-			<p>Pi can use read, write, edit, grep, find, ls, and get_active_note tools.</p>
+			<p>Pi can read and edit notes, and search the vault with its built-in tools.</p>
 		</div>
 	);
 }
@@ -70,10 +74,22 @@ function MessageRow({ message, isStreaming, renderContext }: MessageRowProps): R
 	}
 	return (
 		<article className={`pi-chat__message pi-chat__message--${message.role}`}>
-			<div className="pi-chat__message-role">{message.role}</div>
+			<div className="pi-chat__message-role">{roleLabel(message.role)}</div>
 			<div className="pi-chat__message-content">{renderMessageContent(message, { isStreaming, renderContext })}</div>
 		</article>
 	);
+}
+
+/**
+ * Human-readable role label. Raw internal role names ("toolResult") leak
+ * implementation vocabulary into the transcript; the labels stay lowercase so
+ * the CSS uppercase transform keeps its look.
+ */
+function roleLabel(role: string): string {
+	if (role === "toolResult") {
+		return "tool result";
+	}
+	return role;
 }
 
 /**

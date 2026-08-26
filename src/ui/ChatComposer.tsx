@@ -75,16 +75,17 @@ export function ChatComposer({ input, isStreaming, onInputChange, onSend, onAbor
 				onChange={(event) => onInputChange(event.currentTarget.value)}
 				onKeyDown={handleKeyDown}
 				placeholder="Ask Pi to inspect or edit your vault…"
+				aria-label="Message Pi"
 				rows={4}
 			/>
 			<div className="pi-chat__composer-actions">
-				<span>Press Ctrl/⌘+Enter to send.</span>
+				<span id="pi-chat-send-hint">Press Ctrl/⌘+Enter to send.</span>
 				{isStreaming ? (
-					<button type="button" onClick={onAbort}>
-						Abort
+					<button type="button" onClick={onAbort} aria-describedby="pi-chat-send-hint" aria-label="Stop response">
+						Stop
 					</button>
 				) : (
-					<button type="button" onClick={onSend} disabled={!input.trim()}>
+					<button type="button" onClick={onSend} disabled={!input.trim()} aria-describedby="pi-chat-send-hint">
 						Send
 					</button>
 				)}
