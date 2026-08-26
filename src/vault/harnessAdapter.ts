@@ -5,7 +5,8 @@ import { VaultExecutionEnv } from "./VaultExecutionEnv";
 import type { App } from "obsidian";
 
 /**
- * Spike bridge for issue #16 between pi's two tool shapes.
+ * Bridge between pi's two tool shapes, used to adapt the native harness
+ * read/write/edit tools onto a vault-scoped {@link VaultExecutionEnv}.
  *
  * pi ships two execute contracts:
  * - {@link AgentTool} (what the low-level `Agent` runs): four parameters.
