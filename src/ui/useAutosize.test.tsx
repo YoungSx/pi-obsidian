@@ -73,11 +73,11 @@ describe("useAutosize", () => {
 });
 
 function composerHeight(textarea: HTMLTextAreaElement): string {
-	return textarea.style.getPropertyValue("--pi-composer-height");
+	return textarea.style.getPropertyValue("--piem-composer-height");
 }
 
 function composerOverflow(textarea: HTMLTextAreaElement): string {
-	return textarea.style.getPropertyValue("--pi-composer-overflow");
+	return textarea.style.getPropertyValue("--piem-composer-overflow");
 }
 
 async function mount(

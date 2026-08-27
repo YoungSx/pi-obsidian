@@ -28,24 +28,24 @@ interface ChatBannerProps {
 export function ChatBanner({ errorMessage, noticeMessage, onDismiss, onOpenSettings }: ChatBannerProps): React.JSX.Element | null {
 	if (errorMessage) {
 		return (
-			<div className="pi-chat__banner pi-chat__banner--error" role="alert" aria-live="assertive" aria-atomic="true">
-				<ObsidianIcon name="alert-triangle" className="pi-chat__banner-icon" />
-				<span className="pi-chat__banner-text">{errorMessage}</span>
+			<div className="piem-chat__banner piem-chat__banner--error" role="alert" aria-live="assertive" aria-atomic="true">
+				<ObsidianIcon name="alert-triangle" className="piem-chat__banner-icon" />
+				<span className="piem-chat__banner-text">{errorMessage}</span>
 				{onOpenSettings ? (
-					<button type="button" className="pi-chat__banner-action" onClick={onOpenSettings}>
+					<button type="button" className="piem-chat__banner-action" onClick={onOpenSettings}>
 						Open settings
 					</button>
 				) : null}
-				<IconButton icon="x" label="Dismiss message" onClick={onDismiss} className="pi-chat__banner-dismiss" />
+				<IconButton icon="x" label="Dismiss message" onClick={onDismiss} className="piem-chat__banner-dismiss" />
 			</div>
 		);
 	}
 	if (noticeMessage) {
 		return (
-			<div className="pi-chat__banner pi-chat__banner--notice" role="status" aria-live="polite" aria-atomic="true">
-				<ObsidianIcon name="info" className="pi-chat__banner-icon" />
-				<span className="pi-chat__banner-text">{noticeMessage}</span>
-				<IconButton icon="x" label="Dismiss message" onClick={onDismiss} className="pi-chat__banner-dismiss" />
+			<div className="piem-chat__banner piem-chat__banner--notice" role="status" aria-live="polite" aria-atomic="true">
+				<ObsidianIcon name="info" className="piem-chat__banner-icon" />
+				<span className="piem-chat__banner-text">{noticeMessage}</span>
+				<IconButton icon="x" label="Dismiss message" onClick={onDismiss} className="piem-chat__banner-dismiss" />
 			</div>
 		);
 	}

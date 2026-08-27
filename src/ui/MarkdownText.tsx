@@ -29,7 +29,7 @@ export interface MarkdownTextProps {
  */
 export function MarkdownText({ text, kind, isStreaming = false, app, component, sourcePath }: MarkdownTextProps): React.JSX.Element {
 	if (resolveTextRenderMode(kind, isStreaming) === "plain") {
-		return <pre className="pi-chat__text">{text}</pre>;
+		return <pre className="piem-chat__text">{text}</pre>;
 	}
 	return <MarkdownContainer markdown={text} app={app} component={component} sourcePath={sourcePath} />;
 }
@@ -53,12 +53,12 @@ function MarkdownContainer({ markdown, app, component, sourcePath }: { markdown:
 		}
 		el.empty();
 		void MarkdownRenderer.render(app, markdown, el, sourcePath, component).catch((error: unknown) => {
-			console.error("pi-obsidian: markdown render failed", error);
+			console.error("piem: markdown render failed", error);
 		});
 		return () => {
 			el.empty();
 		};
 	}, [app, component, markdown, sourcePath]);
 
-	return <div className="pi-chat__markdown" ref={ref} />;
+	return <div className="piem-chat__markdown" ref={ref} />;
 }

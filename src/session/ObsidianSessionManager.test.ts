@@ -3,7 +3,7 @@ import type { DataAdapter, ListedFiles, Stat } from "obsidian";
 import { ObsidianSessionManager } from "./ObsidianSessionManager";
 
 const CONFIG_DIR = `.${"obsidian"}`;
-const SESSION_DIR = `${CONFIG_DIR}/plugins/pi-obsidian/sessions`;
+const SESSION_DIR = `${CONFIG_DIR}/plugins/piem/sessions`;
 
 class MemoryAdapter {
 	private readonly files = new Map<string, { content: string; mtime: number }>();

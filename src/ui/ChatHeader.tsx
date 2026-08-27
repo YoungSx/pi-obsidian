@@ -70,17 +70,17 @@ export function ChatHeader({
 	const hasStatus = snapshot.isCompacting || (showDetails && (snapshot.contextFill !== null || snapshot.usage.requests > 0));
 
 	return (
-		<div className="pi-chat__chrome">
-			<header className="pi-chat__header" aria-label="Current chat">
-				<div className="pi-chat__identity">
-					<h2 className="pi-chat__title" title={activeSession ? describeSession(activeSession) : undefined}>
+		<div className="piem-chat__chrome">
+			<header className="piem-chat__header" aria-label="Current chat">
+				<div className="piem-chat__identity">
+					<h2 className="piem-chat__title" title={activeSession ? describeSession(activeSession) : undefined}>
 						{sessionTitle(activeSession)}
 					</h2>
-					<p className="pi-chat__model" title={modelLine}>
+					<p className="piem-chat__model" title={modelLine}>
 						{modelLine}
 					</p>
 				</div>
-				<div className="pi-chat__header-actions" role="toolbar" aria-label="Chat actions">
+				<div className="piem-chat__header-actions" role="toolbar" aria-label="Chat actions">
 					{/* Always mounted so the button positions never shift as the vault
 					    accumulates chats; disabled until there is a second one to pick. */}
 					<IconButton icon="messages-square" label="Open chats" onClick={openPicker} disabled={isBusy || sessions.length < 2} />
@@ -90,15 +90,15 @@ export function ChatHeader({
 			</header>
 
 			{hasStatus ? (
-				<div className="pi-chat__statusbar" aria-label="Chat status">
+				<div className="piem-chat__statusbar" aria-label="Chat status">
 					{showDetails ? <ContextMeter fill={snapshot.contextFill} /> : null}
 					{showDetails && snapshot.usage.requests > 0 ? (
-						<span className="pi-chat__usage">
+						<span className="piem-chat__usage">
 							{formatTokens(snapshot.usage.tokens)} tokens <span aria-hidden="true">·</span> {formatCost(snapshot.usage.cost)}
 						</span>
 					) : null}
 					{snapshot.isCompacting ? (
-						<span className="pi-chat__compacting" role="status">
+						<span className="piem-chat__compacting" role="status">
 							<ObsidianIcon name="loader-circle" />
 							{showDetails ? "Compacting context…" : "Tidying up earlier messages…"}
 						</span>
@@ -122,7 +122,7 @@ function ContextMeter({ fill }: { fill: ContextFill | null }): React.JSX.Element
 
 	return (
 		<div
-			className={`pi-chat__context pi-chat__context--${level}`}
+			className={`piem-chat__context piem-chat__context--${level}`}
 			role="progressbar"
 			aria-label="Context window use"
 			aria-valuemin={0}
@@ -131,12 +131,12 @@ function ContextMeter({ fill }: { fill: ContextFill | null }): React.JSX.Element
 			aria-valuetext={valueText}
 			title={meterTitle(fill)}
 		>
-			<span className="pi-chat__context-label">Context</span>
-			<span className="pi-chat__context-bar" aria-hidden="true">
-				<span className="pi-chat__context-bar-fill" style={meterStyle} />
+			<span className="piem-chat__context-label">Context</span>
+			<span className="piem-chat__context-bar" aria-hidden="true">
+				<span className="piem-chat__context-bar-fill" style={meterStyle} />
 			</span>
-			<span className="pi-chat__context-value">
-				{tokenSummary} <span className="pi-chat__context-state" aria-hidden="true">, {stateText}</span>
+			<span className="piem-chat__context-value">
+				{tokenSummary} <span className="piem-chat__context-state" aria-hidden="true">, {stateText}</span>
 			</span>
 		</div>
 	);

@@ -87,20 +87,20 @@ export function ChatComposer({
 	};
 
 	return (
-		<footer className="pi-chat__composer">
-			<div className="pi-chat__composer-shell">
+		<footer className="piem-chat__composer">
+			<div className="piem-chat__composer-shell">
 				<textarea
 					ref={textareaRef}
 					value={input}
 					onChange={(event) => onInputChange(event.currentTarget.value)}
 					onKeyDown={handleKeyDown}
-					placeholder="Ask Pi…"
-					aria-label="Message Pi"
+					placeholder="Ask Piem…"
+					aria-label="Message Piem"
 					aria-keyshortcuts="Control+Enter Meta+Enter"
 					rows={2}
 				/>
-				<div className="pi-chat__composer-bar">
-					<span className="pi-chat__composer-status" role="status" aria-live="polite">
+				<div className="piem-chat__composer-bar">
+					<span className="piem-chat__composer-status" role="status" aria-live="polite">
 						{composerStatusText({ isInitializing, isCompacting, isStreaming, showAgentDetails, isMac: Platform.isMacOS })}
 					</span>
 					{isBusy ? (
@@ -108,7 +108,7 @@ export function ChatComposer({
 							icon="square"
 							label={isCompacting ? "Stop compaction" : "Stop response"}
 							onClick={onAbort}
-							className="pi-chat__stop-button"
+							className="piem-chat__stop-button"
 						/>
 					) : (
 						<IconButton
@@ -116,7 +116,7 @@ export function ChatComposer({
 							label="Send message"
 							onClick={onSend}
 							disabled={isInitializing || !input.trim()}
-							className="pi-chat__send-button mod-cta"
+							className="piem-chat__send-button mod-cta"
 						/>
 					)}
 				</div>

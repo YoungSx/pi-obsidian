@@ -43,7 +43,7 @@ export interface MessageListProps {
 
 /**
  * Index of the message still streaming in — the last entry, because
- * `PiChatApp` appends the in-flight message after the settled transcript.
+ * `ChatApp` appends the in-flight message after the settled transcript.
  * Its text stays plain until the turn settles; see `markdownPolicy.ts`.
  */
 function streamingIndex(isStreaming: boolean, messageCount: number): number | null {
@@ -105,7 +105,7 @@ export function MessageList({
 	};
 
 	return (
-		<div className="pi-chat__transcript">
+		<div className="piem-chat__transcript">
 			{/*
 			 * Not a live region. It used to carry `aria-live="polite"` plus
 			 * `aria-relevant="additions text"`, so the streaming message
@@ -114,7 +114,7 @@ export function MessageList({
 			 */}
 			<main
 				ref={transcriptRef}
-				className="pi-chat__messages"
+				className="piem-chat__messages"
 				role="log"
 				aria-label="Conversation"
 				aria-busy={isStreaming || isInitializing}
@@ -135,14 +135,14 @@ export function MessageList({
 					))
 				)}
 				{pendingToolCalls.length > 0 ? (
-					<div aria-label="Tools running" className="pi-chat__tool-status" role="status">
-						<ObsidianIcon name="loader-circle" className="pi-chat__spinner" />
+					<div aria-label="Tools running" className="piem-chat__tool-status" role="status">
+						<ObsidianIcon name="loader-circle" className="piem-chat__spinner" />
 						Working: {pendingToolCalls.join(", ")}
 					</div>
 				) : null}
 			</main>
 			{!isAtLatest ? (
-				<button type="button" className="pi-chat__latest" onClick={scrollToLatest}>
+				<button type="button" className="piem-chat__latest" onClick={scrollToLatest}>
 					<ObsidianIcon name="arrow-down" />
 					Latest
 				</button>
@@ -175,7 +175,7 @@ function TurnAnnouncer({ messages, isStreaming }: { messages: AgentMessage[]; is
 	}, [messages, isStreaming]);
 
 	return (
-		<p className="pi-chat__visually-hidden" role="status" aria-live="polite" aria-atomic="true">
+		<p className="piem-chat__visually-hidden" role="status" aria-live="polite" aria-atomic="true">
 			{announcement}
 		</p>
 	);
@@ -218,39 +218,39 @@ interface EmptyStateProps {
 function EmptyState({ isInitializing, isConfigured, onOpenSettings }: EmptyStateProps): React.JSX.Element {
 	if (isInitializing) {
 		return (
-			<div className="pi-chat__skeleton" role="status" aria-label="Opening chat">
+			<div className="piem-chat__skeleton" role="status" aria-label="Opening chat">
 				{/* Skeleton rather than a spinner in the middle of the content area:
 				    the panel loads into a task, so it shows the shape it is about to
 				    fill. Announced once via the label; the bars are decorative. */}
-				<span className="pi-chat__skeleton-line pi-chat__skeleton-line--short" aria-hidden="true" />
-				<span className="pi-chat__skeleton-line" aria-hidden="true" />
-				<span className="pi-chat__skeleton-line pi-chat__skeleton-line--medium" aria-hidden="true" />
+				<span className="piem-chat__skeleton-line piem-chat__skeleton-line--short" aria-hidden="true" />
+				<span className="piem-chat__skeleton-line" aria-hidden="true" />
+				<span className="piem-chat__skeleton-line piem-chat__skeleton-line--medium" aria-hidden="true" />
 			</div>
 		);
 	}
 	if (!isConfigured) {
 		return (
-			<div className="pi-chat__empty">
-				<ObsidianIcon name="key-round" className="pi-chat__empty-icon" />
-				<p className="pi-chat__empty-title">Connect a model to start</p>
+			<div className="piem-chat__empty">
+				<ObsidianIcon name="key-round" className="piem-chat__empty-icon" />
+				<p className="piem-chat__empty-title">Connect a model to start</p>
 				{onOpenSettings ? (
 					<>
-						<p>Pi needs an API key before it can answer.</p>
-						<button type="button" className="mod-cta pi-chat__empty-action" onClick={onOpenSettings}>
+						<p>Piem needs an API key before it can answer.</p>
+						<button type="button" className="mod-cta piem-chat__empty-action" onClick={onOpenSettings}>
 							Add an API key
 						</button>
 					</>
 				) : (
-					<p>Add an API key in <strong>Settings → Pi Obsidian</strong>.</p>
+					<p>Add an API key in <strong>Settings → Piem</strong>.</p>
 				)}
 			</div>
 		);
 	}
 	return (
-		<div className="pi-chat__empty">
-			<ObsidianIcon name="message-circle" className="pi-chat__empty-icon" />
-			<p className="pi-chat__empty-title">Ask about your vault</p>
-			<p>Pi can read, search, and edit notes here. Try “summarize my open note”, or select text and run <strong>Ask pi about selection</strong>.</p>
+		<div className="piem-chat__empty">
+			<ObsidianIcon name="message-circle" className="piem-chat__empty-icon" />
+			<p className="piem-chat__empty-title">Ask about your vault</p>
+			<p>Piem can read, search, and edit notes here. Try “summarize my open note”, or select text and run <strong>Ask about selection</strong>.</p>
 		</div>
 	);
 }
@@ -282,14 +282,14 @@ function MessageRow({ message, isStreaming, renderContext, onRetry }: MessageRow
 		return <HarnessTrace message={message} context={renderContext} />;
 	}
 	return (
-		<article className={`pi-chat__message pi-chat__message--${message.role}`} aria-busy={isStreaming}>
-			<div className="pi-chat__message-role">
+		<article className={`piem-chat__message piem-chat__message--${message.role}`} aria-busy={isStreaming}>
+			<div className="piem-chat__message-role">
 				<ObsidianIcon name={message.role === "user" ? "user" : "sparkles"} />
-				{message.role === "user" ? "You" : "Pi"}
+				{message.role === "user" ? "You" : "Piem"}
 			</div>
-			<div className="pi-chat__message-content">{renderMessageContent(message, { isStreaming, renderContext })}</div>
+			<div className="piem-chat__message-content">{renderMessageContent(message, { isStreaming, renderContext })}</div>
 			{wasInterrupted(message) ? (
-				<p className="pi-chat__interrupted">
+				<p className="piem-chat__interrupted">
 					<ObsidianIcon name="circle-slash" />
 					You stopped this reply.
 				</p>
@@ -316,8 +316,8 @@ function wasInterrupted(message: UserMessage | AssistantMessage): boolean {
  */
 function CompactionDivider({ message, renderContext }: { message: CompactionSummaryMessage; renderContext: MessageContext }): React.JSX.Element {
 	return (
-		<section aria-label="Compacted history" className="pi-chat__compaction">
-			<div className="pi-chat__compaction-heading">Earlier history was summarized to fit the context window.</div>
+		<section aria-label="Compacted history" className="piem-chat__compaction">
+			<div className="piem-chat__compaction-heading">Earlier history was summarized to fit the context window.</div>
 			<Block text={message.summary} kind="harness" isStreaming={false} context={renderContext} />
 		</section>
 	);
@@ -374,7 +374,7 @@ function renderAssistantMessage(message: AssistantMessage, args: RenderArgs): Re
 		}
 		if (content.type === "thinking") {
 			return (
-				<Trace key={index} icon="brain" name="Thought it through" className="pi-chat__trace--thinking">
+				<Trace key={index} icon="brain" name="Thought it through" className="piem-chat__trace--thinking">
 					<Block text={content.thinking} kind="thinking" isStreaming={args.isStreaming} context={args.renderContext} />
 				</Trace>
 			);
@@ -388,7 +388,7 @@ function renderAssistantMessage(message: AssistantMessage, args: RenderArgs): Re
 				detail={summarizeToolPayload(content.arguments)}
 				// Without the payload there is nothing behind the row to open, so it
 				// renders as a plain line rather than an empty disclosure.
-				body={showDetails ? <pre className="pi-chat__text">{JSON.stringify(content.arguments, null, 2)}</pre> : null}
+				body={showDetails ? <pre className="piem-chat__text">{JSON.stringify(content.arguments, null, 2)}</pre> : null}
 			/>
 		);
 	});
@@ -415,22 +415,22 @@ interface TraceProps {
  */
 function Trace({ icon, name, detail, className, body, children }: TraceProps): React.JSX.Element {
 	const revealed = body === undefined ? children : body;
-	const classes = ["pi-chat__trace", className].filter(Boolean).join(" ");
+	const classes = ["piem-chat__trace", className].filter(Boolean).join(" ");
 	const row = (
 		<>
-			<ObsidianIcon name={icon} className="pi-chat__trace-icon" />
-			<span className="pi-chat__trace-name">{name}</span>
-			{detail ? <span className="pi-chat__trace-detail">{detail}</span> : null}
+			<ObsidianIcon name={icon} className="piem-chat__trace-icon" />
+			<span className="piem-chat__trace-name">{name}</span>
+			{detail ? <span className="piem-chat__trace-detail">{detail}</span> : null}
 		</>
 	);
 
 	if (!revealed) {
-		return <div className={`${classes} pi-chat__trace--flat`}>{row}</div>;
+		return <div className={`${classes} piem-chat__trace--flat`}>{row}</div>;
 	}
 	return (
 		<details className={classes}>
-			<summary className="pi-chat__trace-summary">{row}</summary>
-			<div className="pi-chat__trace-body">{revealed}</div>
+			<summary className="piem-chat__trace-summary">{row}</summary>
+			<div className="piem-chat__trace-body">{revealed}</div>
 		</details>
 	);
 }
@@ -444,16 +444,16 @@ function Trace({ icon, name, detail, className, body, children }: TraceProps): R
  */
 function ToolResultTrace({ message, context }: { message: ToolResultMessage; context: MessageContext }): React.JSX.Element {
 	const diff = extractDiff(message.details);
-	const classes = ["pi-chat__trace", "pi-chat__trace--result", message.isError ? "pi-chat__trace--error" : null].filter(Boolean).join(" ");
+	const classes = ["piem-chat__trace", "piem-chat__trace--result", message.isError ? "piem-chat__trace--error" : null].filter(Boolean).join(" ");
 	const detail = diff ? formatDiffCounts(diff) : summarizeToolResult(message);
 	return (
 		<details className={classes}>
-			<summary className="pi-chat__trace-summary">
-				<ObsidianIcon name={message.isError ? "alert-triangle" : "check"} className="pi-chat__trace-icon" />
-				<span className="pi-chat__trace-name">{describeTool(message.toolName, context.showAgentDetails)}</span>
-				{detail ? <span className="pi-chat__trace-detail">{detail}</span> : null}
+			<summary className="piem-chat__trace-summary">
+				<ObsidianIcon name={message.isError ? "alert-triangle" : "check"} className="piem-chat__trace-icon" />
+				<span className="piem-chat__trace-name">{describeTool(message.toolName, context.showAgentDetails)}</span>
+				{detail ? <span className="piem-chat__trace-detail">{detail}</span> : null}
 			</summary>
-			<div className="pi-chat__trace-body">
+			<div className="piem-chat__trace-body">
 				{message.content.map((content, index) => {
 					if (content.type === "text") {
 						return <Block key={index} text={content.text} kind="toolResult" isStreaming={false} context={context} />;
@@ -493,7 +493,7 @@ function extractDiff(details: unknown): string | null {
  * `CustomAgentMessages` declaration merging.
  *
  * They render as traces, never as assistant messages: labelling harness output
- * "Pi" would attribute machine text to the model.
+ * "Piem" would attribute machine text to the model.
  */
 function HarnessTrace({ message, context }: { message: AgentMessage; context: MessageContext }): React.JSX.Element | null {
 	const rendered = renderHarnessBody(message, context);
@@ -501,7 +501,7 @@ function HarnessTrace({ message, context }: { message: AgentMessage; context: Me
 		return null;
 	}
 	return (
-		<Trace icon={harnessIcon(message.role)} name={harnessLabel(message.role)} className="pi-chat__trace--harness">
+		<Trace icon={harnessIcon(message.role)} name={harnessLabel(message.role)} className="piem-chat__trace--harness">
 			{rendered}
 		</Trace>
 	);
@@ -531,7 +531,7 @@ function renderHarnessBody(message: AgentMessage, context: MessageContext): Reac
 /**
  * Human-readable label for a non-conversational role.
  *
- * Unknown roles report as "System", never "Pi": the old default returned the
+ * Unknown roles report as "System", never "Piem": the old default returned the
  * model's own name for anything unrecognized, so harness-injected messages were
  * presented as words the model had said.
  */

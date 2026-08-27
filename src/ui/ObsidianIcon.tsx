@@ -30,7 +30,7 @@ interface IconButtonProps {
 }
 
 export function IconButton({ icon, label, onClick, disabled = false, className }: IconButtonProps): React.JSX.Element {
-	const classes = ["clickable-icon", "pi-chat__icon-button", className].filter(Boolean).join(" ");
+	const classes = ["clickable-icon", "piem-chat__icon-button", className].filter(Boolean).join(" ");
 	return (
 		<button type="button" className={classes} aria-label={label} title={label} disabled={disabled} onClick={onClick}>
 			<ObsidianIcon name={icon} />

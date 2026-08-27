@@ -22,7 +22,7 @@ describe("composerStatusText", () => {
 	});
 
 	it("reports the streaming turn", () => {
-		expect(composerStatusText({ ...idle, isStreaming: true })).toBe("Pi is responding…");
+		expect(composerStatusText({ ...idle, isStreaming: true })).toBe("Piem is responding…");
 	});
 });
 

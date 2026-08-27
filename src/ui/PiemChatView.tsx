@@ -1,13 +1,13 @@
 import { ItemView, Scope, type WorkspaceLeaf } from "obsidian";
 import { createRoot, type Root } from "react-dom/client";
 import React from "react";
-import { VIEW_TYPE_PI_CHAT } from "../constants";
+import { VIEW_TYPE_PIEM_CHAT } from "../constants";
 import type { ObsidianAgentService } from "../agent/ObsidianAgentService";
-import { PiChatApp } from "./PiChatApp";
+import { ChatApp } from "./ChatApp";
 import { ChatInputController } from "./ChatInputController";
 import type { DraftStore } from "../session/DraftStore";
 
-export class PiChatView extends ItemView {
+export class PiemChatView extends ItemView {
 	private readonly service: ObsidianAgentService;
 	private readonly draftStore: DraftStore | undefined;
 	private readonly inputController = new ChatInputController();
@@ -27,11 +27,11 @@ export class PiChatView extends ItemView {
 	}
 
 	getViewType(): string {
-		return VIEW_TYPE_PI_CHAT;
+		return VIEW_TYPE_PIEM_CHAT;
 	}
 
 	getDisplayText(): string {
-		return "Pi chat";
+		return "Piem chat";
 	}
 
 	getIcon(): string {
@@ -46,7 +46,7 @@ export class PiChatView extends ItemView {
 	 * Queues a reference prefill for the composer.
 	 *
 	 * Safe to call before the React tree exists: the controller latches the text
-	 * until `PiChatApp` registers its handler, which is what makes
+	 * until `ChatApp` registers its handler, which is what makes
 	 * `activateChatView()` + prefill work in a single awaited sequence.
 	 */
 	prefillComposer(text: string): void {
@@ -55,10 +55,10 @@ export class PiChatView extends ItemView {
 
 	async onOpen(): Promise<void> {
 		this.contentEl.empty();
-		this.contentEl.addClass("pi-chat-view");
+		this.contentEl.addClass("piem-chat-view");
 		this.root = createRoot(this.contentEl);
 		this.root.render(
-			<PiChatApp service={this.service} inputController={this.inputController} component={this} draftStore={this.draftStore} />,
+			<ChatApp service={this.service} inputController={this.inputController} component={this} draftStore={this.draftStore} />,
 		);
 	}
 

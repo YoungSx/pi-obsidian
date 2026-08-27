@@ -1,5 +1,5 @@
 /**
- * Builds the composer prefill for "ask Pi about this note / selection".
+ * Builds the composer prefill for "ask Piem about this note / selection".
  *
  * Only a reference marker goes into the draft — never the note body. Large notes
  * would eat the context window directly and bypass the read tool's truncation

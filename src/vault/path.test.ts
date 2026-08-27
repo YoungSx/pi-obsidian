@@ -2,7 +2,7 @@ import { describe, expect, it } from "bun:test";
 import { normalizeVaultPath, getParentPath } from "./path";
 
 const CONFIG_DIR = `.${"obsidian"}`;
-const PLUGIN_SESSION_FILE = `${CONFIG_DIR}/plugins/pi-obsidian/sessions/a.jsonl`;
+const PLUGIN_SESSION_FILE = `${CONFIG_DIR}/plugins/piem/sessions/a.jsonl`;
 
 describe("normalizeVaultPath", () => {
 	it("normalizes leading @ and redundant segments", () => {

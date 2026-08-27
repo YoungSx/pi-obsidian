@@ -1,7 +1,7 @@
 import { describe, expect, it } from "bun:test";
 import { CUSTOM_ENDPOINT_PROVIDER, DEFAULT_PROVIDER } from "./constants";
 import { installObsidianStub } from "./testing/obsidianStub";
-import type { PiObsidianSettings } from "./settings";
+import type { PiemSettings } from "./settings";
 
 // `settings.ts` imports the `obsidian` module at runtime; the shared stub must
 // be registered before the dynamic import below resolves it.
@@ -10,7 +10,7 @@ installObsidianStub();
 const { describeModelTarget, getConfiguredApiKey, getSelectedModel, isUsingCustomEndpoint, normalizeSettings, DEFAULT_SETTINGS } =
 	await import("./settings");
 
-function builtinSettings(overrides: Partial<PiObsidianSettings> = {}): PiObsidianSettings {
+function builtinSettings(overrides: Partial<PiemSettings> = {}): PiemSettings {
 	return { ...DEFAULT_SETTINGS, providerApiKeys: {}, ...overrides };
 }
 

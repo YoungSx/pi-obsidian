@@ -11,7 +11,7 @@ import {
 	getPreferredThinkingLevel,
 	getSelectedModel,
 	isUsingCustomEndpoint,
-	type PiObsidianSettings,
+	type PiemSettings,
 } from "../settings";
 import { CUSTOM_ENDPOINT_PROVIDER } from "../constants";
 import { ObsidianSessionManager, type ActiveSessionInfo, type SessionDefaults } from "../session/ObsidianSessionManager";
@@ -101,7 +101,7 @@ export interface ObsidianAgentServiceOptions {
 
 export class ObsidianAgentService {
 	private readonly app: App;
-	private readonly getSettings: () => PiObsidianSettings;
+	private readonly getSettings: () => PiemSettings;
 	private readonly sessionManager: ObsidianSessionManager;
 	private readonly streamFn: StreamFn | undefined;
 	private readonly listeners = new Set<SnapshotListener>();
@@ -126,7 +126,7 @@ export class ObsidianAgentService {
 	private isCompacting = false;
 	private compactionController: AbortController | null = null;
 
-	constructor(app: App, getSettings: () => PiObsidianSettings, sessionManager: ObsidianSessionManager, options: ObsidianAgentServiceOptions = {}) {
+	constructor(app: App, getSettings: () => PiemSettings, sessionManager: ObsidianSessionManager, options: ObsidianAgentServiceOptions = {}) {
 		this.app = app;
 		this.getSettings = getSettings;
 		this.sessionManager = sessionManager;

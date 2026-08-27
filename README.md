@@ -1,76 +1,50 @@
-# Pi Obsidian
+# Piem
 
-Pi Obsidian runs a pi-style coding agent inside Obsidian and exposes vault-scoped Obsidian tools to the model. The MVP uses a React chat side panel and defaults to DeepSeek's `deepseek-v4-pro` model.
+Piem is an Obsidian plugin that runs an AI coding agent inside Obsidian. The
+agent works on your vault through vault-scoped tools — reading, searching, and
+editing notes — from a React chat side panel. It is built on the
+[@earendil-works/pi-agent-core](https://github.com/earendil-works/pi-mono)
+agent runtime and defaults to DeepSeek's `deepseek-v4-pro` model.
 
-## MVP status
+## Status
 
-- Runs in Obsidian desktop and mobile (`isDesktopOnly: false`).
-- Uses `@earendil-works/pi-agent-core` and `@earendil-works/pi-ai` in the plugin bundle.
-- Defaults to provider `deepseek` and model `deepseek-v4-pro`.
-- Stores API keys in Obsidian plugin data, encrypted with your operating
-  system's keychain where supported (plaintext fallback — see limitations).
-- Stores chat sessions as pi-compatible JSONL files under this plugin directory.
-- Provider requests go through a pluggable transport: Obsidian `requestUrl`
-  (CORS-safe, buffered) by default, or native `fetch` (streams, may hit CORS).
-- Mutating tools (`write` and `edit`) run immediately.
+Piem is in early alpha (`0.1.0-alpha.x`). It runs in Obsidian desktop and
+mobile (`isDesktopOnly: false`).
 
-## Known limitations
+## Features
 
-- **No confirmation before `write`/`edit`.** The agent can modify notes without
-  asking. Use it on vaults you are willing to have changed, or review the
-  transcript after each turn.
-- **Key encryption is device-local.** On desktop, keys are encrypted with
-  Electron `safeStorage` (DPAPI on Windows, Keychain on macOS, libsecret on
-  Linux) before they are written to
-  `<vault>/.obsidian/plugins/pi-obsidian/data.json`. The ciphertext only
-  decodes on the machine whose keychain produced it, so vault sync does not
-  carry usable keys to other devices — re-enter the key once per device. On
-  mobile, and on desktops without a keyring service, keys fall back to
-  plaintext in that same file; prefer restricted / low-limit keys.
-- **Streaming depends on transport choice.** The default `requestUrl`
-  transport buffers the entire response, so tokens appear all at once. Switch
-  to the `fetch` transport in settings for incremental streaming where the
-  provider allows browser origins.
-- **No bash tool.** Obsidian has no shell access; only the vault tools listed
-  below are available to the agent.
+- **Chat side panel** with streaming responses, abort mid-turn, and multiple
+  conversations (create, switch, rename, delete).
+- **Vault tools**: the agent can read, list, find, grep, write, and edit files;
+  write/edit changes render as inline diffs you can expand.
+- **Reply actions**: copy, insert at the cursor, append to the active note, or
+  ask again (replacing the reply instead of stacking a second one).
+- **Per-chat composer drafts**: unsent text survives closing the panel or
+  switching conversations.
+- **Context management**: automatic compaction when the context window fills,
+  plus a manual *Tidy up earlier messages* command.
+- **Optional agent details**: token counts, spend, context-window use, raw tool
+  arguments, and the provider-qualified model name.
+
+Commands (shown as *Piem: …* in the command palette): **Open chat**,
+**New chat**, **Stop response**, **Tidy up earlier messages**, **Focus chat
+input**, **Ask about selection**, and **Ask about this note**. Press
+**Ctrl/⌘+Enter** in the composer to send.
 
 ## Setup
 
-1. Run `npm install`.
+1. Run `bun install`.
 2. Run `npm run build`.
-3. Reload Obsidian and enable **Pi Obsidian** in **Settings → Community plugins**.
-4. Open **Settings → Pi Obsidian**.
-5. Paste a DeepSeek API key.
-6. Run the command **Open pi chat** or select the ribbon bot icon.
+3. Reload Obsidian and enable **Piem** in **Settings → Community plugins**.
+4. Open **Settings → Piem** and paste an API key (DeepSeek by default).
 
-## Chat usage
-
-The side panel supports:
-
-- Streaming chat responses.
-- Abort while the agent is responding.
-- Starting a new JSONL-backed chat session, switching between stored ones,
-  renaming, and deleting.
-- Tool calls, tool results, thinking and write/edit diffs, each collapsed to
-  a one-line row you open on demand.
-- Reply actions: copy, insert at the cursor, append to the active note, and
-  ask again (which replaces the reply rather than appending a second one).
-- Unsent composer text is saved per chat, so closing the panel or switching
-  conversations does not lose it.
-
-Press **Ctrl/⌘+Enter** in the composer to send.
-
-By default the panel keeps agent internals out of the way. Turn on **Show
-agent details** in settings for token counts, spend, context-window use, raw
-tool arguments, and the provider-qualified model name.
-
-Commands: **Open pi chat**, **New pi chat**, **Stop pi response**, **Tidy up
-earlier messages**, **Focus pi chat input**, **Ask pi about selection**, and
-**Ask pi about this note**.
+For manual installation, copy `main.js`, `manifest.json`, and `styles.css`
+into `<vault>/.obsidian/plugins/piem/`. The repository is
+[`lhr0909/pi-obsidian`](https://github.com/lhr0909/pi-obsidian).
 
 ## Tools
 
-The agent can use these vault-scoped tools:
+The agent has these vault-scoped tools:
 
 - `get_active_note`: return the active Markdown note path and optionally selection/content.
 - `read`: read a vault-relative text or Markdown file.
@@ -79,27 +53,34 @@ The agent can use these vault-scoped tools:
 - `ls`: list a vault folder.
 - `find`: find files by substring or simple glob pattern.
 - `grep`: search text files.
+- `get_note_links` / `get_note_metadata`: use Obsidian's metadata cache for
+  links, backlinks, tags, and frontmatter.
 
-Tool paths must be vault-relative. Absolute paths and `..` path escapes are rejected. The plugin also blocks tool access to `.obsidian/plugins/pi-obsidian` internals by default.
+Tool paths must be vault-relative. Absolute paths and `..` path escapes are
+rejected, and access to the plugin's own internals (`.obsidian/plugins/piem`)
+is blocked by default.
 
-## Session storage
+## Storage
 
-Unsent composer drafts are kept beside them in `drafts.json`, keyed by
-session id.
+Sessions are stored as JSONL files under
+`<vault config dir>/plugins/piem/sessions/`, using a pi-compatible version 3
+header and tree-shaped entries (`id` / `parentId`). Unsent composer drafts are
+kept in `drafts.json` beside them.
 
-Sessions are stored as JSONL files under:
+## Privacy and keys
 
-```text
-<vault config dir>/plugins/pi-obsidian/sessions/
-```
+Prompts, conversation history, vault content returned by tools, and tool
+results are sent to the configured model provider. API keys are stored with
+Obsidian plugin data: on desktop they are sealed with Electron `safeStorage`
+(DPAPI on Windows, Keychain on macOS, libsecret on Linux) before being written
+to `data.json`; on mobile and keyring-less desktops they fall back to
+plaintext there. Sealed keys only decode on the device that created them, so
+vault sync does not carry usable keys — enter the key once per device. Prefer
+restricted / low-limit keys.
 
-Each file starts with a pi-compatible version 3 `session` header and then appends tree-shaped entries using `id` and `parentId`.
-
-## Privacy and provider disclosure
-
-Prompts, assistant-visible conversation history, vault content returned by tools, and tool results are sent to the configured model provider. For the MVP that provider is DeepSeek unless you change settings.
-
-API keys are saved with Obsidian plugin data using `loadData()` / `saveData()`. On desktop they are sealed with Electron `safeStorage` before being written; where that is unavailable (mobile, keyring-less Linux) they remain plaintext (see limitations). Keys are sent only to the selected provider for model requests. Do not use this plugin with vault content you do not want sent to your selected provider.
+**There is no confirmation step before `write`/`edit`** — the agent can modify
+notes immediately. Use it on vaults you are willing to have changed, and
+review the transcript after each turn.
 
 ## Development
 
@@ -108,6 +89,13 @@ bun install
 bun test
 npm run build
 npm run lint
+npm run verify
 ```
 
-Release artifacts are `main.js`, `manifest.json`, and `styles.css` at the plugin root.
+Release artifacts are `main.js`, `manifest.json`, and `styles.css` at the
+plugin root.
+
+## Acknowledgements
+
+Piem grew far beyond its starting point, but it stands on
+[Pi](https://github.com/earendil-works/pi-mono) — thank you.
