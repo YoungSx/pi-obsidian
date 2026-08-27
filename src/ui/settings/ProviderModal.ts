@@ -101,11 +101,12 @@ export class ProviderModal extends Modal {
 			});
 
 		// Placed before the save row so a failing verdict is read before
-		// committing. The check needs a model id, which lives on ModelConfig, so
-		// the caller resolves one of this provider's own models to probe with.
+		// committing. The check needs no model id of its own: the caller probes with
+		// one of this provider's own models when the user has configured one, and
+		// otherwise asks the endpoint which models it serves.
 		const testSetting = new Setting(contentEl)
 			.setName("Connection")
-			.setDesc("Sends one minimal request to confirm the URL, protocol, and key work together.");
+			.setDesc("Checks the URL, protocol, and key. Uses one of this provider's models when there is one, and otherwise asks the endpoint which models it serves.");
 		this.testRow = attachTestButton(testSetting, async () => {
 			const problem = validateProviderDraft(this.draft);
 			if (problem) {
