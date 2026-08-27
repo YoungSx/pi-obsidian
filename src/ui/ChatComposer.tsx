@@ -3,6 +3,7 @@ import { Platform } from "obsidian";
 import { IconButton } from "./ObsidianIcon";
 import { composerStatusText } from "./composerStatus";
 import { isSendShortcut } from "./keyboard";
+import { useAutosize } from "./useAutosize";
 
 interface ChatComposerProps {
 	input: string;
@@ -34,6 +35,8 @@ export function ChatComposer({
 	const isBusy = isStreaming || isCompacting;
 
 	onSendRef.current = onSend;
+
+	useAutosize(textareaRef, input);
 
 	useEffect(() => {
 		const textarea = textareaRef.current;

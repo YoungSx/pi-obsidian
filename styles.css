@@ -56,13 +56,19 @@
 	white-space: nowrap;
 }
 
-/* Provider/model strings can be long ("openrouter/anthropic/…"); wrap instead
-   of pushing the action buttons out of the pane. */
+/*
+ * Provider/model strings can be long ("openrouter/anthropic/claude-…").
+ * `overflow-wrap: anywhere` broke them mid-token across three lines and pushed
+ * the transcript down; this is secondary metadata, so it clips and the full
+ * string lives in the title attribute.
+ */
 .pi-chat__model {
 	color: var(--text-muted);
 	font-size: var(--font-ui-smaller);
 	margin: var(--size-4-1) 0 0;
-	overflow-wrap: anywhere;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
 }
 
 .pi-chat__header-actions {
@@ -738,10 +744,20 @@
 	padding: var(--size-4-2);
 }
 
+/*
+ * The shell carries the single focus indicator. The textarea used to draw its
+ * own outline on top of this border, so one focus produced two rings.
+ */
 .pi-chat__composer-shell:focus-within {
 	border-color: var(--background-modifier-border-focus);
+	box-shadow: 0 0 0 1px var(--background-modifier-border-focus);
 }
 
+/*
+ * Height is driven by `useAutosize`, which sets it inline. The old fixed
+ * `min-height: 5rem` wasted 80px of a narrow sidebar while idle and then made a
+ * long prompt scroll inside that same 80px.
+ */
 .pi-chat__composer textarea {
 	background: var(--background-primary);
 	border: none;
@@ -749,14 +765,17 @@
 	color: var(--text-normal);
 	font-family: var(--font-interface);
 	font-size: var(--font-ui-small);
-	min-height: 5rem;
-	resize: vertical;
+	/* Both driven by `useAutosize`; the fallbacks apply before it first runs and
+	 * if the hook is ever absent. */
+	height: var(--pi-composer-height, auto);
+	max-height: 40vh;
+	overflow-y: var(--pi-composer-overflow, auto);
+	resize: none;
 	width: 100%;
 }
 
 .pi-chat__composer textarea:focus {
-	outline: 2px solid var(--background-modifier-border-focus);
-	outline-offset: -1px;
+	outline: none;
 }
 
 .pi-chat__composer-bar {
