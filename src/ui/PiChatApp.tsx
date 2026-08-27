@@ -3,6 +3,7 @@ import { flushSync } from "react-dom";
 import type { Component } from "obsidian";
 import type { ChatSnapshot, ObsidianAgentService } from "../agent/ObsidianAgentService";
 import type { ActiveSessionInfo } from "../session/ObsidianSessionManager";
+import type { DraftStore } from "../session/DraftStore";
 import type { ChatInputController } from "./ChatInputController";
 import { getActiveNotePath } from "./activeNotePath";
 import { ChatBanner } from "./ChatBanner";
@@ -11,22 +12,33 @@ import { ChatHeader } from "./ChatHeader";
 import { MessageList } from "./MessageList";
 import { appendToDraft } from "./noteReference";
 import { canOpenPluginSettings, openPluginSettings } from "./pluginSettings";
+import { useSessionDraft } from "./useSessionDraft";
 
 interface PiChatAppProps {
 	service: ObsidianAgentService;
 	inputController?: ChatInputController;
 	/** Parent Obsidian component owning rendered Markdown child components. */
 	component: Component;
+	/**
+	 * Persists unsent composer text per chat. Optional so a test can mount the
+	 * panel without touching the vault.
+	 */
+	draftStore?: DraftStore;
 }
 
-export function PiChatApp({ service, inputController, component }: PiChatAppProps): React.JSX.Element {
+export function PiChatApp({ service, inputController, component, draftStore }: PiChatAppProps): React.JSX.Element {
 	const [snapshot, setSnapshot] = useState<ChatSnapshot>(() => service.getSnapshot());
-	const [input, setInput] = useState("");
+	const { draft: input, setDraft: setInput, clearDraft } = useSessionDraft(draftStore, snapshot.session?.id);
 	const [sessions, setSessions] = useState<ActiveSessionInfo[]>([]);
 	const [isInitializing, setIsInitializing] = useState(true);
 	const [initializationError, setInitializationError] = useState<string>();
 	const [dismissedInitError, setDismissedInitError] = useState(false);
 	const sendPromptRef = useRef<() => void>(() => undefined);
+	// Read inside the prefill handler, which is registered once and must not
+	// re-register on every keystroke just to see the current draft.
+	const inputRef = useRef(input);
+
+	inputRef.current = input;
 
 	const app = service.getApp();
 	// Recomputed per render (not memoized on identity) so switching the active
@@ -77,10 +89,11 @@ export function PiChatApp({ service, inputController, component }: PiChatAppProp
 			await service.sendPrompt(prompt);
 			return;
 		}
-		setInput("");
+		clearDraft();
 		const sent = await service.sendPrompt(prompt);
 		if (!sent) {
-			setInput((current) => current || prompt);
+			// Hand the text back rather than losing it to a failed request.
+			setInput(prompt);
 		}
 	};
 
@@ -113,7 +126,7 @@ export function PiChatApp({ service, inputController, component }: PiChatAppProp
 			// Appends to the current draft instead of replacing it, so a prefill that
 			// lands mid-typing never wipes the user's text.
 			flushSync(() => {
-				setInput((current) => appendToDraft(current, text));
+				setInput(appendToDraft(inputRef.current, text));
 			});
 			inputController.notifyPrefillCommitted();
 		});

@@ -12,6 +12,7 @@ import {
 	unsealCustomEndpointApiKey,
 } from "./secrets";
 import { createSecretEnvironment, type SecretEnvironment } from "./secretsStore";
+import { DraftStore } from "./session/DraftStore";
 import { ObsidianSessionManager } from "./session/ObsidianSessionManager";
 import { ObsidianAgentService } from "./agent/ObsidianAgentService";
 import { PiChatView } from "./ui/PiChatView";
@@ -34,6 +35,7 @@ export default class PiObsidianPlugin extends Plugin {
 	// so the shared DEFAULT_SETTINGS object is never mutated in place.
 	settings: PiObsidianSettings = normalizeSettings(null);
 	private agentService: ObsidianAgentService | null = null;
+	private draftStore: DraftStore | null = null;
 	/**
 	 * Resolved once per load. In-memory settings always hold plaintext; this
 	 * codec is what converts to and from the persisted form at the
@@ -57,8 +59,9 @@ export default class PiObsidianPlugin extends Plugin {
 
 		const sessionManager = ObsidianSessionManager.forPlugin(this.app, this);
 		this.agentService = new ObsidianAgentService(this.app, () => this.settings, sessionManager);
+		this.draftStore = DraftStore.forPlugin(this.app, this);
 
-		this.registerView(VIEW_TYPE_PI_CHAT, (leaf) => new PiChatView(leaf, this.requireAgentService()));
+		this.registerView(VIEW_TYPE_PI_CHAT, (leaf) => new PiChatView(leaf, this.requireAgentService(), this.draftStore ?? undefined));
 		this.addSettingTab(new PiObsidianSettingTab(this.app, this, this.requireSecretEnvironment()));
 		this.addCommand({
 			id: "open-pi-chat",
@@ -86,6 +89,22 @@ export default class PiObsidianPlugin extends Plugin {
 				}
 				if (!checking) {
 					service.abort();
+				}
+				return true;
+			},
+		});
+		this.addCommand({
+			id: "compact-pi-chat",
+			name: "Tidy up earlier messages",
+			// `compactNow` existed but nothing reached it, so a full context could
+			// only be resolved by waiting for the automatic threshold.
+			checkCallback: (checking) => {
+				const service = this.agentService;
+				if (!service || service.getSnapshot().isStreaming || service.getSnapshot().isCompacting) {
+					return false;
+				}
+				if (!checking) {
+					void service.compactNow();
 				}
 				return true;
 			},
@@ -142,6 +161,10 @@ export default class PiObsidianPlugin extends Plugin {
 	onunload(): void {
 		this.agentService?.dispose();
 		this.agentService = null;
+		// The view's own teardown already flushed; this only cancels a debounce
+		// that would otherwise fire against an unloaded plugin.
+		this.draftStore?.dispose();
+		this.draftStore = null;
 	}
 
 	/**
