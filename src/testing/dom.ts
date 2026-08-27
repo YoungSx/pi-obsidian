@@ -30,10 +30,18 @@ export function installDom(): Document {
 	globals.navigator = window.navigator;
 	globals.customElements = window.customElements;
 	globals.requestAnimationFrame = (callback: FrameRequestCallback): number => window.setTimeout(() => callback(0), 0) as unknown as number;
-	// Obsidian patches this helper onto HTMLElement.prototype; production code
-	// calls it, so the test DOM has to provide it too.
+	// Obsidian patches these helpers onto HTMLElement.prototype; production code
+	// calls them, so the test DOM has to provide them too.
 	(window.HTMLElement.prototype as unknown as { empty: () => void }).empty = function empty(this: HTMLElement) {
 		this.replaceChildren();
+	};
+	(window.HTMLElement.prototype as unknown as { setCssProps: (props: Record<string, string>) => void }).setCssProps = function setCssProps(
+		this: HTMLElement,
+		props: Record<string, string>,
+	) {
+		for (const [name, value] of Object.entries(props)) {
+			this.style.setProperty(name, value);
+		}
 	};
 	installedDocument = window.document as unknown as Document;
 	return installedDocument;

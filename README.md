@@ -49,10 +49,24 @@ The side panel supports:
 
 - Streaming chat responses.
 - Abort while the agent is responding.
-- Starting a new JSONL-backed chat session.
-- Viewing basic tool calls and tool results in the transcript.
+- Starting a new JSONL-backed chat session, switching between stored ones,
+  renaming, and deleting.
+- Tool calls, tool results, thinking and write/edit diffs, each collapsed to
+  a one-line row you open on demand.
+- Reply actions: copy, insert at the cursor, append to the active note, and
+  ask again (which replaces the reply rather than appending a second one).
+- Unsent composer text is saved per chat, so closing the panel or switching
+  conversations does not lose it.
 
 Press **Ctrl/⌘+Enter** in the composer to send.
+
+By default the panel keeps agent internals out of the way. Turn on **Show
+agent details** in settings for token counts, spend, context-window use, raw
+tool arguments, and the provider-qualified model name.
+
+Commands: **Open pi chat**, **New pi chat**, **Stop pi response**, **Tidy up
+earlier messages**, **Focus pi chat input**, **Ask pi about selection**, and
+**Ask pi about this note**.
 
 ## Tools
 
@@ -69,6 +83,9 @@ The agent can use these vault-scoped tools:
 Tool paths must be vault-relative. Absolute paths and `..` path escapes are rejected. The plugin also blocks tool access to `.obsidian/plugins/pi-obsidian` internals by default.
 
 ## Session storage
+
+Unsent composer drafts are kept beside them in `drafts.json`, keyed by
+session id.
 
 Sessions are stored as JSONL files under:
 
