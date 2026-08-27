@@ -1,5 +1,6 @@
 import React from "react";
 import { IconButton, ObsidianIcon } from "./ObsidianIcon";
+import { useT } from "./TranslatorContext";
 
 interface ChatBannerProps {
 	/** A failure; announced assertively and offered a settings shortcut. */
@@ -26,6 +27,7 @@ interface ChatBannerProps {
  * stale message stayed until the next turn overwrote it.
  */
 export function ChatBanner({ errorMessage, noticeMessage, onDismiss, onOpenSettings }: ChatBannerProps): React.JSX.Element | null {
+	const t = useT();
 	if (errorMessage) {
 		return (
 			<div className="piem-chat__banner piem-chat__banner--error" role="alert" aria-live="assertive" aria-atomic="true">
@@ -33,10 +35,10 @@ export function ChatBanner({ errorMessage, noticeMessage, onDismiss, onOpenSetti
 				<span className="piem-chat__banner-text">{errorMessage}</span>
 				{onOpenSettings ? (
 					<button type="button" className="piem-chat__banner-action" onClick={onOpenSettings}>
-						Open settings
+						{t.t("chat.openSettings")}
 					</button>
 				) : null}
-				<IconButton icon="x" label="Dismiss message" onClick={onDismiss} className="piem-chat__banner-dismiss" />
+				<IconButton icon="x" label={t.t("chat.dismissMessage")} onClick={onDismiss} className="piem-chat__banner-dismiss" />
 			</div>
 		);
 	}
@@ -45,7 +47,7 @@ export function ChatBanner({ errorMessage, noticeMessage, onDismiss, onOpenSetti
 			<div className="piem-chat__banner piem-chat__banner--notice" role="status" aria-live="polite" aria-atomic="true">
 				<ObsidianIcon name="info" className="piem-chat__banner-icon" />
 				<span className="piem-chat__banner-text">{noticeMessage}</span>
-				<IconButton icon="x" label="Dismiss message" onClick={onDismiss} className="piem-chat__banner-dismiss" />
+				<IconButton icon="x" label={t.t("chat.dismissMessage")} onClick={onDismiss} className="piem-chat__banner-dismiss" />
 			</div>
 		);
 	}

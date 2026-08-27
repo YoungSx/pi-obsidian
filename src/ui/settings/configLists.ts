@@ -1,4 +1,5 @@
 import { describeModelConfig, type ModelConfig, type ProviderConfig } from "../../modelConfig";
+import type { Translator } from "../../i18n";
 
 /**
  * The list edits behind the settings panel's add/edit/delete rows.
@@ -68,24 +69,24 @@ function reassignActiveModel(lists: ConfigLists): void {
 }
 
 /** What the user loses by deleting a provider, stated before they confirm. */
-export function describeProviderDeletion(boundModels: readonly ModelConfig[]): string[] {
-	const lines = ["The base URL and API key are removed from this vault's config."];
+export function describeProviderDeletion(boundModels: readonly ModelConfig[], t: Translator): string[] {
+	const lines = [t.t("deletion.providerKeyRemoved")];
 	if (boundModels.length > 0) {
 		const names = boundModels.map(describeModelConfig).join(", ");
 		lines.push(
 			boundModels.length === 1
-				? `The model served by it is removed too: ${names}.`
-				: `The ${boundModels.length} models served by it are removed too: ${names}.`,
+				? t.t("deletion.providerOneModel", { names })
+				: t.t("deletion.providerManyModels", { count: boundModels.length, names }),
 		);
 	}
 	return lines;
 }
 
 /** What the user loses by deleting a model. */
-export function describeModelDeletion(lists: ConfigLists, model: ModelConfig): string[] {
-	const lines = ["The provider and its key stay, so other models keep working."];
+export function describeModelDeletion(lists: ConfigLists, model: ModelConfig, t: Translator): string[] {
+	const lines = [t.t("deletion.modelProviderStays")];
 	if (lists.activeModelId === model.id) {
-		lines.push("It is the active model, so another one is selected after it goes.");
+		lines.push(t.t("deletion.modelWasActive"));
 	}
 	return lines;
 }

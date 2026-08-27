@@ -137,6 +137,7 @@ function snapshot(overrides: Partial<ChatSnapshot> = {}): ChatSnapshot {
 		isCompacting: false,
 		// The metrics these tests assert on live behind the agent-details tier.
 		showAgentDetails: true,
+		language: "en",
 		...overrides,
 	};
 }

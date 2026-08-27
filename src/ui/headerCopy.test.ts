@@ -1,16 +1,24 @@
 import { describe, expect, it } from "bun:test";
 import type { ContextFill } from "../agent/usage";
 import { contextLevel, contextStateText, describeModel, formatThinkingLevel, meterTitle } from "./headerCopy";
+import { getT } from "../i18n";
 
 const model = { provider: "openrouter", modelId: "claude-opus-5", thinkingLevel: "high" };
+const en = getT("en");
+const zh = getT("zh-cn");
 
 describe("describeModel", () => {
 	it("shows the model alone by default, so a long provider path cannot wrap the header", () => {
-		expect(describeModel(model, false)).toBe("claude-opus-5");
+		expect(describeModel(model, false, en)).toBe("claude-opus-5");
 	});
 
 	it("restores the provider and reasoning level once details are on", () => {
-		expect(describeModel(model, true)).toBe("openrouter/claude-opus-5 · Reasoning: High");
+		expect(describeModel(model, true, en)).toBe("openrouter/claude-opus-5 · Reasoning: High");
+	});
+
+	it("translates the reasoning prefix but never the model id", () => {
+		expect(describeModel(model, true, zh)).toBe("openrouter/claude-opus-5 · 推理: High");
+		expect(describeModel(model, false, zh)).toBe("claude-opus-5");
 	});
 });
 
@@ -25,19 +33,30 @@ describe("contextLevel", () => {
 
 describe("contextStateText", () => {
 	it("names every level in words, so the bar's colour is never the only signal", () => {
-		expect(contextStateText("ok")).toBe("ok");
-		expect(contextStateText("warn")).toBe("filling");
-		expect(contextStateText("near")).toBe("context nearly full");
+		expect(contextStateText("ok", en)).toBe("ok");
+		expect(contextStateText("warn", en)).toBe("filling");
+		expect(contextStateText("near", en)).toBe("context nearly full");
+	});
+
+	it("names every level in Chinese too", () => {
+		expect(contextStateText("ok", zh)).toBe("正常");
+		expect(contextStateText("warn", zh)).toBe("正在填充");
+		expect(contextStateText("near", zh)).toBe("上下文即将占满");
 	});
 });
 
 describe("meterTitle", () => {
 	it("flags a heuristic estimate rather than presenting it as measured", () => {
-		expect(meterTitle(fill({ heuristicOnly: true }))).toContain("Estimated");
+		expect(meterTitle(fill({ heuristicOnly: true }), en)).toContain("Estimated");
 	});
 
 	it("quotes the compaction threshold once the provider reports usage", () => {
-		expect(meterTitle(fill({ heuristicOnly: false }))).toContain("98%");
+		expect(meterTitle(fill({ heuristicOnly: false }), en)).toContain("98%");
+	});
+
+	it("keeps the interpolated threshold when translated", () => {
+		expect(meterTitle(fill({ heuristicOnly: false }), zh)).toContain("98%");
+		expect(meterTitle(fill({ heuristicOnly: true }), zh)).toContain("估算");
 	});
 });
 

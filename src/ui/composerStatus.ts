@@ -1,3 +1,5 @@
+import type { Translator } from "../i18n";
+
 /**
  * Copy for the composer's status line.
  *
@@ -22,20 +24,20 @@ export interface ComposerStatusInput {
  * reader is already looking for the send shortcut — `aria-keyshortcuts` only
  * reaches assistive tech, and the buttons carry no hint.
  */
-export function composerStatusText(input: ComposerStatusInput): string {
+export function composerStatusText(input: ComposerStatusInput, t: Translator): string {
 	if (input.isInitializing) {
-		return "Opening chat…";
+		return t.t("composerStatus.opening");
 	}
 	if (input.isCompacting) {
-		return input.showAgentDetails ? "Preparing context…" : "Tidying up earlier messages…";
+		return input.showAgentDetails ? t.t("composerStatus.preparing") : t.t("composerStatus.tidyingUp");
 	}
 	if (input.isStreaming) {
-		return "Piem is responding…";
+		return t.t("composerStatus.responding");
 	}
-	return `${sendShortcutLabel(input.isMac)} to send`;
+	return t.t("composerStatus.sendShortcut", { shortcut: sendShortcutLabel(input.isMac, t) });
 }
 
 /** Platform-correct rendering of the send chord. */
-export function sendShortcutLabel(isMac: boolean): string {
-	return isMac ? "⌘↵" : "Ctrl+↵";
+export function sendShortcutLabel(isMac: boolean, t: Translator): string {
+	return isMac ? t.t("composerStatus.shortcutMac") : t.t("composerStatus.shortcutOther");
 }

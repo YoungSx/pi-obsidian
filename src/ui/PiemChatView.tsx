@@ -6,6 +6,7 @@ import type { ObsidianAgentService } from "../agent/ObsidianAgentService";
 import { ChatApp } from "./ChatApp";
 import { ChatInputController } from "./ChatInputController";
 import type { DraftStore } from "../session/DraftStore";
+import { getT } from "../i18n";
 
 export class PiemChatView extends ItemView {
 	private readonly service: ObsidianAgentService;
@@ -31,7 +32,20 @@ export class PiemChatView extends ItemView {
 	}
 
 	getDisplayText(): string {
-		return "Piem chat";
+		return getT(this.service.getSnapshot().language).t("view.tabTitle");
+	}
+
+	/**
+	 * Repaints the tab header so a language change reaches the tab title.
+	 *
+	 * Obsidian only calls {@link getDisplayText} when it decides to redraw the
+	 * header, so the title would otherwise keep the language it was opened in.
+	 * `updateHeader` exists on `View` at runtime but is absent from the shipped
+	 * type declarations, so it is feature-detected rather than declared — and a
+	 * missing method costs only a stale tab title, never a crash.
+	 */
+	refreshHeader(): void {
+		(this as unknown as { updateHeader?: () => void }).updateHeader?.();
 	}
 
 	getIcon(): string {

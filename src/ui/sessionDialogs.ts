@@ -1,16 +1,17 @@
 import { FuzzySuggestModal, Modal, Setting, type App } from "obsidian";
 import type { ActiveSessionInfo } from "../session/ObsidianSessionManager";
+import type { Translator } from "../i18n";
 
 export interface SessionPickerActions {
 	onOpen: (path: string) => void;
 	onDelete: (session: ActiveSessionInfo) => void;
 }
 
-export function sessionTitle(session: ActiveSessionInfo | undefined): string {
+export function sessionTitle(session: ActiveSessionInfo | undefined, t: Translator): string {
 	if (!session) {
-		return "New chat";
+		return t.t("session.newChat");
 	}
-	return session.name?.trim() || session.firstMessage.trim().split("\n")[0] || "Untitled chat";
+	return session.name?.trim() || session.firstMessage.trim().split("\n")[0] || t.t("session.untitled");
 }
 
 /**
@@ -18,22 +19,22 @@ export function sessionTitle(session: ActiveSessionInfo | undefined): string {
  * beside the dialogs because the header, the picker rows and the delete
  * confirmation all have to name a session the same way.
  */
-export function describeSession(session: ActiveSessionInfo): string {
-	const label = sessionTitle(session);
+export function describeSession(session: ActiveSessionInfo, t: Translator): string {
+	const label = sessionTitle(session, t);
 	const summary = label.length > 60 ? `${label.slice(0, 60)}…` : label;
 	return `${summary} · ${new Date(session.updatedAt).toLocaleString()}`;
 }
 
-export function openSessionPicker(app: App, sessions: ActiveSessionInfo[], actions: SessionPickerActions): void {
-	new SessionPickerModal(app, sessions, actions).open();
+export function openSessionPicker(app: App, sessions: ActiveSessionInfo[], actions: SessionPickerActions, t: Translator): void {
+	new SessionPickerModal(app, sessions, actions, t).open();
 }
 
-export function openSessionRename(app: App, session: ActiveSessionInfo, onSubmit: (name: string) => void): void {
-	new SessionNameModal(app, session, onSubmit).open();
+export function openSessionRename(app: App, session: ActiveSessionInfo, onSubmit: (name: string) => void, t: Translator): void {
+	new SessionNameModal(app, session, onSubmit, t).open();
 }
 
-export function openSessionDeleteConfirm(app: App, session: ActiveSessionInfo, onConfirm: () => void): void {
-	new SessionDeleteModal(app, session, onConfirm).open();
+export function openSessionDeleteConfirm(app: App, session: ActiveSessionInfo, onConfirm: () => void, t: Translator): void {
+	new SessionDeleteModal(app, session, onConfirm, t).open();
 }
 
 /**
@@ -44,15 +45,17 @@ export function openSessionDeleteConfirm(app: App, session: ActiveSessionInfo, o
 class SessionPickerModal extends FuzzySuggestModal<ActiveSessionInfo> {
 	private readonly sessions: ActiveSessionInfo[];
 	private readonly actions: SessionPickerActions;
+	private readonly t: Translator;
 
-	constructor(app: App, sessions: ActiveSessionInfo[], actions: SessionPickerActions) {
+	constructor(app: App, sessions: ActiveSessionInfo[], actions: SessionPickerActions, t: Translator) {
 		super(app);
 		this.sessions = sessions;
 		this.actions = actions;
-		this.setPlaceholder("Search chats");
+		this.t = t;
+		this.setPlaceholder(t.t("session.searchPlaceholder"));
 		this.setInstructions([
-			{ command: "↵", purpose: "Open chat" },
-			{ command: "shift ↵", purpose: "Delete chat" },
+			{ command: "↵", purpose: t.t("session.pickerOpenHint") },
+			{ command: "shift ↵", purpose: t.t("session.pickerDeleteHint") },
 		]);
 	}
 
@@ -61,7 +64,7 @@ class SessionPickerModal extends FuzzySuggestModal<ActiveSessionInfo> {
 	}
 
 	getItemText(session: ActiveSessionInfo): string {
-		return describeSession(session);
+		return describeSession(session, this.t);
 	}
 
 	onChooseItem(session: ActiveSessionInfo, evt: MouseEvent | KeyboardEvent): void {
@@ -76,20 +79,22 @@ class SessionPickerModal extends FuzzySuggestModal<ActiveSessionInfo> {
 class SessionNameModal extends Modal {
 	private readonly session: ActiveSessionInfo;
 	private readonly onSubmit: (name: string) => void;
+	private readonly t: Translator;
 	private name: string;
 
-	constructor(app: App, session: ActiveSessionInfo, onSubmit: (name: string) => void) {
+	constructor(app: App, session: ActiveSessionInfo, onSubmit: (name: string) => void, t: Translator) {
 		super(app);
 		this.session = session;
 		this.onSubmit = onSubmit;
+		this.t = t;
 		this.name = session.name ?? "";
 	}
 
 	onOpen(): void {
-		this.setTitle("Rename chat");
+		this.setTitle(this.t.t("session.renameChat"));
 		new Setting(this.contentEl)
-			.setName("Name")
-			.setDesc("Leave empty to fall back to the opening message.")
+			.setName(this.t.t("session.nameLabel"))
+			.setDesc(this.t.t("session.nameDesc"))
 			.addText((text) => {
 				text
 					.setPlaceholder(this.session.firstMessage.trim().split("\n")[0] ?? "")
@@ -109,8 +114,8 @@ class SessionNameModal extends Modal {
 			});
 
 		new Setting(this.contentEl)
-			.addButton((button) => button.setButtonText("Cancel").onClick(() => this.close()))
-			.addButton((button) => button.setButtonText("Save").setCta().onClick(() => this.submit()));
+			.addButton((button) => button.setButtonText(this.t.t("session.cancel")).onClick(() => this.close()))
+			.addButton((button) => button.setButtonText(this.t.t("session.save")).setCta().onClick(() => this.submit()));
 	}
 
 	onClose(): void {
@@ -126,23 +131,25 @@ class SessionNameModal extends Modal {
 class SessionDeleteModal extends Modal {
 	private readonly session: ActiveSessionInfo;
 	private readonly onConfirm: () => void;
+	private readonly t: Translator;
 
-	constructor(app: App, session: ActiveSessionInfo, onConfirm: () => void) {
+	constructor(app: App, session: ActiveSessionInfo, onConfirm: () => void, t: Translator) {
 		super(app);
 		this.session = session;
 		this.onConfirm = onConfirm;
+		this.t = t;
 	}
 
 	onOpen(): void {
-		this.setTitle("Delete chat");
-		this.contentEl.createEl("p", { text: describeSession(this.session) });
-		this.contentEl.createEl("p", { text: "The chat log moves to trash, so it can still be restored from there." });
+		this.setTitle(this.t.t("session.deleteChat"));
+		this.contentEl.createEl("p", { text: describeSession(this.session, this.t) });
+		this.contentEl.createEl("p", { text: this.t.t("session.deleteRestorable") });
 
 		new Setting(this.contentEl)
-			.addButton((button) => button.setButtonText("Cancel").onClick(() => this.close()))
+			.addButton((button) => button.setButtonText(this.t.t("session.cancel")).onClick(() => this.close()))
 			.addButton((button) =>
 				button
-					.setButtonText("Delete")
+					.setButtonText(this.t.t("session.delete"))
 					.setWarning()
 					.onClick(() => {
 						this.close();

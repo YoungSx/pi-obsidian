@@ -16,6 +16,7 @@ import {
 import { ObsidianSessionManager, type ActiveSessionInfo, type SessionDefaults } from "../session/ObsidianSessionManager";
 import type { SessionContext } from "../session/jsonl";
 import { OBSIDIAN_AGENT_SYSTEM_PROMPT } from "./systemPrompt";
+import { getT, resolveLanguage, type Language, type LanguageHost, type Translator } from "../i18n";
 
 export interface ChatSnapshot {
 	messages: AgentMessage[];
@@ -67,6 +68,15 @@ export interface ChatSnapshot {
 	 * the UI reads one snapshot rather than reaching for settings itself.
 	 */
 	showAgentDetails: boolean;
+	/**
+	 * Language the panel renders in, already resolved from the user's setting.
+	 *
+	 * Resolved here rather than in the components for the same reason
+	 * {@link showAgentDetails} is mirrored: the UI reads one snapshot, and
+	 * `"auto"` needs the host vault to resolve, which a presentational component
+	 * has no business reaching for.
+	 */
+	language: Language;
 }
 
 type SnapshotListener = (snapshot: ChatSnapshot) => void;
@@ -195,7 +205,8 @@ export class ObsidianAgentService {
 			return false;
 		}
 		if (!this.hasApiKey()) {
-			this.setError(`${describeModelTarget(this.getSettings())} needs an API key in plugin settings before sending a prompt.`);
+			const t = this.t();
+			this.setError(t.t("target.needsKeyToSend", { target: describeModelTarget(this.getSettings(), t) }));
 			return false;
 		}
 
@@ -394,8 +405,12 @@ export class ObsidianAgentService {
 
 	async refreshConfiguration(): Promise<void> {
 		// A just-trashed session leaves nothing to append to; the session adopted in
-		// its place runs `ensureConfiguration` itself.
+		// its place runs `ensureConfiguration` itself. Subscribers are still told:
+		// the snapshot is derived from live settings, so a setting the panel renders
+		// directly — the language, the agent-details tier — has already changed even
+		// when there is no agent to reconfigure.
 		if (!this.agent || !this.sessionManager.getActiveSessionPath()) {
+			this.notify();
 			return;
 		}
 		const defaults = this.getSessionDefaults();
@@ -418,6 +433,16 @@ export class ObsidianAgentService {
 	/** Modals are opened from the chat UI, whose only dependency is this service. */
 	getApp(): App {
 		return this.app;
+	}
+
+	/**
+	 * Copy in the language the panel is currently rendering in.
+	 *
+	 * Resolved per call from live settings so an error raised after the user
+	 * switches language is worded in the new one.
+	 */
+	private t(): Translator {
+		return getT(resolveLanguage(this.app.vault as LanguageHost, this.getSettings().language));
 	}
 
 	getSnapshot(): ChatSnapshot {
@@ -452,6 +477,10 @@ export class ObsidianAgentService {
 			isCompacting: this.isCompacting,
 			isConfigured: this.hasApiKey(),
 			showAgentDetails: settings.showAgentDetails,
+			// `getLanguage` is newer than this plugin's minAppVersion, so the shipped
+			// Vault declarations do not carry it; the cast is what lets the optional
+			// call be feature-detected at runtime.
+			language: resolveLanguage(this.app.vault as LanguageHost, settings.language),
 		};
 	}
 
@@ -568,7 +597,8 @@ export class ObsidianAgentService {
 			return;
 		}
 		if (!this.hasApiKey()) {
-			this.setError(`${describeModelTarget(this.getSettings())} needs an API key in plugin settings before compacting.`);
+			const t = this.t();
+			this.setError(t.t("target.needsKeyToCompact", { target: describeModelTarget(this.getSettings(), t) }));
 			return;
 		}
 

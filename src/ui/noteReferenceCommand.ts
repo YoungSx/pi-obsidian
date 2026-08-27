@@ -1,5 +1,6 @@
 import { Notice, type Editor } from "obsidian";
 import { buildNoteReference } from "./noteReference";
+import type { Translator } from "../i18n";
 
 /**
  * Collects the reference for the editor the user is acting on and hands it to
@@ -42,9 +43,9 @@ function selectionRange(editor: Editor, trimmedSelection: string): { startLine?:
 }
 
 /** Warns once per action when a quoted selection had to be clipped. */
-export function warnIfTruncated(truncated: boolean): void {
+export function warnIfTruncated(truncated: boolean, t: Translator): void {
 	if (truncated) {
 		// Sentence case is enforced by eslint-plugin-obsidianmd for UI text.
-		new Notice("The selected text was long; only its beginning was quoted.");
+		new Notice(t.t("noteReference.truncated"));
 	}
 }

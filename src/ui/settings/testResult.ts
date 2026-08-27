@@ -1,5 +1,6 @@
 import type { Setting } from "obsidian";
 import type { ConnectionTestResult } from "../../connectionTest";
+import type { Translator } from "../../i18n";
 
 /**
  * Shared presentation for a connection test: the verdict and the button.
@@ -20,11 +21,11 @@ export function renderTestResult(el: HTMLElement, result: ConnectionTestResult):
 }
 
 /** Renders the in-flight state, so a slow endpoint does not look like a dead button. */
-function renderTestPending(el: HTMLElement): void {
+function renderTestPending(el: HTMLElement, t: Translator): void {
 	el.empty();
 	el.removeClasses(["piem-test-result--ok", "piem-test-result--error"]);
 	el.addClass("piem-test-result--pending");
-	el.setText("Sending a test request…");
+	el.setText(t.t("test.pending"));
 }
 
 /** Handle for a test row, letting the owner drop a verdict that no longer applies. */
@@ -46,20 +47,20 @@ export interface TestRowHandle {
  * convert provider failures into results — but a throw is caught anyway so a bug
  * in the caller's wiring surfaces in the panel instead of an unhandled rejection.
  */
-export function attachTestButton(setting: Setting, run: () => Promise<ConnectionTestResult>): TestRowHandle {
+export function attachTestButton(setting: Setting, t: Translator, run: () => Promise<ConnectionTestResult>): TestRowHandle {
 	const resultEl = setting.descEl.createDiv({ cls: "piem-test-result" });
 	let running = false;
 
 	setting.addButton((button) => {
-		button.setButtonText("Test");
+		button.setButtonText(t.t("test.button"));
 		button.onClick(async () => {
 			if (running) {
 				return;
 			}
 			running = true;
 			button.setDisabled(true);
-			button.setButtonText("Testing…");
-			renderTestPending(resultEl);
+			button.setButtonText(t.t("test.running"));
+			renderTestPending(resultEl, t);
 			try {
 				renderTestResult(resultEl, await run());
 			} catch (cause) {
@@ -70,7 +71,7 @@ export function attachTestButton(setting: Setting, run: () => Promise<Connection
 			} finally {
 				running = false;
 				button.setDisabled(false);
-				button.setButtonText("Test");
+				button.setButtonText(t.t("test.button"));
 			}
 		});
 	});

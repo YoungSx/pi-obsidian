@@ -6,10 +6,11 @@ import {
 	describeModelConfig,
 	describeProviderConfig,
 	modelsForProvider,
-	WIRE_PROTOCOL_LABELS,
+	wireProtocolLabel,
 	type ModelConfig,
 	type ProviderConfig,
 } from "../../modelConfig";
+import { LANGUAGES, getT, type LanguageSetting, type Translator } from "../../i18n";
 import { createObsidianModels } from "../../net/streamFn";
 import type { NetworkTransport } from "../../net/obsidianFetch";
 import {
@@ -54,6 +55,8 @@ export interface SettingsPanelHost {
 	preferredThinkingLevel(): ModelThinkingLevel;
 	/** Names whatever requests currently target, for the status line. */
 	describeTarget(): string;
+	/** Copy for the whole panel, resolved from {@link SettingsPanelSettings.language}. */
+	t: Translator;
 }
 
 /** The slice of settings this panel reads and writes. */
@@ -64,6 +67,7 @@ export interface SettingsPanelSettings {
 	thinkingLevel: ModelThinkingLevel;
 	networkTransport: NetworkTransport;
 	showAgentDetails: boolean;
+	language: LanguageSetting;
 }
 
 /** Which tab is open. Module-level so it survives a re-render of the panel. */
@@ -72,11 +76,13 @@ let lastActiveTabId = "models";
 export function renderSettingsPanel(containerEl: HTMLElement, host: SettingsPanelHost): void {
 	containerEl.empty();
 
+	const { t } = host;
 	const tabs: SettingsTabDefinition[] = [
-		{ id: "models", label: "Models", render: (el) => renderModelsTab(el, host) },
-		{ id: "chat", label: "Chat", render: (el) => renderChatTab(el, host) },
-		{ id: "network", label: "Network", render: (el) => renderNetworkTab(el, host) },
-		{ id: "about", label: "About", render: (el) => renderAboutTab(el, host) },
+		{ id: "models", label: t.t("settings.tabModels"), render: (el) => renderModelsTab(el, host) },
+		{ id: "chat", label: t.t("settings.tabChat"), render: (el) => renderChatTab(el, host) },
+		{ id: "language", label: t.t("settings.tabLanguage"), render: (el) => renderLanguageTab(el, host) },
+		{ id: "network", label: t.t("settings.tabNetwork"), render: (el) => renderNetworkTab(el, host) },
+		{ id: "about", label: t.t("settings.tabAbout"), render: (el) => renderAboutTab(el, host) },
 	];
 
 	renderSettingsTabs(containerEl, {
@@ -108,7 +114,7 @@ function renderModelsTab(containerEl: HTMLElement, host: SettingsPanelHost): voi
 	// layout never stated: it could only be inferred from which controls looked
 	// enabled.
 	const status = containerEl.createDiv({ cls: "piem-settings-status" });
-	status.createSpan({ cls: "piem-settings-status__label", text: "Active model" });
+	status.createSpan({ cls: "piem-settings-status__label", text: host.t.t("settings.statusActiveModel") });
 	status.createSpan({ cls: "piem-settings-status__value", text: host.describeTarget() });
 
 	renderProviderList(containerEl, host, refresh);
@@ -116,19 +122,20 @@ function renderModelsTab(containerEl: HTMLElement, host: SettingsPanelHost): voi
 }
 
 function renderProviderList(containerEl: HTMLElement, host: SettingsPanelHost, refresh: () => void): void {
-	const { settings } = host;
+	const { settings, t } = host;
 
 	new Setting(containerEl)
-		.setName("Providers")
+		.setName(t.t("settings.providersHeading"))
 		.setHeading()
-		.setDesc("Endpoints requests can go to. A provider holds a base URL, a wire protocol, and one key.")
+		.setDesc(t.t("settings.providersDesc"))
 		.addButton((button) => {
-			button.setButtonText("Add provider");
+			button.setButtonText(t.t("settings.addProvider"));
 			button.setCta();
 			button.onClick(() => {
 				new ProviderModal({
 					app: host.app,
 					secretStorage: host.secretStorage,
+					t,
 					test: (draft) => testDraftProvider(host, draft),
 					onSubmit: async (provider) => {
 						settings.providers.push(provider);
@@ -142,7 +149,7 @@ function renderProviderList(containerEl: HTMLElement, host: SettingsPanelHost, r
 	if (settings.providers.length === 0) {
 		containerEl.createEl("p", {
 			cls: "piem-settings-empty",
-			text: "No providers yet. Add one to send requests to your own endpoint or gateway.",
+			text: t.t("settings.noProviders"),
 		});
 		return;
 	}
@@ -151,16 +158,17 @@ function renderProviderList(containerEl: HTMLElement, host: SettingsPanelHost, r
 		const boundModels = modelsForProvider(settings.models, provider.id);
 		const setting = new Setting(containerEl)
 			.setName(describeProviderConfig(provider))
-			.setDesc(describeProviderRow(provider, boundModels.length));
+			.setDesc(describeProviderRow(provider, boundModels.length, t));
 
 		setting.addExtraButton((button) => {
 			button.setIcon("pencil");
-			button.setTooltip("Edit provider");
+			button.setTooltip(t.t("settings.editProvider"));
 			button.onClick(() => {
 				new ProviderModal({
 					app: host.app,
 					provider,
 					secretStorage: host.secretStorage,
+					t,
 					test: (draft) => testDraftProvider(host, draft),
 					onSubmit: async (updated) => {
 						replaceById(settings.providers, updated);
@@ -173,11 +181,12 @@ function renderProviderList(containerEl: HTMLElement, host: SettingsPanelHost, r
 
 		setting.addExtraButton((button) => {
 			button.setIcon("trash-2");
-			button.setTooltip("Delete provider");
+			button.setTooltip(t.t("settings.deleteProvider"));
 			button.onClick(() => {
 				openConfirmDelete(host.app, {
-					subject: `provider "${describeProviderConfig(provider)}"`,
-					consequences: describeProviderDeletion(boundModels),
+					subject: t.t("confirmDelete.providerSubject", { name: describeProviderConfig(provider) }),
+					consequences: describeProviderDeletion(boundModels, t),
+					t,
 					onConfirm: async () => {
 						removeProvider(settings, provider.id);
 						await host.save();
@@ -190,19 +199,15 @@ function renderProviderList(containerEl: HTMLElement, host: SettingsPanelHost, r
 }
 
 function renderModelList(containerEl: HTMLElement, host: SettingsPanelHost, refresh: () => void): void {
-	const { settings } = host;
+	const { settings, t } = host;
 	const hasProviders = settings.providers.length > 0;
 
 	new Setting(containerEl)
-		.setName("Models")
+		.setName(t.t("settings.modelsHeading"))
 		.setHeading()
-		.setDesc(
-			hasProviders
-				? "Models you can select. Each one names a provider and the model ID that provider expects."
-				: "Add a provider first — a model needs an endpoint to be served from.",
-		)
+		.setDesc(t.t(hasProviders ? "settings.modelsDescWithProviders" : "settings.modelsDescNoProviders"))
 		.addButton((button) => {
-			button.setButtonText("Add model");
+			button.setButtonText(t.t("settings.addModel"));
 			button.setCta();
 			// Without a provider there is nothing to bind to, so the button is
 			// disabled rather than opening a form whose only field cannot be filled.
@@ -211,6 +216,7 @@ function renderModelList(containerEl: HTMLElement, host: SettingsPanelHost, refr
 				new ModelModal({
 					app: host.app,
 					providers: settings.providers,
+					t,
 					test: (draft) => testDraftModel(host, draft),
 					onSubmit: async (model) => {
 						settings.models.push(model);
@@ -227,17 +233,17 @@ function renderModelList(containerEl: HTMLElement, host: SettingsPanelHost, refr
 
 	if (settings.models.length === 0) {
 		if (hasProviders) {
-			containerEl.createEl("p", { cls: "piem-settings-empty", text: "No models yet." });
+			containerEl.createEl("p", { cls: "piem-settings-empty", text: t.t("settings.noModels") });
 		}
 		return;
 	}
 
 	new Setting(containerEl)
-		.setName("Active model")
-		.setDesc("Every request goes out on this one.")
+		.setName(t.t("settings.activeModelHeading"))
+		.setDesc(t.t("settings.activeModelDesc"))
 		.addDropdown((dropdown) => {
 			for (const model of settings.models) {
-				dropdown.addOption(model.id, describeModelRow(settings, model));
+				dropdown.addOption(model.id, describeModelRow(settings, model, t));
 			}
 			dropdown.setValue(settings.activeModelId ?? settings.models[0]?.id ?? "");
 			dropdown.onChange(async (modelId) => {
@@ -251,16 +257,17 @@ function renderModelList(containerEl: HTMLElement, host: SettingsPanelHost, refr
 	for (const model of settings.models) {
 		const setting = new Setting(containerEl)
 			.setName(describeModelConfig(model))
-			.setDesc(describeModelRow(settings, model));
+			.setDesc(describeModelRow(settings, model, t));
 
 		setting.addExtraButton((button) => {
 			button.setIcon("pencil");
-			button.setTooltip("Edit model");
+			button.setTooltip(t.t("settings.editModel"));
 			button.onClick(() => {
 				new ModelModal({
 					app: host.app,
 					model,
 					providers: settings.providers,
+					t,
 					test: (draft) => testDraftModel(host, draft),
 					onSubmit: async (updated) => {
 						replaceById(settings.models, updated);
@@ -273,11 +280,12 @@ function renderModelList(containerEl: HTMLElement, host: SettingsPanelHost, refr
 
 		setting.addExtraButton((button) => {
 			button.setIcon("trash-2");
-			button.setTooltip("Delete model");
+			button.setTooltip(t.t("settings.deleteModel"));
 			button.onClick(() => {
 				openConfirmDelete(host.app, {
-					subject: `model "${describeModelConfig(model)}"`,
-					consequences: describeModelDeletion(settings, model),
+					subject: t.t("confirmDelete.modelSubject", { name: describeModelConfig(model) }),
+					consequences: describeModelDeletion(settings, model, t),
+					t,
 					onConfirm: async () => {
 						removeModel(settings, model.id);
 						await host.save();
@@ -290,11 +298,11 @@ function renderModelList(containerEl: HTMLElement, host: SettingsPanelHost, refr
 }
 
 function renderChatTab(containerEl: HTMLElement, host: SettingsPanelHost): void {
-	const { settings } = host;
+	const { settings, t } = host;
 
 	new Setting(containerEl)
-		.setName("Thinking level")
-		.setDesc("How much reasoning to request. Levels the active model does not support are hidden.")
+		.setName(t.t("settings.thinkingLevel"))
+		.setDesc(t.t("settings.thinkingLevelDesc"))
 		.addDropdown((dropdown) => {
 			for (const level of host.thinkingLevels()) {
 				dropdown.addOption(level, level);
@@ -307,8 +315,8 @@ function renderChatTab(containerEl: HTMLElement, host: SettingsPanelHost): void 
 		});
 
 	new Setting(containerEl)
-		.setName("Show agent details")
-		.setDesc("Show token counts, spend, context-window use, and raw tool arguments in the chat panel.")
+		.setName(t.t("settings.showAgentDetails"))
+		.setDesc(t.t("settings.showAgentDetailsDesc"))
 		.addToggle((toggle) => {
 			toggle.setValue(settings.showAgentDetails);
 			toggle.onChange(async (showAgentDetails) => {
@@ -319,16 +327,14 @@ function renderChatTab(containerEl: HTMLElement, host: SettingsPanelHost): void 
 }
 
 function renderNetworkTab(containerEl: HTMLElement, host: SettingsPanelHost): void {
-	const { settings } = host;
+	const { settings, t } = host;
 
 	new Setting(containerEl)
-		.setName("Network transport")
-		.setDesc(
-			"Request URL bypasses browser restrictions everywhere but buffers responses — tokens appear all at once. Fetch streams incrementally but may be blocked.",
-		)
+		.setName(t.t("settings.networkTransport"))
+		.setDesc(t.t("settings.networkTransportDesc"))
 		.addDropdown((dropdown) => {
-			dropdown.addOption("requestUrl", "Request URL (buffered, works everywhere)");
-			dropdown.addOption("fetch", "Fetch (streams, may be blocked)");
+			dropdown.addOption("requestUrl", t.t("settings.transportRequestUrl"));
+			dropdown.addOption("fetch", t.t("settings.transportFetch"));
 			dropdown.setValue(settings.networkTransport);
 			dropdown.onChange(async (transport) => {
 				settings.networkTransport = transport as NetworkTransport;
@@ -338,30 +344,53 @@ function renderNetworkTab(containerEl: HTMLElement, host: SettingsPanelHost): vo
 }
 
 function renderAboutTab(containerEl: HTMLElement, host: SettingsPanelHost): void {
-	new Setting(containerEl).setName("What leaves this vault").setHeading();
-	containerEl.createEl("p", {
-		text: "Prompts, vault content read by tools, and tool results are sent to the provider serving the active model. Nothing is sent anywhere else.",
-	});
+	const { t } = host;
+	new Setting(containerEl).setName(t.t("settings.whatLeavesVault")).setHeading();
+	containerEl.createEl("p", { text: t.t("settings.whatLeavesVaultDesc") });
 
-	new Setting(containerEl).setName("API keys").setHeading();
-	containerEl.createEl("p", { text: describeSecretStorage(host.secretStorage) });
-	containerEl.createEl("p", {
-		text: "Use a restricted, low-limit key: a vault is a plain folder, and a key inside it travels with every backup and sync of that folder.",
-	});
+	new Setting(containerEl).setName(t.t("settings.apiKeysHeading")).setHeading();
+	containerEl.createEl("p", { text: describeSecretStorage(host.secretStorage, t) });
+	containerEl.createEl("p", { text: t.t("settings.restrictedKeyHint") });
+}
+
+/**
+ * Language tab.
+ *
+ * Changing the language re-renders the whole panel rather than this one tab: the
+ * tab strip's own labels are copy too, so redrawing only the pane would leave
+ * the strip in the previous language.
+ */
+function renderLanguageTab(containerEl: HTMLElement, host: SettingsPanelHost): void {
+	const { settings, t } = host;
+
+	new Setting(containerEl)
+		.setName(t.t("settings.languageHeading"))
+		.setDesc(t.t("settings.languageDesc"))
+		.addDropdown((dropdown) => {
+			dropdown.addOption("auto", t.t("language.auto"));
+			for (const language of LANGUAGES) {
+				dropdown.addOption(language, getT(language).t(`language.${language}`));
+			}
+			dropdown.setValue(settings.language);
+			dropdown.onChange(async (language) => {
+				settings.language = language as LanguageSetting;
+				await host.save();
+			});
+		});
 }
 
 /** Row description for a provider: protocol, key state, and how many models use it. */
-function describeProviderRow(provider: ProviderConfig, modelCount: number): string {
-	const key = provider.apiKey.trim() ? "key set" : "no key";
-	const models = modelCount === 1 ? "1 model" : `${modelCount} models`;
-	return `${provider.baseUrl} · ${WIRE_PROTOCOL_LABELS[provider.protocol]} · ${key} · ${models}`;
+function describeProviderRow(provider: ProviderConfig, modelCount: number, t: Translator): string {
+	const key = t.t(provider.apiKey.trim() ? "settings.keySet" : "settings.noKey");
+	const models = t.t(modelCount === 1 ? "settings.modelCount" : "settings.modelsCount", { count: modelCount });
+	return `${provider.baseUrl} · ${wireProtocolLabel(provider.protocol, t)} · ${key} · ${models}`;
 }
 
 /** Row description for a model: its provider and the id sent to the server. */
-function describeModelRow(settings: SettingsPanelSettings, model: ModelConfig): string {
+function describeModelRow(settings: SettingsPanelSettings, model: ModelConfig, t: Translator): string {
 	const provider = settings.providers.find((entry) => entry.id === model.providerId);
-	const providerName = provider ? describeProviderConfig(provider) : "provider missing";
-	const active = settings.activeModelId === model.id ? " · active" : "";
+	const providerName = provider ? describeProviderConfig(provider) : t.t("settings.providerMissing");
+	const active = settings.activeModelId === model.id ? t.t("settings.activeSuffix") : "";
 	return `${model.modelApiId} · ${providerName}${active}`;
 }
 
@@ -377,18 +406,18 @@ async function testDraftProvider(host: SettingsPanelHost, draft: ProviderConfig)
 		transport: host.settings.networkTransport,
 		providers: [draft],
 	});
-	return testProviderConnection(models, draft, host.settings.models);
+	return testProviderConnection(models, draft, host.settings.models, host.t);
 }
 
 /** Same, for a model draft: the provider it names is resolved from saved settings. */
 async function testDraftModel(host: SettingsPanelHost, draft: ModelConfig): Promise<ConnectionTestResult> {
 	const provider = host.settings.providers.find((entry) => entry.id === draft.providerId);
 	if (!provider) {
-		return { ok: false, detail: "That provider no longer exists." };
+		return { ok: false, detail: host.t.t("modelModal.providerMissing") };
 	}
 	const { models } = createObsidianModels({
 		transport: host.settings.networkTransport,
 		providers: [provider],
 	});
-	return testModelConnection(models, draft, provider);
+	return testModelConnection(models, draft, provider, host.t);
 }

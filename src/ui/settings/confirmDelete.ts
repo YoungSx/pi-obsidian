@@ -1,4 +1,5 @@
 import { Modal, Setting, type App } from "obsidian";
+import type { Translator } from "../../i18n";
 
 /**
  * Confirmation before a settings row is removed.
@@ -14,6 +15,8 @@ export interface ConfirmDeleteOptions {
 	subject: string;
 	/** Consequences the user cannot see from the row itself. */
 	consequences: readonly string[];
+	/** Copy for the dialog's own chrome (title and buttons). */
+	t: Translator;
 	onConfirm(): void | Promise<void>;
 }
 
@@ -30,18 +33,18 @@ class ConfirmDeleteModal extends Modal {
 	}
 
 	onOpen(): void {
-		this.setTitle(`Delete ${this.options.subject}?`);
+		this.setTitle(this.options.t.t("confirmDelete.title", { subject: this.options.subject }));
 		for (const line of this.options.consequences) {
 			this.contentEl.createEl("p", { text: line });
 		}
 
 		new Setting(this.contentEl)
-			.addButton((button) => button.setButtonText("Cancel").onClick(() => this.close()))
+			.addButton((button) => button.setButtonText(this.options.t.t("confirmDelete.cancel")).onClick(() => this.close()))
 			.addButton((button) =>
 				// `setWarning` is Obsidian's destructive styling, which is what tells
 				// this button apart from the Cancel beside it at a glance.
 				button
-					.setButtonText("Delete")
+					.setButtonText(this.options.t.t("confirmDelete.delete"))
 					.setWarning()
 					.onClick(() => {
 						this.close();

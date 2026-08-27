@@ -3,11 +3,12 @@ import type { ConnectionTestResult } from "../../connectionTest";
 import {
 	DEFAULT_WIRE_PROTOCOL,
 	WIRE_PROTOCOLS,
-	WIRE_PROTOCOL_LABELS,
 	emptyProviderConfig,
+	wireProtocolLabel,
 	type ProviderConfig,
 	type WireProtocol,
 } from "../../modelConfig";
+import type { Translator } from "../../i18n";
 import { describeApiKeyField, type SecretStorageState } from "./secretStorageCopy";
 import { attachTestButton } from "./testResult";
 
@@ -17,6 +18,8 @@ export interface ProviderModalOptions {
 	provider?: ProviderConfig;
 	/** Where keys actually land on this device, for honest field copy. */
 	secretStorage: SecretStorageState;
+	/** Copy for every label, description, and button in this form. */
+	t: Translator;
 	/** Runs a live request against the draft. */
 	test(draft: ProviderConfig): Promise<ConnectionTestResult>;
 	/** Persists the finished row. Called only on a valid submit. */
@@ -48,13 +51,14 @@ export class ProviderModal extends Modal {
 		const { contentEl } = this;
 		contentEl.empty();
 		contentEl.addClass("piem-settings-modal");
-		this.setTitle(this.isNew ? "Add provider" : "Edit provider");
+		const { t } = this.options;
+		this.setTitle(t.t(this.isNew ? "providerModal.addTitle" : "providerModal.editTitle"));
 
 		new Setting(contentEl)
-			.setName("Name")
-			.setDesc("Shown wherever this provider is listed. Optional — the base URL is used when blank.")
+			.setName(t.t("providerModal.name"))
+			.setDesc(t.t("providerModal.nameDesc"))
 			.addText((text) => {
-				text.setPlaceholder("My gateway");
+				text.setPlaceholder(t.t("providerModal.namePlaceholder"));
 				text.setValue(this.draft.name);
 				text.onChange((value) => {
 					this.draft.name = value;
@@ -62,10 +66,10 @@ export class ProviderModal extends Modal {
 			});
 
 		new Setting(contentEl)
-			.setName("Base URL")
-			.setDesc("Root of the API, e.g. https://api.example.com/v1")
+			.setName(t.t("providerModal.baseUrl"))
+			.setDesc(t.t("providerModal.baseUrlDesc"))
 			.addText((text) => {
-				text.setPlaceholder("https://api.example.com/v1");
+				text.setPlaceholder(t.t("providerModal.baseUrlPlaceholder"));
 				text.setValue(this.draft.baseUrl);
 				text.onChange((value) => {
 					this.draft.baseUrl = value;
@@ -74,11 +78,11 @@ export class ProviderModal extends Modal {
 			});
 
 		new Setting(contentEl)
-			.setName("Protocol")
-			.setDesc("The wire format this endpoint speaks. The first option is the one gateways and self-hosted servers implement most widely.")
+			.setName(t.t("providerModal.protocol"))
+			.setDesc(t.t("providerModal.protocolDesc"))
 			.addDropdown((dropdown) => {
 				for (const protocol of WIRE_PROTOCOLS) {
-					dropdown.addOption(protocol, WIRE_PROTOCOL_LABELS[protocol]);
+					dropdown.addOption(protocol, wireProtocolLabel(protocol, t));
 				}
 				dropdown.setValue(this.draft.protocol ?? DEFAULT_WIRE_PROTOCOL);
 				dropdown.onChange((value) => {
@@ -88,11 +92,11 @@ export class ProviderModal extends Modal {
 			});
 
 		new Setting(contentEl)
-			.setName("API key")
-			.setDesc(describeApiKeyField(this.options.secretStorage, "this provider's base URL"))
+			.setName(t.t("providerModal.apiKey"))
+			.setDesc(describeApiKeyField(this.options.secretStorage, t.t("secretStorage.providerTarget"), t))
 			.addText((text) => {
 				text.inputEl.type = "password";
-				text.setPlaceholder("Enter API key");
+				text.setPlaceholder(t.t("providerModal.apiKeyPlaceholder"));
 				text.setValue(this.draft.apiKey);
 				text.onChange((value) => {
 					this.draft.apiKey = value;
@@ -104,10 +108,10 @@ export class ProviderModal extends Modal {
 		// committing. The check needs a model id, which lives on ModelConfig, so
 		// the caller resolves one of this provider's own models to probe with.
 		const testSetting = new Setting(contentEl)
-			.setName("Connection")
-			.setDesc("Sends one minimal request to confirm the URL, protocol, and key work together.");
-		this.testRow = attachTestButton(testSetting, async () => {
-			const problem = validateProviderDraft(this.draft);
+			.setName(t.t("providerModal.connection"))
+			.setDesc(t.t("providerModal.connectionDesc"));
+		this.testRow = attachTestButton(testSetting, t, async () => {
+			const problem = validateProviderDraft(this.draft, t);
 			if (problem) {
 				return { ok: false, detail: problem };
 			}
@@ -116,11 +120,11 @@ export class ProviderModal extends Modal {
 
 		new Setting(contentEl)
 			.addButton((button) => {
-				button.setButtonText("Cancel");
+				button.setButtonText(t.t("providerModal.cancel"));
 				button.onClick(() => this.close());
 			})
 			.addButton((button) => {
-				button.setButtonText(this.isNew ? "Add" : "Save");
+				button.setButtonText(t.t(this.isNew ? "providerModal.add" : "providerModal.save"));
 				button.setCta();
 				button.onClick(() => void this.submit());
 			});
@@ -143,7 +147,8 @@ export class ProviderModal extends Modal {
 	}
 
 	private async submit(): Promise<void> {
-		const problem = validateProviderDraft(this.draft);
+		const { t } = this.options;
+		const problem = validateProviderDraft(this.draft, t);
 		if (problem) {
 			new Notice(problem);
 			return;
@@ -152,7 +157,7 @@ export class ProviderModal extends Modal {
 			await this.options.onSubmit(this.normalizedDraft());
 			this.close();
 		} catch (cause) {
-			new Notice(`Could not save the provider: ${cause instanceof Error ? cause.message : String(cause)}`);
+			new Notice(t.t("providerModal.couldNotSave", { message: cause instanceof Error ? cause.message : String(cause) }));
 		}
 	}
 }
@@ -163,19 +168,19 @@ export class ProviderModal extends Modal {
  * Kept exported and free of DOM access so the rules are unit-testable: this is
  * the panel's only guard against saving a row that cannot ever serve a request.
  */
-export function validateProviderDraft(draft: ProviderConfig): string | undefined {
+export function validateProviderDraft(draft: ProviderConfig, t: Translator): string | undefined {
 	const baseUrl = draft.baseUrl.trim();
 	if (!baseUrl) {
-		return "A base URL is required.";
+		return t.t("providerModal.baseUrlRequired");
 	}
 	let parsed: URL;
 	try {
 		parsed = new URL(baseUrl);
 	} catch {
-		return "That base URL is not a valid URL. Include the scheme, e.g. https://api.example.com/v1";
+		return t.t("providerModal.baseUrlInvalid");
 	}
 	if (parsed.protocol !== "https:" && parsed.protocol !== "http:") {
-		return "The base URL must use http or https.";
+		return t.t("providerModal.baseUrlScheme");
 	}
 	return undefined;
 }

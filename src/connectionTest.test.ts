@@ -3,6 +3,11 @@ import { createModels, fauxAssistantMessage, fauxProvider } from "@earendil-work
 import type { Models } from "@earendil-works/pi-ai";
 import { testModelConnection, testProviderConnection } from "./connectionTest";
 import type { ModelConfig, ProviderConfig, WireProtocol } from "./modelConfig";
+import { getT } from "./i18n";
+
+const t = getT("en");
+const en = t;
+const zh = getT("zh-cn");
 
 /**
  * Builds a `Models` collection whose single provider is pi-ai's own faux
@@ -40,7 +45,7 @@ describe("testModelConnection", () => {
 		const { models, faux } = modelsWith("prov-1");
 		faux.setResponses([fauxAssistantMessage("ok")]);
 
-		const result = await testModelConnection(models, model(), provider());
+		const result = await testModelConnection(models, model(), provider(), t);
 		expect(result.ok).toBe(true);
 		expect(result.detail).toContain("My gateway");
 	});
@@ -49,20 +54,27 @@ describe("testModelConnection", () => {
 		const { models, faux } = modelsWith("prov-1");
 		faux.setResponses([fauxAssistantMessage("ok")]);
 
-		await testModelConnection(models, model(), provider());
+		await testModelConnection(models, model(), provider(), t);
 		expect(faux.state.callCount).toBe(1);
 	});
 
 	it("points at the empty field instead of the server when no key is set", async () => {
 		const { models } = modelsWith("prov-1");
-		const result = await testModelConnection(models, model(), provider({ apiKey: "   " }));
+		const result = await testModelConnection(models, model(), provider({ apiKey: "   " }), t);
 		expect(result.ok).toBe(false);
 		expect(result.detail).toContain("API key");
 	});
 
+	it("reports that same verdict in the reader's language", async () => {
+		const { models } = modelsWith("prov-1");
+		const result = await testModelConnection(models, model(), provider({ apiKey: "   " }), zh);
+		expect(result.ok).toBe(false);
+		expect(result.detail).toBe("此提供方还没有 API 密钥。");
+	});
+
 	it("spends no request when the model has no id to send", async () => {
 		const { models, faux } = modelsWith("prov-1");
-		const result = await testModelConnection(models, model({ modelApiId: "" }), provider());
+		const result = await testModelConnection(models, model({ modelApiId: "" }), provider(), t);
 		expect(result.ok).toBe(false);
 		expect(faux.state.callCount).toBe(0);
 	});
@@ -71,10 +83,21 @@ describe("testModelConnection", () => {
 		const { models, faux } = modelsWith("prov-1");
 		faux.setResponses([fauxAssistantMessage("", { stopReason: "error", errorMessage: "401 invalid api key" })]);
 
-		const result = await testModelConnection(models, model(), provider());
+		const result = await testModelConnection(models, model(), provider(), t);
 		expect(result.ok).toBe(false);
 		// The server's own wording is what tells a user which field is wrong.
 		expect(result.detail).toBe("401 invalid api key");
+	});
+
+	it("names the stop reason in the reader's language when the server said nothing", async () => {
+		// Regression: the reason used to be interpolated as the library's own enum,
+		// so a Chinese reader got "请求error。" — half a sentence in each language.
+		const { models, faux } = modelsWith("prov-1");
+		faux.setResponses([fauxAssistantMessage("", { stopReason: "error", errorMessage: "" })]);
+		expect((await testModelConnection(models, model(), provider(), zh)).detail).toBe("请求失败。");
+
+		faux.setResponses([fauxAssistantMessage("", { stopReason: "aborted", errorMessage: "" })]);
+		expect((await testModelConnection(models, model(), provider(), en)).detail).toBe("Request aborted.");
 	});
 
 	it("surfaces a thrown provider error verbatim", async () => {
@@ -85,7 +108,7 @@ describe("testModelConnection", () => {
 			},
 		]);
 
-		const result = await testModelConnection(models, model(), provider());
+		const result = await testModelConnection(models, model(), provider(), t);
 		expect(result.ok).toBe(false);
 		expect(result.detail).toBe("404 model not found");
 	});
@@ -96,7 +119,7 @@ describe("testModelConnection", () => {
 		// is the only signal that the request did not go where the user thinks.
 		faux.setResponses([(context, options, state, requestModel) => ({ ...fauxAssistantMessage("ok"), model: requestModel.id, responseModel: "cheaper-model" })]);
 
-		const result = await testModelConnection(models, model({ modelApiId: "probe-model" }), provider());
+		const result = await testModelConnection(models, model({ modelApiId: "probe-model" }), provider(), t);
 		expect(result.ok).toBe(true);
 		expect(result.detail).toContain("served cheaper-model");
 	});
@@ -105,7 +128,7 @@ describe("testModelConnection", () => {
 		const { models, faux } = modelsWith("prov-1");
 		faux.setResponses([{ ...fauxAssistantMessage("ok"), responseModel: "probe-model" }]);
 
-		const result = await testModelConnection(models, model({ modelApiId: "probe-model" }), provider());
+		const result = await testModelConnection(models, model({ modelApiId: "probe-model" }), provider(), t);
 		expect(result.detail).not.toContain("served");
 	});
 
@@ -113,7 +136,7 @@ describe("testModelConnection", () => {
 		const { models, faux } = modelsWith("prov-1");
 		faux.setResponses([fauxAssistantMessage("ok")]);
 
-		const result = await testModelConnection(models, model(), provider({ name: "" }));
+		const result = await testModelConnection(models, model(), provider({ name: "" }), t);
 		expect(result.detail).toContain("https://gw.internal/v1");
 	});
 
@@ -121,7 +144,7 @@ describe("testModelConnection", () => {
 		for (const protocol of ["openai-completions", "openai-responses", "anthropic-messages"] as const) {
 			const { models, faux } = modelsWith("prov-1", protocol);
 			faux.setResponses([fauxAssistantMessage("ok")]);
-			const result = await testModelConnection(models, model(), provider({ protocol }));
+			const result = await testModelConnection(models, model(), provider({ protocol }), t);
 			expect(result.ok).toBe(true);
 		}
 	});
@@ -132,14 +155,14 @@ describe("testProviderConnection", () => {
 		const { models, faux } = modelsWith("prov-1");
 		faux.setResponses([fauxAssistantMessage("ok")]);
 
-		const result = await testProviderConnection(models, provider(), [model()]);
+		const result = await testProviderConnection(models, provider(), [model()], t);
 		expect(result.ok).toBe(true);
 		expect(faux.state.callCount).toBe(1);
 	});
 
 	it("explains what to do when the provider has no model yet, rather than inventing one", async () => {
 		const { models, faux } = modelsWith("prov-1");
-		const result = await testProviderConnection(models, provider(), []);
+		const result = await testProviderConnection(models, provider(), [], t);
 		expect(result.ok).toBe(false);
 		expect(result.detail).toContain("Add a model");
 		expect(faux.state.callCount).toBe(0);
@@ -147,14 +170,14 @@ describe("testProviderConnection", () => {
 
 	it("ignores models belonging to a different provider", async () => {
 		const { models, faux } = modelsWith("prov-1");
-		const result = await testProviderConnection(models, provider(), [model({ providerId: "other" })]);
+		const result = await testProviderConnection(models, provider(), [model({ providerId: "other" })], t);
 		expect(result.ok).toBe(false);
 		expect(faux.state.callCount).toBe(0);
 	});
 
 	it("skips a model with no id, which could not be sent", async () => {
 		const { models } = modelsWith("prov-1");
-		const result = await testProviderConnection(models, provider(), [model({ modelApiId: "" })]);
+		const result = await testProviderConnection(models, provider(), [model({ modelApiId: "" })], t);
 		expect(result.ok).toBe(false);
 		expect(result.detail).toContain("Add a model");
 	});

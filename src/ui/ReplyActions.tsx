@@ -2,6 +2,7 @@ import React from "react";
 import type { App } from "obsidian";
 import { IconButton } from "./ObsidianIcon";
 import { appendToActiveNote, copyToClipboard, insertAtCursor, notifyActionResult } from "./messageActions";
+import { useT } from "./TranslatorContext";
 
 interface ReplyActionsProps {
 	app: App;
@@ -24,30 +25,31 @@ interface ReplyActionsProps {
  * does run on a phone.
  */
 export function ReplyActions({ app, text, onRetry }: ReplyActionsProps): React.JSX.Element | null {
+	const t = useT();
 	if (!text) {
 		return null;
 	}
 
 	return (
-		<div className="piem-chat__message-actions" role="group" aria-label="Reply actions">
+		<div className="piem-chat__message-actions" role="group" aria-label={t.t("replyActions.label")}>
 			<IconButton
 				icon="copy"
-				label="Copy reply"
+				label={t.t("replyActions.copy")}
 				onClick={() => {
-					void copyToClipboard(text).then((copied) => notifyActionResult(copied, "Could not copy to the clipboard."));
+					void copyToClipboard(text).then((copied) => notifyActionResult(copied, t.t("replyActions.couldNotCopy")));
 				}}
 			/>
 			<IconButton
 				icon="text-cursor-input"
-				label="Insert at cursor"
-				onClick={() => notifyActionResult(insertAtCursor(app, text), "Open a note to insert this reply.")}
+				label={t.t("replyActions.insert")}
+				onClick={() => notifyActionResult(insertAtCursor(app, text), t.t("replyActions.needOpenNoteToInsert"))}
 			/>
 			<IconButton
 				icon="file-plus"
-				label="Append to note"
-				onClick={() => notifyActionResult(appendToActiveNote(app, text), "Open a note to append this reply.")}
+				label={t.t("replyActions.append")}
+				onClick={() => notifyActionResult(appendToActiveNote(app, text), t.t("replyActions.needOpenNoteToAppend"))}
 			/>
-			{onRetry ? <IconButton icon="rotate-ccw" label="Ask again" onClick={onRetry} /> : null}
+			{onRetry ? <IconButton icon="rotate-ccw" label={t.t("replyActions.askAgain")} onClick={onRetry} /> : null}
 		</div>
 	);
 }

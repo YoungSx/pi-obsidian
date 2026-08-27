@@ -1,10 +1,15 @@
 import type { ContextFill } from "../agent/usage";
+import type { Translator } from "../i18n";
 
 /**
  * Copy and level rules for the chat panel chrome.
  *
  * Free of React and DOM imports so the wording can be unit-tested without a
  * renderer; `ChatHeader.tsx` owns the markup.
+ *
+ * Every function that returns prose takes the {@link Translator} rather than
+ * reaching for a table itself: that keeps the language a caller's decision and
+ * lets the tests assert both languages through the same entry points.
  */
 
 /** What the header carries to identify the chat's counterpart. */
@@ -23,25 +28,25 @@ export interface ModelDescriptor {
  * wrapped to three lines and pushed the transcript down. Turning on agent
  * details restores the full string for readers who switch models often.
  */
-export function describeModel(model: ModelDescriptor, showAgentDetails: boolean): string {
+export function describeModel(model: ModelDescriptor, showAgentDetails: boolean, t: Translator): string {
 	if (!showAgentDetails) {
 		return model.modelId;
 	}
-	return `${model.provider}/${model.modelId} · Reasoning: ${formatThinkingLevel(model.thinkingLevel)}`;
+	return `${model.provider}/${model.modelId} · ${t.t("context.reasoning")}: ${formatThinkingLevel(model.thinkingLevel)}`;
 }
 
 /**
  * Text label for the context level, mirrored from the colour so the state is
  * legible without sight — required by the a11y contract, not cosmetic.
  */
-export function contextStateText(level: ContextLevel): string {
+export function contextStateText(level: ContextLevel, t: Translator): string {
 	if (level === "near") {
-		return "context nearly full";
+		return t.t("context.nearlyFull");
 	}
 	if (level === "warn") {
-		return "filling";
+		return t.t("context.filling");
 	}
-	return "ok";
+	return t.t("context.ok");
 }
 
 export type ContextLevel = "ok" | "warn" | "near";
@@ -57,11 +62,11 @@ export function contextLevel(fill: ContextFill): ContextLevel {
 	return fill.ratio >= fill.compactionRatio * 0.75 ? "warn" : "ok";
 }
 
-export function meterTitle(fill: ContextFill): string {
+export function meterTitle(fill: ContextFill, t: Translator): string {
 	if (fill.heuristicOnly) {
-		return "Estimated from message sizes; updates after the first reply.";
+		return t.t("context.meterHeuristic");
 	}
-	return `Context use reported by the provider. Compaction starts near ${Math.round(fill.compactionRatio * 100)}%.`;
+	return t.t("context.meterMeasured", { percent: Math.round(fill.compactionRatio * 100) });
 }
 
 export function formatThinkingLevel(level: string): string {

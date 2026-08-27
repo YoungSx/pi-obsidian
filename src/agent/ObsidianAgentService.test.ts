@@ -129,6 +129,7 @@ describe("ObsidianAgentService", () => {
 			providerApiKeys: { deepseek: "test-key" },
 			networkTransport: "requestUrl",
 			showAgentDetails: false,
+			language: "en",
 		};
 		const adapter = new MemoryAdapter();
 		const service = new ObsidianAgentService(
@@ -482,10 +483,45 @@ function usageChunk(): object {
 	};
 }
 
+describe("language in the snapshot", () => {
+	it("resolves the user's setting so the panel never re-resolves it", () => {
+		const { service, settings } = createServiceWithSettings();
+		expect(service.getSnapshot().language).toBe("en");
+		settings.language = "zh-cn";
+		expect(service.getSnapshot().language).toBe("zh-cn");
+	});
+
+	it("resolves auto to English when the host reports no language", () => {
+		const { service, settings } = createServiceWithSettings();
+		settings.language = "auto";
+		expect(service.getSnapshot().language).toBe("en");
+	});
+
+	it("tells subscribers a setting changed even with no agent to reconfigure", async () => {
+		// Regression: refreshConfiguration returned before notify() when no agent
+		// had been built, so switching language left an open panel in the old one.
+		const { service, settings } = createServiceWithSettings();
+		const seen: string[] = [];
+		const unsubscribe = service.subscribe((snapshot) => seen.push(snapshot.language));
+		settings.language = "zh-cn";
+		await service.refreshConfiguration();
+		unsubscribe();
+		expect(seen).toEqual(["en", "zh-cn"]);
+	});
+});
+
 function createService(
 	memoryAdapter: MemoryAdapter = new MemoryAdapter(),
 	overrides: { streamFn?: StreamFn } = {},
 ): ObsidianAgentServiceType {
+	return createServiceWithSettings(memoryAdapter, overrides).service;
+}
+
+/** Same, but hands back the live settings object so a test can mutate it. */
+function createServiceWithSettings(
+	memoryAdapter: MemoryAdapter = new MemoryAdapter(),
+	overrides: { streamFn?: StreamFn } = {},
+): { service: ObsidianAgentServiceType; settings: PiemSettings } {
 	const adapter = asDataAdapter(memoryAdapter);
 	const settings: PiemSettings = {
 		providers: [],
@@ -496,11 +532,13 @@ function createService(
 		providerApiKeys: { deepseek: "test-key" },
 		networkTransport: "requestUrl",
 		showAgentDetails: false,
+		language: "en",
 	};
 	const sessionManager = new ObsidianSessionManager(adapter, SESSION_DIR, "obsidian-vault:Test");
-	return new ObsidianAgentService(createFakeApp(adapter), () => settings, sessionManager, {
+	const service = new ObsidianAgentService(createFakeApp(adapter), () => settings, sessionManager, {
 		streamFn: overrides.streamFn ?? createFakeStreamFn(),
 	});
+	return { service, settings };
 }
 
 function createFakeStreamFn(): StreamFn {

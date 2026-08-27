@@ -22,6 +22,7 @@ import {
 	type CustomEndpointConfig,
 } from "./customEndpoint";
 import { renderSettingsPanel } from "./ui/settings/SettingsPanel";
+import { getT, isLanguageSetting, resolveLanguage, type LanguageHost, type LanguageSetting, type Translator } from "./i18n";
 
 const OFF_THINKING_LEVEL: ModelThinkingLevel = "off";
 
@@ -53,6 +54,11 @@ export interface PiemSettings {
 	 */
 	showAgentDetails: boolean;
 	/**
+	 * Language the interface speaks. `"auto"` follows the host vault's language
+	 * (resolved once per load); the concrete values override it.
+	 */
+	language: LanguageSetting;
+	/**
 	 * Legacy single-endpoint form, superseded by {@link providers}/{@link models}.
 	 *
 	 * Retained after migration rather than cleared: a user who rolls back to an
@@ -71,6 +77,7 @@ export const DEFAULT_SETTINGS: PiemSettings = {
 	providerApiKeys: {},
 	networkTransport: "requestUrl",
 	showAgentDetails: false,
+	language: "auto",
 };
 
 /**
@@ -88,6 +95,10 @@ export function normalizeSettings(data: Partial<PiemSettings> | null | undefined
 	const thinkingLevel = data?.thinkingLevel || DEFAULT_THINKING_LEVEL;
 	const providerApiKeys = data?.providerApiKeys || {};
 	const networkTransport: NetworkTransport = data?.networkTransport === "fetch" ? "fetch" : "requestUrl";
+	// A corrupted or unknown stored value degrades to "auto" rather than
+	// throwing, matching how every other enum-typed setting is repaired.
+	const rawLanguage = data?.language;
+	const language: LanguageSetting = isLanguageSetting(rawLanguage) ? rawLanguage : "auto";
 	// Absent in older vaults; normalizeCustomEndpoint drops empty objects so
 	// a cleared form does not resurrect itself as an active endpoint.
 	const customEndpoint = normalizeCustomEndpoint(data?.customEndpoint);
@@ -126,6 +137,7 @@ export function normalizeSettings(data: Partial<PiemSettings> | null | undefined
 		// Absent in vaults written before the setting existed; those users get the
 		// quiet default rather than inheriting the old always-verbose panel.
 		showAgentDetails: data?.showAgentDetails === true,
+		language,
 		customEndpoint,
 	};
 	if (activeModelId) {
@@ -237,14 +249,14 @@ export function getApiKeyForProvider(settings: PiemSettings, providerId: string)
  * A configured model is described by its display name and provider rather than
  * by internal ids, which would mean nothing to a user reading an error.
  */
-export function describeModelTarget(settings: PiemSettings): string {
+export function describeModelTarget(settings: PiemSettings, t: Translator): string {
 	const active = getActiveConfiguration(settings);
 	if (active) {
 		const providerName = active.provider.name || active.provider.baseUrl;
 		return `${describeModelConfig(active.model)} (${providerName})`;
 	}
 	if (isCustomEndpointActive(settings.customEndpoint)) {
-		return `The custom endpoint (${settings.customEndpoint?.modelId})`;
+		return t.t("target.customEndpoint", { modelId: settings.customEndpoint?.modelId ?? "" });
 	}
 	return `${settings.provider}/${settings.modelId}`.replace(/^./, (first) => first.toUpperCase());
 }
@@ -289,14 +301,25 @@ export class PiemSettingTab extends PluginSettingTab {
 	}
 
 	display(): void {
+		const language = resolveLanguage(this.app.vault as LanguageHost, this.plugin.settings.language);
 		renderSettingsPanel(this.containerEl, {
 			app: this.app,
 			settings: this.plugin.settings,
-			save: () => this.plugin.saveSettings(),
+			// A language change rewrites every label on the page, including the tab
+			// strip's, so the panel is redrawn from scratch rather than patched.
+			// Comparing the resolved language (not the setting) keeps "auto" from
+			// redrawing when it resolves to what is already shown.
+			save: async () => {
+				await this.plugin.saveSettings();
+				if (resolveLanguage(this.app.vault as LanguageHost, this.plugin.settings.language) !== language) {
+					this.display();
+				}
+			},
 			secretStorage: this.encryptionAvailable ? "encrypted" : "plaintext",
 			thinkingLevels: () => getSupportedThinkingLevelOptions(this.plugin.settings),
 			preferredThinkingLevel: () => getPreferredThinkingLevel(this.plugin.settings),
-			describeTarget: () => describeModelTarget(this.plugin.settings),
+			describeTarget: () => describeModelTarget(this.plugin.settings, getT(language)),
+			t: getT(language),
 		});
 	}
 }

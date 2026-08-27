@@ -1,5 +1,6 @@
 import type { Models } from "@earendil-works/pi-ai";
 import { buildConfiguredModel, type ModelConfig, type ProviderConfig } from "./modelConfig";
+import type { Translator } from "./i18n";
 
 /**
  * Verifying a configured endpoint by actually calling it.
@@ -37,11 +38,11 @@ const PROBE_MAX_TOKENS = 1;
  * than a generic "request failed" — a 401 says the key is wrong, a 404 says the
  * model id is.
  */
-function describeError(error: unknown): string {
+function describeError(error: unknown, t: Translator): string {
 	if (error instanceof Error) {
 		return error.message;
 	}
-	return typeof error === "string" ? error : "Unknown error";
+	return typeof error === "string" ? error : t.t("connectionTest.unknownError");
 }
 
 /**
@@ -57,13 +58,14 @@ export async function testModelConnection(
 	models: Models,
 	model: ModelConfig,
 	provider: ProviderConfig,
+	t: Translator,
 	options: { signal?: AbortSignal } = {},
 ): Promise<ConnectionTestResult> {
 	if (!provider.apiKey.trim()) {
-		return { ok: false, detail: "No API key for this provider yet." };
+		return { ok: false, detail: t.t("connectionTest.noKey") };
 	}
 	if (!model.modelApiId.trim()) {
-		return { ok: false, detail: "This model has no model ID yet." };
+		return { ok: false, detail: t.t("connectionTest.noModelId") };
 	}
 
 	try {
@@ -75,14 +77,18 @@ export async function testModelConnection(
 		// A stream can terminate with an error message rather than throwing, so
 		// the reported stop reason decides the verdict, not the absence of a throw.
 		if (response.stopReason === "error" || response.stopReason === "aborted") {
-			return { ok: false, detail: response.errorMessage || `Request ${response.stopReason}.` };
+			const reason = t.t(response.stopReason === "aborted" ? "connectionTest.requestAborted" : "connectionTest.requestFailed");
+			return { ok: false, detail: response.errorMessage || reason };
 		}
 		// `responseModel` is what the server says it served, which catches a
 		// gateway silently substituting a different model.
-		const served = response.responseModel && response.responseModel !== model.modelApiId ? ` — served ${response.responseModel}` : "";
-		return { ok: true, detail: `Reached ${provider.name || provider.baseUrl}${served}.` };
+		const served =
+			response.responseModel && response.responseModel !== model.modelApiId
+				? t.t("connectionTest.servedSuffix", { model: response.responseModel })
+				: "";
+		return { ok: true, detail: t.t("connectionTest.reached", { target: provider.name || provider.baseUrl, served }) };
 	} catch (error) {
-		return { ok: false, detail: describeError(error) };
+		return { ok: false, detail: describeError(error, t) };
 	}
 }
 
@@ -98,11 +104,12 @@ export async function testProviderConnection(
 	models: Models,
 	provider: ProviderConfig,
 	providerModels: readonly ModelConfig[],
+	t: Translator,
 	options: { signal?: AbortSignal } = {},
 ): Promise<ConnectionTestResult> {
 	const probe = providerModels.find((model) => model.providerId === provider.id && model.modelApiId.trim());
 	if (!probe) {
-		return { ok: false, detail: "Add a model under this provider first — a request needs one." };
+		return { ok: false, detail: t.t("connectionTest.needModelFirst") };
 	}
-	return testModelConnection(models, probe, provider, options);
+	return testModelConnection(models, probe, provider, t, options);
 }

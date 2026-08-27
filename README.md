@@ -25,6 +25,8 @@ mobile (`isDesktopOnly: false`).
   plus a manual *Tidy up earlier messages* command.
 - **Optional agent details**: token counts, spend, context-window use, raw tool
   arguments, and the provider-qualified model name.
+- **English and Simplified Chinese UI**: follows Obsidian's language by
+  default, with a manual override in **Settings → Piem → Language**.
 
 Commands (shown as *Piem: …* in the command palette): **Open chat**,
 **New chat**, **Stop response**, **Tidy up earlier messages**, **Focus chat
