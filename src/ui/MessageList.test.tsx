@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import type { App, Component } from "obsidian";
-import type { ToolResultMessage, UserMessage } from "@earendil-works/pi-ai";
+import type { AssistantMessage, ToolResultMessage, UserMessage } from "@earendil-works/pi-ai";
 import type { createRoot } from "react-dom/client";
 import { flushRender, installDom } from "../testing/dom";
 import { installObsidianStub, markdownRenderMock } from "../testing/obsidianStub";
@@ -78,7 +78,7 @@ describe("MessageList compaction divider", () => {
 
 		const status = host.querySelector(".pi-chat__tool-status");
 		expect(status?.getAttribute("role")).toBe("status");
-		expect(status?.textContent).toContain("Running tools: read, grep");
+		expect(status?.textContent).toContain("Working: read, grep");
 	});
 });
 
@@ -97,50 +97,115 @@ describe("MessageList message chrome", () => {
 		document.body.replaceChildren();
 	});
 
-	it("labels message roles in human vocabulary, not internal enum names", async () => {
-		const host = renderMessages([userMessage("hi"), toolResult({})]);
+	it("labels the conversational roles in human vocabulary, not internal enum names", async () => {
+		const host = renderMessages([userMessage("hi"), assistantMessage("hello")]);
 		await flushRender();
 
 		const roles = Array.from(host.querySelectorAll(".pi-chat__message-role"), (el) => el.textContent);
-		expect(roles).toContain("user");
-		expect(roles).toContain("tool result");
-		expect(roles).not.toContain("toolResult");
+		expect(roles).toEqual(["You", "Pi"]);
+	});
+
+	it("gives card chrome to conversation only, so a tool result never nests inside one", async () => {
+		const host = renderMessages([userMessage("hi"), toolResult({})]);
+		await flushRender();
+
+		expect(host.querySelectorAll("article.pi-chat__message")).toHaveLength(1);
+		expect(host.querySelector("article.pi-chat__message--user")).not.toBeNull();
+		expect(host.querySelector("details.pi-chat__trace--result")).not.toBeNull();
+		// A trace must never live inside a message card; that was the nested-card bug.
+		expect(host.querySelector("article.pi-chat__message .pi-chat__trace")).toBeNull();
+	});
+
+	it("marks an aborted assistant turn so half-written text is not read as complete", async () => {
+		const host = renderMessages([assistantMessage("half a th", { stopReason: "aborted" })]);
+		await flushRender();
+
+		expect(host.querySelector(".pi-chat__interrupted")?.textContent).toContain("You stopped this reply.");
+	});
+
+	it("leaves a settled assistant turn unmarked", async () => {
+		const host = renderMessages([assistantMessage("all done")]);
+		await flushRender();
+
+		expect(host.querySelector(".pi-chat__interrupted")).toBeNull();
+	});
+
+	it("attributes unknown harness roles to the system, never to the model", async () => {
+		const host = renderMessages([harnessMessage("injected by the harness")]);
+		await flushRender();
+
+		const trace = host.querySelector("details.pi-chat__trace--harness");
+		expect(trace?.querySelector(".pi-chat__trace-name")?.textContent).toBe("System");
+		expect(trace?.textContent).not.toContain("Pi");
+	});
+});
+
+describe("MessageList trace collapsing", () => {
+	it("collapses a tool call to one row with its most telling argument", async () => {
+		const host = renderMessages([assistantToolCall("read", { path: "Daily/2026-08-27.md", offset: 0 })]);
+		await flushRender();
+
+		const trace = host.querySelector("details.pi-chat__trace");
+		expect(trace?.hasAttribute("open")).toBe(false);
+		expect(trace?.querySelector(".pi-chat__trace-name")?.textContent).toBe("read");
+		expect(trace?.querySelector(".pi-chat__trace-detail")?.textContent).toBe("Daily/2026-08-27.md");
+	});
+
+	it("collapses thinking behind the same trace vocabulary as tool traffic", async () => {
+		const host = renderMessages([assistantThinking("weighing options")]);
+		await flushRender();
+
+		const trace = host.querySelector("details.pi-chat__trace--thinking");
+		expect(trace).not.toBeNull();
+		expect(trace?.hasAttribute("open")).toBe(false);
+	});
+
+	it("flags a failed tool result on the collapsed row", async () => {
+		const host = renderMessages([{ ...toolResult({}), isError: true, content: [{ type: "text", text: "File not found." }] } as ToolResultMessage]);
+		await flushRender();
+
+		const trace = host.querySelector("details.pi-chat__trace--error");
+		expect(trace).not.toBeNull();
+		expect(trace?.querySelector(".pi-chat__trace-detail")?.textContent).toBe("File not found.");
 	});
 });
 
 describe("MessageList tool-result diff", () => {
-	it("renders a write/edit diff collapsed by default with an add/remove summary", async () => {
+	it("puts the add/remove counts on the collapsed row instead of nesting a second disclosure", async () => {
 		const host = renderMessages([toolResult({ diff: " 1 unchanged\n+2 added\n-3 removed" })]);
 		await flushRender();
 
-		const details = host.querySelector("details.pi-chat__diff");
-		expect(details).not.toBeNull();
-		expect(details?.hasAttribute("open")).toBe(false);
-		expect(details?.querySelector("summary")?.textContent).toBe("+1 -1");
+		const trace = host.querySelector("details.pi-chat__trace--result");
+		expect(trace).not.toBeNull();
+		expect(trace?.hasAttribute("open")).toBe(false);
+		expect(trace?.querySelector(".pi-chat__trace-detail")?.textContent).toBe("+1 -1");
+		// The old shape nested a `<details>` inside an always-expanded result block.
+		expect(trace?.querySelector("details")).toBeNull();
 	});
 
 	it("sends the diff through the Markdown renderer as a diff fence", async () => {
 		renderMessages([toolResult({ diff: "+added line" })]);
 		await flushRender();
 
-		expect(markdownRenderMock).toHaveBeenCalledTimes(1);
-		const call = markdownRenderMock.mock.calls[0]![0] as { markdown: string };
-		expect(call.markdown).toBe("```diff\n+added line\n```");
+		const diffCall = markdownRenderMock.mock.calls.find((call) => (call[0] as { markdown: string }).markdown.startsWith("```diff"));
+		expect((diffCall?.[0] as { markdown: string }).markdown).toBe("```diff\n+added line\n```");
 	});
 
-	it("shows no diff section when details carry no diff", async () => {
+	it("falls back to the result's own first line when no diff is attached", async () => {
 		const host = renderMessages([toolResult({ path: "Note.md", editCount: 2 })]);
 		await flushRender();
 
-		expect(host.querySelector("details.pi-chat__diff")).toBeNull();
-		expect(markdownRenderMock).toHaveBeenCalledTimes(0);
+		expect(host.querySelector(".pi-chat__trace-detail")?.textContent).toBe("Applied 1 edit to Note.md.");
+		const diffCalls = markdownRenderMock.mock.calls.filter((call) => (call[0] as { markdown: string }).markdown.startsWith("```diff"));
+		expect(diffCalls).toHaveLength(0);
 	});
 
 	it("ignores non-string and empty diff values", async () => {
-		const host = renderMessages([toolResult({ diff: 42 }), toolResult({ diff: "" })]);
+		renderMessages([toolResult({ diff: 42 }), toolResult({ diff: "" })]);
 		await flushRender();
 
-		expect(host.querySelectorAll("details.pi-chat__diff")).toHaveLength(0);
+		const diffCalls = markdownRenderMock.mock.calls.filter((call) => (call[0] as { markdown: string }).markdown.startsWith("```diff"));
+		expect(diffCalls).toHaveLength(0);
 	});
 });
 
@@ -162,6 +227,46 @@ function compactionSummary(text: string): AgentMessage {
 
 function userMessage(text: string): UserMessage {
 	return { role: "user", content: text, timestamp: Date.now() };
+}
+
+function assistantMessage(text: string, overrides: Partial<AssistantMessage> = {}): AssistantMessage {
+	return { ...assistantBase(), content: [{ type: "text", text }], ...overrides };
+}
+
+function assistantThinking(thinking: string): AssistantMessage {
+	return { ...assistantBase(), content: [{ type: "thinking", thinking }] };
+}
+
+function assistantToolCall(name: string, args: Record<string, unknown>): AssistantMessage {
+	return { ...assistantBase(), content: [{ type: "toolCall", id: "call-1", name, arguments: args }] };
+}
+
+function assistantBase(): AssistantMessage {
+	return {
+		role: "assistant",
+		content: [],
+		api: "anthropic-messages",
+		provider: "deepseek",
+		model: "deepseek-v4-pro",
+		usage: emptyUsage(),
+		stopReason: "stop",
+		timestamp: Date.now(),
+	} as AssistantMessage;
+}
+
+function emptyUsage(): AssistantMessage["usage"] {
+	return {
+		input: 0,
+		output: 0,
+		cacheRead: 0,
+		cacheWrite: 0,
+		cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+	} as AssistantMessage["usage"];
+}
+
+/** A role the chat panel does not model as conversation, to pin system attribution. */
+function harnessMessage(text: string): AgentMessage {
+	return { role: "custom", content: text, timestamp: Date.now() } as AgentMessage;
 }
 
 const roots = new WeakMap<HTMLElement, import("react-dom/client").Root>();

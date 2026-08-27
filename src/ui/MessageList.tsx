@@ -1,10 +1,11 @@
 import React, { useEffect, useRef, useState } from "react";
 import type { AgentMessage, CompactionSummaryMessage } from "@earendil-works/pi-agent-core";
 import type { AssistantMessage, ToolResultMessage, UserMessage } from "@earendil-works/pi-ai";
-import type { App, Component } from "obsidian";
+import type { App, Component, IconName } from "obsidian";
 import type { TextBlockKind } from "./markdownPolicy";
 import { MarkdownText } from "./MarkdownText";
 import { ObsidianIcon } from "./ObsidianIcon";
+import { countDiffLines, summarizeToolPayload, summarizeToolResult } from "./traceSummary";
 
 export interface MessageListProps {
 	messages: AgentMessage[];
@@ -90,8 +91,6 @@ export function MessageList({
 				className="pi-chat__messages"
 				role="log"
 				aria-label="Conversation"
-				aria-live="polite"
-				aria-relevant="additions text"
 				aria-busy={isStreaming || isInitializing}
 				tabIndex={0}
 				onScroll={updateFollowState}
@@ -103,8 +102,8 @@ export function MessageList({
 				)}
 				{pendingToolCalls.length > 0 ? (
 					<div aria-label="Tools running" className="pi-chat__tool-status" role="status">
-						<ObsidianIcon name="loader-circle" />
-						Running tools: {pendingToolCalls.join(", ")}
+						<ObsidianIcon name="loader-circle" className="pi-chat__spinner" />
+						Working: {pendingToolCalls.join(", ")}
 					</div>
 				) : null}
 			</main>
@@ -150,53 +149,45 @@ interface MessageRowProps {
 	renderContext: MessageContext;
 }
 
-function MessageRow({ message, isStreaming, renderContext }: MessageRowProps): React.JSX.Element {
+/**
+ * One transcript entry.
+ *
+ * Only the two conversational roles get card chrome. Everything else — tool
+ * calls, tool results, harness output, compaction summaries — renders flat, so
+ * a card never contains another bordered box.
+ */
+function MessageRow({ message, isStreaming, renderContext }: MessageRowProps): React.JSX.Element | null {
 	// The summary fronts a compacted transcript; it reads as a divider ("history
 	// above this was summarized"), not as one more message bubble.
 	if (message.role === "compactionSummary") {
 		return <CompactionDivider message={message} renderContext={renderContext} />;
 	}
+	if (message.role === "toolResult") {
+		return <ToolResultTrace message={message} context={renderContext} />;
+	}
+	if (message.role !== "user" && message.role !== "assistant") {
+		return <HarnessTrace message={message} context={renderContext} />;
+	}
 	return (
 		<article className={`pi-chat__message pi-chat__message--${message.role}`} aria-busy={isStreaming}>
 			<div className="pi-chat__message-role">
-				<ObsidianIcon name={roleIcon(message.role)} />
-				{roleLabel(message.role)}
+				<ObsidianIcon name={message.role === "user" ? "user" : "sparkles"} />
+				{message.role === "user" ? "You" : "Pi"}
 			</div>
 			<div className="pi-chat__message-content">{renderMessageContent(message, { isStreaming, renderContext })}</div>
+			{wasInterrupted(message) ? (
+				<p className="pi-chat__interrupted">
+					<ObsidianIcon name="circle-slash" />
+					You stopped this reply.
+				</p>
+			) : null}
 		</article>
 	);
 }
 
-/**
- * Human-readable role label. Raw internal role names ("toolResult") leak
- * implementation vocabulary into the transcript; the labels stay lowercase so
- * the CSS uppercase transform keeps its look.
- */
-function roleLabel(role: string): string {
-	switch (role) {
-		case "user":
-			return "user";
-		case "assistant":
-			return "Pi";
-		case "toolResult":
-			return "tool result";
-		case "bashExecution":
-			return "command";
-		case "branchSummary":
-			return "summary";
-		default:
-			return "Pi";
-	}
-}
-
-function roleIcon(role: string): string {
-	if (role === "user") {
-		return "user";
-	}
-	if (role === "toolResult" || role === "bashExecution") {
-		return "wrench";
-	}
-	return "sparkles";
+/** True for an assistant turn the user aborted, so the half-written text is not read as complete. */
+function wasInterrupted(message: UserMessage | AssistantMessage): boolean {
+	return message.role === "assistant" && message.stopReason === "aborted";
 }
 
 /**
@@ -224,17 +215,11 @@ interface MessageContext {
 	sourcePath: string;
 }
 
-function renderMessageContent(message: AgentMessage, args: RenderArgs): React.ReactNode {
+function renderMessageContent(message: UserMessage | AssistantMessage, args: RenderArgs): React.ReactNode {
 	if (message.role === "user") {
 		return renderUserMessage(message, args);
 	}
-	if (message.role === "assistant") {
-		return renderAssistantMessage(message, args);
-	}
-	if (message.role === "toolResult") {
-		return renderToolResultMessage(message, args.renderContext);
-	}
-	return renderFallbackMessage(message, args.renderContext);
+	return renderAssistantMessage(message, args);
 }
 
 interface TextBlockProps {
@@ -271,35 +256,85 @@ function renderAssistantMessage(message: AssistantMessage, args: RenderArgs): Re
 		}
 		if (content.type === "thinking") {
 			return (
-				<details key={index} className="pi-chat__thinking">
-					<summary>Thinking</summary>
+				<Trace key={index} icon="brain" name="Thought it through" className="pi-chat__trace--thinking">
 					<Block text={content.thinking} kind="thinking" isStreaming={args.isStreaming} context={args.renderContext} />
-				</details>
+				</Trace>
 			);
 		}
 		return (
-			<div key={index} className="pi-chat__tool-call">
-				Tool call: <strong>{content.name}</strong>
-				<pre>{JSON.stringify(content.arguments, null, 2)}</pre>
-			</div>
+			<Trace key={index} icon="wrench" name={content.name} detail={summarizeToolPayload(content.arguments)}>
+				<pre className="pi-chat__text">{JSON.stringify(content.arguments, null, 2)}</pre>
+			</Trace>
 		);
 	});
 }
 
-function renderToolResultMessage(message: ToolResultMessage, context: MessageContext): React.ReactNode {
-	const diff = extractDiff(message.details);
+interface TraceProps {
+	icon: IconName;
+	name: string;
+	detail?: string;
+	className?: string;
+	children: React.ReactNode;
+}
+
+/**
+ * Collapsed one-line disclosure for machine traffic (tool calls, tool results,
+ * thinking, harness output).
+ *
+ * One vocabulary for all of it: the transcript used to expand raw JSON and full
+ * tool output inline while hiding thinking and diffs behind `<details>`, so a
+ * single `grep` could bury the model's actual prose. Everything mechanical now
+ * collapses to a 1-line row the reader opens on demand.
+ */
+function Trace({ icon, name, detail, className, children }: TraceProps): React.JSX.Element {
+	const classes = ["pi-chat__trace", className].filter(Boolean).join(" ");
 	return (
-		<div className={message.isError ? "pi-chat__tool-result pi-chat__tool-result--error" : "pi-chat__tool-result"}>
-			<div>Tool result: <strong>{message.toolName}</strong></div>
-			{message.content.map((content, index) => {
-				if (content.type === "text") {
-					return <Block key={index} text={content.text} kind="toolResult" isStreaming={false} context={context} />;
-				}
-				return <div key={index}>[image: {content.mimeType}]</div>;
-			})}
-			{diff ? <DiffDetails diff={diff} context={context} /> : null}
-		</div>
+		<details className={classes}>
+			<summary className="pi-chat__trace-summary">
+				<ObsidianIcon name={icon} className="pi-chat__trace-icon" />
+				<span className="pi-chat__trace-name">{name}</span>
+				{detail ? <span className="pi-chat__trace-detail">{detail}</span> : null}
+			</summary>
+			<div className="pi-chat__trace-body">{children}</div>
+		</details>
 	);
+}
+
+/**
+ * A tool result, collapsed.
+ *
+ * When the tool attached a diff, the summary carries the `+N -M` counts and the
+ * body shows the diff itself — previously the diff sat in a second `<details>`
+ * nested inside an always-expanded result block.
+ */
+function ToolResultTrace({ message, context }: { message: ToolResultMessage; context: MessageContext }): React.JSX.Element {
+	const diff = extractDiff(message.details);
+	const classes = ["pi-chat__trace", "pi-chat__trace--result", message.isError ? "pi-chat__trace--error" : null].filter(Boolean).join(" ");
+	const detail = diff ? formatDiffCounts(diff) : summarizeToolResult(message);
+	return (
+		<details className={classes}>
+			<summary className="pi-chat__trace-summary">
+				<ObsidianIcon name={message.isError ? "alert-triangle" : "check"} className="pi-chat__trace-icon" />
+				<span className="pi-chat__trace-name">{message.toolName}</span>
+				{detail ? <span className="pi-chat__trace-detail">{detail}</span> : null}
+			</summary>
+			<div className="pi-chat__trace-body">
+				{message.content.map((content, index) => {
+					if (content.type === "text") {
+						return <Block key={index} text={content.text} kind="toolResult" isStreaming={false} context={context} />;
+					}
+					return <div key={index}>[image: {content.mimeType}]</div>;
+				})}
+				{diff ? <Block text={`\`\`\`diff\n${diff}\n\`\`\``} kind="assistant" isStreaming={false} context={context} /> : null}
+			</div>
+		</details>
+	);
+}
+
+/** `+N -M` counts for a diff, matching what the collapsed summary used to show. */
+function formatDiffCounts(diff: string): string {
+	const { added, removed } = countDiffLines(diff);
+	return `+${added} -${removed}`;
 }
 
 /**
@@ -318,46 +353,30 @@ function extractDiff(details: unknown): string | null {
 }
 
 /**
- * Collapsed-by-default view of what write/edit changed.
+ * Harness message variants the chat panel does not model as conversation
+ * (bashExecution, custom, branchSummary). These arrive via pi-agent-core's
+ * `CustomAgentMessages` declaration merging.
  *
- * The summary counts the diff's own `+`/`-` lines so no extra state has to flow
- * from the tool; the body renders as a ```diff fence inside Obsidian's Markdown
- * pipeline, which highlights added/removed lines for free.
- *
- * The fence travels as kind `"assistant"` because that is the existing
- * markdown-rendered kind closest to settled, tool-generated text;
- * `markdownPolicy.ts` belongs to the separate markdown-rendering workstream,
- * so introducing a dedicated `"diff"` kind there was deliberately avoided.
+ * They render as traces, never as assistant messages: labelling harness output
+ * "Pi" would attribute machine text to the model.
  */
-function DiffDetails({ diff, context }: { diff: string; context: MessageContext }): React.JSX.Element {
-	let added = 0;
-	let removed = 0;
-	for (const line of diff.split("\n")) {
-		if (line.startsWith("+")) {
-			added += 1;
-		} else if (line.startsWith("-")) {
-			removed += 1;
-		}
+function HarnessTrace({ message, context }: { message: AgentMessage; context: MessageContext }): React.JSX.Element | null {
+	const rendered = renderHarnessBody(message, context);
+	if (!rendered) {
+		return null;
 	}
-	const summary = `+${added} -${removed}`;
 	return (
-		<details className="pi-chat__diff">
-			<summary>{summary}</summary>
-			<Block text={`\`\`\`diff\n${diff}\n\`\`\``} kind="assistant" isStreaming={false} context={context} />
-		</details>
+		<Trace icon={harnessIcon(message.role)} name={harnessLabel(message.role)} className="pi-chat__trace--harness">
+			{rendered}
+		</Trace>
 	);
 }
 
-/**
- * Renders harness message variants that the chat panel does not model yet
- * (bashExecution, custom, branchSummary, compactionSummary). These arrive via
- * pi-agent-core's `CustomAgentMessages` declaration merging.
- */
-function renderFallbackMessage(message: AgentMessage, context: MessageContext): React.ReactNode {
+function renderHarnessBody(message: AgentMessage, context: MessageContext): React.ReactNode {
 	if (message.role === "bashExecution") {
 		return <Block text={`$ ${message.command}\n${message.output}`} kind="harness" isStreaming={false} context={context} />;
 	}
-	if (message.role === "branchSummary" || message.role === "compactionSummary") {
+	if (message.role === "branchSummary") {
 		return <Block text={message.summary} kind="harness" isStreaming={false} context={context} />;
 	}
 	if (message.role === "custom") {
@@ -372,4 +391,25 @@ function renderFallbackMessage(message: AgentMessage, context: MessageContext): 
 		});
 	}
 	return null;
+}
+
+/**
+ * Human-readable label for a non-conversational role.
+ *
+ * Unknown roles report as "System", never "Pi": the old default returned the
+ * model's own name for anything unrecognized, so harness-injected messages were
+ * presented as words the model had said.
+ */
+function harnessLabel(role: string): string {
+	if (role === "bashExecution") {
+		return "Command";
+	}
+	if (role === "branchSummary") {
+		return "Summary";
+	}
+	return "System";
+}
+
+function harnessIcon(role: string): IconName {
+	return role === "bashExecution" ? "terminal" : "info";
 }
