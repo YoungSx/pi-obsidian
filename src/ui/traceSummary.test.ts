@@ -1,6 +1,6 @@
 import { describe, expect, it } from "bun:test";
 import type { ToolResultMessage } from "@earendil-works/pi-ai";
-import { countDiffLines, summarizeToolPayload, summarizeToolResult } from "./traceSummary";
+import { countDiffLines, describeTool, summarizeToolPayload, summarizeToolResult } from "./traceSummary";
 
 describe("summarizeToolPayload", () => {
 	it("prefers the path, the one argument that answers 'which note'", () => {
@@ -36,6 +36,21 @@ describe("summarizeToolResult", () => {
 
 	it("stays empty for a successful result with no text, so the row shows the tool name alone", () => {
 		expect(summarizeToolResult({ ...result(""), content: [] })).toBe("");
+	});
+});
+
+describe("describeTool", () => {
+	it("names vault tools in the reader's vocabulary by default", () => {
+		expect(describeTool("grep", false)).toBe("Searched the vault");
+		expect(describeTool("get_active_note", false)).toBe("Checked the open note");
+	});
+
+	it("keeps the raw id once details are on, so the row matches the payload below it", () => {
+		expect(describeTool("grep", true)).toBe("grep");
+	});
+
+	it("falls through to the raw id for a tool it has not been taught", () => {
+		expect(describeTool("some_new_tool", false)).toBe("some_new_tool");
 	});
 });
 

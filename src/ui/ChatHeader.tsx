@@ -5,6 +5,7 @@ import type { ActiveSessionInfo } from "../session/ObsidianSessionManager";
 import type { ContextFill } from "../agent/usage";
 import { formatCost, formatTokens } from "../agent/usage";
 import { IconButton, ObsidianIcon } from "./ObsidianIcon";
+import { contextLevel, contextStateText, describeModel, meterTitle } from "./headerCopy";
 import {
 	describeSession,
 	openSessionDeleteConfirm,
@@ -34,6 +35,7 @@ export function ChatHeader({
 }: ChatHeaderProps): React.JSX.Element {
 	const activeSession = snapshot.session;
 	const isBusy = snapshot.isStreaming || snapshot.isCompacting;
+	const showDetails = snapshot.showAgentDetails;
 	const openPicker = (): void => {
 		openSessionPicker(app, sessions, {
 			onOpen: onOpenSession,
@@ -62,6 +64,11 @@ export function ChatHeader({
 		menu.showAtMouseEvent(event.nativeEvent);
 	};
 
+	const modelLine = describeModel(snapshot, showDetails);
+	// The status bar is empty on a fresh, quiet chat in the default tier; rendering
+	// the row anyway would leave a labelled landmark holding nothing.
+	const hasStatus = snapshot.isCompacting || (showDetails && (snapshot.contextFill !== null || snapshot.usage.requests > 0));
+
 	return (
 		<div className="pi-chat__chrome">
 			<header className="pi-chat__header" aria-label="Current chat">
@@ -69,35 +76,35 @@ export function ChatHeader({
 					<h2 className="pi-chat__title" title={activeSession ? describeSession(activeSession) : undefined}>
 						{sessionTitle(activeSession)}
 					</h2>
-					<p className="pi-chat__model">
-						{snapshot.provider}/{snapshot.modelId} <span aria-hidden="true">·</span> Reasoning: {formatThinkingLevel(snapshot.thinkingLevel)}
+					<p className="pi-chat__model" title={modelLine}>
+						{modelLine}
 					</p>
 				</div>
 				<div className="pi-chat__header-actions" role="toolbar" aria-label="Chat actions">
-					{sessions.length > 1 ? (
-						<IconButton icon="messages-square" label="Open chats" onClick={openPicker} disabled={isBusy} />
-					) : null}
+					{/* Always mounted so the button positions never shift as the vault
+					    accumulates chats; disabled until there is a second one to pick. */}
+					<IconButton icon="messages-square" label="Open chats" onClick={openPicker} disabled={isBusy || sessions.length < 2} />
 					<IconButton icon="square-pen" label="New chat" onClick={onNewSession} disabled={isBusy} />
-					{activeSession ? (
-						<IconButton icon="ellipsis" label="More chat actions" onClick={openSessionMenu} disabled={isBusy} />
-					) : null}
+					<IconButton icon="ellipsis" label="More chat actions" onClick={openSessionMenu} disabled={isBusy || !activeSession} />
 				</div>
 			</header>
 
-			<div className="pi-chat__statusbar" aria-label="Chat status">
-				<ContextMeter fill={snapshot.contextFill} />
-				{snapshot.usage.requests > 0 ? (
-					<span className="pi-chat__usage">
-						{formatTokens(snapshot.usage.tokens)} tokens <span aria-hidden="true">·</span> {formatCost(snapshot.usage.cost)}
-					</span>
-				) : null}
-				{snapshot.isCompacting ? (
-					<span className="pi-chat__compacting" role="status">
-						<ObsidianIcon name="loader-circle" />
-						Compacting context…
-					</span>
-				) : null}
-			</div>
+			{hasStatus ? (
+				<div className="pi-chat__statusbar" aria-label="Chat status">
+					{showDetails ? <ContextMeter fill={snapshot.contextFill} /> : null}
+					{showDetails && snapshot.usage.requests > 0 ? (
+						<span className="pi-chat__usage">
+							{formatTokens(snapshot.usage.tokens)} tokens <span aria-hidden="true">·</span> {formatCost(snapshot.usage.cost)}
+						</span>
+					) : null}
+					{snapshot.isCompacting ? (
+						<span className="pi-chat__compacting" role="status">
+							<ObsidianIcon name="loader-circle" />
+							{showDetails ? "Compacting context…" : "Tidying up earlier messages…"}
+						</span>
+					) : null}
+				</div>
+			) : null}
 		</div>
 	);
 }
@@ -133,36 +140,4 @@ function ContextMeter({ fill }: { fill: ContextFill | null }): React.JSX.Element
 			</span>
 		</div>
 	);
-}
-
-/**
- * Text label for the context level, mirrored from the colour so the state is
- * legible without sight — required by the a11y contract, not cosmetic.
- */
-function contextStateText(level: "ok" | "warn" | "near"): string {
-	if (level === "near") {
-		return "context nearly full";
-	}
-	if (level === "warn") {
-		return "filling";
-	}
-	return "ok";
-}
-
-function meterTitle(fill: ContextFill): string {
-	if (fill.heuristicOnly) {
-		return "Estimated from message sizes; updates after the first reply.";
-	}
-	return `Context use reported by the provider. Compaction starts near ${Math.round(fill.compactionRatio * 100)}%.`;
-}
-
-function contextLevel(fill: ContextFill): "ok" | "warn" | "near" {
-	if (fill.ratio >= fill.compactionRatio) {
-		return "near";
-	}
-	return fill.ratio >= fill.compactionRatio * 0.75 ? "warn" : "ok";
-}
-
-function formatThinkingLevel(level: string): string {
-	return level.replace(/-/g, " ").replace(/^./, (first: string) => first.toUpperCase());
 }
