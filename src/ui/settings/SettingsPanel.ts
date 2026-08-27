@@ -64,7 +64,6 @@ let lastActiveTabId = "models";
 
 export function renderSettingsPanel(containerEl: HTMLElement, host: SettingsPanelHost): void {
 	containerEl.empty();
-	containerEl.addClass("piem-settings");
 
 	const tabs: SettingsTabDefinition[] = [
 		{ id: "models", label: "Models", render: (el) => renderModelsTab(el, host) },

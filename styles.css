@@ -862,3 +862,170 @@
 		width: 3rem;
 	}
 }
+
+/* --- settings panel --- */
+
+/*
+ * The panel is Obsidian's own settings surface, so it inherits almost
+ * everything from `.setting-item`. What is added here is only what the tab
+ * layout needs, plus the two things Obsidian has no idiom for: the active-model
+ * status line and the connection-test verdict.
+ */
+
+/*
+ * Horizontal strip that scrolls rather than wraps. Four labels fit on a desktop
+ * settings dialog, but the same dialog on a phone is far narrower — wrapping
+ * would push the content down by a row and leave a ragged two-line strip, while
+ * scrolling keeps the content's top edge where the user expects it.
+ */
+.piem-settings-tabs {
+	border-bottom: 1px solid var(--background-modifier-border);
+	display: flex;
+	gap: var(--size-4-1);
+	margin-bottom: var(--size-4-4);
+	overflow-x: auto;
+	scrollbar-width: none;
+}
+
+.piem-settings-tabs::-webkit-scrollbar {
+	display: none;
+}
+
+/*
+ * Styled as a tab rather than a button: no fill, no border, and the selected
+ * one is marked by an underline that sits on the strip's own bottom border.
+ * `box-shadow` draws it instead of `border-bottom` so switching tabs cannot
+ * shift the label by a pixel.
+ */
+.piem-settings-tab {
+	background: transparent;
+	border: none;
+	border-radius: 0;
+	box-shadow: none;
+	color: var(--text-muted);
+	cursor: pointer;
+	flex-shrink: 0;
+	font-size: var(--font-ui-small);
+	padding: var(--size-4-2) var(--size-4-3);
+	white-space: nowrap;
+}
+
+.piem-settings-tab:hover {
+	background: transparent;
+	box-shadow: none;
+	color: var(--text-normal);
+}
+
+.piem-settings-tab.is-active {
+	box-shadow: inset 0 -2px 0 0 var(--text-accent);
+	color: var(--text-normal);
+	font-weight: var(--font-semibold);
+}
+
+/*
+ * Obsidian draws the focus ring from the element's own box, and a transparent
+ * tab has none worth outlining, so the ring is restated here — arrow-key
+ * navigation is unusable if focus is invisible.
+ */
+.piem-settings-tab:focus-visible {
+	outline: 2px solid var(--background-modifier-border-focus);
+	outline-offset: -2px;
+}
+
+/* The first row inside a tab has the strip above it, so it needs no top rule. */
+.piem-settings-tab-content > .setting-item:first-child {
+	border-top: none;
+	padding-top: 0;
+}
+
+/*
+ * "Where is my prompt actually going" — the question the old layout never
+ * answered, since the active target could only be inferred from which controls
+ * looked enabled.
+ */
+.piem-settings-status {
+	align-items: baseline;
+	background: var(--background-secondary);
+	border-radius: var(--radius-s);
+	display: flex;
+	flex-wrap: wrap;
+	gap: var(--size-4-1) var(--size-4-2);
+	margin-bottom: var(--size-4-4);
+	padding: var(--size-4-2) var(--size-4-3);
+}
+
+.piem-settings-status__label {
+	color: var(--text-muted);
+	font-size: var(--font-ui-smaller);
+	text-transform: uppercase;
+}
+
+.piem-settings-status__value {
+	font-size: var(--font-ui-small);
+	font-weight: var(--font-semibold);
+	min-width: 0;
+	overflow-wrap: anywhere;
+}
+
+/* Stands in for a list that has no rows yet, and says what to do about it. */
+.piem-settings-empty {
+	color: var(--text-muted);
+	font-size: var(--font-ui-small);
+	margin: 0 0 var(--size-4-4);
+}
+
+/*
+ * The provider and model forms are longer than a default modal is tall, so the
+ * body scrolls inside a bounded height rather than growing past the viewport
+ * and putting the save button out of reach.
+ */
+.piem-settings-modal {
+	max-height: 70vh;
+	overflow-y: auto;
+}
+
+/*
+ * Verdict from a connection test, rendered under the row's description.
+ *
+ * The state is carried by the text colour alone — no fill. This block sits
+ * inside `.setting-item-description`, and giving it a background would put a
+ * coloured slab in the middle of a settings row for what is a one-line result.
+ */
+.piem-test-result {
+	font-size: var(--font-ui-smaller);
+	margin-top: var(--size-4-1);
+	overflow-wrap: anywhere;
+}
+
+/* No verdict yet, or one the owner reset: collapse rather than leave a gap. */
+.piem-test-result:empty {
+	display: none;
+}
+
+.piem-test-result--pending {
+	color: var(--text-muted);
+}
+
+.piem-test-result--ok {
+	color: var(--text-success);
+}
+
+.piem-test-result--error {
+	color: var(--text-error);
+}
+
+/* --- suggestion rows (provider/model search) --- */
+
+/*
+ * Two lines per row: the value that gets written into the field, and where it
+ * came from. The description is what makes a bare model id legible — `sonar-pro`
+ * means little until "perplexity" is sitting under it.
+ */
+.piem-suggestion-value {
+	color: var(--text-normal);
+}
+
+.piem-suggestion-description {
+	color: var(--text-muted);
+	font-size: var(--font-ui-smaller);
+}
