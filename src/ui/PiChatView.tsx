@@ -5,15 +5,18 @@ import { VIEW_TYPE_PI_CHAT } from "../constants";
 import type { ObsidianAgentService } from "../agent/ObsidianAgentService";
 import { PiChatApp } from "./PiChatApp";
 import { ChatInputController } from "./ChatInputController";
+import type { DraftStore } from "../session/DraftStore";
 
 export class PiChatView extends ItemView {
 	private readonly service: ObsidianAgentService;
+	private readonly draftStore: DraftStore | undefined;
 	private readonly inputController = new ChatInputController();
 	private root: Root | null = null;
 
-	constructor(leaf: WorkspaceLeaf, service: ObsidianAgentService) {
+	constructor(leaf: WorkspaceLeaf, service: ObsidianAgentService, draftStore?: DraftStore) {
 		super(leaf);
 		this.service = service;
+		this.draftStore = draftStore;
 		this.scope = new Scope(this.app.scope);
 		this.scope.register(["Mod"], "Enter", (event) => {
 			event.preventDefault();
@@ -54,14 +57,19 @@ export class PiChatView extends ItemView {
 		this.contentEl.empty();
 		this.contentEl.addClass("pi-chat-view");
 		this.root = createRoot(this.contentEl);
-		this.root.render(<PiChatApp service={this.service} inputController={this.inputController} component={this} />);
+		this.root.render(
+			<PiChatApp service={this.service} inputController={this.inputController} component={this} draftStore={this.draftStore} />,
+		);
 	}
 
 	async onClose(): Promise<void> {
 		this.inputController.setSubmitHandler(null);
 		this.inputController.setFocusHandler(null);
 		this.inputController.setPrefillHandler(null);
+		// Unmount first: the app writes the pending draft in its unmount effect,
+		// which this then waits on so a panel closed mid-sentence keeps its text.
 		this.root?.unmount();
 		this.root = null;
+		await this.draftStore?.flush();
 	}
 }
