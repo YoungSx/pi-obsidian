@@ -23,6 +23,33 @@ import { requestUrl, type RequestUrlParam } from "obsidian";
 /** Header names that Obsidian's `requestUrl` sets itself; forwarding ours breaks the request. */
 const STRIPPED_REQUEST_HEADERS = new Set(["host", "content-length", "connection"]);
 
+/**
+ * Ceiling on a single buffered provider request.
+ *
+ * `requestUrl` has no timeout of its own, so a provider that accepts the
+ * connection and then stalls leaves the returned promise pending forever. The
+ * agent stays `isStreaming` with no way back except reloading Obsidian, since
+ * abort only rejects the race below when the user actually presses stop.
+ *
+ * Generous on purpose: this is a whole buffered completion, including a long
+ * reasoning pass on a slow endpoint, not a single round trip. It exists to
+ * bound a hang, not to cut off honest work.
+ */
+export const REQUEST_TIMEOUT_MS = 300_000;
+
+function abortError(): DOMException {
+	return new DOMException("The operation was aborted.", "AbortError");
+}
+
+/**
+ * Distinct from {@link abortError} so the transcript can say which happened.
+ * A user who pressed stop knows why the turn ended; someone whose endpoint went
+ * quiet needs to be told, or the only symptom is a reply that never arrives.
+ */
+function timeoutError(timeoutMs: number): DOMException {
+	return new DOMException(`The provider did not respond within ${Math.round(timeoutMs / 1000)}s.`, "TimeoutError");
+}
+
 function normalizeHeaders(init: RequestInit | undefined, input: RequestInfo | URL): Record<string, string> {
 	const collected: Record<string, string> = {};
 
@@ -126,7 +153,7 @@ async function resolveBody(
  * the entire body as one chunk, so tokens appear all at once instead of
  * incrementally.
  */
-export function createObsidianRequestUrlFetch(): typeof globalThis.fetch {
+export function createObsidianRequestUrlFetch(timeoutMs = REQUEST_TIMEOUT_MS): typeof globalThis.fetch {
 	const obsidianFetch = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
 		const url = resolveUrl(input);
 		const method = resolveMethod(input, init);
@@ -135,7 +162,7 @@ export function createObsidianRequestUrlFetch(): typeof globalThis.fetch {
 
 		const signal = init?.signal ?? (typeof Request !== "undefined" && input instanceof Request ? input.signal : undefined);
 		if (signal?.aborted) {
-			throw new DOMException("The operation was aborted.", "AbortError");
+			throw abortError();
 		}
 
 		const params: RequestUrlParam = {
@@ -152,23 +179,40 @@ export function createObsidianRequestUrlFetch(): typeof globalThis.fetch {
 
 		const requestPromise = requestUrl(params);
 
-		const response = signal
-			? await Promise.race([
-					requestPromise,
+		// Both losers of this race are cleaned up in the `finally` below: a
+		// pending timer would keep Obsidian's event loop alive after a fast
+		// response, and an un-removed abort listener leaks for as long as the
+		// caller's controller does — which for the agent is the whole turn.
+		let timer: ReturnType<typeof setTimeout> | undefined;
+		let onAbort: (() => void) | undefined;
+		try {
+			const guards: Promise<never>[] = [
+				new Promise<never>((_resolve, reject) => {
+					timer = setTimeout(() => reject(timeoutError(timeoutMs)), timeoutMs);
+				}),
+			];
+			if (signal) {
+				guards.push(
 					new Promise<never>((_resolve, reject) => {
-						signal.addEventListener(
-							"abort",
-							() => reject(new DOMException("The operation was aborted.", "AbortError")),
-							{ once: true },
-						);
+						onAbort = () => reject(abortError());
+						signal.addEventListener("abort", onAbort, { once: true });
 					}),
-				])
-			: await requestPromise;
+				);
+			}
 
-		return new Response(response.arrayBuffer, {
-			status: response.status,
-			headers: response.headers ?? {},
-		});
+			const response = await Promise.race([requestPromise, ...guards]);
+			return new Response(response.arrayBuffer, {
+				status: response.status,
+				headers: response.headers ?? {},
+			});
+		} finally {
+			if (timer !== undefined) {
+				clearTimeout(timer);
+			}
+			if (signal && onAbort) {
+				signal.removeEventListener("abort", onAbort);
+			}
+		}
 	};
 
 	return obsidianFetch as typeof globalThis.fetch;
