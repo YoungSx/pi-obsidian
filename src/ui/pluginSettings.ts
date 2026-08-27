@@ -22,7 +22,7 @@ interface SettingHost {
  *
  * Returns whether it worked, so the UI can decide between offering a button and
  * naming the path in prose. Telling the user to go to
- * **Settings → Pi Obsidian** is what the panel did everywhere an API key was
+ * **Settings → Piem** is what the panel did everywhere an API key was
  * missing: instructions where an action belonged.
  */
 export function openPluginSettings(app: App): boolean {

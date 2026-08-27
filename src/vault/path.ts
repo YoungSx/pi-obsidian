@@ -14,7 +14,7 @@ export function normalizeVaultPath(input: string, options: VaultPathOptions = {}
 
 	const normalized = collapsePathSegments(withForwardSlashes);
 	if (!options.allowPluginInternals && isPluginInternalPath(normalized)) {
-		throw new Error("Path points inside the pi-obsidian plugin internals.");
+		throw new Error("Path points inside the Piem plugin internals.");
 	}
 	return normalized;
 }

@@ -272,7 +272,7 @@ describe("VaultExecutionEnv", () => {
 		const escape = await env.readTextFile("/../outside.md");
 		expect(escape.ok).toBe(false);
 
-		const internals = await env.writeFile(`/.${"obsidian"}/plugins/pi-obsidian/main.js`, "x");
+		const internals = await env.writeFile(`/.${"obsidian"}/plugins/piem/main.js`, "x");
 		expect(internals.ok).toBe(false);
 	});
 

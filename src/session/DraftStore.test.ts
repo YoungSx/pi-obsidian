@@ -2,7 +2,7 @@ import { describe, expect, it } from "bun:test";
 import type { DataAdapter } from "obsidian";
 import { DraftStore } from "./DraftStore";
 
-const DRAFT_PATH = `.${"obsidian"}/plugins/pi-obsidian/sessions/drafts.json`;
+const DRAFT_PATH = `.${"obsidian"}/plugins/piem/sessions/drafts.json`;
 
 /**
  * Minimal adapter with the four calls `DraftStore` makes, plus counters so a

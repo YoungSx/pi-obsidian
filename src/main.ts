@@ -1,7 +1,7 @@
 import { Notice, Plugin, type Editor } from "obsidian";
-import { PiObsidianSettingTab, normalizeSettings, type PiObsidianSettings } from "./settings";
+import { PiemSettingTab, normalizeSettings, type PiemSettings } from "./settings";
 import { normalizeCustomEndpoint } from "./customEndpoint";
-import { VIEW_TYPE_PI_CHAT } from "./constants";
+import { VIEW_TYPE_PIEM_CHAT } from "./constants";
 import type { SecretCodec } from "./secrets";
 import {
 	hasPersistedPlaintextSecrets,
@@ -15,11 +15,11 @@ import { createSecretEnvironment, type SecretEnvironment } from "./secretsStore"
 import { DraftStore } from "./session/DraftStore";
 import { ObsidianSessionManager } from "./session/ObsidianSessionManager";
 import { ObsidianAgentService } from "./agent/ObsidianAgentService";
-import { PiChatView } from "./ui/PiChatView";
+import { PiemChatView } from "./ui/PiemChatView";
 import { requestNoteReference, warnIfTruncated } from "./ui/noteReferenceCommand";
 
 /** Persists `settings` with every non-empty secret sealed through `codec`. */
-function sealCurrentSettings(settings: PiObsidianSettings, codec: SecretCodec): Partial<PiObsidianSettings> {
+function sealCurrentSettings(settings: PiemSettings, codec: SecretCodec): Partial<PiemSettings> {
 	const customEndpoint = settings.customEndpoint
 		? { ...settings.customEndpoint, apiKey: sealCustomEndpointApiKey(settings.customEndpoint.apiKey, codec) }
 		: undefined;
@@ -33,7 +33,7 @@ function sealCurrentSettings(settings: PiObsidianSettings, codec: SecretCodec): 
 export default class PiObsidianPlugin extends Plugin {
 	// Fresh defaults until `onload` loads persisted data; `normalizeSettings` deep-copies
 	// so the shared DEFAULT_SETTINGS object is never mutated in place.
-	settings: PiObsidianSettings = normalizeSettings(null);
+	settings: PiemSettings = normalizeSettings(null);
 	private agentService: ObsidianAgentService | null = null;
 	private draftStore: DraftStore | null = null;
 	/**
@@ -61,25 +61,25 @@ export default class PiObsidianPlugin extends Plugin {
 		this.agentService = new ObsidianAgentService(this.app, () => this.settings, sessionManager);
 		this.draftStore = DraftStore.forPlugin(this.app, this);
 
-		this.registerView(VIEW_TYPE_PI_CHAT, (leaf) => new PiChatView(leaf, this.requireAgentService(), this.draftStore ?? undefined));
-		this.addSettingTab(new PiObsidianSettingTab(this.app, this, this.requireSecretEnvironment()));
+		this.registerView(VIEW_TYPE_PIEM_CHAT, (leaf) => new PiemChatView(leaf, this.requireAgentService(), this.draftStore ?? undefined));
+		this.addSettingTab(new PiemSettingTab(this.app, this, this.requireSecretEnvironment()));
 		this.addCommand({
-			id: "open-pi-chat",
-			name: "Open pi chat",
+			id: "open-chat",
+			name: "Open chat",
 			callback: () => {
 				void this.activateChatView();
 			},
 		});
 		this.addCommand({
-			id: "new-pi-chat",
-			name: "New pi chat",
+			id: "new-chat",
+			name: "New chat",
 			callback: () => {
 				void this.startNewChat();
 			},
 		});
 		this.addCommand({
-			id: "abort-pi-chat",
-			name: "Stop pi response",
+			id: "abort-chat",
+			name: "Stop response",
 			// `checking` asks whether the command should be listed at all, so the abort
 			// must stay behind the `!checking` guard or merely opening the palette fires it.
 			checkCallback: (checking) => {
@@ -94,7 +94,7 @@ export default class PiObsidianPlugin extends Plugin {
 			},
 		});
 		this.addCommand({
-			id: "compact-pi-chat",
+			id: "compact-chat",
 			name: "Tidy up earlier messages",
 			// `compactNow` existed but nothing reached it, so a full context could
 			// only be resolved by waiting for the automatic threshold.
@@ -110,8 +110,8 @@ export default class PiObsidianPlugin extends Plugin {
 			},
 		});
 		this.addCommand({
-			id: "focus-pi-chat",
-			name: "Focus pi chat input",
+			id: "focus-chat",
+			name: "Focus chat input",
 			checkCallback: (checking) => {
 				const view = this.findChatView();
 				if (!view) {
@@ -124,20 +124,20 @@ export default class PiObsidianPlugin extends Plugin {
 			},
 		});
 		this.addCommand({
-			id: "ask-pi-about-selection",
-			name: "Ask pi about selection",
+			id: "ask-about-selection",
+			name: "Ask about selection",
 			editorCallback: (editor, info) => {
-				void this.askPiAboutSelection(editor, info.file?.path ?? null);
+				void this.askPiemAboutSelection(editor, info.file?.path ?? null);
 			},
 		});
 		this.addCommand({
-			id: "ask-pi-about-note",
-			name: "Ask pi about this note",
+			id: "ask-about-note",
+			name: "Ask about this note",
 			editorCallback: (editor, info) => {
-				void this.askPiAboutSelection(editor, info.file?.path ?? null, { selectionOnly: false });
+				void this.askPiemAboutSelection(editor, info.file?.path ?? null, { selectionOnly: false });
 			},
 		});
-		this.addRibbonIcon("bot", "Open pi chat", () => {
+		this.addRibbonIcon("bot", "Open chat", () => {
 			void this.activateChatView();
 		});
 		this.registerEvent(
@@ -148,10 +148,10 @@ export default class PiObsidianPlugin extends Plugin {
 				}
 				menu.addItem((item) =>
 					item
-						.setTitle("Ask pi about selection")
+						.setTitle("Ask about selection")
 						.setIcon("bot")
 						.onClick(() => {
-							void this.askPiAboutSelection(editor, path);
+							void this.askPiemAboutSelection(editor, path);
 						}),
 				);
 			}),
@@ -181,7 +181,7 @@ export default class PiObsidianPlugin extends Plugin {
 	async loadSettings(): Promise<void> {
 		const environment = this.requireSecretEnvironment();
 		const codec = environment.codec();
-		const raw = await this.loadData() as Partial<PiObsidianSettings> | null;
+		const raw = await this.loadData() as Partial<PiemSettings> | null;
 
 		// Snapshot the persisted secret values verbatim: migration compares
 		// its output against these, not against the normalized settings.
@@ -253,7 +253,7 @@ export default class PiObsidianPlugin extends Plugin {
 	 * composer registers, so ordering here is what keeps the reference from
 	 * landing in a not-yet-existing input.
 	 */
-	private async askPiAboutSelection(editor: Editor, path: string | null, options = { selectionOnly: true }): Promise<void> {
+	private async askPiemAboutSelection(editor: Editor, path: string | null, options = { selectionOnly: true }): Promise<void> {
 		const handled = requestNoteReference(editor, path, {
 			...options,
 			deliver: (text, truncated) => {
@@ -264,7 +264,7 @@ export default class PiObsidianPlugin extends Plugin {
 		if (handled) {
 			return;
 		}
-		new Notice("No active note to ask pi about.");
+		new Notice("No active note to ask about.");
 	}
 
 	private async deliverReference(text: string): Promise<void> {
@@ -276,13 +276,13 @@ export default class PiObsidianPlugin extends Plugin {
 		view?.focusInput();
 	}
 
-	private findChatView(): PiChatView | null {
-		const view = this.app.workspace.getLeavesOfType(VIEW_TYPE_PI_CHAT)[0]?.view;
-		return view instanceof PiChatView ? view : null;
+	private findChatView(): PiemChatView | null {
+		const view = this.app.workspace.getLeavesOfType(VIEW_TYPE_PIEM_CHAT)[0]?.view;
+		return view instanceof PiemChatView ? view : null;
 	}
 
 	private async activateChatView(): Promise<void> {
-		const existingLeaf = this.app.workspace.getLeavesOfType(VIEW_TYPE_PI_CHAT)[0];
+		const existingLeaf = this.app.workspace.getLeavesOfType(VIEW_TYPE_PIEM_CHAT)[0];
 		if (existingLeaf) {
 			await this.app.workspace.revealLeaf(existingLeaf);
 			return;
@@ -290,20 +290,20 @@ export default class PiObsidianPlugin extends Plugin {
 
 		const leaf = this.app.workspace.getRightLeaf(false);
 		if (!leaf) {
-			new Notice("Could not open pi chat view.");
+			new Notice("Could not open the chat view.");
 			return;
 		}
 
-		await leaf.setViewState({ type: VIEW_TYPE_PI_CHAT, active: true });
+		await leaf.setViewState({ type: VIEW_TYPE_PIEM_CHAT, active: true });
 		await this.app.workspace.revealLeaf(leaf);
 	}
 
 	private requireAgentService(): ObsidianAgentService {
 		if (!this.agentService) {
-			throw new Error("Pi agent service is not initialized.");
+			throw new Error("Piem agent service is not initialized.");
 		}
 		return this.agentService;
 	}
 }
 
-export { VIEW_TYPE_PI_CHAT };
+export { VIEW_TYPE_PIEM_CHAT };

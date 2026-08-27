@@ -1,18 +1,18 @@
-/* Pi Obsidian — chat panel.
+/* Piem — chat panel.*/
  *
  * Every colour, radius, spacing and font comes from Obsidian's semantic CSS
  * variables, so the panel inherits whatever theme (light/dark/community) the
  * vault runs. No hardcoded hex/rgb anywhere; the only custom property below is
  * `--pi-context-ratio`, an inline state value, not a theme token. */
 
-.pi-chat-view {
+.piem-chat-view {
 	height: 100%;
 	padding: 0;
 }
 
 /* --- shell --- */
 
-.pi-chat {
+.piem-chat {
 	display: flex;
 	flex-direction: column;
 	height: 100%;
@@ -28,26 +28,26 @@
  * actions that steer the session. Two stacked rows so a narrow leaf never
  * forces the title and the buttons to fight for one line.
  */
-.pi-chat__chrome {
+.piem-chat__chrome {
 	display: flex;
 	flex-direction: column;
 	gap: var(--size-4-1);
 	flex-shrink: 0;
 }
 
-.pi-chat__header {
+.piem-chat__header {
 	align-items: flex-start;
 	display: flex;
 	gap: var(--size-4-2);
 	justify-content: space-between;
 }
 
-.pi-chat__identity {
+.piem-chat__identity {
 	flex: 1 1 auto;
 	min-width: 0;
 }
 
-.pi-chat__title {
+.piem-chat__title {
 	font-size: var(--font-ui-medium);
 	font-weight: var(--font-semibold);
 	margin: 0;
@@ -62,7 +62,7 @@
  * the transcript down; this is secondary metadata, so it clips and the full
  * string lives in the title attribute.
  */
-.pi-chat__model {
+.piem-chat__model {
 	color: var(--text-muted);
 	font-size: var(--font-ui-smaller);
 	margin: var(--size-4-1) 0 0;
@@ -71,7 +71,7 @@
 	white-space: nowrap;
 }
 
-.pi-chat__header-actions {
+.piem-chat__header-actions {
 	align-items: center;
 	display: flex;
 	flex-shrink: 0;
@@ -89,7 +89,7 @@
  * `clickable-icon` provides. 32px on a mouse, 44px under a coarse pointer,
  * where `isDesktopOnly: false` means this panel really does run.
  */
-.pi-chat__icon-button {
+.piem-chat__icon-button {
 	align-items: center;
 	border-radius: var(--radius-s);
 	display: inline-flex;
@@ -98,7 +98,7 @@
 	min-width: var(--size-4-8);
 }
 
-.pi-chat__icon-button:focus-visible {
+.piem-chat__icon-button:focus-visible {
 	outline: 2px solid var(--background-modifier-border-focus);
 	outline-offset: 1px;
 }
@@ -108,14 +108,14 @@
  * opacity — using it here rendered a disabled button at full strength, so an
  * empty-draft Send looked clickable and silently did nothing.
  */
-.pi-chat__icon-button:disabled {
+.piem-chat__icon-button:disabled {
 	cursor: not-allowed;
 	opacity: 0.4;
 }
 
 /* --- status bar --- */
 
-.pi-chat__statusbar {
+.piem-chat__statusbar {
 	align-items: center;
 	color: var(--text-muted);
 	display: flex;
@@ -126,18 +126,18 @@
 
 /* --- context-window indicator --- */
 
-.pi-chat__context {
+.piem-chat__context {
 	align-items: center;
 	display: flex;
 	gap: var(--size-4-1);
 }
 
-.pi-chat__context-label {
+.piem-chat__context-label {
 	color: var(--text-muted);
 }
 
 /* Thin occupancy bar; the fill colour carries the ok/warn/near state. */
-.pi-chat__context-bar {
+.piem-chat__context-bar {
 	background: var(--background-modifier-border);
 	border-radius: var(--radius-s);
 	flex-shrink: 0;
@@ -151,7 +151,7 @@
  * `background` on the fill element specifically — a `color` override here is
  * invisible (that bug shipped once: the warn band rendered grey).
  */
-.pi-chat__context-bar-fill {
+.piem-chat__context-bar-fill {
 	background: var(--text-muted);
 	display: block;
 	height: 100%;
@@ -164,48 +164,48 @@
 	width: 100%;
 }
 
-.pi-chat__context--warn .pi-chat__context-bar-fill {
+.piem-chat__context--warn .piem-chat__context-bar-fill {
 	background: var(--text-warning);
 }
 
-.pi-chat__context--near .pi-chat__context-bar-fill {
+.piem-chat__context--near .piem-chat__context-bar-fill {
 	background: var(--text-error);
 }
 
-.pi-chat__context-value {
+.piem-chat__context-value {
 	font-variant-numeric: tabular-nums;
 }
 
 /* State word is mirrored from the bar colour so the level is legible without
  * sight — required by the a11y contract, not cosmetic. */
-.pi-chat__context-state {
+.piem-chat__context-state {
 	color: var(--text-muted);
 }
 
-.pi-chat__context--warn {
+.piem-chat__context--warn {
 	color: var(--text-warning);
 }
 
-.pi-chat__context--warn .pi-chat__context-state {
+.piem-chat__context--warn .piem-chat__context-state {
 	color: var(--text-warning);
 }
 
-.pi-chat__context--near {
+.piem-chat__context--near {
 	color: var(--text-error);
 	font-weight: var(--font-semibold);
 }
 
-.pi-chat__context--near .pi-chat__context-state {
+.piem-chat__context--near .piem-chat__context-state {
 	color: var(--text-error);
 }
 
-.pi-chat__usage {
+.piem-chat__usage {
 	color: var(--text-faint);
 	font-variant-numeric: tabular-nums;
 }
 
 /* Shown while the summarization request is in flight (it is a real LLM call). */
-.pi-chat__compacting {
+.piem-chat__compacting {
 	align-items: center;
 	color: var(--text-faint);
 	display: inline-flex;
@@ -224,23 +224,23 @@
 	}
 }
 
-.pi-chat__compacting .pi-chat__spinner,
-.pi-chat__compacting svg {
+.piem-chat__compacting .piem-chat__spinner,
+.piem-chat__compacting svg {
 	animation: pi-compaction-pulse 1.2s ease-in-out infinite;
 }
 
 @media (prefers-reduced-motion: reduce) {
 
-	.pi-chat__compacting .pi-chat__spinner,
-	.pi-chat__compacting svg {
+	.piem-chat__compacting .piem-chat__spinner,
+	.piem-chat__compacting svg {
 		animation: none;
 	}
 
-	.pi-chat__context-bar-fill {
+	.piem-chat__context-bar-fill {
 		transition: none;
 	}
 
-	.pi-chat__latest {
+	.piem-chat__latest {
 		scroll-behavior: auto;
 	}
 }
@@ -252,7 +252,7 @@
  * banner had no close control, so a stale message stayed until the next turn
  * overwrote it.
  */
-.pi-chat__banner {
+.piem-chat__banner {
 	align-items: flex-start;
 	border: 1px solid var(--background-modifier-border);
 	border-radius: var(--radius-s);
@@ -267,31 +267,31 @@
  * community themes make that pairing unreadable. The text stays on
  * `--text-normal`; the border and the icon carry the state.
  */
-.pi-chat__banner--error {
+.piem-chat__banner--error {
 	background: var(--background-modifier-error);
 	border-color: var(--text-error);
 	color: var(--text-normal);
 }
 
-.pi-chat__banner--error .pi-chat__banner-icon {
+.piem-chat__banner--error .piem-chat__banner-icon {
 	color: var(--text-error);
 }
 
-.pi-chat__banner--notice {
+.piem-chat__banner--notice {
 	background: var(--background-secondary-alt);
 	color: var(--text-normal);
 }
 
-.pi-chat__banner--notice .pi-chat__banner-icon {
+.piem-chat__banner--notice .piem-chat__banner-icon {
 	color: var(--text-muted);
 }
 
-.pi-chat__banner-icon {
+.piem-chat__banner-icon {
 	flex-shrink: 0;
 	margin-top: 2px;
 }
 
-.pi-chat__banner-text {
+.piem-chat__banner-text {
 	flex: 1 1 auto;
 	font-size: var(--font-ui-smaller);
 	min-width: 0;
@@ -299,19 +299,19 @@
 }
 
 /* Action where the old copy printed a settings path in prose. */
-.pi-chat__banner-action {
+.piem-chat__banner-action {
 	flex-shrink: 0;
 	font-size: var(--font-ui-smaller);
 	min-height: var(--size-4-8);
 }
 
-.pi-chat__banner-dismiss {
+.piem-chat__banner-dismiss {
 	flex-shrink: 0;
 }
 
 /* --- transcript --- */
 
-.pi-chat__transcript {
+.piem-chat__transcript {
 	display: flex;
 	flex: 1 1 auto;
 	flex-direction: column;
@@ -319,7 +319,7 @@
 	position: relative;
 }
 
-.pi-chat__messages {
+.piem-chat__messages {
 	display: flex;
 	flex: 1 1 auto;
 	flex-direction: column;
@@ -330,7 +330,7 @@
 	scrollbar-gutter: stable;
 }
 
-.pi-chat__messages:focus-visible {
+.piem-chat__messages:focus-visible {
 	outline: 2px solid var(--background-modifier-border-focus);
 	outline-offset: -2px;
 }
@@ -341,7 +341,7 @@
  * Marks where summarized history begins, so scrolling back explains why earlier
  * turns are gone instead of looking like a broken transcript.
  */
-.pi-chat__compaction {
+.piem-chat__compaction {
 	border-top: 1px dashed var(--background-modifier-border-hover);
 	color: var(--text-muted);
 	font-size: var(--font-ui-smaller);
@@ -349,12 +349,12 @@
 	padding-top: var(--size-4-2);
 }
 
-.pi-chat__compaction-heading {
+.piem-chat__compaction-heading {
 	font-weight: var(--font-semibold);
 	margin-bottom: var(--size-4-1);
 }
 
-.pi-chat__compaction pre {
+.piem-chat__compaction pre {
 	font-size: var(--font-ui-smaller);
 	max-height: 12rem;
 	overflow-y: auto;
@@ -368,7 +368,7 @@
  * results and harness output render as flat trace rows (below), so a bordered
  * card never contains a second bordered box.
  */
-.pi-chat__message {
+.piem-chat__message {
 	border-radius: var(--radius-m);
 	padding: var(--size-4-2);
 }
@@ -379,7 +379,7 @@
  * model forward and sink the user's own words into the panel — the inverse of
  * every chat convention.
  */
-.pi-chat__message--user {
+.piem-chat__message--user {
 	align-self: flex-end;
 	background: var(--background-primary);
 	border: 1px solid var(--background-modifier-border);
@@ -387,11 +387,11 @@
 }
 
 /* The assistant reads as the page: no fill, no border, just text. */
-.pi-chat__message--assistant {
+.piem-chat__message--assistant {
 	padding-inline: 0;
 }
 
-.pi-chat__message-role {
+.piem-chat__message-role {
 	align-items: center;
 	color: var(--text-muted);
 	display: flex;
@@ -400,16 +400,16 @@
 	margin-bottom: var(--size-4-1);
 }
 
-.pi-chat__message-content > :first-child {
+.piem-chat__message-content > :first-child {
 	margin-top: 0;
 }
 
-.pi-chat__message-content > :last-child {
+.piem-chat__message-content > :last-child {
 	margin-bottom: 0;
 }
 
 /* Aborted turn: the text below the marker is half-written, not a finished reply. */
-.pi-chat__interrupted {
+.piem-chat__interrupted {
 	align-items: center;
 	color: var(--text-muted);
 	display: flex;
@@ -425,7 +425,7 @@
  * touch, and `isDesktopOnly: false` means this panel runs on a phone. Muted
  * until interacted with so the row does not compete with the reply itself.
  */
-.pi-chat__message-actions {
+.piem-chat__message-actions {
 	display: flex;
 	gap: var(--size-4-1);
 	margin-top: var(--size-4-1);
@@ -433,27 +433,27 @@
 	transition: opacity 0.15s ease-out;
 }
 
-.pi-chat__message-actions:hover,
-.pi-chat__message-actions:focus-within {
+.piem-chat__message-actions:hover,
+.piem-chat__message-actions:focus-within {
 	opacity: 1;
 }
 
 /* A coarse pointer has no hover, so the row stays legible without one. */
 @media (pointer: coarse) {
 
-	.pi-chat__message-actions {
+	.piem-chat__message-actions {
 		opacity: 1;
 	}
 }
 
 @media (prefers-reduced-motion: reduce) {
 
-	.pi-chat__message-actions {
+	.piem-chat__message-actions {
 		transition: none;
 	}
 }
 
-.pi-chat__text {
+.piem-chat__text {
 	background: transparent;
 	font-family: var(--font-interface);
 	margin: 0;
@@ -462,22 +462,22 @@
 
 /* Rendered Markdown (assistant/user text). Obsidian's renderer emits its own
    block elements; keep them tight so messages stay scannable. */
-.pi-chat__markdown > :first-child {
+.piem-chat__markdown > :first-child {
 	margin-top: 0;
 }
 
-.pi-chat__markdown > :last-child {
+.piem-chat__markdown > :last-child {
 	margin-bottom: 0;
 }
 
-.pi-chat__markdown pre {
+.piem-chat__markdown pre {
 	white-space: pre-wrap;
 }
 
-.pi-chat__markdown p,
-.pi-chat__markdown ul,
-.pi-chat__markdown ol,
-.pi-chat__markdown blockquote {
+.piem-chat__markdown p,
+.piem-chat__markdown ul,
+.piem-chat__markdown ol,
+.piem-chat__markdown blockquote {
 	margin-block: 0.4em;
 }
 
@@ -489,7 +489,7 @@
  * disclosures, so a single `grep` could bury the model's prose. Each of these is
  * now a one-line row the reader opens on demand.
  */
-.pi-chat__trace {
+.piem-chat__trace {
 	font-size: var(--font-ui-smaller);
 	margin-top: var(--size-4-1);
 }
@@ -499,7 +499,7 @@
  * default tier) renders as a plain line: an empty `<details>` would offer a
  * disclosure affordance that opens onto nothing.
  */
-.pi-chat__trace--flat {
+.piem-chat__trace--flat {
 	align-items: center;
 	color: var(--text-muted);
 	display: flex;
@@ -508,7 +508,7 @@
 	padding: 0 var(--size-4-1);
 }
 
-.pi-chat__trace-summary {
+.piem-chat__trace-summary {
 	align-items: center;
 	border-radius: var(--radius-s);
 	color: var(--text-muted);
@@ -522,36 +522,36 @@
 }
 
 /* Obsidian ships webkit, so the default disclosure triangle needs both hooks. */
-.pi-chat__trace-summary::-webkit-details-marker {
+.piem-chat__trace-summary::-webkit-details-marker {
 	display: none;
 }
 
-.pi-chat__trace-summary::marker {
+.piem-chat__trace-summary::marker {
 	content: "";
 }
 
-.pi-chat__trace-summary:hover {
+.piem-chat__trace-summary:hover {
 	background: var(--background-modifier-hover);
 }
 
-.pi-chat__trace-summary:focus-visible {
+.piem-chat__trace-summary:focus-visible {
 	outline: 2px solid var(--background-modifier-border-focus);
 	outline-offset: -2px;
 }
 
-.pi-chat__trace-icon {
+.piem-chat__trace-icon {
 	--icon-size: var(--icon-s);
 	color: var(--text-faint);
 	flex-shrink: 0;
 }
 
-.pi-chat__trace-name {
+.piem-chat__trace-name {
 	flex-shrink: 0;
 	font-family: var(--font-monospace);
 }
 
 /* The argument or outcome next to the name; first thing to give up width. */
-.pi-chat__trace-detail {
+.piem-chat__trace-detail {
 	color: var(--text-faint);
 	min-width: 0;
 	overflow: hidden;
@@ -559,35 +559,35 @@
 	white-space: nowrap;
 }
 
-.pi-chat__trace--thinking .pi-chat__trace-name,
-.pi-chat__trace--harness .pi-chat__trace-name {
+.piem-chat__trace--thinking .piem-chat__trace-name,
+.piem-chat__trace--harness .piem-chat__trace-name {
 	font-family: var(--font-interface);
 }
 
-.pi-chat__trace--error .pi-chat__trace-icon,
-.pi-chat__trace--error .pi-chat__trace-name {
+.piem-chat__trace--error .piem-chat__trace-icon,
+.piem-chat__trace--error .piem-chat__trace-name {
 	color: var(--text-error);
 }
 
-.pi-chat__trace-body {
+.piem-chat__trace-body {
 	border-left: 1px solid var(--background-modifier-border);
 	margin-left: var(--size-4-2);
 	padding: var(--size-4-1) 0 var(--size-4-1) var(--size-4-2);
 }
 
-.pi-chat__trace-body pre {
+.piem-chat__trace-body pre {
 	margin: 0;
 	white-space: pre-wrap;
 }
 
 /* Long tool output stays bounded so one `grep` cannot own the whole panel. */
-.pi-chat__trace--result .pi-chat__trace-body,
-.pi-chat__trace--harness .pi-chat__trace-body {
+.piem-chat__trace--result .piem-chat__trace-body,
+.piem-chat__trace--harness .piem-chat__trace-body {
 	max-height: 18rem;
 	overflow-y: auto;
 }
 
-.pi-chat__tool-status {
+.piem-chat__tool-status {
 	align-items: center;
 	color: var(--text-muted);
 	display: inline-flex;
@@ -601,12 +601,12 @@
 
 /*
  * Floats over the transcript. `sticky` was wrong here: the scroller is
- * `.pi-chat__messages`, and this button is its sibling on a non-scrolling flex
+ * `.piem-chat__messages`, and this button is its sibling on a non-scrolling flex
  * parent, so sticky did nothing while the button still consumed flex space —
  * the message list visibly shrank the moment it appeared. `absolute` against
- * `.pi-chat__transcript` (already `position: relative`) takes it out of flow.
+ * `.piem-chat__transcript` (already `position: relative`) takes it out of flow.
  */
-.pi-chat__latest {
+.piem-chat__latest {
 	align-items: center;
 	background: var(--background-secondary);
 	border: 1px solid var(--background-modifier-border);
@@ -624,18 +624,18 @@
 	transform: translateX(-50%);
 }
 
-.pi-chat__latest:hover {
+.piem-chat__latest:hover {
 	background: var(--background-modifier-hover);
 }
 
-.pi-chat__latest:focus-visible {
+.piem-chat__latest:focus-visible {
 	outline: 2px solid var(--background-modifier-border-focus);
 	outline-offset: 1px;
 }
 
 /* --- empty state --- */
 
-.pi-chat__empty {
+.piem-chat__empty {
 	align-items: center;
 	color: var(--text-muted);
 	display: flex;
@@ -648,24 +648,24 @@
 	text-align: center;
 }
 
-.pi-chat__empty-icon {
+.piem-chat__empty-icon {
 	--icon-size: var(--size-4-6);
 	color: var(--text-faint);
 }
 
-.pi-chat__empty-title {
+.piem-chat__empty-title {
 	color: var(--text-normal);
 	font-size: var(--font-ui-small);
 	font-weight: var(--font-semibold);
 	margin: 0;
 }
 
-.pi-chat__empty p {
+.piem-chat__empty p {
 	margin: 0;
 	max-width: 34ch;
 }
 
-.pi-chat__empty-action {
+.piem-chat__empty-action {
 	min-height: var(--size-4-8);
 }
 
@@ -675,31 +675,31 @@
  * Shows the shape the transcript is about to take, rather than a spinner parked
  * in the middle of the content area.
  */
-.pi-chat__skeleton {
+.piem-chat__skeleton {
 	display: flex;
 	flex-direction: column;
 	gap: var(--size-4-2);
 	padding: var(--size-4-2);
 }
 
-.pi-chat__skeleton-line {
+.piem-chat__skeleton-line {
 	background: var(--background-modifier-border);
 	border-radius: var(--radius-s);
 	height: var(--size-4-3);
 	opacity: 0.6;
 }
 
-.pi-chat__skeleton-line--short {
+.piem-chat__skeleton-line--short {
 	width: 40%;
 }
 
-.pi-chat__skeleton-line--medium {
+.piem-chat__skeleton-line--medium {
 	width: 70%;
 }
 
 @media (prefers-reduced-motion: no-preference) {
 
-	.pi-chat__skeleton-line {
+	.piem-chat__skeleton-line {
 		animation: pi-skeleton-pulse 1.4s ease-in-out infinite;
 	}
 }
@@ -716,7 +716,7 @@
 	}
 }
 
-.pi-chat__spinner {
+.piem-chat__spinner {
 	animation: pi-spin 1.1s linear infinite;
 }
 
@@ -728,13 +728,13 @@
 
 /* --- composer --- */
 
-.pi-chat__composer {
+.piem-chat__composer {
 	border-top: 1px solid var(--background-modifier-border);
 	flex-shrink: 0;
 	padding-top: var(--size-4-2);
 }
 
-.pi-chat__composer-shell {
+.piem-chat__composer-shell {
 	background: var(--background-secondary);
 	border: 1px solid var(--background-modifier-border);
 	border-radius: var(--radius-m);
@@ -748,7 +748,7 @@
  * The shell carries the single focus indicator. The textarea used to draw its
  * own outline on top of this border, so one focus produced two rings.
  */
-.pi-chat__composer-shell:focus-within {
+.piem-chat__composer-shell:focus-within {
 	border-color: var(--background-modifier-border-focus);
 	box-shadow: 0 0 0 1px var(--background-modifier-border-focus);
 }
@@ -758,7 +758,7 @@
  * `min-height: 5rem` wasted 80px of a narrow sidebar while idle and then made a
  * long prompt scroll inside that same 80px.
  */
-.pi-chat__composer textarea {
+.piem-chat__composer textarea {
 	background: var(--background-primary);
 	border: none;
 	border-radius: var(--radius-s);
@@ -767,25 +767,25 @@
 	font-size: var(--font-ui-small);
 	/* Both driven by `useAutosize`; the fallbacks apply before it first runs and
 	 * if the hook is ever absent. */
-	height: var(--pi-composer-height, auto);
+	height: var(--piem-composer-height, auto);
 	max-height: 40vh;
-	overflow-y: var(--pi-composer-overflow, auto);
+	overflow-y: var(--piem-composer-overflow, auto);
 	resize: none;
 	width: 100%;
 }
 
-.pi-chat__composer textarea:focus {
+.piem-chat__composer textarea:focus {
 	outline: none;
 }
 
-.pi-chat__composer-bar {
+.piem-chat__composer-bar {
 	align-items: center;
 	display: flex;
 	gap: var(--size-4-2);
 	justify-content: space-between;
 }
 
-.pi-chat__composer-status {
+.piem-chat__composer-status {
 	color: var(--text-muted);
 	flex: 1 1 auto;
 	font-size: var(--font-ui-smaller);
@@ -794,18 +794,18 @@
 
 /* Send rides on Obsidian's `mod-cta` (call-to-action) accent; Stop is a plain
  * icon button so it never competes visually with Send. */
-.pi-chat__send-button.mod-cta {
+.piem-chat__send-button.mod-cta {
 	min-height: var(--size-4-8);
 	min-width: var(--size-4-8);
 }
 
-.pi-chat__stop-button {
+.piem-chat__stop-button {
 	color: var(--text-error);
 }
 
 /* --- screen-reader-only --- */
 
-.pi-chat__visually-hidden {
+.piem-chat__visually-hidden {
 	border: 0;
 	clip-path: inset(50%);
 	height: 1px;
@@ -824,14 +824,14 @@
  */
 @media (pointer: coarse) {
 
-	.pi-chat__icon-button,
-	.pi-chat__send-button.mod-cta {
+	.piem-chat__icon-button,
+	.piem-chat__send-button.mod-cta {
 		min-height: var(--size-4-12);
 		min-width: var(--size-4-12);
 	}
 
-	.pi-chat__trace-summary,
-	.pi-chat__trace--flat {
+	.piem-chat__trace-summary,
+	.piem-chat__trace--flat {
 		min-height: var(--size-4-9);
 	}
 }
@@ -845,20 +845,20 @@
  */
 @media (max-width: 32rem) {
 
-	.pi-chat__header {
+	.piem-chat__header {
 		flex-wrap: wrap;
 	}
 
-	.pi-chat__header-actions {
+	.piem-chat__header-actions {
 		flex-basis: 100%;
 		justify-content: flex-start;
 	}
 
-	.pi-chat__message--user {
+	.piem-chat__message--user {
 		max-width: 100%;
 	}
 
-	.pi-chat__context-bar {
+	.piem-chat__context-bar {
 		width: 3rem;
 	}
 }

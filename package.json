@@ -1,7 +1,7 @@
 {
-	"name": "pi-obsidian",
+	"name": "piem",
 	"version": "0.1.0-alpha.5",
-	"description": "Run a pi-style agent inside Obsidian with vault-scoped tools and a chat side panel.",
+	"description": "Run the Piem agent inside Obsidian with vault-scoped tools and a chat side panel.",
 	"main": "main.js",
 	"type": "module",
 	"scripts": {

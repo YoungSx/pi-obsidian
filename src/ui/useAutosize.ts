@@ -36,7 +36,7 @@ export interface AutosizeOptions {
  *
  * Written with `setCssProps` rather than `style.height`: `eslint-plugin-
  * obsidianmd` bans direct style assignment so themes keep a hook, and the
- * stylesheet consumes `--pi-composer-height` / `--pi-composer-overflow`.
+ * stylesheet consumes `--piem-composer-height` / `--piem-composer-overflow`.
  */
 function resize(textarea: HTMLTextAreaElement, minRows: number, maxFraction: number): void {
 	const style = textarea.ownerDocument.defaultView?.getComputedStyle(textarea);
@@ -49,13 +49,13 @@ function resize(textarea: HTMLTextAreaElement, minRows: number, maxFraction: num
 
 	// Collapse before measuring, or `scrollHeight` reports the current height and
 	// the box can only ever grow.
-	textarea.setCssProps({ "--pi-composer-height": "auto" });
+	textarea.setCssProps({ "--piem-composer-height": "auto" });
 	const content = textarea.scrollHeight;
 	const height = Math.min(Math.max(content, floor), ceiling);
 
 	textarea.setCssProps({
-		"--pi-composer-height": `${height}px`,
+		"--piem-composer-height": `${height}px`,
 		// Only scroll once the content genuinely exceeds the ceiling.
-		"--pi-composer-overflow": content > ceiling ? "auto" : "hidden",
+		"--piem-composer-overflow": content > ceiling ? "auto" : "hidden",
 	});
 }

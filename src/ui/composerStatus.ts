@@ -30,7 +30,7 @@ export function composerStatusText(input: ComposerStatusInput): string {
 		return input.showAgentDetails ? "Preparing context…" : "Tidying up earlier messages…";
 	}
 	if (input.isStreaming) {
-		return "Pi is responding…";
+		return "Piem is responding…";
 	}
 	return `${sendShortcutLabel(input.isMac)} to send`;
 }

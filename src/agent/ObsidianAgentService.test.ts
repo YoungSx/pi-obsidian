@@ -5,7 +5,7 @@ import type { Api, AssistantMessage, Context, Model, SimpleStreamOptions } from 
 import { createAssistantMessageEventStream } from "@earendil-works/pi-ai";
 import type { StreamFn } from "@earendil-works/pi-agent-core";
 import { ObsidianSessionManager } from "../session/ObsidianSessionManager";
-import type { PiObsidianSettings } from "../settings";
+import type { PiemSettings } from "../settings";
 import type { ObsidianAgentService as ObsidianAgentServiceType } from "./ObsidianAgentService";
 
 installObsidianStub();
@@ -15,7 +15,7 @@ const { ObsidianAgentService } = await import("./ObsidianAgentService");
 
 // Tests drive ObsidianSessionManager directly, so the directory is supplied here
 // rather than derived from a Vault; `Vault#configDir` is used in production code.
-const SESSION_DIR = `.${"obsidian"}/plugins/pi-obsidian/sessions`;
+const SESSION_DIR = `.${"obsidian"}/plugins/piem/sessions`;
 
 class MemoryAdapter {
 	private readonly files = new Map<string, { content: string; mtime: number }>();
@@ -373,7 +373,7 @@ function usageChunk(): object {
 
 function createService(memoryAdapter: MemoryAdapter = new MemoryAdapter()): ObsidianAgentServiceType {
 	const adapter = asDataAdapter(memoryAdapter);
-	const settings: PiObsidianSettings = {
+	const settings: PiemSettings = {
 		provider: "deepseek",
 		modelId: "deepseek-v4-pro",
 		thinkingLevel: "high",

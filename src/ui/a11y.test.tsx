@@ -57,17 +57,17 @@ describe("ChatHeader accessibility", () => {
 
 	it("names the context state in text instead of relying on colour alone", async () => {
 		const nearHost = await renderHeader(snapshot({ contextFill: fill({ tokens: 990_000, ratio: 0.99 }) }));
-		expect(nearHost.querySelector(".pi-chat__context")?.textContent).toContain("context nearly full");
+		expect(nearHost.querySelector(".piem-chat__context")?.textContent).toContain("context nearly full");
 
 		document.body.replaceChildren();
 		const okHost = await renderHeader(snapshot());
-		expect(okHost.querySelector(".pi-chat__context")?.textContent).toContain(", ok");
+		expect(okHost.querySelector(".piem-chat__context")?.textContent).toContain(", ok");
 	});
 
 	it("exposes the header actions as a labelled toolbar", async () => {
 		const host = await renderHeader(snapshot());
 
-		const toolbar = host.querySelector(".pi-chat__header-actions");
+		const toolbar = host.querySelector(".piem-chat__header-actions");
 		expect(toolbar?.getAttribute("role")).toBe("toolbar");
 		expect(toolbar?.getAttribute("aria-label")).toBe("Chat actions");
 	});
@@ -75,7 +75,7 @@ describe("ChatHeader accessibility", () => {
 	it("announces the compacting banner as a status region", async () => {
 		const host = await renderHeader(snapshot({ isCompacting: true }));
 
-		expect(host.querySelector(".pi-chat__compacting")?.getAttribute("role")).toBe("status");
+		expect(host.querySelector(".piem-chat__compacting")?.getAttribute("role")).toBe("status");
 	});
 });
 

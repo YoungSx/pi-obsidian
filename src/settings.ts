@@ -21,7 +21,7 @@ const OFF_THINKING_LEVEL: ModelThinkingLevel = "off";
 /** Human-readable form of the default context window, e.g. "128k". */
 const DEFAULT_CUSTOM_ENDPOINT_CONTEXT_WINDOW_LABEL = `${Math.round(DEFAULT_CUSTOM_ENDPOINT_CONTEXT_WINDOW / 1000)}k`;
 
-export interface PiObsidianSettings {
+export interface PiemSettings {
 	provider: string;
 	modelId: string;
 	thinkingLevel: ModelThinkingLevel;
@@ -44,7 +44,7 @@ export interface PiObsidianSettings {
 	customEndpoint?: CustomEndpointConfig;
 }
 
-export const DEFAULT_SETTINGS: PiObsidianSettings = {
+export const DEFAULT_SETTINGS: PiemSettings = {
 	provider: DEFAULT_PROVIDER,
 	modelId: DEFAULT_MODEL_ID,
 	thinkingLevel: DEFAULT_THINKING_LEVEL,
@@ -53,7 +53,7 @@ export const DEFAULT_SETTINGS: PiObsidianSettings = {
 	showAgentDetails: false,
 };
 
-export function normalizeSettings(data: Partial<PiObsidianSettings> | null | undefined): PiObsidianSettings {
+export function normalizeSettings(data: Partial<PiemSettings> | null | undefined): PiemSettings {
 	const provider = data?.provider || DEFAULT_PROVIDER;
 	const modelId = data?.modelId || DEFAULT_MODEL_ID;
 	const thinkingLevel = data?.thinkingLevel || DEFAULT_THINKING_LEVEL;
@@ -80,7 +80,7 @@ export function getProviderModels(provider: string) {
 }
 
 /** Whether the user's custom endpoint currently serves all model requests. */
-export function isUsingCustomEndpoint(settings: PiObsidianSettings): boolean {
+export function isUsingCustomEndpoint(settings: PiemSettings): boolean {
 	return isCustomEndpointActive(settings.customEndpoint);
 }
 
@@ -92,7 +92,7 @@ export function isUsingCustomEndpoint(settings: PiObsidianSettings): boolean {
  * overrides what the user typed at the top of the panel. Only when no
  * endpoint is configured do the builtin providers apply.
  */
-export function getSelectedModel(settings: PiObsidianSettings): Model<string> {
+export function getSelectedModel(settings: PiemSettings): Model<string> {
 	if (isUsingCustomEndpoint(settings)) {
 		return buildCustomEndpointModel(settings.customEndpoint as CustomEndpointConfig);
 	}
@@ -118,7 +118,7 @@ export function getSelectedModel(settings: PiObsidianSettings): Model<string> {
  * to the per-provider map only when the endpoint form holds nothing, so a
  * leftover DeepSeek key is never silently reused against a different server.
  */
-export function getConfiguredApiKey(settings: PiObsidianSettings): string | undefined {
+export function getConfiguredApiKey(settings: PiemSettings): string | undefined {
 	if (isUsingCustomEndpoint(settings)) {
 		const apiKey = settings.customEndpoint?.apiKey.trim();
 		if (apiKey) {
@@ -137,18 +137,18 @@ export function getConfiguredApiKey(settings: PiObsidianSettings): string | unde
  * (my-model)" — rather than the synthetic provider constant, which would mean
  * nothing to a user reading an error.
  */
-export function describeModelTarget(settings: PiObsidianSettings): string {
+export function describeModelTarget(settings: PiemSettings): string {
 	if (isUsingCustomEndpoint(settings)) {
 		return `The custom endpoint (${settings.customEndpoint?.modelId})`;
 	}
 	return `${settings.provider}/${settings.modelId}`.replace(/^./, (first) => first.toUpperCase());
 }
 
-export function getSupportedThinkingLevelOptions(settings: PiObsidianSettings): ModelThinkingLevel[] {
+export function getSupportedThinkingLevelOptions(settings: PiemSettings): ModelThinkingLevel[] {
 	return getSupportedThinkingLevels(getSelectedModel(settings));
 }
 
-export function getPreferredThinkingLevel(settings: PiObsidianSettings): ModelThinkingLevel {
+export function getPreferredThinkingLevel(settings: PiemSettings): ModelThinkingLevel {
 	const supportedLevels = getSupportedThinkingLevelOptions(settings);
 	if (supportedLevels.includes(settings.thinkingLevel)) {
 		return settings.thinkingLevel;
@@ -159,7 +159,7 @@ export function getPreferredThinkingLevel(settings: PiObsidianSettings): ModelTh
 	return supportedLevels[0] ?? OFF_THINKING_LEVEL;
 }
 
-export class PiObsidianSettingTab extends PluginSettingTab {
+export class PiemSettingTab extends PluginSettingTab {
 	private readonly plugin: PiObsidianPlugin;
 	private readonly secretEnvironment: SecretEnvironment | null;
 
@@ -179,7 +179,7 @@ export class PiObsidianSettingTab extends PluginSettingTab {
 		const { containerEl } = this;
 		containerEl.empty();
 
-		new Setting(containerEl).setName("Pi agent").setHeading();
+		new Setting(containerEl).setName("Agent").setHeading();
 		containerEl.createEl("p", {
 			text: "Prompts, vault content read by tools, and tool results are sent to the configured model provider. API keys are stored in this plugin's Obsidian settings, encrypted with your operating system's keychain where supported.",
 		});
@@ -219,7 +219,7 @@ export class PiObsidianSettingTab extends PluginSettingTab {
 
 		new Setting(containerEl)
 			.setName("Custom endpoint")
-			.setClass("pi-custom-endpoint")
+			.setClass("piem-custom-endpoint")
 			.setDesc(
 				"OpenAI-compatible base URL, e.g. https://api.example.com/v1 — a gateway, proxy, or self-hosted server. When both this and a model ID are set they replace the providers below.",
 			)
@@ -271,7 +271,7 @@ export class PiObsidianSettingTab extends PluginSettingTab {
 					? "Not in use — the custom endpoint above serves all requests. Clear the endpoint base URL or the model ID to re-enable providers."
 					: "The polished provider for this first version is deepseek. Other providers are listed for future compatibility.",
 			)
-			.setClass(customActive ? "pi-provider-inactive" : "pi-provider-active")
+			.setClass(customActive ? "piem-provider-inactive" : "piem-provider-active")
 			.addDropdown((dropdown) => {
 				for (const provider of getBuiltinProviders()) {
 					dropdown.addOption(provider, provider);
@@ -298,7 +298,7 @@ export class PiObsidianSettingTab extends PluginSettingTab {
 					? "Not in use — the custom endpoint above serves all requests."
 					: "The first test path uses deepseek-v4-pro.",
 			)
-			.setClass(customActive ? "pi-model-inactive" : "pi-model-active")
+			.setClass(customActive ? "piem-model-inactive" : "piem-model-active")
 			.addDropdown((dropdown) => {
 				for (const model of getProviderModels(this.plugin.settings.provider)) {
 					dropdown.addOption(model.id, model.name || model.id);

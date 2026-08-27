@@ -51,7 +51,7 @@ function instantiate(options: {
 	const PluginClass = (exports as { default?: unknown }).default ?? exports;
 	expect(typeof PluginClass).toBe("function");
 	const plugin = new (PluginClass as new (app: unknown, manifest: unknown) => LoadedPlugin)(createStubApp(), {
-		id: "pi-obsidian",
+		id: "piem",
 		version: "test",
 	});
 	return { plugin, record };
@@ -81,7 +81,7 @@ describe("built bundle loads under Obsidian's loader", () => {
 
 		await plugin.onload();
 
-		expect(record.views).toContain("pi-obsidian-chat-view");
+		expect(record.views).toContain("piem-chat-view");
 		expect(record.commands.length).toBeGreaterThan(0);
 		expect(record.settingTabs).toBe(1);
 	});
@@ -145,7 +145,7 @@ describe("built bundle loads under Obsidian's loader", () => {
 
 		await plugin.onload();
 
-		expect(record.views).toContain("pi-obsidian-chat-view");
+		expect(record.views).toContain("piem-chat-view");
 		expect(record.settingTabs).toBe(1);
 	});
 

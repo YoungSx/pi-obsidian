@@ -14,7 +14,7 @@ import { appendToDraft } from "./noteReference";
 import { canOpenPluginSettings, openPluginSettings } from "./pluginSettings";
 import { useSessionDraft } from "./useSessionDraft";
 
-interface PiChatAppProps {
+interface ChatAppProps {
 	service: ObsidianAgentService;
 	inputController?: ChatInputController;
 	/** Parent Obsidian component owning rendered Markdown child components. */
@@ -26,7 +26,7 @@ interface PiChatAppProps {
 	draftStore?: DraftStore;
 }
 
-export function PiChatApp({ service, inputController, component, draftStore }: PiChatAppProps): React.JSX.Element {
+export function ChatApp({ service, inputController, component, draftStore }: ChatAppProps): React.JSX.Element {
 	const [snapshot, setSnapshot] = useState<ChatSnapshot>(() => service.getSnapshot());
 	const { draft: input, setDraft: setInput, clearDraft } = useSessionDraft(draftStore, snapshot.session?.id);
 	const [sessions, setSessions] = useState<ActiveSessionInfo[]>([]);
@@ -136,7 +136,7 @@ export function PiChatApp({ service, inputController, component, draftStore }: P
 	}, [inputController]);
 
 	return (
-		<div className="pi-chat" aria-busy={snapshot.isStreaming || snapshot.isCompacting || isInitializing}>
+		<div className="piem-chat" aria-busy={snapshot.isStreaming || snapshot.isCompacting || isInitializing}>
 			<ChatHeader
 				app={service.getApp()}
 				snapshot={snapshot}

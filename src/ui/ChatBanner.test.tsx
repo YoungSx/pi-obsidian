@@ -37,7 +37,7 @@ describe("ChatBanner", () => {
 	it("announces a failure assertively", async () => {
 		const host = await renderBanner({ errorMessage: "Request failed.", onDismiss: () => undefined });
 
-		const banner = host.querySelector(".pi-chat__banner--error");
+		const banner = host.querySelector(".piem-chat__banner--error");
 		expect(banner?.getAttribute("role")).toBe("alert");
 		expect(banner?.getAttribute("aria-live")).toBe("assertive");
 	});
@@ -45,7 +45,7 @@ describe("ChatBanner", () => {
 	it("announces a notice politely, so 'nothing happened' never interrupts", async () => {
 		const host = await renderBanner({ noticeMessage: "Nothing to compact yet.", onDismiss: () => undefined });
 
-		const banner = host.querySelector(".pi-chat__banner--notice");
+		const banner = host.querySelector(".piem-chat__banner--notice");
 		expect(banner?.getAttribute("role")).toBe("status");
 		expect(banner?.getAttribute("aria-live")).toBe("polite");
 	});
@@ -54,7 +54,7 @@ describe("ChatBanner", () => {
 		let dismissed = 0;
 		const host = await renderBanner({ noticeMessage: "Nothing to compact yet.", onDismiss: () => (dismissed += 1) });
 
-		const dismiss = host.querySelector<HTMLButtonElement>(".pi-chat__banner-dismiss");
+		const dismiss = host.querySelector<HTMLButtonElement>(".piem-chat__banner-dismiss");
 		expect(dismiss?.getAttribute("aria-label")).toBe("Dismiss message");
 		dismiss?.click();
 		await flushRender();
@@ -65,7 +65,7 @@ describe("ChatBanner", () => {
 		let opened = 0;
 		const host = await renderBanner({ errorMessage: "Needs an API key.", onDismiss: () => undefined, onOpenSettings: () => (opened += 1) });
 
-		const action = host.querySelector<HTMLButtonElement>(".pi-chat__banner-action");
+		const action = host.querySelector<HTMLButtonElement>(".piem-chat__banner-action");
 		expect(action?.textContent).toBe("Open settings");
 		action?.click();
 		await flushRender();
@@ -75,20 +75,20 @@ describe("ChatBanner", () => {
 	it("omits the action when the host cannot reach settings", async () => {
 		const host = await renderBanner({ errorMessage: "Needs an API key.", onDismiss: () => undefined });
 
-		expect(host.querySelector(".pi-chat__banner-action")).toBeNull();
+		expect(host.querySelector(".piem-chat__banner-action")).toBeNull();
 	});
 
 	it("prefers the failure when both are present, since it is the actionable one", async () => {
 		const host = await renderBanner({ errorMessage: "Request failed.", noticeMessage: "Nothing to compact yet.", onDismiss: () => undefined });
 
-		expect(host.querySelector(".pi-chat__banner--error")).not.toBeNull();
-		expect(host.querySelector(".pi-chat__banner--notice")).toBeNull();
+		expect(host.querySelector(".piem-chat__banner--error")).not.toBeNull();
+		expect(host.querySelector(".piem-chat__banner--notice")).toBeNull();
 	});
 
 	it("renders nothing when there is nothing to say", async () => {
 		const host = await renderBanner({ onDismiss: () => undefined });
 
-		expect(host.querySelector(".pi-chat__banner")).toBeNull();
+		expect(host.querySelector(".piem-chat__banner")).toBeNull();
 	});
 });
 

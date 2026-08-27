@@ -29,7 +29,7 @@ export function ReplyActions({ app, text, onRetry }: ReplyActionsProps): React.J
 	}
 
 	return (
-		<div className="pi-chat__message-actions" role="group" aria-label="Reply actions">
+		<div className="piem-chat__message-actions" role="group" aria-label="Reply actions">
 			<IconButton
 				icon="copy"
 				label="Copy reply"
