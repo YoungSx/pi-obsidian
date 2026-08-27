@@ -26,6 +26,21 @@ export default tseslint.config(
 		},
 	},
 	...obsidianmd.configs.recommended,
+	{
+		// The load harness is build-time tooling, not plugin runtime code: it
+		// reads the built bundle off disk and evaluates it the way Obsidian's
+		// loader does. Node builtins and `eval` are the mechanism under test,
+		// so the rules that rightly forbid them in the plugin are scoped off
+		// here — and only here, by exact path.
+		files: ["src/testing/pluginLoader.ts", "src/testing/pluginLoader.test.ts"],
+		rules: {
+			"import/no-nodejs-modules": "off",
+			"no-eval": "off",
+			// The stub app models a default vault layout; it is not reading a
+			// real user's configuration, so it has no configDir to consult.
+			"obsidianmd/hardcoded-config-path": "off",
+		},
+	},
 	globalIgnores([
 		"node_modules",
 		// Nested agent worktrees are separate checkouts; linting them here would

@@ -39,11 +39,17 @@ export default class PiObsidianPlugin extends Plugin {
 	 * codec is what converts to and from the persisted form at the
 	 * `loadData`/`saveData` boundary.
 	 */
-	private secretEnvironment: Promise<SecretEnvironment> | null = null;
+	private secretEnvironment: SecretEnvironment | null = null;
 
-	private async requireSecretEnvironment(): Promise<SecretEnvironment> {
+	/**
+	 * Detection is synchronous and total, so the resolved environment is cached
+	 * directly. An earlier revision cached a Promise, which meant a rejection
+	 * during detection was memoised and re-thrown on every later access — and
+	 * because this sits on the `onload` path, that took the whole plugin down.
+	 */
+	private requireSecretEnvironment(): SecretEnvironment {
 		this.secretEnvironment ??= createSecretEnvironment();
-		return await this.secretEnvironment;
+		return this.secretEnvironment;
 	}
 
 	async onload(): Promise<void> {
@@ -53,7 +59,7 @@ export default class PiObsidianPlugin extends Plugin {
 		this.agentService = new ObsidianAgentService(this.app, () => this.settings, sessionManager);
 
 		this.registerView(VIEW_TYPE_PI_CHAT, (leaf) => new PiChatView(leaf, this.requireAgentService()));
-		this.addSettingTab(new PiObsidianSettingTab(this.app, this, await this.requireSecretEnvironment()));
+		this.addSettingTab(new PiObsidianSettingTab(this.app, this, this.requireSecretEnvironment()));
 		this.addCommand({
 			id: "open-pi-chat",
 			name: "Open pi chat",
@@ -150,7 +156,7 @@ export default class PiObsidianPlugin extends Plugin {
 	 * migration keeps the old file rather than destroying it.
 	 */
 	async loadSettings(): Promise<void> {
-		const environment = await this.requireSecretEnvironment();
+		const environment = this.requireSecretEnvironment();
 		const codec = environment.codec();
 		const raw = await this.loadData() as Partial<PiObsidianSettings> | null;
 
@@ -205,7 +211,7 @@ export default class PiObsidianPlugin extends Plugin {
 	}
 
 	async saveSettings(): Promise<void> {
-		const environment = await this.requireSecretEnvironment();
+		const environment = this.requireSecretEnvironment();
 		await this.saveData(sealCurrentSettings(this.settings, environment.codec()));
 		await this.agentService?.refreshConfiguration();
 	}
