@@ -313,6 +313,67 @@ describe("ObsidianAgentService", () => {
 		expect(JSON.stringify(after)).toContain("What is in my vault?");
 	});
 
+	it("drops the abandoned reply from the reloaded session, not just from memory", async () => {
+		// The log is append-only, so the discarded turn stays on disk. What must
+		// not survive is its place on the active branch: a retry that only
+		// truncated the in-memory transcript would leave the log's leaf on the
+		// abandoned reply and append the replacement below it, so reopening the
+		// session would replay both the question and the answer it replaced.
+		const adapter = new MemoryAdapter();
+		const service = createService(adapter);
+		await service.sendPrompt("Which notes mention pi?");
+		const sessionPath = service.getSnapshot().session?.path ?? "";
+		const before = service.getSnapshot().messages;
+
+		expect(await service.retryFrom(before.length - 1)).toBe(true);
+
+		const reloaded = createService(adapter);
+		await reloaded.openSession(sessionPath);
+		const messages = reloaded.getSnapshot().messages;
+		expect(messages.filter((message) => message.role === "user")).toHaveLength(1);
+		expect(messages.filter((message) => message.role === "assistant")).toHaveLength(1);
+	});
+
+	it("declines a retry for a turn the log cannot name", async () => {
+		// A transcript adopted without entry ids stands in for the turns a
+		// compaction absorbed: their text survives only inside the summary, so
+		// there is no entry to branch from and rewinding would drop the summary
+		// along with the turn. Retrying in memory alone would then desync the
+		// transcript from the log, so the action is refused instead.
+		const service = createService();
+		await service.initialize();
+		const agent = service.getSnapshot();
+		expect(agent.messages).toHaveLength(0);
+
+		await service.sendPrompt("Recorded turn");
+		const withHistory = service.getSnapshot().messages;
+		// Replace the transcript with copies, which carry no entry mapping.
+		service.getSnapshot();
+		const detached = withHistory.map((message) => structuredClone(message));
+		(service as unknown as { agent: { state: { messages: unknown[] } } }).agent.state.messages = detached;
+
+		expect(await service.retryFrom(detached.length - 1)).toBe(false);
+	});
+
+	it("reports pending tool calls by name, never the provider's call ids", async () => {
+		let snapshotDuringTool: string[] | undefined;
+		const service = createService(new MemoryAdapter(), {
+			streamFn: createToolCallingStreamFn("ls", "toolu_bdrk_0152GcOpaqueId"),
+		});
+		service.subscribe((snapshot) => {
+			if (snapshot.pendingToolCalls.length > 0) {
+				snapshotDuringTool = snapshot.pendingToolCalls;
+			}
+		});
+
+		await service.sendPrompt("What folders do I have?");
+
+		// The id pi tracks is opaque to a reader; the panel has to name the tool.
+		expect(snapshotDuringTool).toEqual(["ls"]);
+		// And the call clears once it finishes, so the status row does not stick.
+		expect(service.getSnapshot().pendingToolCalls).toEqual([]);
+	});
+
 	it("declines a retry when nothing precedes the reply", async () => {
 		const service = createService();
 		await service.initialize();
@@ -421,7 +482,10 @@ function usageChunk(): object {
 	};
 }
 
-function createService(memoryAdapter: MemoryAdapter = new MemoryAdapter()): ObsidianAgentServiceType {
+function createService(
+	memoryAdapter: MemoryAdapter = new MemoryAdapter(),
+	overrides: { streamFn?: StreamFn } = {},
+): ObsidianAgentServiceType {
 	const adapter = asDataAdapter(memoryAdapter);
 	const settings: PiemSettings = {
 		providers: [],
@@ -434,7 +498,9 @@ function createService(memoryAdapter: MemoryAdapter = new MemoryAdapter()): Obsi
 		showAgentDetails: false,
 	};
 	const sessionManager = new ObsidianSessionManager(adapter, SESSION_DIR, "obsidian-vault:Test");
-	return new ObsidianAgentService(createFakeApp(adapter), () => settings, sessionManager, { streamFn: createFakeStreamFn() });
+	return new ObsidianAgentService(createFakeApp(adapter), () => settings, sessionManager, {
+		streamFn: overrides.streamFn ?? createFakeStreamFn(),
+	});
 }
 
 function createFakeStreamFn(): StreamFn {
@@ -457,6 +523,51 @@ function createFakeStreamFn(): StreamFn {
 			stopReason: "stop",
 			timestamp: Date.now(),
 		};
+		stream.push({ type: "done", reason: "stop", message });
+		stream.end(message);
+		return stream;
+	};
+}
+
+/**
+ * Streams one tool call, then a plain reply on the follow-up request.
+ *
+ * The call id is deliberately provider-shaped: it is the string the panel used
+ * to show before pending calls were resolved to names.
+ */
+function createToolCallingStreamFn(toolName: string, toolCallId: string): StreamFn {
+	let requests = 0;
+	return (model: Model<Api>, _context: Context, _options?: SimpleStreamOptions) => {
+		requests += 1;
+		const stream = createAssistantMessageEventStream();
+		const base = {
+			role: "assistant" as const,
+			api: model.api,
+			provider: model.provider,
+			model: model.id,
+			usage: {
+				input: 1_000,
+				output: 10,
+				cacheRead: 0,
+				cacheWrite: 0,
+				totalTokens: 1_010,
+				cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+			},
+			timestamp: Date.now(),
+		};
+
+		if (requests === 1) {
+			const message: AssistantMessage = {
+				...base,
+				content: [{ type: "toolCall", id: toolCallId, name: toolName, arguments: { path: "/" } }],
+				stopReason: "toolUse",
+			};
+			stream.push({ type: "done", reason: "toolUse", message });
+			stream.end(message);
+			return stream;
+		}
+
+		const message: AssistantMessage = { ...base, content: [{ type: "text", text: "Done" }], stopReason: "stop" };
 		stream.push({ type: "done", reason: "stop", message });
 		stream.end(message);
 		return stream;

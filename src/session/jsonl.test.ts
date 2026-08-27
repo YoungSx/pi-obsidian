@@ -85,4 +85,60 @@ describe("JSONL session helpers", () => {
 		expect(context.thinkingLevel).toBe("high");
 		expect(context.messages).toHaveLength(1);
 	});
+	it("names the entry behind every message so a retry can rewind the log", () => {
+		const header = createSessionHeader("session-1", "obsidian-vault:Test", "2026-05-03T00:00:00.000Z");
+		const entries: SessionEntry[] = [
+			header,
+			{
+				type: "message",
+				id: "e1",
+				parentId: null,
+				timestamp: "2026-05-03T00:00:01.000Z",
+				message: { role: "user", content: "First question", timestamp: 1 } as never,
+			},
+			{
+				type: "message",
+				id: "e2",
+				parentId: "e1",
+				timestamp: "2026-05-03T00:00:02.000Z",
+				message: { role: "user", content: "Second question", timestamp: 2 } as never,
+			},
+		];
+
+		const context = buildSessionContext(entries, "e2");
+
+		expect(context.messageOrigins).toEqual(["e1", "e2"]);
+	});
+
+	it("marks compaction-absorbed messages unbranchable rather than naming the compaction", () => {
+		const header = createSessionHeader("session-1", "obsidian-vault:Test", "2026-05-03T00:00:00.000Z");
+		const entries: SessionEntry[] = [
+			header,
+			{
+				type: "compaction",
+				id: "c1",
+				parentId: null,
+				timestamp: "2026-05-03T00:00:01.000Z",
+				summary: "Earlier turns",
+				tokensBefore: 1_000,
+				retainedTail: [{ role: "user", content: "Kept question", timestamp: 1 } as never],
+			},
+			{
+				type: "message",
+				id: "e9",
+				parentId: "c1",
+				timestamp: "2026-05-03T00:00:02.000Z",
+				message: { role: "user", content: "After compaction", timestamp: 2 } as never,
+			},
+		];
+
+		const context = buildSessionContext(entries, "e9");
+
+		// The summary and the tail it carries have no entry of their own. Naming
+		// the compaction would let a retry rewind past it and lose the summary
+		// along with the turn, so those slots stay null.
+		expect(context.messages).toHaveLength(3);
+		expect(context.messageOrigins).toEqual([null, null, "e9"]);
+	});
+
 });

@@ -77,7 +77,7 @@ describe("MessageList compaction divider", () => {
 		expect(text?.textContent).toBe("**not** markdown #heading");
 	});
 
-	it("announces running tools as a status region", async () => {
+	it("announces running tools as a status region, in the reader's vocabulary", async () => {
 		const host = renderMessages([]);
 		await flushRender();
 		// Re-render with pending tools through the same host.
@@ -89,7 +89,27 @@ describe("MessageList compaction divider", () => {
 
 		const status = host.querySelector(".piem-chat__tool-status");
 		expect(status?.getAttribute("role")).toBe("status");
-		expect(status?.textContent).toContain("Working: read, grep");
+		expect(status?.textContent).toContain("Working: Read a note, Searched the vault");
+	});
+
+	it("keeps raw tool ids in the running-tools status when agent details are shown", async () => {
+		const host = renderMessages([]);
+		await flushRender();
+		const root = roots.get(host)!;
+		root.render(
+			<MessageList
+				messages={[]}
+				isStreaming={false}
+				pendingToolCalls={["read", "grep"]}
+				showAgentDetails
+				app={app}
+				component={component}
+				sourcePath=""
+			/>,
+		);
+		await flushRender();
+
+		expect(host.querySelector(".piem-chat__tool-status")?.textContent).toContain("Working: read, grep");
 	});
 });
 
