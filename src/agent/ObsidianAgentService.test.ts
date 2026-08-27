@@ -257,6 +257,28 @@ describe("ObsidianAgentService", () => {
 		expect(JSON.stringify(snapshot.messages)).toContain("Only conversation");
 	});
 
+	it("replaces a reply on retry instead of appending a second answer", async () => {
+		const service = createService();
+		await service.sendPrompt("What is in my vault?");
+		const before = service.getSnapshot().messages;
+		expect(before.filter((message) => message.role === "user")).toHaveLength(1);
+
+		expect(await service.retryFrom(before.length - 1)).toBe(true);
+
+		const after = service.getSnapshot().messages;
+		// The question is re-asked once, not stacked, so the model never sees the
+		// same prompt twice in one context.
+		expect(after.filter((message) => message.role === "user")).toHaveLength(1);
+		expect(JSON.stringify(after)).toContain("What is in my vault?");
+	});
+
+	it("declines a retry when nothing precedes the reply", async () => {
+		const service = createService();
+		await service.initialize();
+
+		expect(await service.retryFrom(0)).toBe(false);
+	});
+
 	it("surfaces an error instead of throwing when a session cannot be opened", async () => {
 		const service = createService();
 		await service.initialize();

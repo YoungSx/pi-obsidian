@@ -63,6 +63,38 @@ export interface ChatSnapshot {
 
 type SnapshotListener = (snapshot: ChatSnapshot) => void;
 
+/**
+ * Index of the user turn that produced the message at `index`.
+ *
+ * Walks backwards because tool results sit between a question and its answer.
+ * Returns null when nothing precedes it, which happens for a transcript whose
+ * head was replaced by a compaction summary — retrying there would resend a
+ * prompt the model can no longer see in context.
+ */
+function findPromptIndex(messages: AgentMessage[], index: number): number | null {
+	for (let cursor = Math.min(index, messages.length) - 1; cursor >= 0; cursor -= 1) {
+		if (messages[cursor]?.role === "user") {
+			return cursor;
+		}
+	}
+	return null;
+}
+
+function extractUserText(message: AgentMessage | undefined): string {
+	if (!message || message.role !== "user") {
+		return "";
+	}
+	const { content } = message;
+	if (typeof content === "string") {
+		return content.trim();
+	}
+	return content
+		.filter((part): part is Extract<typeof part, { type: "text" }> => part.type === "text")
+		.map((part) => part.text)
+		.join("\n")
+		.trim();
+}
+
 export interface ObsidianAgentServiceOptions {
 	streamFn?: StreamFn;
 }
@@ -173,6 +205,38 @@ export class ObsidianAgentService {
 		this.noticeMessage = undefined;
 		this.dismissedAgentError = this.agent?.state.errorMessage;
 		this.notify();
+	}
+
+	/**
+	 * Re-asks the question that produced the reply at `index`.
+	 *
+	 * Truncates the transcript to just before that user turn and prompts again, so
+	 * the retry replaces the reply rather than appending a second answer to a
+	 * conversation the model would then see twice.
+	 *
+	 * The session log is append-only and tree-shaped, so the discarded turns stay
+	 * on disk; the new branch simply becomes the active leaf. The reloaded history
+	 * follows the leaf, so the abandoned reply does not come back.
+	 */
+	async retryFrom(index: number): Promise<boolean> {
+		await this.initialize();
+		const agent = this.requireAgent();
+		if (agent.state.isStreaming || this.isCompacting) {
+			return false;
+		}
+
+		const promptIndex = findPromptIndex(agent.state.messages, index);
+		if (promptIndex === null) {
+			return false;
+		}
+		const prompt = extractUserText(agent.state.messages[promptIndex]);
+		if (!prompt) {
+			return false;
+		}
+
+		agent.state.messages = agent.state.messages.slice(0, promptIndex);
+		this.notify();
+		return await this.sendPrompt(prompt);
 	}
 
 	abort(): void {

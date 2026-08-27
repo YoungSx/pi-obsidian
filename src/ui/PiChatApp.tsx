@@ -167,6 +167,7 @@ export function PiChatApp({ service, inputController, component, draftStore }: P
 				isConfigured={snapshot.isConfigured ?? false}
 				showAgentDetails={snapshot.showAgentDetails}
 				onOpenSettings={canOpenSettings ? () => openPluginSettings(app) : undefined}
+				onRetry={snapshot.isStreaming || snapshot.isCompacting ? undefined : (index) => void service.retryFrom(index)}
 				app={app}
 				component={component}
 				sourcePath={sourcePath}
