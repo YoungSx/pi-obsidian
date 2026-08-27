@@ -4,6 +4,6 @@
 	"version": "0.1.0-alpha.4",
 	"minAppVersion": "1.5.7",
 	"description": "Run a pi-style agent inside Obsidian with vault-scoped tools and a chat side panel.",
-	"author": "Simon Liang",
+	"author": "Shangxin",
 	"isDesktopOnly": false
 }
