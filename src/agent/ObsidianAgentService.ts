@@ -7,13 +7,12 @@ import { measureContextFill, sumUsage, type ContextFill, type UsageTotals } from
 import { createObsidianTools } from "../tools/obsidianTools";
 import {
 	describeModelTarget,
+	getApiKeyForProvider,
 	getConfiguredApiKey,
 	getPreferredThinkingLevel,
 	getSelectedModel,
-	isUsingCustomEndpoint,
 	type PiemSettings,
 } from "../settings";
-import { CUSTOM_ENDPOINT_PROVIDER } from "../constants";
 import { ObsidianSessionManager, type ActiveSessionInfo, type SessionDefaults } from "../session/ObsidianSessionManager";
 import { OBSIDIAN_AGENT_SYSTEM_PROMPT } from "./systemPrompt";
 
@@ -427,7 +426,13 @@ export class ObsidianAgentService {
 		const agent = new Agent({
 			// The custom endpoint rides the same transport as builtin providers;
 			// only the provider registration differs, which streamFn handles.
-			streamFn: this.streamFn ?? createObsidianStreamFn({ transport: settings.networkTransport, customEndpoint: settings.customEndpoint }),
+			streamFn:
+				this.streamFn ??
+				createObsidianStreamFn({
+					transport: settings.networkTransport,
+					providers: settings.providers,
+					customEndpoint: settings.customEndpoint,
+				}),
 			// pi's converter renders compaction summaries into the request. The agent's
 			// default one silently filters that role out, which would discard every
 			// compacted turn without surfacing an error.
@@ -571,13 +576,17 @@ export class ObsidianAgentService {
 	}
 
 	private requireModelsBundle(): ObsidianModelsBundle {
-		// Rebuilt when the endpoint changes so the custom provider registration
-		// tracks settings; cached otherwise, since transports are stateless.
+		// Rebuilt when a provider registration would differ, cached otherwise
+		// since transports are stateless. The key covers provider id, base URL,
+		// and protocol because each of those changes what gets registered; API
+		// keys are excluded, as they are supplied per request.
 		const settings = this.getSettings();
-		const bundleKey = `${settings.networkTransport}:${settings.customEndpoint?.baseUrl ?? ""}`;
+		const providerKey = settings.providers.map((provider) => `${provider.id}|${provider.baseUrl}|${provider.protocol}`).join(",");
+		const bundleKey = `${settings.networkTransport}:${providerKey}:${settings.customEndpoint?.baseUrl ?? ""}`;
 		if (!this.modelsBundle || this.modelsBundleKey !== bundleKey) {
 			this.modelsBundle = createObsidianModels({
 				transport: settings.networkTransport,
+				providers: settings.providers,
 				customEndpoint: settings.customEndpoint,
 			});
 			this.modelsBundleKey = bundleKey;
@@ -605,12 +614,7 @@ export class ObsidianAgentService {
 	}
 
 	private getApiKey(provider: string): string | undefined {
-		const settings = this.getSettings();
-		if (isUsingCustomEndpoint(settings) && provider === CUSTOM_ENDPOINT_PROVIDER) {
-			return getConfiguredApiKey(settings);
-		}
-		const apiKey = settings.providerApiKeys[provider]?.trim();
-		return apiKey || undefined;
+		return getApiKeyForProvider(this.getSettings(), provider);
 	}
 
 	private hasApiKey(): boolean {

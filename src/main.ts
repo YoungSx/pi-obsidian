@@ -10,6 +10,7 @@ import {
 	sealCustomEndpointApiKey,
 	unsealApiKeyMap,
 	unsealCustomEndpointApiKey,
+	type PersistedSecrets,
 } from "./secrets";
 import { createSecretEnvironment, type SecretEnvironment } from "./secretsStore";
 import { DraftStore } from "./session/DraftStore";
@@ -25,9 +26,21 @@ function sealCurrentSettings(settings: PiemSettings, codec: SecretCodec): Partia
 		: undefined;
 	return {
 		...settings,
+		providers: settings.providers.map((provider) => ({ ...provider, apiKey: sealCustomEndpointApiKey(provider.apiKey, codec) })),
 		providerApiKeys: sealApiKeyMap(settings.providerApiKeys, codec),
 		customEndpoint,
 	};
+}
+
+/** Reads the raw persisted secret of each configured provider, keyed by id. */
+function readPersistedProviderKeys(raw: Partial<PiemSettings> | null): Record<string, string> {
+	const keys: Record<string, string> = {};
+	for (const provider of Array.isArray(raw?.providers) ? raw.providers : []) {
+		if (provider && typeof provider === "object" && typeof provider.id === "string" && typeof provider.apiKey === "string") {
+			keys[provider.id] = provider.apiKey;
+		}
+	}
+	return keys;
 }
 
 export default class PiObsidianPlugin extends Plugin {
@@ -192,18 +205,28 @@ export default class PiObsidianPlugin extends Plugin {
 			}
 		}
 		const loadedEndpointApiKey = raw?.customEndpoint && typeof raw.customEndpoint.apiKey === "string" ? raw.customEndpoint.apiKey : "";
+		const loadedConfiguredProviderKeys = readPersistedProviderKeys(raw);
 
 		const customEndpoint = normalizeCustomEndpoint(raw?.customEndpoint);
 		const unsealedCustomEndpoint = customEndpoint
 			? { ...customEndpoint, apiKey: unsealCustomEndpointApiKey(loadedEndpointApiKey, codec) }
 			: undefined;
+		const unsealedProviders = (Array.isArray(raw?.providers) ? raw.providers : []).map((provider) => ({
+			...provider,
+			apiKey: unsealCustomEndpointApiKey(provider?.apiKey, codec),
+		}));
 		this.settings = normalizeSettings({
 			...raw,
+			providers: unsealedProviders,
 			providerApiKeys: unsealApiKeyMap(loadedProviderApiKeys, codec),
 			customEndpoint: unsealedCustomEndpoint,
 		});
 
-		await this.migratePlaintextSecrets(codec, loadedProviderApiKeys, loadedEndpointApiKey);
+		await this.migratePlaintextSecrets(codec, {
+			providerApiKeys: loadedProviderApiKeys,
+			customEndpointApiKey: loadedEndpointApiKey,
+			configuredProviderApiKeys: loadedConfiguredProviderKeys,
+		});
 	}
 
 	/**
@@ -214,17 +237,18 @@ export default class PiObsidianPlugin extends Plugin {
 	 * alone. Failure keeps the previous data.json — an unreadable keychain
 	 * must never cost the user their key.
 	 */
-	private async migratePlaintextSecrets(
-		codec: SecretCodec,
-		loadedProviderApiKeys: Record<string, string>,
-		loadedEndpointApiKey: string,
-	): Promise<void> {
-		if (!codec.canRoundTrip || !hasPersistedPlaintextSecrets(loadedProviderApiKeys, loadedEndpointApiKey)) {
+	private async migratePlaintextSecrets(codec: SecretCodec, loaded: PersistedSecrets): Promise<void> {
+		if (!codec.canRoundTrip || !hasPersistedPlaintextSecrets(loaded)) {
 			return;
 		}
 		try {
 			const sealed = sealCurrentSettings(this.settings, codec);
-			if (persistedFormChanged(sealed.providerApiKeys ?? {}, sealed.customEndpoint?.apiKey ?? "", loadedProviderApiKeys, loadedEndpointApiKey)) {
+			const sealedSecrets: PersistedSecrets = {
+				providerApiKeys: sealed.providerApiKeys ?? {},
+				customEndpointApiKey: sealed.customEndpoint?.apiKey ?? "",
+				configuredProviderApiKeys: Object.fromEntries((sealed.providers ?? []).map((provider) => [provider.id, provider.apiKey])),
+			};
+			if (persistedFormChanged(sealedSecrets, loaded)) {
 				await this.saveData(sealed);
 			}
 		} catch {

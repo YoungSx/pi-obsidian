@@ -1,0 +1,321 @@
+import { uuidv7 } from "@earendil-works/pi-ai";
+import type { Model } from "@earendil-works/pi-ai";
+import type { CustomEndpointConfig } from "./customEndpoint";
+import { DEFAULT_CUSTOM_ENDPOINT_CONTEXT_WINDOW, DEFAULT_CUSTOM_ENDPOINT_MAX_TOKENS } from "./customEndpoint";
+
+/**
+ * Provider and model configuration for user-supplied endpoints.
+ *
+ * The split between {@link ProviderConfig} and {@link ModelConfig} is the point
+ * of this module: a provider owns *how to reach a server* (base URL, wire
+ * protocol, credential) while a model owns *what to ask for* (the id the server
+ * expects, plus how it should be presented and budgeted). Keeping them apart is
+ * what allows several models to share one credential, and it is the shape
+ * fallback/forward chains need later — those only reorder model references, so
+ * they will not require another schema change.
+ */
+
+/**
+ * Wire protocols the plugin can speak.
+ *
+ * All three implementations already ship inside the bundle: pi-ai's provider
+ * factories pull in `@anthropic-ai/sdk` and `openai`, and esbuild inlines the
+ * lazy api entrypoints. Supporting the extra two therefore costs no bundle size
+ * and no request-path code — only the `Model.api` value changes.
+ */
+export type WireProtocol = "openai-completions" | "openai-responses" | "anthropic-messages";
+
+export const WIRE_PROTOCOLS: readonly WireProtocol[] = ["openai-completions", "openai-responses", "anthropic-messages"];
+
+/**
+ * Default for new and migrated providers. OpenAI Chat Completions is the format
+ * gateways and self-hosted servers implement most widely, so it is the safest
+ * assumption when the user has not said otherwise.
+ */
+export const DEFAULT_WIRE_PROTOCOL: WireProtocol = "openai-completions";
+
+/** Human-readable protocol labels for settings UI. */
+export const WIRE_PROTOCOL_LABELS: Record<WireProtocol, string> = {
+	"openai-completions": "OpenAI Chat Completions",
+	"openai-responses": "OpenAI Responses",
+	"anthropic-messages": "Anthropic Messages",
+};
+
+/**
+ * A reachable endpoint plus its credential — connection concerns only.
+ *
+ * Deliberately holds no model list: the same provider may serve many models,
+ * and binding them here is exactly the coupling this rework removes.
+ */
+export interface ProviderConfig {
+	/** Stable identity. Survives renames so model references never dangle. */
+	id: string;
+	/** Display name, e.g. "DeepSeek". */
+	name: string;
+	/** Root of the API, e.g. `https://api.example.com/v1`. */
+	baseUrl: string;
+	protocol: WireProtocol;
+	/**
+	 * Plaintext in memory; sealed at the persistence boundary by the same codec
+	 * that handles every other secret in this plugin.
+	 */
+	apiKey: string;
+	/**
+	 * Where this provider came from. Only `user` exists today; the field is
+	 * present so partner and subscription entries can be distinguished later
+	 * without migrating stored data again. Non-user rows are not user-editable.
+	 */
+	source: ProviderSource;
+}
+
+export type ProviderSource = "user" | "partner" | "subscription";
+
+/**
+ * One model the user can select, bound to the provider that serves it.
+ *
+ * `modelApiId` and `displayName` are separate because they answer to different
+ * audiences: the former must match what the server accepts verbatim, the latter
+ * exists so a panel never has to show `qwen-token-plan-individual`.
+ */
+export interface ModelConfig {
+	/** Stable identity, referenced by `activeModelId`. Renaming is safe. */
+	id: string;
+	/** The {@link ProviderConfig} that serves this model. */
+	providerId: string;
+	/** Model identifier sent to the server, exactly as it expects it. */
+	modelApiId: string;
+	/** Name shown in the UI. Falls back to `modelApiId` when blank. */
+	displayName: string;
+	/** Tokens of context, used for compaction planning. */
+	contextWindow?: number;
+	/** Whether to advertise thinking support for this model. */
+	reasoning: boolean;
+}
+
+function readTrimmedString(value: unknown): string {
+	return typeof value === "string" ? value.trim() : "";
+}
+
+function readPositiveInteger(value: unknown): number | undefined {
+	if (typeof value === "number" && Number.isInteger(value) && value > 0) {
+		return value;
+	}
+	if (typeof value === "string" && value.trim() !== "") {
+		const parsed = Number.parseInt(value, 10);
+		if (Number.isInteger(parsed) && parsed > 0) {
+			return parsed;
+		}
+	}
+	return undefined;
+}
+
+/** Whether a persisted value names a protocol this build can speak. */
+export function isWireProtocol(value: unknown): value is WireProtocol {
+	return typeof value === "string" && (WIRE_PROTOCOLS as readonly string[]).includes(value);
+}
+
+function readProviderSource(value: unknown): ProviderSource {
+	return value === "partner" || value === "subscription" ? value : "user";
+}
+
+/** A blank provider for the "add provider" form to fill in. */
+export function emptyProviderConfig(): ProviderConfig {
+	return { id: uuidv7(), name: "", baseUrl: "", protocol: DEFAULT_WIRE_PROTOCOL, apiKey: "", source: "user" };
+}
+
+/** A blank model bound to `providerId`. */
+export function emptyModelConfig(providerId: string): ModelConfig {
+	return { id: uuidv7(), providerId, modelApiId: "", displayName: "", reasoning: false };
+}
+
+/**
+ * Coerces persisted provider data into a config, or `undefined` when it cannot
+ * be repaired.
+ *
+ * An entry without an `id` is unreferenceable and an entry without a `baseUrl`
+ * is unreachable, so both are dropped rather than kept as a row the user cannot
+ * make work. An unrecognized protocol falls back to the default instead of
+ * discarding the endpoint — a vault written by a newer build should degrade,
+ * not lose data.
+ */
+export function normalizeProviderConfig(data: unknown): ProviderConfig | undefined {
+	if (!data || typeof data !== "object") {
+		return undefined;
+	}
+	const raw = data as Record<string, unknown>;
+	const id = readTrimmedString(raw.id);
+	const baseUrl = readTrimmedString(raw.baseUrl);
+	if (!id || !baseUrl) {
+		return undefined;
+	}
+	return {
+		id,
+		name: readTrimmedString(raw.name),
+		baseUrl,
+		protocol: isWireProtocol(raw.protocol) ? raw.protocol : DEFAULT_WIRE_PROTOCOL,
+		apiKey: readTrimmedString(raw.apiKey),
+		source: readProviderSource(raw.source),
+	};
+}
+
+/**
+ * Coerces persisted model data into a config, or `undefined` when unusable.
+ *
+ * Requires `id`, `providerId`, and `modelApiId`: without any one of them the
+ * entry cannot be selected, routed, or sent.
+ */
+export function normalizeModelConfig(data: unknown): ModelConfig | undefined {
+	if (!data || typeof data !== "object") {
+		return undefined;
+	}
+	const raw = data as Record<string, unknown>;
+	const id = readTrimmedString(raw.id);
+	const providerId = readTrimmedString(raw.providerId);
+	const modelApiId = readTrimmedString(raw.modelApiId);
+	if (!id || !providerId || !modelApiId) {
+		return undefined;
+	}
+	const config: ModelConfig = {
+		id,
+		providerId,
+		modelApiId,
+		displayName: readTrimmedString(raw.displayName),
+		reasoning: raw.reasoning === true,
+	};
+	const contextWindow = readPositiveInteger(raw.contextWindow);
+	if (contextWindow !== undefined) {
+		config.contextWindow = contextWindow;
+	}
+	return config;
+}
+
+/**
+ * Drops providers and models that cannot be used, and models orphaned by a
+ * missing provider.
+ *
+ * Orphan removal matters because a model whose provider is gone has no base URL
+ * and no credential; leaving it selectable would produce a request that fails
+ * with an error pointing at the wrong setting.
+ */
+export function normalizeProviderAndModelLists(
+	rawProviders: unknown,
+	rawModels: unknown,
+): { providers: ProviderConfig[]; models: ModelConfig[] } {
+	const providers = (Array.isArray(rawProviders) ? rawProviders : [])
+		.map(normalizeProviderConfig)
+		.filter((provider): provider is ProviderConfig => provider !== undefined);
+	const providerIds = new Set(providers.map((provider) => provider.id));
+	const models = (Array.isArray(rawModels) ? rawModels : [])
+		.map(normalizeModelConfig)
+		.filter((model): model is ModelConfig => model !== undefined)
+		.filter((model) => providerIds.has(model.providerId));
+	return { providers, models };
+}
+
+/** Name to show for a model: its display name, or the raw id as a fallback. */
+export function describeModelConfig(model: ModelConfig): string {
+	return model.displayName || model.modelApiId;
+}
+
+/** Name to show for a provider: its display name, or its base URL. */
+export function describeProviderConfig(provider: ProviderConfig): string {
+	return provider.name || provider.baseUrl;
+}
+
+/** Models served by one provider, for list rendering and delete guards. */
+export function modelsForProvider(models: readonly ModelConfig[], providerId: string): ModelConfig[] {
+	return models.filter((model) => model.providerId === providerId);
+}
+
+/**
+ * Conservative compat overrides for arbitrary OpenAI Chat Completions servers.
+ *
+ * pi-ai auto-detects these from the base URL, which assumes modern OpenAI
+ * behavior for hosts it does not recognize. Old gateways reject exactly those
+ * assumptions, so the legacy wire format is pinned instead: `system` role
+ * rather than `developer`, `max_tokens` rather than `max_completion_tokens`,
+ * and no `store` field.
+ *
+ * The other two protocols get no overrides: their compat fields are all
+ * optional and pi-ai's defaults are the correct baseline for a server that
+ * genuinely implements the format.
+ */
+const OPENAI_COMPLETIONS_COMPAT = {
+	supportsStore: false,
+	supportsDeveloperRole: false,
+	maxTokensField: "max_tokens",
+} as const;
+
+/**
+ * Builds the pi-ai `Model` for a configured model/provider pair.
+ *
+ * Field choices are least-common-denominator for servers of unknown capability:
+ *
+ * - `api` is the provider's protocol, which is the only thing pi-ai dispatches
+ *   on — `createProvider`'s api map routes each request by `model.api`.
+ * - `cost` is zero because BYOK pricing is unknowable, and a made-up rate would
+ *   render as a fabricated number in the usage readout.
+ * - `contextWindow` honors the user's override since compaction schedules
+ *   against it.
+ *
+ * Auth is absent by design: each protocol's official SDK sets its own headers
+ * (`x-api-key` plus `anthropic-version` for Anthropic, `Authorization` for
+ * OpenAI), so the plugin only has to supply the key as `options.apiKey`.
+ */
+export function buildConfiguredModel(model: ModelConfig, provider: ProviderConfig): Model<WireProtocol> {
+	const base = {
+		id: model.modelApiId,
+		name: describeModelConfig(model),
+		provider: provider.id,
+		baseUrl: provider.baseUrl,
+		reasoning: model.reasoning,
+		input: ["text"] as ("text" | "image")[],
+		cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+		contextWindow: model.contextWindow ?? DEFAULT_CUSTOM_ENDPOINT_CONTEXT_WINDOW,
+		maxTokens: DEFAULT_CUSTOM_ENDPOINT_MAX_TOKENS,
+	};
+	// `compat` is a conditional type keyed on the api, so each protocol is
+	// constructed in its own branch rather than through a shared object literal
+	// that would not typecheck against the narrowed shape.
+	switch (provider.protocol) {
+		case "openai-completions":
+			return { ...base, api: "openai-completions", compat: OPENAI_COMPLETIONS_COMPAT };
+		case "openai-responses":
+			return { ...base, api: "openai-responses" };
+		case "anthropic-messages":
+			return { ...base, api: "anthropic-messages" };
+	}
+}
+
+/**
+ * Converts a legacy custom endpoint into a provider/model pair.
+ *
+ * Returned rather than applied so the caller controls persistence. The provider
+ * keeps the legacy synthetic id so an already-stored API key still resolves
+ * under the same lookup key, and the protocol is Chat Completions because that
+ * is what the old form always sent.
+ */
+export function migrateCustomEndpoint(
+	endpoint: CustomEndpointConfig,
+	providerId: string,
+): { provider: ProviderConfig; model: ModelConfig } {
+	const provider: ProviderConfig = {
+		id: providerId,
+		name: "Custom endpoint",
+		baseUrl: endpoint.baseUrl,
+		protocol: DEFAULT_WIRE_PROTOCOL,
+		apiKey: endpoint.apiKey,
+		source: "user",
+	};
+	const model: ModelConfig = {
+		id: uuidv7(),
+		providerId,
+		modelApiId: endpoint.modelId,
+		displayName: endpoint.modelId,
+		reasoning: false,
+	};
+	if (endpoint.contextWindow !== undefined) {
+		model.contextWindow = endpoint.contextWindow;
+	}
+	return { provider, model };
+}

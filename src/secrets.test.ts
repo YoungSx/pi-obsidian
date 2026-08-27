@@ -1,6 +1,6 @@
 import { describe, expect, it } from "bun:test";
 import { installObsidianStub, SafeStorageLikeMock } from "./testing/obsidianStub";
-import type { SecretCodec } from "./secrets";
+import type { PersistedSecrets as PersistedSecretsType, SecretCodec } from "./secrets";
 
 // `secrets.ts` is free of obsidian/electron imports, but the shared stub also
 // backs `SafeStorageLikeMock`; register it before the dynamic import resolves.
@@ -131,27 +131,52 @@ describe("custom endpoint key helpers", () => {
 });
 
 describe("migration helpers", () => {
+	/** A persisted-secrets snapshot with only the fields a case cares about. */
+	function secrets(overrides: Partial<PersistedSecretsType> = {}): PersistedSecretsType {
+		return { providerApiKeys: {}, customEndpointApiKey: "", configuredProviderApiKeys: {}, ...overrides };
+	}
+
 	it("detects plaintext secrets in the persisted form", async () => {
 		const { hasPersistedPlaintextSecrets } = await import("./secrets");
-		expect(hasPersistedPlaintextSecrets({ deepseek: "sk-plain" }, "")).toBe(true);
-		expect(hasPersistedPlaintextSecrets({}, "sk-plain-endpoint")).toBe(true);
+		expect(hasPersistedPlaintextSecrets(secrets({ providerApiKeys: { deepseek: "sk-plain" } }))).toBe(true);
+		expect(hasPersistedPlaintextSecrets(secrets({ customEndpointApiKey: "sk-plain-endpoint" }))).toBe(true);
+	});
+
+	it("detects plaintext keys on configured providers", async () => {
+		const { hasPersistedPlaintextSecrets } = await import("./secrets");
+		expect(hasPersistedPlaintextSecrets(secrets({ configuredProviderApiKeys: { "prov-1": "sk-plain" } }))).toBe(true);
+		expect(hasPersistedPlaintextSecrets(secrets({ configuredProviderApiKeys: { "prov-1": "enc:v1:AAAA" } }))).toBe(false);
 	});
 
 	it("ignores empty values and already-sealed values", async () => {
 		const { hasPersistedPlaintextSecrets } = await import("./secrets");
-		expect(hasPersistedPlaintextSecrets({ deepseek: "" }, "")).toBe(false);
-		expect(hasPersistedPlaintextSecrets({ deepseek: "enc:v1:AAAA" }, "enc:v1:BBBB")).toBe(false);
+		expect(hasPersistedPlaintextSecrets(secrets({ providerApiKeys: { deepseek: "" } }))).toBe(false);
+		expect(
+			hasPersistedPlaintextSecrets(secrets({ providerApiKeys: { deepseek: "enc:v1:AAAA" }, customEndpointApiKey: "enc:v1:BBBB" })),
+		).toBe(false);
 	});
 
 	it("reports no change for a fully migrated vault", async () => {
 		const { persistedFormChanged } = await import("./secrets");
-		expect(persistedFormChanged({ deepseek: "enc:v1:A" }, "enc:v1:B", { deepseek: "enc:v1:A" }, "enc:v1:B")).toBe(false);
-		expect(persistedFormChanged({}, "", {}, "")).toBe(false);
+		const migrated = secrets({ providerApiKeys: { deepseek: "enc:v1:A" }, customEndpointApiKey: "enc:v1:B" });
+		expect(persistedFormChanged(migrated, migrated)).toBe(false);
+		expect(persistedFormChanged(secrets(), secrets())).toBe(false);
 	});
 
 	it("reports a change when any secret differs from what is on disk", async () => {
 		const { persistedFormChanged } = await import("./secrets");
-		expect(persistedFormChanged({ deepseek: "enc:v1:NEW" }, "", { deepseek: "sk-old" }, "")).toBe(true);
-		expect(persistedFormChanged({}, "enc:v1:E", {}, "")).toBe(true);
+		expect(
+			persistedFormChanged(
+				secrets({ providerApiKeys: { deepseek: "enc:v1:NEW" } }),
+				secrets({ providerApiKeys: { deepseek: "sk-old" } }),
+			),
+		).toBe(true);
+		expect(persistedFormChanged(secrets({ customEndpointApiKey: "enc:v1:E" }), secrets())).toBe(true);
+		expect(
+			persistedFormChanged(
+				secrets({ configuredProviderApiKeys: { "prov-1": "enc:v1:NEW" } }),
+				secrets({ configuredProviderApiKeys: { "prov-1": "sk-old" } }),
+			),
+		).toBe(true);
 	});
 });

@@ -159,33 +159,55 @@ export function unsealCustomEndpointApiKey(apiKey: unknown, codec: SecretCodec):
 }
 
 /**
+ * Every secret-bearing value of a persisted settings blob, in raw stored form.
+ *
+ * Grouping them keeps the migration checks below from growing a parameter per
+ * secret location as the settings schema gains more of them.
+ */
+export interface PersistedSecrets {
+	/** Builtin provider keys, keyed by provider slug. */
+	providerApiKeys: Record<string, string>;
+	/** Legacy single-endpoint key. */
+	customEndpointApiKey: string;
+	/** Configured provider keys, keyed by `ProviderConfig.id`. */
+	configuredProviderApiKeys: Record<string, string>;
+}
+
+/**
  * Whether the values exactly as they sit on disk include a plaintext secret.
  *
  * Operates on raw persisted strings so it can be checked before anything is
  * rewritten; sealed values are ignored, which is what makes the migration
  * idempotent across reloads.
  */
-export function hasPersistedPlaintextSecrets(providerApiKeys: Record<string, string>, customEndpointApiKey: string): boolean {
-	const anyPlainProviderKey = Object.values(providerApiKeys).some((value) => value !== "" && !isSealedSecret(value));
-	return anyPlainProviderKey || (customEndpointApiKey !== "" && !isSealedSecret(customEndpointApiKey));
+export function hasPersistedPlaintextSecrets(secrets: PersistedSecrets): boolean {
+	const isPlaintext = (value: string): boolean => value !== "" && !isSealedSecret(value);
+	return (
+		Object.values(secrets.providerApiKeys).some(isPlaintext) ||
+		Object.values(secrets.configuredProviderApiKeys).some(isPlaintext) ||
+		isPlaintext(secrets.customEndpointApiKey)
+	);
+}
+
+function mapFormChanged(sealed: Record<string, string>, loaded: Record<string, string>): boolean {
+	for (const [key, value] of Object.entries(sealed)) {
+		if ((loaded[key] ?? "") !== value) {
+			return true;
+		}
+	}
+	return false;
 }
 
 /**
  * Whether re-sealing would change what is persisted.
  *
- * A fully migrated vault produces identical provider keys and an identical
- * endpoint key here and is therefore not written again.
+ * A fully migrated vault produces identical secrets here and is therefore not
+ * written again.
  */
-export function persistedFormChanged(
-	sealedProviderApiKeys: Record<string, string>,
-	sealedCustomEndpointApiKey: string,
-	loadedProviderApiKeys: Record<string, string>,
-	loadedCustomEndpointApiKey: string,
-): boolean {
-	for (const [provider, sealed] of Object.entries(sealedProviderApiKeys)) {
-		if ((loadedProviderApiKeys[provider] ?? "") !== sealed) {
-			return true;
-		}
-	}
-	return loadedCustomEndpointApiKey !== sealedCustomEndpointApiKey;
+export function persistedFormChanged(sealed: PersistedSecrets, loaded: PersistedSecrets): boolean {
+	return (
+		mapFormChanged(sealed.providerApiKeys, loaded.providerApiKeys) ||
+		mapFormChanged(sealed.configuredProviderApiKeys, loaded.configuredProviderApiKeys) ||
+		loaded.customEndpointApiKey !== sealed.customEndpointApiKey
+	);
 }

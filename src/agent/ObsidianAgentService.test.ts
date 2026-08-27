@@ -374,6 +374,8 @@ function usageChunk(): object {
 function createService(memoryAdapter: MemoryAdapter = new MemoryAdapter()): ObsidianAgentServiceType {
 	const adapter = asDataAdapter(memoryAdapter);
 	const settings: PiemSettings = {
+		providers: [],
+		models: [],
 		provider: "deepseek",
 		modelId: "deepseek-v4-pro",
 		thinkingLevel: "high",

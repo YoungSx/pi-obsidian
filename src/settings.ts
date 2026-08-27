@@ -4,9 +4,17 @@ import { getBuiltinModels, getBuiltinProviders } from "@earendil-works/pi-ai/pro
 import type { BuiltinProvider } from "@earendil-works/pi-ai/providers/all";
 import type { Model, ModelThinkingLevel } from "@earendil-works/pi-ai";
 import type PiObsidianPlugin from "./main";
-import { DEFAULT_MODEL_ID, DEFAULT_PROVIDER, DEFAULT_THINKING_LEVEL } from "./constants";
+import { CUSTOM_ENDPOINT_PROVIDER, DEFAULT_MODEL_ID, DEFAULT_PROVIDER, DEFAULT_THINKING_LEVEL } from "./constants";
 import type { SecretEnvironment } from "./secretsStore";
 import type { NetworkTransport } from "./net/obsidianFetch";
+import {
+	buildConfiguredModel,
+	describeModelConfig,
+	migrateCustomEndpoint,
+	normalizeProviderAndModelLists,
+	type ModelConfig,
+	type ProviderConfig,
+} from "./modelConfig";
 import {
 	buildCustomEndpointModel,
 	DEFAULT_CUSTOM_ENDPOINT_CONTEXT_WINDOW,
@@ -22,7 +30,19 @@ const OFF_THINKING_LEVEL: ModelThinkingLevel = "off";
 const DEFAULT_CUSTOM_ENDPOINT_CONTEXT_WINDOW_LABEL = `${Math.round(DEFAULT_CUSTOM_ENDPOINT_CONTEXT_WINDOW / 1000)}k`;
 
 export interface PiemSettings {
+	/**
+	 * The {@link ModelConfig} every request goes out on. Undefined means no
+	 * configured model has been chosen, so the builtin provider/model pair
+	 * below applies.
+	 */
+	activeModelId?: string;
+	/** User-configured endpoints. Connection and credential only, no models. */
+	providers: ProviderConfig[];
+	/** Configured models, each bound to one entry in {@link providers}. */
+	models: ModelConfig[];
+	/** Builtin catalog provider, used when no configured model is active. */
 	provider: string;
+	/** Builtin catalog model id, used when no configured model is active. */
 	modelId: string;
 	thinkingLevel: ModelThinkingLevel;
 	providerApiKeys: Record<string, string>;
@@ -37,14 +57,18 @@ export interface PiemSettings {
 	 */
 	showAgentDetails: boolean;
 	/**
-	 * User-supplied OpenAI-compatible endpoint. While active it replaces the
-	 * built-in provider catalog entirely; `undefined` means the user has never
-	 * touched the custom-endpoint form.
+	 * Legacy single-endpoint form, superseded by {@link providers}/{@link models}.
+	 *
+	 * Retained after migration rather than cleared: a user who rolls back to an
+	 * older build must still find their endpoint configured. A later release
+	 * drops the field once rollback is no longer a concern.
 	 */
 	customEndpoint?: CustomEndpointConfig;
 }
 
 export const DEFAULT_SETTINGS: PiemSettings = {
+	providers: [],
+	models: [],
 	provider: DEFAULT_PROVIDER,
 	modelId: DEFAULT_MODEL_ID,
 	thinkingLevel: DEFAULT_THINKING_LEVEL,
@@ -53,14 +77,51 @@ export const DEFAULT_SETTINGS: PiemSettings = {
 	showAgentDetails: false,
 };
 
+/**
+ * Coerces persisted data into settings, migrating the legacy custom endpoint on
+ * the way through.
+ *
+ * Migration is folded in here rather than run as a separate pass so every
+ * entrypoint that loads settings gets it, and it is keyed on the presence of a
+ * provider with the legacy synthetic id — which makes repeat calls idempotent
+ * even though model ids are freshly generated.
+ */
 export function normalizeSettings(data: Partial<PiemSettings> | null | undefined): PiemSettings {
 	const provider = data?.provider || DEFAULT_PROVIDER;
 	const modelId = data?.modelId || DEFAULT_MODEL_ID;
 	const thinkingLevel = data?.thinkingLevel || DEFAULT_THINKING_LEVEL;
 	const providerApiKeys = data?.providerApiKeys || {};
 	const networkTransport: NetworkTransport = data?.networkTransport === "fetch" ? "fetch" : "requestUrl";
+	// Absent in older vaults; normalizeCustomEndpoint drops empty objects so
+	// a cleared form does not resurrect itself as an active endpoint.
+	const customEndpoint = normalizeCustomEndpoint(data?.customEndpoint);
 
-	return {
+	const { providers, models } = normalizeProviderAndModelLists(data?.providers, data?.models);
+	let activeModelId = typeof data?.activeModelId === "string" ? data.activeModelId.trim() : "";
+
+	// A legacy endpoint becomes a provider/model pair exactly once. The stored
+	// API key already lives under the synthetic provider id, so reusing that id
+	// keeps the credential resolvable without touching `providerApiKeys`.
+	const alreadyMigrated = providers.some((entry) => entry.id === CUSTOM_ENDPOINT_PROVIDER);
+	if (isCustomEndpointActive(customEndpoint) && !alreadyMigrated) {
+		const migrated = migrateCustomEndpoint(customEndpoint as CustomEndpointConfig, CUSTOM_ENDPOINT_PROVIDER);
+		providers.push(migrated.provider);
+		models.push(migrated.model);
+		// The legacy endpoint outranked the builtin dropdowns, so the migrated
+		// model has to inherit that precedence or the user's configuration
+		// would silently change target on upgrade.
+		activeModelId = migrated.model.id;
+	}
+
+	// A dangling reference would resolve to nothing on every request, so it is
+	// dropped in favour of the builtin fallback below.
+	if (activeModelId && !models.some((model) => model.id === activeModelId)) {
+		activeModelId = "";
+	}
+
+	const settings: PiemSettings = {
+		providers,
+		models,
 		provider,
 		modelId,
 		thinkingLevel,
@@ -69,31 +130,68 @@ export function normalizeSettings(data: Partial<PiemSettings> | null | undefined
 		// Absent in vaults written before the setting existed; those users get the
 		// quiet default rather than inheriting the old always-verbose panel.
 		showAgentDetails: data?.showAgentDetails === true,
-		// Absent in older vaults; normalizeCustomEndpoint drops empty objects so
-		// a cleared form does not resurrect itself as an active endpoint.
-		customEndpoint: normalizeCustomEndpoint(data?.customEndpoint),
+		customEndpoint,
 	};
+	if (activeModelId) {
+		settings.activeModelId = activeModelId;
+	}
+	return settings;
 }
 
 export function getProviderModels(provider: string) {
 	return getBuiltinModels(provider as BuiltinProvider);
 }
 
-/** Whether the user's custom endpoint currently serves all model requests. */
+/** The active {@link ModelConfig}, or undefined when a builtin model is selected. */
+export function getActiveModelConfig(settings: PiemSettings): ModelConfig | undefined {
+	if (!settings.activeModelId) {
+		return undefined;
+	}
+	return settings.models.find((model) => model.id === settings.activeModelId);
+}
+
+/** The provider serving `model`. */
+export function getProviderForModel(settings: PiemSettings, model: ModelConfig): ProviderConfig | undefined {
+	return settings.providers.find((provider) => provider.id === model.providerId);
+}
+
+/** The active model paired with its provider, when both resolve. */
+export function getActiveConfiguration(settings: PiemSettings): { model: ModelConfig; provider: ProviderConfig } | undefined {
+	const model = getActiveModelConfig(settings);
+	if (!model) {
+		return undefined;
+	}
+	const provider = getProviderForModel(settings, model);
+	return provider ? { model, provider } : undefined;
+}
+
+/**
+ * Whether a user-configured endpoint currently serves all model requests.
+ *
+ * True for a migrated or newly added configuration, and still true for a legacy
+ * `customEndpoint` that has not been migrated yet — callers use this to decide
+ * whether the builtin catalog applies at all.
+ */
 export function isUsingCustomEndpoint(settings: PiemSettings): boolean {
-	return isCustomEndpointActive(settings.customEndpoint);
+	return !!getActiveConfiguration(settings) || isCustomEndpointActive(settings.customEndpoint);
 }
 
 /**
  * Resolves the model every request goes out on.
  *
- * The custom endpoint wins outright when configured: mixing it with a builtin
+ * A configured provider/model pair wins outright: mixing it with a builtin
  * catalog entry would mean the dropdown's provider/model pair silently
- * overrides what the user typed at the top of the panel. Only when no
- * endpoint is configured do the builtin providers apply.
+ * overrides what the user configured. Only when nothing is configured do the
+ * builtin providers apply.
  */
 export function getSelectedModel(settings: PiemSettings): Model<string> {
-	if (isUsingCustomEndpoint(settings)) {
+	const active = getActiveConfiguration(settings);
+	if (active) {
+		return buildConfiguredModel(active.model, active.provider);
+	}
+	// Reachable only for a legacy endpoint that predates migration, which
+	// normalizeSettings would otherwise have converted.
+	if (isCustomEndpointActive(settings.customEndpoint)) {
 		return buildCustomEndpointModel(settings.customEndpoint as CustomEndpointConfig);
 	}
 
@@ -113,32 +211,54 @@ export function getSelectedModel(settings: PiemSettings): Model<string> {
 /**
  * API key for the resolved configuration.
  *
- * Custom endpoints store their key under {@link CUSTOM_ENDPOINT_PROVIDER}
- * inside `providerApiKeys`, keeping one lookup path for both modes. Falls back
- * to the per-provider map only when the endpoint form holds nothing, so a
- * leftover DeepSeek key is never silently reused against a different server.
+ * Configured providers carry their own key, so the per-provider map is
+ * consulted only for builtin catalog entries — a leftover DeepSeek key is never
+ * silently reused against a different server.
  */
 export function getConfiguredApiKey(settings: PiemSettings): string | undefined {
-	if (isUsingCustomEndpoint(settings)) {
-		const apiKey = settings.customEndpoint?.apiKey.trim();
-		if (apiKey) {
-			return apiKey;
-		}
-		return undefined;
+	const active = getActiveConfiguration(settings);
+	if (active) {
+		return active.provider.apiKey.trim() || undefined;
+	}
+	if (isCustomEndpointActive(settings.customEndpoint)) {
+		return settings.customEndpoint?.apiKey.trim() || undefined;
 	}
 	const apiKey = settings.providerApiKeys[settings.provider]?.trim();
 	return apiKey || undefined;
 }
 
 /**
+ * API key for one provider id, as pi-ai asks for it per request.
+ *
+ * Configured providers are matched by id first; the legacy synthetic id and the
+ * builtin per-provider map follow, so both storage layouts keep resolving
+ * during the migration window.
+ */
+export function getApiKeyForProvider(settings: PiemSettings, providerId: string): string | undefined {
+	const configured = settings.providers.find((provider) => provider.id === providerId);
+	if (configured) {
+		return configured.apiKey.trim() || undefined;
+	}
+	if (providerId === CUSTOM_ENDPOINT_PROVIDER && isCustomEndpointActive(settings.customEndpoint)) {
+		return settings.customEndpoint?.apiKey.trim() || undefined;
+	}
+	const apiKey = settings.providerApiKeys[providerId]?.trim();
+	return apiKey || undefined;
+}
+
+/**
  * Names whatever requests currently target, for user-facing messages.
  *
- * The custom endpoint is described by its model id — "custom endpoint
- * (my-model)" — rather than the synthetic provider constant, which would mean
- * nothing to a user reading an error.
+ * A configured model is described by its display name and provider rather than
+ * by internal ids, which would mean nothing to a user reading an error.
  */
 export function describeModelTarget(settings: PiemSettings): string {
-	if (isUsingCustomEndpoint(settings)) {
+	const active = getActiveConfiguration(settings);
+	if (active) {
+		const providerName = active.provider.name || active.provider.baseUrl;
+		return `${describeModelConfig(active.model)} (${providerName})`;
+	}
+	if (isCustomEndpointActive(settings.customEndpoint)) {
 		return `The custom endpoint (${settings.customEndpoint?.modelId})`;
 	}
 	return `${settings.provider}/${settings.modelId}`.replace(/^./, (first) => first.toUpperCase());
