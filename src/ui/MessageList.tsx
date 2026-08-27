@@ -13,6 +13,10 @@ export interface MessageListProps {
 	messages: AgentMessage[];
 	/** True while the agent turn is in flight; the last message is the streaming one. */
 	isStreaming: boolean;
+	/**
+	 * Tool names running right now, worded like the collapsed trace rows so the
+	 * live line and the finished rows do not name the same tool two ways.
+	 */
 	pendingToolCalls: string[];
 	isInitializing?: boolean;
 	isConfigured?: boolean;
@@ -137,7 +141,7 @@ export function MessageList({
 				{pendingToolCalls.length > 0 ? (
 					<div aria-label="Tools running" className="piem-chat__tool-status" role="status">
 						<ObsidianIcon name="loader-circle" className="piem-chat__spinner" />
-						Working: {pendingToolCalls.join(", ")}
+						Working: {pendingToolCalls.map((toolName) => describeTool(toolName, showAgentDetails)).join(", ")}
 					</div>
 				) : null}
 			</main>

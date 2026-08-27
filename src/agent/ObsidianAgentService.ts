@@ -14,12 +14,21 @@ import {
 	type PiemSettings,
 } from "../settings";
 import { ObsidianSessionManager, type ActiveSessionInfo, type SessionDefaults } from "../session/ObsidianSessionManager";
+import type { SessionContext } from "../session/jsonl";
 import { OBSIDIAN_AGENT_SYSTEM_PROMPT } from "./systemPrompt";
 
 export interface ChatSnapshot {
 	messages: AgentMessage[];
 	streamingMessage?: AgentMessage;
 	isStreaming: boolean;
+	/**
+	 * Names of the tools running right now.
+	 *
+	 * Names, not the ids pi tracks in `agent.state.pendingToolCalls`: that Set
+	 * holds tool call ids, so rendering it put `toolu_bdrk_01...` in front of the
+	 * user. {@link ObsidianAgentService} keeps the id-to-name mapping from the
+	 * execution events and resolves it here.
+	 */
 	pendingToolCalls: string[];
 	errorMessage?: string;
 	/**
@@ -109,7 +118,24 @@ export class ObsidianAgentService {
 	private initialization: Promise<void> | null = null;
 	private sessionInfo: ActiveSessionInfo | undefined;
 	private sessionRevision = 0;
-	private persistedMessages = new WeakSet<object>();
+	/**
+	 * Log entry each already-persisted message was written as.
+	 *
+	 * Doubles as the de-duplication guard for {@link persistMessage} and as the
+	 * lookup a retry needs: discarding a turn has to name the entry to rewind
+	 * to, and the in-memory transcript is the only place a live turn's id is
+	 * reachable from. Keyed weakly so the map cannot outlive the transcript.
+	 */
+	private messageEntryIds = new WeakMap<object, string>();
+	/**
+	 * Tool name for each in-flight tool call id.
+	 *
+	 * `agent.state.pendingToolCalls` holds call ids, which are provider-generated
+	 * strings like `toolu_bdrk_01…` and mean nothing to a reader. The name only
+	 * ever arrives on the execution events, so it has to be captured as they pass
+	 * and dropped when the call ends.
+	 */
+	private readonly pendingToolNames = new Map<string, string>();
 	private errorMessage: string | undefined;
 	private noticeMessage: string | undefined;
 	/** Agent-reported error the user already dismissed; see {@link dismissMessages}. */
@@ -213,9 +239,16 @@ export class ObsidianAgentService {
 	 * the retry replaces the reply rather than appending a second answer to a
 	 * conversation the model would then see twice.
 	 *
-	 * The session log is append-only and tree-shaped, so the discarded turns stay
-	 * on disk; the new branch simply becomes the active leaf. The reloaded history
-	 * follows the leaf, so the abandoned reply does not come back.
+	 * The log is append-only and tree-shaped, so the discarded turns stay on disk
+	 * and the replacement becomes a sibling rather than their child. Rewinding
+	 * the leaf is what makes that true: truncating only the in-memory transcript
+	 * would leave the log's leaf on the abandoned reply, the replacement would be
+	 * appended below it, and reloading the session would show both.
+	 *
+	 * A turn the log cannot name is refused rather than retried in memory alone.
+	 * That covers messages a compaction absorbed, whose text survives only inside
+	 * the summary — rewinding to before the compaction would discard the summary
+	 * along with the turn.
 	 */
 	async retryFrom(index: number): Promise<boolean> {
 		await this.initialize();
@@ -228,11 +261,22 @@ export class ObsidianAgentService {
 		if (promptIndex === null) {
 			return false;
 		}
-		const prompt = extractUserText(agent.state.messages[promptIndex]);
+		const promptMessage = agent.state.messages[promptIndex];
+		const prompt = extractUserText(promptMessage);
 		if (!prompt) {
 			return false;
 		}
+		const entryId = promptMessage ? this.messageEntryIds.get(promptMessage) : undefined;
+		if (!entryId) {
+			return false;
+		}
 
+		try {
+			this.sessionManager.rewindTo(entryId);
+		} catch (error) {
+			this.setError(error instanceof Error ? error.message : String(error));
+			return false;
+		}
 		agent.state.messages = agent.state.messages.slice(0, promptIndex);
 		this.notify();
 		return await this.sendPrompt(prompt);
@@ -254,7 +298,7 @@ export class ObsidianAgentService {
 		this.agent?.abort();
 		const defaults = this.getSessionDefaults();
 		this.sessionInfo = await this.sessionManager.createSession(defaults);
-		this.persistedMessages = new WeakSet<object>();
+		this.messageEntryIds = new WeakMap<object, string>();
 		this.lastCompaction = undefined;
 		this.compactionUsage = [];
 		this.replaceAgent([]);
@@ -290,11 +334,7 @@ export class ObsidianAgentService {
 		// Usage is per-transcript, and a reloaded session's compaction cost was
 		// already paid in an earlier run, so the running total starts from history.
 		this.compactionUsage = [];
-		this.persistedMessages = new WeakSet<object>();
-		for (const message of context.messages) {
-			this.persistedMessages.add(message);
-		}
-		this.replaceAgent(context.messages);
+		this.adoptSessionContext(context);
 		this.errorMessage = undefined;
 		await this.sessionManager.ensureConfiguration(this.getSessionDefaults());
 		this.sessionInfo = this.sessionManager.getActiveSessionInfo();
@@ -389,7 +429,12 @@ export class ObsidianAgentService {
 			messages,
 			streamingMessage: agent?.state.streamingMessage,
 			isStreaming: agent?.state.isStreaming ?? false,
-			pendingToolCalls: [...(agent?.state.pendingToolCalls ?? new Set<string>())],
+			// Names, not call ids: the ids are what pi tracks, but a reader needs
+			// the tool. An id with no captured name is dropped rather than shown
+			// raw, so a missed event cannot leak `toolu_…` into the panel.
+			pendingToolCalls: [...(agent?.state.pendingToolCalls ?? new Set<string>())]
+				.map((toolCallId) => this.pendingToolNames.get(toolCallId))
+				.filter((toolName): toolName is string => toolName !== undefined),
 			errorMessage: this.errorMessage ?? this.visibleAgentError(agent),
 			noticeMessage: this.noticeMessage,
 			provider: model.provider,
@@ -415,12 +460,36 @@ export class ObsidianAgentService {
 		this.sessionInfo = await this.sessionManager.continueRecentSession(defaults);
 		const context = this.sessionManager.buildSessionContext();
 		this.lastCompaction = this.sessionManager.getLastCompaction();
-		this.replaceAgent(context.messages);
+		this.adoptSessionContext(context);
 		this.notify();
+	}
+
+	/**
+	 * Rebuilds the transcript from a session loaded off disk.
+	 *
+	 * Every message keeps a pointer back to the entry it was read from, so a
+	 * retry in a reloaded session can rewind the log instead of being refused.
+	 * Messages a compaction absorbed carry no entry and are left unmapped, which
+	 * is what makes {@link retryFrom} decline them.
+	 */
+	private adoptSessionContext(context: SessionContext): void {
+		this.messageEntryIds = new WeakMap<object, string>();
+		context.messages.forEach((message, index) => {
+			const entryId = context.messageOrigins[index];
+			if (entryId) {
+				this.messageEntryIds.set(message, entryId);
+			}
+		});
+		this.replaceAgent(context.messages);
 	}
 
 	private replaceAgent(messages: AgentMessage[]): void {
 		this.unsubscribeAgent?.();
+		// An aborted run never delivers `tool_execution_end`, so names captured for
+		// calls that were in flight would otherwise accumulate for the life of the
+		// panel. A fresh agent has nothing in flight, which makes this the point
+		// where the map is known to be safe to drop.
+		this.pendingToolNames.clear();
 		const settings = this.getSettings();
 		const model = getSelectedModel(settings);
 		const agent = new Agent({
@@ -449,6 +518,12 @@ export class ObsidianAgentService {
 	}
 
 	private async handleAgentEvent(event: AgentEvent): Promise<void> {
+		if (event.type === "tool_execution_start") {
+			this.pendingToolNames.set(event.toolCallId, event.toolName);
+		}
+		if (event.type === "tool_execution_end") {
+			this.pendingToolNames.delete(event.toolCallId);
+		}
 		try {
 			if (event.type === "message_end") {
 				await this.persistMessage(event.message);
@@ -623,11 +698,10 @@ export class ObsidianAgentService {
 
 	private async persistMessage(message: AgentMessage): Promise<void> {
 		const key = message as object;
-		if (this.persistedMessages.has(key)) {
+		if (this.messageEntryIds.has(key)) {
 			return;
 		}
-		await this.sessionManager.appendMessage(message);
-		this.persistedMessages.add(key);
+		this.messageEntryIds.set(key, await this.sessionManager.appendMessage(message));
 	}
 
 	private getSessionDefaults(): SessionDefaults {

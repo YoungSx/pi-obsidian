@@ -68,6 +68,16 @@ export type SessionEntry =
 
 export interface SessionContext {
 	messages: AgentMessage[];
+	/**
+	 * Log entry each message in {@link messages} came from, at matching indices,
+	 * or `null` for a message that no single entry owns.
+	 *
+	 * A transcript loaded from disk has no other way back to the log, and a
+	 * caller that discards turns (a retry) needs the entry to branch from.
+	 * Positions alone cannot serve: one compaction entry expands into several
+	 * messages, so the two sequences drift apart at the first compaction.
+	 */
+	messageOrigins: (string | null)[];
 	model: { provider: string; modelId: string } | null;
 	thinkingLevel: ThinkingLevel;
 }
@@ -145,6 +155,7 @@ export function buildSessionContext(entries: SessionEntry[], leafId?: string | n
 	let model: SessionContext["model"] = null;
 	let thinkingLevel: ThinkingLevel = "off";
 	const messages: AgentMessage[] = [];
+	const messageOrigins: (string | null)[] = [];
 
 	// Model and thinking level are derived from the whole path, because a
 	// compaction does not undo configuration chosen before it.
@@ -166,17 +177,26 @@ export function buildSessionContext(entries: SessionEntry[], leafId?: string | n
 	for (const entry of getContextEntries(path)) {
 		if (entry.type === "message") {
 			messages.push(entry.message);
+			messageOrigins.push(entry.id);
 			continue;
 		}
 		if (entry.type === "compaction") {
-			messages.push(
+			const expanded = [
 				createCompactionSummaryMessage(entry.summary, entry.tokensBefore, entry.timestamp),
 				...entry.retainedTail,
-			);
+			];
+			messages.push(...expanded);
+			// A compaction's messages have no entry of their own to branch from:
+			// the summary was never an entry, and the retained tail was copied into
+			// the compaction rather than left as the entries it came from. Naming
+			// the compaction here would invite a caller to rewind past it and drop
+			// the summary along with the turn it meant to discard, so these
+			// messages are marked unbranchable instead.
+			messageOrigins.push(...expanded.map(() => null));
 		}
 	}
 
-	return { messages, model, thinkingLevel };
+	return { messages, messageOrigins, model, thinkingLevel };
 }
 
 /** Drops everything before the newest compaction, mirroring pi's `defaultContextEntryTransform`. */

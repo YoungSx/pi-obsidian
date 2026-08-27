@@ -185,6 +185,25 @@ export class ObsidianSessionManager {
 	}
 
 	/**
+	 * Re-points the active branch just before `entryId`, abandoning that entry
+	 * and everything after it on its branch.
+	 *
+	 * The log stays append-only — nothing is rewritten or removed. Moving the
+	 * leaf back makes the next append a sibling of the discarded entries rather
+	 * than their child, so {@link buildSessionContext} walks past them and a
+	 * reload shows the branch that is actually active. Without this, a retry
+	 * that only truncated the in-memory transcript would hang the replacement
+	 * off the reply it meant to discard, and reloading would resurrect it.
+	 */
+	rewindTo(entryId: string): void {
+		const target = this.entries.find((entry) => entry.type !== "session" && entry.id === entryId);
+		if (!target || target.type === "session") {
+			throw new Error(`Unknown session entry: ${entryId}`);
+		}
+		this.leafId = target.parentId;
+	}
+
+	/**
 	 * Newest persisted compaction, so a reloaded session updates that summary
 	 * rather than summarizing its own summary from scratch.
 	 */
