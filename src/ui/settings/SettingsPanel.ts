@@ -12,6 +12,13 @@ import {
 } from "../../modelConfig";
 import { createObsidianModels } from "../../net/streamFn";
 import type { NetworkTransport } from "../../net/obsidianFetch";
+import {
+	describeModelDeletion,
+	describeProviderDeletion,
+	removeModel,
+	removeProvider,
+	replaceById,
+} from "./configLists";
 import { openConfirmDelete } from "./confirmDelete";
 import { ModelModal } from "./ModelModal";
 import { ProviderModal } from "./ProviderModal";
@@ -356,78 +363,6 @@ function describeModelRow(settings: SettingsPanelSettings, model: ModelConfig): 
 	const providerName = provider ? describeProviderConfig(provider) : "provider missing";
 	const active = settings.activeModelId === model.id ? " · active" : "";
 	return `${model.modelApiId} · ${providerName}${active}`;
-}
-
-/** What the user loses by deleting a provider, stated before they confirm. */
-function describeProviderDeletion(boundModels: readonly ModelConfig[]): string[] {
-	const lines = ["The base URL and API key are removed from this vault's config."];
-	if (boundModels.length > 0) {
-		const names = boundModels.map(describeModelConfig).join(", ");
-		lines.push(
-			boundModels.length === 1
-				? `The model served by it is removed too: ${names}.`
-				: `The ${boundModels.length} models served by it are removed too: ${names}.`,
-		);
-	}
-	return lines;
-}
-
-/** What the user loses by deleting a model. */
-function describeModelDeletion(settings: SettingsPanelSettings, model: ModelConfig): string[] {
-	const lines = ["The provider and its key stay, so other models keep working."];
-	if (settings.activeModelId === model.id) {
-		lines.push("It is the active model, so another one is selected after it goes.");
-	}
-	return lines;
-}
-
-/** Replaces an entry with the same id, leaving list order untouched. */
-function replaceById<T extends { id: string }>(list: T[], updated: T): void {
-	const index = list.findIndex((entry) => entry.id === updated.id);
-	if (index === -1) {
-		list.push(updated);
-		return;
-	}
-	list[index] = updated;
-}
-
-/**
- * Removes a provider and everything that depended on it.
- *
- * Models are dropped with it because a model without a provider has no base URL
- * and no credential — leaving one selectable would produce a request that fails
- * with an error pointing at the wrong setting.
- */
-function removeProvider(settings: SettingsPanelSettings, providerId: string): void {
-	settings.providers = settings.providers.filter((provider) => provider.id !== providerId);
-	const orphaned = settings.models.filter((model) => model.providerId === providerId);
-	settings.models = settings.models.filter((model) => model.providerId !== providerId);
-	if (orphaned.some((model) => model.id === settings.activeModelId)) {
-		reassignActiveModel(settings);
-	}
-}
-
-function removeModel(settings: SettingsPanelSettings, modelId: string): void {
-	settings.models = settings.models.filter((model) => model.id !== modelId);
-	if (settings.activeModelId === modelId) {
-		reassignActiveModel(settings);
-	}
-}
-
-/**
- * Picks a surviving model after the active one is deleted.
- *
- * Falling back to the first remaining model beats clearing the selection: an
- * empty `activeModelId` silently hands every request back to the builtin
- * catalog, which is a different endpoint than the user configured.
- */
-function reassignActiveModel(settings: SettingsPanelSettings): void {
-	const next = settings.models[0];
-	if (next) {
-		settings.activeModelId = next.id;
-	} else {
-		delete settings.activeModelId;
-	}
 }
 
 /**
