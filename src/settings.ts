@@ -162,17 +162,6 @@ export function getActiveConfiguration(settings: PiemSettings): { model: ModelCo
 }
 
 /**
- * Whether a user-configured endpoint currently serves all model requests.
- *
- * True for a migrated or newly added configuration, and still true for a legacy
- * `customEndpoint` that has not been migrated yet — callers use this to decide
- * whether the builtin catalog applies at all.
- */
-export function isUsingCustomEndpoint(settings: PiemSettings): boolean {
-	return !!getActiveConfiguration(settings) || isCustomEndpointActive(settings.customEndpoint);
-}
-
-/**
  * Resolves the model every request goes out on.
  *
  * A configured provider/model pair wins outright: mixing it with a builtin

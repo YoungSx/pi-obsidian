@@ -14,7 +14,6 @@ const {
 	getApiKeyForProvider,
 	getConfiguredApiKey,
 	getSelectedModel,
-	isUsingCustomEndpoint,
 	normalizeSettings,
 	DEFAULT_SETTINGS,
 } = await import("./settings");
@@ -84,17 +83,6 @@ describe("getSelectedModel priority", () => {
 		const model = getSelectedModel(builtinSettings());
 		expect(model.provider).toBe(DEFAULT_PROVIDER);
 		expect(model.id).toBe("deepseek-v4-pro");
-	});
-});
-
-describe("isUsingCustomEndpoint", () => {
-	it("mirrors whether an active endpoint exists in settings", () => {
-		expect(isUsingCustomEndpoint(builtinSettings())).toBe(false);
-		expect(
-			isUsingCustomEndpoint(
-				builtinSettings({ customEndpoint: { baseUrl: "https://x/v1", apiKey: "", modelId: "m" } }),
-			),
-		).toBe(true);
 	});
 });
 

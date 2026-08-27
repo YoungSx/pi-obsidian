@@ -40,14 +40,6 @@ export const DEFAULT_CUSTOM_ENDPOINT_CONTEXT_WINDOW = 128_000;
  */
 export const DEFAULT_CUSTOM_ENDPOINT_MAX_TOKENS = 8_192;
 
-/**
- * Blank slate for merging UI edits into the stored config, and the base shape
- * `normalizeCustomEndpoint` starts from.
- */
-export function emptyCustomEndpoint(): CustomEndpointConfig {
-	return { baseUrl: "", apiKey: "", modelId: "" };
-}
-
 function readTrimmedString(value: unknown): string {
 	return typeof value === "string" ? value.trim() : "";
 }
