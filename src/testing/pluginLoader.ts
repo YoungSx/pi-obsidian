@@ -228,6 +228,10 @@ export function createObsidianHostModule(record: PluginHostRecord, platform: Rec
 		Setting: class Setting {},
 		Modal: class Modal {},
 		FuzzySuggestModal: class FuzzySuggestModal {},
+		// Extended by the settings panel's suggest fields at module scope, so it
+		// has to be a real constructor: a plain object here fails the bundle's
+		// `extends` clause with "superclass is not a constructor" before onload runs.
+		AbstractInputSuggest: class AbstractInputSuggest {},
 		Menu: class Menu {},
 		Notice: class Notice {},
 		Scope: class Scope {},

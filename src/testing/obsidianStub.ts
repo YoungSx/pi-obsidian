@@ -78,6 +78,12 @@ const obsidianStub = {
 		showAtPosition(): void {}
 	},
 	FuzzySuggestModal: class FuzzySuggestModal {},
+	// Base class for the settings panel's search-as-you-type fields. Stubbed as a
+	// bare class because the tests exercise the ranking function directly rather
+	// than Obsidian's popover; a subclass merely has to be constructible.
+	AbstractInputSuggest: class AbstractInputSuggest {
+		constructor(_app: unknown, _inputEl: unknown) {}
+	},
 	PluginSettingTab: class PluginSettingTab {},
 	Setting: class Setting {},
 	Notice: class Notice {},
