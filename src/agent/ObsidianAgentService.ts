@@ -23,6 +23,13 @@ export interface ChatSnapshot {
 	isStreaming: boolean;
 	pendingToolCalls: string[];
 	errorMessage?: string;
+	/**
+	 * Informational message that is not a failure ("Nothing to compact yet.").
+	 * Kept apart from `errorMessage` because the error banner is an
+	 * `aria-live="assertive"` alert: routing a notice through it made a
+	 * screen reader interrupt the user to report that nothing had happened.
+	 */
+	noticeMessage?: string;
 	provider: string;
 	modelId: string;
 	thinkingLevel: ThinkingLevel;
@@ -73,6 +80,9 @@ export class ObsidianAgentService {
 	private sessionRevision = 0;
 	private persistedMessages = new WeakSet<object>();
 	private errorMessage: string | undefined;
+	private noticeMessage: string | undefined;
+	/** Agent-reported error the user already dismissed; see {@link dismissMessages}. */
+	private dismissedAgentError: string | undefined;
 	private modelsBundle: ObsidianModelsBundle | null = null;
 	private modelsBundleKey: string | null = null;
 	private lastCompaction: CompactResult | undefined;
@@ -136,6 +146,7 @@ export class ObsidianAgentService {
 		let sent = false;
 		try {
 			this.errorMessage = undefined;
+			this.noticeMessage = undefined;
 			this.notify();
 			await this.compactContextIfNeeded(agent);
 			await agent.prompt(trimmedPrompt);
@@ -146,6 +157,22 @@ export class ObsidianAgentService {
 			this.notifySettledState();
 		}
 		return sent;
+	}
+
+	/**
+	 * Clears the banner after the user dismisses it.
+	 *
+	 * `agent.state.errorMessage` is read-only, so a dismissal that only cleared
+	 * this service's own field would be undone the moment the snapshot fell back
+	 * to the agent's. `dismissedAgentError` records what was dismissed and the
+	 * snapshot suppresses exactly that string, which a later, different failure
+	 * naturally escapes.
+	 */
+	dismissMessages(): void {
+		this.errorMessage = undefined;
+		this.noticeMessage = undefined;
+		this.dismissedAgentError = this.agent?.state.errorMessage;
+		this.notify();
 	}
 
 	abort(): void {
@@ -300,7 +327,8 @@ export class ObsidianAgentService {
 			streamingMessage: agent?.state.streamingMessage,
 			isStreaming: agent?.state.isStreaming ?? false,
 			pendingToolCalls: [...(agent?.state.pendingToolCalls ?? new Set<string>())],
-			errorMessage: this.errorMessage ?? agent?.state.errorMessage,
+			errorMessage: this.errorMessage ?? this.visibleAgentError(agent),
+			noticeMessage: this.noticeMessage,
 			provider: model.provider,
 			modelId: model.id,
 			thinkingLevel: getPreferredThinkingLevel(settings),
@@ -388,10 +416,10 @@ export class ObsidianAgentService {
 	 * Compacts on demand from the command palette, regardless of the threshold.
 	 *
 	 * "Skipped" is a real outcome worth reporting — a fresh conversation has
-	 * nothing older than `keepRecentTokens` for pi to summarize — so it lands
-	 * on the error line instead of vanishing; that field is the header's only
-	 * transient-message channel today. A failed compaction is already surfaced
-	 * by {@link runCompaction} and must not be overwritten with "nothing".
+	 * nothing older than `keepRecentTokens` for pi to summarize — so it lands on
+	 * the notice channel rather than vanishing. A failed compaction is already
+	 * surfaced by {@link runCompaction} and must not be overwritten with
+	 * "nothing".
 	 */
 	async compactNow(): Promise<void> {
 		await this.initialize();
@@ -406,9 +434,10 @@ export class ObsidianAgentService {
 
 		try {
 			this.errorMessage = undefined;
+			this.noticeMessage = undefined;
 			const compacted = await this.runExclusiveCompaction(agent, true);
 			if (!compacted && !this.errorMessage) {
-				this.setError("Nothing to compact yet.");
+				this.setNotice("Nothing to compact yet.");
 			}
 		} finally {
 			this.notifySettledState();
@@ -531,8 +560,22 @@ export class ObsidianAgentService {
 		return this.agent;
 	}
 
+	/** The agent's own error, unless the user dismissed that exact message. */
+	private visibleAgentError(agent: Agent | null): string | undefined {
+		const agentError = agent?.state.errorMessage;
+		return agentError && agentError === this.dismissedAgentError ? undefined : agentError;
+	}
+
 	private setError(message: string): void {
 		this.errorMessage = message;
+		this.noticeMessage = undefined;
+		this.dismissedAgentError = undefined;
+		this.notify();
+	}
+
+	/** Reports a non-failure outcome without raising the error banner's alert. */
+	private setNotice(message: string): void {
+		this.noticeMessage = message;
 		this.notify();
 	}
 

@@ -19,6 +19,11 @@ export interface MessageListProps {
 	 * the `JSON.stringify` payload behind each call.
 	 */
 	showAgentDetails?: boolean;
+	/**
+	 * Opens the plugin settings tab. Absent when the host cannot reach it, in
+	 * which case the empty state names the path in prose instead.
+	 */
+	onOpenSettings?: () => void;
 	/** Render context for `MarkdownRenderer.render`; supplied by the view. */
 	app: App;
 	component: Component;
@@ -48,6 +53,7 @@ export function MessageList({
 	isInitializing = false,
 	isConfigured = true,
 	showAgentDetails = false,
+	onOpenSettings,
 	app,
 	component,
 	sourcePath,
@@ -92,6 +98,12 @@ export function MessageList({
 
 	return (
 		<div className="pi-chat__transcript">
+			{/*
+			 * Not a live region. It used to carry `aria-live="polite"` plus
+			 * `aria-relevant="additions text"`, so the streaming message
+			 * re-announced on every token — a screen reader read half-words in a
+			 * loop. Settled turns are announced once through `TurnAnnouncer` below.
+			 */}
 			<main
 				ref={transcriptRef}
 				className="pi-chat__messages"
@@ -102,7 +114,7 @@ export function MessageList({
 				onScroll={updateFollowState}
 			>
 				{messages.length === 0 ? (
-					<EmptyState isInitializing={isInitializing} isConfigured={isConfigured} />
+					<EmptyState isInitializing={isInitializing} isConfigured={isConfigured} onOpenSettings={onOpenSettings} />
 				) : (
 					messages.map((message, index) => <MessageRow key={index} message={message} isStreaming={index === activeIndex} renderContext={context} />)
 				)}
@@ -119,16 +131,83 @@ export function MessageList({
 					Latest
 				</button>
 			) : null}
+			<TurnAnnouncer messages={messages} isStreaming={isStreaming} />
 		</div>
 	);
 }
 
-function EmptyState({ isInitializing, isConfigured }: { isInitializing: boolean; isConfigured: boolean }): React.JSX.Element {
+/**
+ * Announces a settled assistant turn once.
+ *
+ * The transcript itself cannot be the live region: the in-flight message
+ * mutates on every token, and `aria-live` on its container makes a screen
+ * reader read the partial text again with each delta. This waits for the turn
+ * to settle, then publishes the finished text into a dedicated region.
+ */
+function TurnAnnouncer({ messages, isStreaming }: { messages: AgentMessage[]; isStreaming: boolean }): React.JSX.Element {
+	const [announcement, setAnnouncement] = useState("");
+
+	useEffect(() => {
+		if (isStreaming) {
+			return;
+		}
+		const latest = messages[messages.length - 1];
+		if (!latest || latest.role !== "assistant") {
+			return;
+		}
+		setAnnouncement(assistantSpeech(latest));
+	}, [messages, isStreaming]);
+
+	return (
+		<p className="pi-chat__visually-hidden" role="status" aria-live="polite" aria-atomic="true">
+			{announcement}
+		</p>
+	);
+}
+
+/**
+ * The words a settled assistant turn actually said.
+ *
+ * Thinking and tool calls are deliberately excluded: they are mechanical
+ * traffic the transcript already collapses, and reading them aloud would bury
+ * the answer.
+ */
+function assistantSpeech(message: AssistantMessage): string {
+	const spoken = message.content
+		.filter((content): content is Extract<typeof content, { type: "text" }> => content.type === "text")
+		.map((content) => content.text)
+		.join("\n")
+		.trim();
+	if (message.stopReason === "aborted") {
+		return spoken ? `${spoken} — you stopped this reply.` : "You stopped this reply.";
+	}
+	return spoken;
+}
+
+interface EmptyStateProps {
+	isInitializing: boolean;
+	isConfigured: boolean;
+	onOpenSettings?: () => void;
+}
+
+/**
+ * What the transcript shows before there is a transcript.
+ *
+ * The unconfigured branch offers a button rather than printing a settings path,
+ * and the ready branch names what the agent can actually do — "Start a
+ * conversation" alone left the reader to guess that this thing reads and writes
+ * notes, and that a selection can be sent from the editor.
+ */
+function EmptyState({ isInitializing, isConfigured, onOpenSettings }: EmptyStateProps): React.JSX.Element {
 	if (isInitializing) {
 		return (
-			<div className="pi-chat__empty" role="status">
-				<ObsidianIcon name="loader-circle" className="pi-chat__empty-icon pi-chat__spinner" />
-				<p>Opening chat…</p>
+			<div className="pi-chat__skeleton" role="status" aria-label="Opening chat">
+				{/* Skeleton rather than a spinner in the middle of the content area:
+				    the panel loads into a task, so it shows the shape it is about to
+				    fill. Announced once via the label; the bars are decorative. */}
+				<span className="pi-chat__skeleton-line pi-chat__skeleton-line--short" aria-hidden="true" />
+				<span className="pi-chat__skeleton-line" aria-hidden="true" />
+				<span className="pi-chat__skeleton-line pi-chat__skeleton-line--medium" aria-hidden="true" />
 			</div>
 		);
 	}
@@ -137,14 +216,24 @@ function EmptyState({ isInitializing, isConfigured }: { isInitializing: boolean;
 			<div className="pi-chat__empty">
 				<ObsidianIcon name="key-round" className="pi-chat__empty-icon" />
 				<p className="pi-chat__empty-title">Connect a model to start</p>
-				<p>Add an API key in <strong>Settings → Pi Obsidian</strong>.</p>
+				{onOpenSettings ? (
+					<>
+						<p>Pi needs an API key before it can answer.</p>
+						<button type="button" className="mod-cta pi-chat__empty-action" onClick={onOpenSettings}>
+							Add an API key
+						</button>
+					</>
+				) : (
+					<p>Add an API key in <strong>Settings → Pi Obsidian</strong>.</p>
+				)}
 			</div>
 		);
 	}
 	return (
 		<div className="pi-chat__empty">
 			<ObsidianIcon name="message-circle" className="pi-chat__empty-icon" />
-			<p className="pi-chat__empty-title">Start a conversation</p>
+			<p className="pi-chat__empty-title">Ask about your vault</p>
+			<p>Pi can read, search, and edit notes here. Try “summarize my open note”, or select text and run <strong>Ask pi about selection</strong>.</p>
 		</div>
 	);
 }

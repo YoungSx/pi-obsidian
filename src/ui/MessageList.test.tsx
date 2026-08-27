@@ -93,6 +93,79 @@ describe("MessageList compaction divider", () => {
 	});
 });
 
+describe("MessageList announcements", () => {
+	it("keeps the transcript out of the live region, so a streaming turn is not re-read per token", async () => {
+		const host = renderMessages([assistantMessage("partial")], { isStreaming: true });
+		await flushRender();
+
+		const log = host.querySelector(".pi-chat__messages");
+		expect(log?.getAttribute("role")).toBe("log");
+		expect(log?.hasAttribute("aria-live")).toBe(false);
+		expect(log?.hasAttribute("aria-relevant")).toBe(false);
+	});
+
+	it("stays silent while the turn is still streaming", async () => {
+		const host = renderMessages([assistantMessage("half a th")], { isStreaming: true });
+		await flushRender();
+
+		expect(host.querySelector(".pi-chat__visually-hidden")?.textContent).toBe("");
+	});
+
+	it("announces the settled reply once, without its thinking or tool traffic", async () => {
+		const host = renderMessages([
+			{ ...assistantMessage("Here is the answer."), content: [{ type: "thinking", thinking: "weighing" }, { type: "text", text: "Here is the answer." }] },
+		]);
+		await flushRender();
+
+		const announcer = host.querySelector(".pi-chat__visually-hidden");
+		expect(announcer?.getAttribute("aria-live")).toBe("polite");
+		expect(announcer?.textContent).toBe("Here is the answer.");
+	});
+
+	it("says the reply was stopped, so silence is not read as completion", async () => {
+		const host = renderMessages([assistantMessage("half a th", { stopReason: "aborted" })]);
+		await flushRender();
+
+		expect(host.querySelector(".pi-chat__visually-hidden")?.textContent).toContain("you stopped this reply");
+	});
+});
+
+describe("MessageList empty state", () => {
+	it("offers a settings action rather than printing the path, when the host can open it", async () => {
+		const host = renderMessages([], { isConfigured: false, onOpenSettings: () => undefined });
+		await flushRender();
+
+		expect(host.querySelector(".pi-chat__empty-action")?.textContent).toBe("Add an API key");
+	});
+
+	it("falls back to naming the settings path when the host cannot open it", async () => {
+		const host = renderMessages([], { isConfigured: false });
+		await flushRender();
+
+		expect(host.querySelector(".pi-chat__empty-action")).toBeNull();
+		expect(host.querySelector(".pi-chat__empty")?.textContent).toContain("Settings → Pi Obsidian");
+	});
+
+	it("names what the agent can do instead of only inviting a conversation", async () => {
+		const host = renderMessages([]);
+		await flushRender();
+
+		const empty = host.querySelector(".pi-chat__empty")?.textContent ?? "";
+		expect(empty).toContain("read, search, and edit notes");
+		expect(empty).toContain("Ask pi about selection");
+	});
+
+	it("shows a skeleton while opening, not a spinner parked in the content area", async () => {
+		const host = renderMessages([], { isInitializing: true });
+		await flushRender();
+
+		const skeleton = host.querySelector(".pi-chat__skeleton");
+		expect(skeleton?.getAttribute("role")).toBe("status");
+		expect(skeleton?.getAttribute("aria-label")).toBe("Opening chat");
+		expect(skeleton?.querySelectorAll(".pi-chat__skeleton-line").length).toBeGreaterThan(0);
+	});
+});
+
 describe("MessageList message chrome", () => {
 	beforeEach(() => {
 		createRootSync = createRootImpl;
