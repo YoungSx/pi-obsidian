@@ -114,6 +114,47 @@ describe("ObsidianAgentService", () => {
 		expect(service.getSnapshot().usage.requests).toBe(1);
 	});
 
+	it("reaches a custom endpoint configured after the agent was built", async () => {
+		// Regression: `replaceAgent` used to capture `createObsidianStreamFn(...)`
+		// once, freezing the provider registry at construction-time settings. An
+		// endpoint configured afterwards left the agent holding a `Models` that
+		// had never registered `custom`, so every send failed with
+		// "Unknown provider: custom". The streamFn must resolve per request.
+		const settings: PiemSettings = {
+			providers: [],
+			models: [],
+			provider: "deepseek",
+			modelId: "deepseek-v4-pro",
+			thinkingLevel: "high",
+			providerApiKeys: { deepseek: "test-key" },
+			networkTransport: "requestUrl",
+			showAgentDetails: false,
+		};
+		const adapter = new MemoryAdapter();
+		const service = new ObsidianAgentService(
+			createFakeApp(asDataAdapter(adapter)),
+			() => settings,
+			new ObsidianSessionManager(asDataAdapter(adapter), SESSION_DIR, "obsidian-vault:Test"),
+		);
+		requestUrlMock.mockResolvedValue(sseResponse(replyChunks("hello")));
+
+		// First turn on the builtin provider: this is what builds the agent, so
+		// the streamFn captures whatever the registry looked like right now.
+		await service.sendPrompt("Hello");
+		expect(service.getSnapshot().errorMessage).toBeUndefined();
+
+		// Then the user configures an endpoint and talks again — the exact
+		// sequence that used to die with "Unknown provider: custom".
+		settings.customEndpoint = { baseUrl: "https://gw.example.com/v1", apiKey: "sk-custom", modelId: "my-model" };
+		await service.sendPrompt("Hello again");
+
+		expect(service.getSnapshot().errorMessage).toBeUndefined();
+		expect(requestUrlMock).toHaveBeenCalled();
+		const params = requestUrlMock.mock.calls.at(-1)?.[0] as { url: string; headers: Record<string, string> };
+		expect(params.url).toBe("https://gw.example.com/v1/chat/completions");
+		expect(params.headers.authorization).toBe("Bearer sk-custom");
+	});
+
 	it("switches back to an earlier session and restores its transcript", async () => {
 		const service = createService();
 		await service.sendPrompt("First conversation");
@@ -360,6 +401,15 @@ function sseResponse(frames: object[]): { status: number; headers: Record<string
 /** A chat-completions chunk carrying part of the summarizer's answer. */
 function summaryChunk(text = "SUMMARY OF EARLIER TURNS"): object {
 	return { id: "c1", choices: [{ delta: { content: text }, finish_reason: null }] };
+}
+
+/** A user-visible assistant reply, ending with a usage-charged stop. */
+function replyChunks(text: string): object[] {
+	return [
+		{ id: "c1", choices: [{ delta: { role: "assistant", content: text }, finish_reason: null }] },
+		{ id: "c1", choices: [{ delta: {}, finish_reason: "stop" }] },
+		{ id: "c1", choices: [], usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 } },
+	];
 }
 
 /** Final chunk with finish_reason and usage, as OpenAI-compatible providers emit. */

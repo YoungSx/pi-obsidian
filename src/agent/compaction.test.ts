@@ -83,6 +83,49 @@ describe("compactIfNeeded", () => {
 			expect(outcome.message).toContain("provider exploded");
 		}
 	});
+
+	it("retries a transient summarization failure and still compacts", async () => {
+		const models = createFlakyModels();
+
+		const outcome = await compactIfNeeded({
+			messages: buildOverflowingHistory(),
+			model: createModel({ contextWindow: 2_000 }),
+			models,
+			thinkingLevel: "off",
+			retry: { enabled: true, maxRetries: 2, baseDelayMs: 1 },
+		});
+
+		expect(outcome.status).toBe("compacted");
+	});
+
+	it("compacts through a transient failure on the default policy", async () => {
+		// The regression here is the wiring, not pi's retry loop: `compactIfNeeded`
+		// used to pass `undefined` for the retry budget, so the default policy
+		// never applied and one 503 failed the whole pre-prompt compaction.
+		const outcome = await compactIfNeeded({
+			messages: buildOverflowingHistory(),
+			model: createModel({ contextWindow: 2_000 }),
+			models: createFlakyModels(),
+			thinkingLevel: "off",
+		});
+
+		expect(outcome.status).toBe("compacted");
+	});
+
+	it("fails without retrying when the policy is disabled", async () => {
+		const outcome = await compactIfNeeded({
+			messages: buildOverflowingHistory(),
+			model: createModel({ contextWindow: 2_000 }),
+			models: createFlakyModels(),
+			thinkingLevel: "off",
+			retry: { enabled: false, maxRetries: 2, baseDelayMs: 1 },
+		});
+
+		expect(outcome.status).toBe("failed");
+		if (outcome.status === "failed") {
+			expect(outcome.message).toContain("503");
+		}
+	});
 });
 
 describe("toCompactedMessages", () => {
@@ -168,4 +211,36 @@ function createFailingModels(message: string): Models {
 			throw new Error(message);
 		},
 	} as unknown as Models;
+}
+
+/**
+ * First call answers with a transient provider error (`503` matches pi's
+ * retryable pattern); every later call summarizes normally.
+ */
+function createFlakyModels(summary = "summary"): Models {
+	let calls = 0;
+	return {
+		completeSimple: async () => {
+			calls += 1;
+			if (calls === 1) {
+				return errorAssistantMessage("HTTP 503: service temporarily unavailable");
+			}
+			return assistantMessage(summary, EMPTY_USAGE);
+		},
+	} as unknown as Models;
+}
+
+/** The error-shaped `AssistantMessage` pi's `retryAssistantCall` classifies. */
+function errorAssistantMessage(errorMessage: string): AssistantMessage {
+	return {
+		role: "assistant",
+		content: [],
+		api: "openai-completions",
+		provider: "deepseek",
+		model: "deepseek-v4-pro",
+		usage: EMPTY_USAGE,
+		stopReason: "error",
+		errorMessage,
+		timestamp: Date.now(),
+	} as unknown as AssistantMessage;
 }

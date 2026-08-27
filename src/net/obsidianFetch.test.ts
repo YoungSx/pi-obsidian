@@ -139,6 +139,33 @@ describe("createObsidianRequestUrlFetch", () => {
 		expect(pending).rejects.toThrow(/aborted/i);
 	});
 
+	it("rejects with a timeout error when the provider never responds", async () => {
+		// `requestUrl` has no timeout of its own, so without this guard a stalled
+		// endpoint leaves the agent streaming forever.
+		requestUrlMock.mockReturnValue(new Promise<never>(() => undefined));
+		const obsidianFetch = createObsidianRequestUrlFetch(25);
+
+		const pending = obsidianFetch("https://api.example.com/v1/chat", { method: "POST", body: "{}" });
+		expect(pending).rejects.toThrow(/did not respond within/);
+	});
+
+	it("aborts through the caller's signal even while the timeout is armed", async () => {
+		requestUrlMock.mockReturnValue(new Promise<never>(() => undefined));
+		const obsidianFetch = createObsidianRequestUrlFetch(60_000);
+		const controller = new AbortController();
+
+		const pending = obsidianFetch("https://api.example.com/v1/chat", {
+			method: "POST",
+			body: "{}",
+			signal: controller.signal,
+		});
+		controller.abort();
+
+		// The user pressed stop: that must surface as an abort, not as the
+		// provider-side timeout wording.
+		expect(pending).rejects.toThrow(/aborted/i);
+	});
+
 	it("defaults to GET without a body", async () => {
 		const obsidianFetch = createObsidianRequestUrlFetch();
 

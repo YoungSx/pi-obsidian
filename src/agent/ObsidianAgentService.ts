@@ -1,7 +1,7 @@
 import type { App } from "obsidian";
 import type { Usage } from "@earendil-works/pi-ai";
 import { Agent, convertToLlm, type AgentEvent, type AgentMessage, type StreamFn, type ThinkingLevel } from "@earendil-works/pi-agent-core";
-import { createObsidianModels, createObsidianStreamFn, withRequestDefaults, type ObsidianModelsBundle } from "../net/streamFn";
+import { createObsidianModels, withRequestDefaults, type ObsidianModelsBundle } from "../net/streamFn";
 import { compactIfNeeded, type CompactResult } from "./compaction";
 import { measureContextFill, sumUsage, type ContextFill, type UsageTotals } from "./usage";
 import { createObsidianTools } from "../tools/obsidianTools";
@@ -425,14 +425,10 @@ export class ObsidianAgentService {
 		const model = getSelectedModel(settings);
 		const agent = new Agent({
 			// The custom endpoint rides the same transport as builtin providers;
-			// only the provider registration differs, which streamFn handles.
-			streamFn:
-				this.streamFn ??
-				createObsidianStreamFn({
-					transport: settings.networkTransport,
-					providers: settings.providers,
-					customEndpoint: settings.customEndpoint,
-				}),
+			// only the provider registration differs. Resolved per request rather
+			// than captured here, so an endpoint configured after this agent was
+			// built is still reachable — see `resolveStreamFn`.
+			streamFn: this.resolveStreamFn(),
 			// pi's converter renders compaction summaries into the request. The agent's
 			// default one silently filters that role out, which would discard every
 			// compacted turn without surfacing an error.
@@ -580,9 +576,15 @@ export class ObsidianAgentService {
 		// since transports are stateless. The key covers provider id, base URL,
 		// and protocol because each of those changes what gets registered; API
 		// keys are excluded, as they are supplied per request.
+		//
+		// The legacy endpoint contributes both fields `isCustomEndpointActive`
+		// reads. Keying on its `baseUrl` alone let a user who typed the URL
+		// first and the model id second keep a bundle built while the endpoint
+		// still counted as inactive — so `custom` was never registered.
 		const settings = this.getSettings();
 		const providerKey = settings.providers.map((provider) => `${provider.id}|${provider.baseUrl}|${provider.protocol}`).join(",");
-		const bundleKey = `${settings.networkTransport}:${providerKey}:${settings.customEndpoint?.baseUrl ?? ""}`;
+		const legacyKey = `${settings.customEndpoint?.baseUrl ?? ""}|${settings.customEndpoint?.modelId ?? ""}`;
+		const bundleKey = `${settings.networkTransport}:${providerKey}:${legacyKey}`;
 		if (!this.modelsBundle || this.modelsBundleKey !== bundleKey) {
 			this.modelsBundle = createObsidianModels({
 				transport: settings.networkTransport,
@@ -592,6 +594,31 @@ export class ObsidianAgentService {
 			this.modelsBundleKey = bundleKey;
 		}
 		return this.modelsBundle;
+	}
+
+	/**
+	 * Stream function for ordinary turns, resolved per request.
+	 *
+	 * An earlier revision captured `createObsidianStreamFn(...)` once inside
+	 * `replaceAgent`, which froze the provider registry at whatever the settings
+	 * were when the agent was constructed. Configuring a custom endpoint
+	 * afterwards updated `agent.state.model` to `provider: "custom"` through
+	 * `refreshConfiguration`, but the captured `Models` instance had never
+	 * registered that provider and could not learn about it — so every send
+	 * failed with pi-ai's `Unknown provider: custom`.
+	 *
+	 * Routing through {@link requireModelsBundle} means both the turn path and
+	 * the compaction path share one cache with one invalidation rule, so neither
+	 * can go stale while the other stays fresh.
+	 */
+	private resolveStreamFn(): StreamFn {
+		if (this.streamFn) {
+			return this.streamFn;
+		}
+		return (model, context, streamOptions) => {
+			const { models, fetch: fetchImpl } = this.requireModelsBundle();
+			return models.streamSimple(model, context, { ...streamOptions, fetch: fetchImpl });
+		};
 	}
 
 	private async persistMessage(message: AgentMessage): Promise<void> {

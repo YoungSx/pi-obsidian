@@ -12,9 +12,29 @@ import {
 	type MessageEntry,
 	type ThinkingLevel,
 } from "@earendil-works/pi-agent-core";
-import type { Api, Model, Models } from "@earendil-works/pi-ai";
+import type { Api, Model, Models, RetryPolicy } from "@earendil-works/pi-ai";
 
 export { DEFAULT_COMPACTION_SETTINGS, type CompactionSettings, type CompactResult };
+
+/**
+ * Retry budget for the summarization request.
+ *
+ * Compaction is the one request the user never asked for: it fires on the way
+ * to sending a prompt, and when it fails the prompt goes out against a context
+ * that is already known not to fit. A single 429 or dropped connection
+ * therefore costs the whole turn, which makes this the request most worth
+ * retrying and the one where a few seconds of backoff are least noticeable.
+ *
+ * pi's own loop (`retryAssistantCall`, reached through `compact`) classifies
+ * which failures are transient and leaves deterministic ones — bad key, quota
+ * exhausted — to fail fast, so a bounded budget here cannot turn a
+ * misconfiguration into a long stall.
+ */
+export const DEFAULT_COMPACTION_RETRY: RetryPolicy = {
+	enabled: true,
+	maxRetries: 2,
+	baseDelayMs: 1_000,
+};
 
 /** Outcome of a compaction attempt. */
 export type CompactionOutcome =
@@ -31,6 +51,8 @@ export interface CompactionRequest {
 	previous?: CompactResult;
 	settings?: CompactionSettings;
 	signal?: AbortSignal;
+	/** Retry budget for the summarization request; {@link DEFAULT_COMPACTION_RETRY} when unset. */
+	retry?: RetryPolicy;
 	/**
 	 * Summarize even when the context still fits, for the manual "compact now"
 	 * command. The cut point and retention budget stay pi's own — forcing only
@@ -68,7 +90,15 @@ export async function compactIfNeeded(request: CompactionRequest): Promise<Compa
 	// error propagates as a thrown exception, so both paths need handling.
 	let compacted;
 	try {
-		compacted = await compact(prepared.value, request.models, request.model, undefined, request.signal, request.thinkingLevel);
+		compacted = await compact(
+			prepared.value,
+			request.models,
+			request.model,
+			undefined,
+			request.signal,
+			request.thinkingLevel,
+			request.retry ?? DEFAULT_COMPACTION_RETRY,
+		);
 	} catch (error) {
 		return { status: "failed", message: error instanceof Error ? error.message : String(error) };
 	}
