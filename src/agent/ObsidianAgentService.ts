@@ -512,6 +512,11 @@ export class ObsidianAgentService {
 			getApiKey: (provider) => this.getApiKey(provider),
 			sessionId: this.sessionInfo?.id,
 			toolExecution: "sequential",
+			// Pi normally feeds a failed tool result back to the model and starts
+			// another turn. A model that keeps retrying the same invalid call can
+			// therefore leave the panel responding forever. Let Pi finish the
+			// current turn normally, then end the run before another request starts.
+			shouldStopAfterTurn: ({ toolResults }) => toolResults.some((result) => result.isError),
 		});
 		this.agent = agent;
 		this.unsubscribeAgent = agent.subscribe((event) => this.handleAgentEvent(event));

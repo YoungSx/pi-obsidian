@@ -374,6 +374,35 @@ describe("ObsidianAgentService", () => {
 		expect(service.getSnapshot().pendingToolCalls).toEqual([]);
 	});
 
+	it("ends the run after a tool fails and accepts the next prompt", async () => {
+		let requestCount = 0;
+		const scriptedStream = createToolCallingStreamFn("ls", "toolu_failed", { path: "Missing" });
+		const streamFn: StreamFn = (model, context, options) => {
+			requestCount += 1;
+			return scriptedStream(model, context, options);
+		};
+		const service = createService(new MemoryAdapter(), { streamFn });
+
+		expect(await service.sendPrompt("List the missing folder")).toBe(true);
+
+		const failed = service.getSnapshot();
+		expect(requestCount).toBe(1);
+		expect(failed.isStreaming).toBe(false);
+		expect(failed.pendingToolCalls).toEqual([]);
+		const toolResult = failed.messages.at(-1);
+		expect(toolResult?.role).toBe("toolResult");
+		if (toolResult?.role !== "toolResult") {
+			throw new Error("Expected the failed tool result to end the turn.");
+		}
+		expect(toolResult.isError).toBe(true);
+		expect(JSON.stringify(toolResult.content)).toContain("Folder not found: Missing");
+
+		expect(await service.sendPrompt("Continue with something else")).toBe(true);
+		expect(requestCount).toBe(2);
+		expect(service.getSnapshot().isStreaming).toBe(false);
+		expect(service.getSnapshot().messages.at(-1)?.role).toBe("assistant");
+	});
+
 	it("declines a retry when nothing precedes the reply", async () => {
 		const service = createService();
 		await service.initialize();
@@ -535,7 +564,11 @@ function createFakeStreamFn(): StreamFn {
  * The call id is deliberately provider-shaped: it is the string the panel used
  * to show before pending calls were resolved to names.
  */
-function createToolCallingStreamFn(toolName: string, toolCallId: string): StreamFn {
+function createToolCallingStreamFn(
+	toolName: string,
+	toolCallId: string,
+	toolArguments: Record<string, unknown> = { path: "/" },
+): StreamFn {
 	let requests = 0;
 	return (model: Model<Api>, _context: Context, _options?: SimpleStreamOptions) => {
 		requests += 1;
@@ -559,7 +592,7 @@ function createToolCallingStreamFn(toolName: string, toolCallId: string): Stream
 		if (requests === 1) {
 			const message: AssistantMessage = {
 				...base,
-				content: [{ type: "toolCall", id: toolCallId, name: toolName, arguments: { path: "/" } }],
+				content: [{ type: "toolCall", id: toolCallId, name: toolName, arguments: toolArguments }],
 				stopReason: "toolUse",
 			};
 			stream.push({ type: "done", reason: "toolUse", message });
