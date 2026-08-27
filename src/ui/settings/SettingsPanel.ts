@@ -371,13 +371,18 @@ function describeModelRow(settings: SettingsPanelSettings, model: ModelConfig): 
  * The draft's provider is registered in a throwaway `Models` collection, which
  * is what lets a user verify an edit before committing it — testing the stored
  * row would report on configuration they are in the middle of replacing.
+ *
+ * The bundle's `fetch` travels with the probe so the test uses the transport the
+ * user selected. Without it the request would go out on the platform `fetch`,
+ * which is the very thing the requestUrl transport exists to avoid — a test
+ * could then fail on CORS while real turns work, or pass while they do not.
  */
 async function testDraftProvider(host: SettingsPanelHost, draft: ProviderConfig): Promise<ConnectionTestResult> {
-	const { models } = createObsidianModels({
+	const { models, fetch: fetchImpl } = createObsidianModels({
 		transport: host.settings.networkTransport,
 		providers: [draft],
 	});
-	return testProviderConnection(models, draft, host.settings.models);
+	return testProviderConnection(models, draft, host.settings.models, { fetch: fetchImpl });
 }
 
 /** Same, for a model draft: the provider it names is resolved from saved settings. */
@@ -386,9 +391,9 @@ async function testDraftModel(host: SettingsPanelHost, draft: ModelConfig): Prom
 	if (!provider) {
 		return { ok: false, detail: "That provider no longer exists." };
 	}
-	const { models } = createObsidianModels({
+	const { models, fetch: fetchImpl } = createObsidianModels({
 		transport: host.settings.networkTransport,
 		providers: [provider],
 	});
-	return testModelConnection(models, draft, provider);
+	return testModelConnection(models, draft, provider, { fetch: fetchImpl });
 }
