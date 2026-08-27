@@ -2,8 +2,9 @@ import { describe, expect, it } from "bun:test";
 import { installObsidianStub, SafeStorageLikeMock } from "./testing/obsidianStub";
 import type { SecretCodec } from "./secrets";
 
-// `secretsStore.ts` imports `Platform` from obsidian and lazily imports
-// electron; both module stubs must be registered before those imports resolve.
+// `secrets.ts` is free of obsidian/electron imports, but the shared stub also
+// backs `SafeStorageLikeMock`; register it before the dynamic import resolves.
+// Environment detection itself is covered in `secretsStore.test.ts`.
 installObsidianStub();
 
 const { createSafeStorageCodec, PLAINTEXT_CODEC } = await import("./secrets");
@@ -152,46 +153,5 @@ describe("migration helpers", () => {
 		const { persistedFormChanged } = await import("./secrets");
 		expect(persistedFormChanged({ deepseek: "enc:v1:NEW" }, "", { deepseek: "sk-old" }, "")).toBe(true);
 		expect(persistedFormChanged({}, "enc:v1:E", {}, "")).toBe(true);
-	});
-});
-
-describe("createSecretEnvironment dual path", () => {
-	it("uses safeStorage on a desktop with working encryption", async () => {
-		const { createSecretEnvironment } = await import("./secretsStore");
-		const mock = new SafeStorageLikeMock();
-		const environment = await createSecretEnvironment({ safeStorage: mock, isDesktopApp: true });
-
-		expect(environment.codec().canRoundTrip).toBe(true);
-		expect(environment.codec().seal("k")).toMatch(/^enc:v1:/);
-	});
-
-	it("falls back to plaintext on mobile without touching electron", async () => {
-		const { createSecretEnvironment } = await import("./secretsStore");
-
-		const environment = await createSecretEnvironment({
-			safeStorage: new SafeStorageLikeMock(),
-			isDesktopApp: false,
-		});
-		expect(environment.codec()).toBe(PLAINTEXT_CODEC);
-	});
-
-	it("falls back to plaintext when the keyring is unavailable", async () => {
-		const { createSecretEnvironment } = await import("./secretsStore");
-		const mock = new SafeStorageLikeMock();
-		mock.available = false;
-
-		const environment = await createSecretEnvironment({ safeStorage: mock, isDesktopApp: true });
-		expect(environment.codec()).toBe(PLAINTEXT_CODEC);
-	});
-
-	it("falls back to plaintext when probing availability throws", async () => {
-		const { createSecretEnvironment } = await import("./secretsStore");
-		const mock = new SafeStorageLikeMock();
-		mock.isEncryptionAvailable = () => {
-			throw new Error("no keyring service");
-		};
-
-		const environment = await createSecretEnvironment({ safeStorage: mock, isDesktopApp: true });
-		expect(environment.codec()).toBe(PLAINTEXT_CODEC);
 	});
 });

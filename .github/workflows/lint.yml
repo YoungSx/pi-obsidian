@@ -23,6 +23,21 @@ jobs:
                   # bug reached CI while every local run stayed green.
                   bun-version: 1.4.0
             - run: bun install --frozen-lockfile
-            - run: bun test
-            - run: npm run build
-            - run: npm run lint
+
+            # Build first: the bundle gates below assert on main.js, and
+            # `bun test` includes a smoke test that loads that artifact. Running
+            # tests before the build would silently check a stale bundle — or
+            # none at all on a clean checkout.
+            - name: Build
+              run: npm run build
+
+            # Catches constructs Obsidian's eval-based loader cannot handle, such
+            # as the `import("electron")` that shipped in 0.1.0-alpha.3.
+            - name: Check bundle for loader-incompatible constructs
+              run: npm run check:bundle
+
+            - name: Test
+              run: bun test
+
+            - name: Lint
+              run: npm run lint

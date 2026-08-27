@@ -34,10 +34,12 @@ function pluginWithData(
 	const environment = {
 		codec: (): SecretCodec => (mock.available ? createSafeStorageCodec(mock) : PLAINTEXT_CODEC),
 	};
+	// Matches the field's real shape: detection is synchronous and total, so the
+	// resolved environment is cached directly rather than as a Promise.
 	Object.defineProperty(plugin, "secretEnvironment", {
 		configurable: true,
 		get() {
-			return Promise.resolve(environment);
+			return environment;
 		},
 	});
 	return { plugin, saved: () => ({ value: store.data, writes }) };
