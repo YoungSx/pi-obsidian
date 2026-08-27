@@ -18,13 +18,24 @@ let createRootSync: typeof createRoot;
 const app = {} as App;
 const component = {} as Component;
 
-function renderMessages(messages: Parameters<typeof MessageList>[0]["messages"]): HTMLElement {
+function renderMessages(
+	messages: Parameters<typeof MessageList>[0]["messages"],
+	overrides: Partial<Parameters<typeof MessageList>[0]> = {},
+): HTMLElement {
 	const host = document.createElement("div");
 	document.body.appendChild(host);
 	const root = roots.get(host) ?? createRootSync(host);
 	roots.set(host, root);
 	root.render(
-		<MessageList messages={messages} isStreaming={false} pendingToolCalls={[]} app={app} component={component} sourcePath="" />,
+		<MessageList
+			messages={messages}
+			isStreaming={false}
+			pendingToolCalls={[]}
+			app={app}
+			component={component}
+			sourcePath=""
+			{...overrides}
+		/>,
 	);
 	return host;
 }
@@ -141,14 +152,26 @@ describe("MessageList message chrome", () => {
 });
 
 describe("MessageList trace collapsing", () => {
-	it("collapses a tool call to one row with its most telling argument", async () => {
+	it("renders a tool call as a plain row in the default tier, since the payload is hidden", async () => {
 		const host = renderMessages([assistantToolCall("read", { path: "Daily/2026-08-27.md", offset: 0 })]);
+		await flushRender();
+
+		const trace = host.querySelector(".pi-chat__trace--flat");
+		expect(trace).not.toBeNull();
+		// An empty disclosure would offer to open onto nothing.
+		expect(host.querySelector("details.pi-chat__trace")).toBeNull();
+		expect(trace?.querySelector(".pi-chat__trace-name")?.textContent).toBe("Read a note");
+		expect(trace?.querySelector(".pi-chat__trace-detail")?.textContent).toBe("Daily/2026-08-27.md");
+	});
+
+	it("collapses the raw payload behind the row once agent details are on", async () => {
+		const host = renderMessages([assistantToolCall("read", { path: "Daily/2026-08-27.md", offset: 0 })], { showAgentDetails: true });
 		await flushRender();
 
 		const trace = host.querySelector("details.pi-chat__trace");
 		expect(trace?.hasAttribute("open")).toBe(false);
 		expect(trace?.querySelector(".pi-chat__trace-name")?.textContent).toBe("read");
-		expect(trace?.querySelector(".pi-chat__trace-detail")?.textContent).toBe("Daily/2026-08-27.md");
+		expect(trace?.querySelector(".pi-chat__trace-body")?.textContent).toContain('"path": "Daily/2026-08-27.md"');
 	});
 
 	it("collapses thinking behind the same trace vocabulary as tool traffic", async () => {
@@ -167,6 +190,7 @@ describe("MessageList trace collapsing", () => {
 		const trace = host.querySelector("details.pi-chat__trace--error");
 		expect(trace).not.toBeNull();
 		expect(trace?.querySelector(".pi-chat__trace-detail")?.textContent).toBe("File not found.");
+		expect(trace?.querySelector(".pi-chat__trace-name")?.textContent).toBe("Edited a note");
 	});
 });
 

@@ -46,6 +46,12 @@ export interface ChatSnapshot {
 	isCompacting: boolean;
 	/** Whether the active model target has a credential ready for requests. */
 	isConfigured?: boolean;
+	/**
+	 * Whether the panel may show agent-internal readouts (token counts, spend,
+	 * context-window occupancy, raw tool arguments). Mirrors the user setting so
+	 * the UI reads one snapshot rather than reaching for settings itself.
+	 */
+	showAgentDetails: boolean;
 }
 
 type SnapshotListener = (snapshot: ChatSnapshot) => void;
@@ -309,6 +315,7 @@ export class ObsidianAgentService {
 			),
 			isCompacting: this.isCompacting,
 			isConfigured: this.hasApiKey(),
+			showAgentDetails: settings.showAgentDetails,
 		};
 	}
 

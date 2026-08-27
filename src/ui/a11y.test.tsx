@@ -92,6 +92,7 @@ function snapshot(overrides: Partial<ChatSnapshot> = {}): ChatSnapshot {
 		contextFill: fill(),
 		isCompacting: false,
 		session: undefined,
+		showAgentDetails: true,
 		...overrides,
 	} as ChatSnapshot;
 }

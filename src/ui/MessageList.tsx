@@ -5,7 +5,7 @@ import type { App, Component, IconName } from "obsidian";
 import type { TextBlockKind } from "./markdownPolicy";
 import { MarkdownText } from "./MarkdownText";
 import { ObsidianIcon } from "./ObsidianIcon";
-import { countDiffLines, summarizeToolPayload, summarizeToolResult } from "./traceSummary";
+import { countDiffLines, describeTool, summarizeToolPayload, summarizeToolResult } from "./traceSummary";
 
 export interface MessageListProps {
 	messages: AgentMessage[];
@@ -14,6 +14,11 @@ export interface MessageListProps {
 	pendingToolCalls: string[];
 	isInitializing?: boolean;
 	isConfigured?: boolean;
+	/**
+	 * Whether the transcript may use agent-internal vocabulary: raw tool ids and
+	 * the `JSON.stringify` payload behind each call.
+	 */
+	showAgentDetails?: boolean;
 	/** Render context for `MarkdownRenderer.render`; supplied by the view. */
 	app: App;
 	component: Component;
@@ -42,11 +47,12 @@ export function MessageList({
 	pendingToolCalls,
 	isInitializing = false,
 	isConfigured = true,
+	showAgentDetails = false,
 	app,
 	component,
 	sourcePath,
 }: MessageListProps): React.JSX.Element {
-	const context: MessageContext = { app, component, sourcePath };
+	const context: MessageContext = { app, component, sourcePath, showAgentDetails };
 	const activeIndex = streamingIndex(isStreaming, messages.length);
 	const transcriptRef = useRef<HTMLElement | null>(null);
 	const shouldFollowRef = useRef(true);
@@ -213,6 +219,8 @@ interface MessageContext {
 	app: App;
 	component: Component;
 	sourcePath: string;
+	/** Mirrors the user setting; decides tool naming and payload visibility. */
+	showAgentDetails: boolean;
 }
 
 function renderMessageContent(message: UserMessage | AssistantMessage, args: RenderArgs): React.ReactNode {
@@ -261,10 +269,17 @@ function renderAssistantMessage(message: AssistantMessage, args: RenderArgs): Re
 				</Trace>
 			);
 		}
+		const showDetails = args.renderContext.showAgentDetails;
 		return (
-			<Trace key={index} icon="wrench" name={content.name} detail={summarizeToolPayload(content.arguments)}>
-				<pre className="pi-chat__text">{JSON.stringify(content.arguments, null, 2)}</pre>
-			</Trace>
+			<Trace
+				key={index}
+				icon="wrench"
+				name={describeTool(content.name, showDetails)}
+				detail={summarizeToolPayload(content.arguments)}
+				// Without the payload there is nothing behind the row to open, so it
+				// renders as a plain line rather than an empty disclosure.
+				body={showDetails ? <pre className="pi-chat__text">{JSON.stringify(content.arguments, null, 2)}</pre> : null}
+			/>
 		);
 	});
 }
@@ -274,7 +289,9 @@ interface TraceProps {
 	name: string;
 	detail?: string;
 	className?: string;
-	children: React.ReactNode;
+	/** Revealed content; `null` renders a plain row with no disclosure affordance. */
+	body?: React.ReactNode;
+	children?: React.ReactNode;
 }
 
 /**
@@ -286,16 +303,24 @@ interface TraceProps {
  * single `grep` could bury the model's actual prose. Everything mechanical now
  * collapses to a 1-line row the reader opens on demand.
  */
-function Trace({ icon, name, detail, className, children }: TraceProps): React.JSX.Element {
+function Trace({ icon, name, detail, className, body, children }: TraceProps): React.JSX.Element {
+	const revealed = body === undefined ? children : body;
 	const classes = ["pi-chat__trace", className].filter(Boolean).join(" ");
+	const row = (
+		<>
+			<ObsidianIcon name={icon} className="pi-chat__trace-icon" />
+			<span className="pi-chat__trace-name">{name}</span>
+			{detail ? <span className="pi-chat__trace-detail">{detail}</span> : null}
+		</>
+	);
+
+	if (!revealed) {
+		return <div className={`${classes} pi-chat__trace--flat`}>{row}</div>;
+	}
 	return (
 		<details className={classes}>
-			<summary className="pi-chat__trace-summary">
-				<ObsidianIcon name={icon} className="pi-chat__trace-icon" />
-				<span className="pi-chat__trace-name">{name}</span>
-				{detail ? <span className="pi-chat__trace-detail">{detail}</span> : null}
-			</summary>
-			<div className="pi-chat__trace-body">{children}</div>
+			<summary className="pi-chat__trace-summary">{row}</summary>
+			<div className="pi-chat__trace-body">{revealed}</div>
 		</details>
 	);
 }
@@ -315,7 +340,7 @@ function ToolResultTrace({ message, context }: { message: ToolResultMessage; con
 		<details className={classes}>
 			<summary className="pi-chat__trace-summary">
 				<ObsidianIcon name={message.isError ? "alert-triangle" : "check"} className="pi-chat__trace-icon" />
-				<span className="pi-chat__trace-name">{message.toolName}</span>
+				<span className="pi-chat__trace-name">{describeTool(message.toolName, context.showAgentDetails)}</span>
 				{detail ? <span className="pi-chat__trace-detail">{detail}</span> : null}
 			</summary>
 			<div className="pi-chat__trace-body">

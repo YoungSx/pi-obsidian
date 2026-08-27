@@ -81,6 +81,48 @@ describe("ChatHeader context meter", () => {
 	});
 });
 
+describe("ChatHeader vocabulary tiers", () => {
+	beforeEach(() => {
+		createRootSync = createRootImpl;
+		document.body.replaceChildren();
+	});
+
+	afterEach(() => {
+		document.body.replaceChildren();
+	});
+
+	it("keeps agent metrics out of the default panel", async () => {
+		const host = await renderHeader(snapshot({ showAgentDetails: false, usage: { tokens: 4_200, cost: 0.02, requests: 3 } }));
+
+		expect(host.querySelector(".pi-chat__context")).toBeNull();
+		expect(host.querySelector(".pi-chat__usage")).toBeNull();
+		// Nothing to report means no empty landmark either.
+		expect(host.querySelector(".pi-chat__statusbar")).toBeNull();
+	});
+
+	it("names the model without its provider path in the default tier", async () => {
+		const host = await renderHeader(snapshot({ showAgentDetails: false }));
+
+		expect(host.querySelector(".pi-chat__model")?.textContent).toBe("deepseek-v4-pro");
+	});
+
+	it("describes compaction in plain language until details are on", async () => {
+		const quietHost = await renderHeader(snapshot({ showAgentDetails: false, isCompacting: true }));
+		expect(quietHost.querySelector(".pi-chat__compacting")?.textContent).toContain("Tidying up earlier messages");
+
+		document.body.replaceChildren();
+		const detailHost = await renderHeader(snapshot({ isCompacting: true }));
+		expect(detailHost.querySelector(".pi-chat__compacting")?.textContent).toContain("Compacting context");
+	});
+
+	it("keeps every action button mounted so their positions never shift", async () => {
+		const host = await renderHeader(snapshot());
+
+		const labels = Array.from(host.querySelectorAll(".pi-chat__header-actions button"), (button) => button.getAttribute("aria-label"));
+		expect(labels).toEqual(["Open chats", "New chat", "More chat actions"]);
+	});
+});
+
 function snapshot(overrides: Partial<ChatSnapshot> = {}): ChatSnapshot {
 	return {
 		messages: [],
@@ -93,6 +135,8 @@ function snapshot(overrides: Partial<ChatSnapshot> = {}): ChatSnapshot {
 		usage: usageTotals(),
 		contextFill: fill(),
 		isCompacting: false,
+		// The metrics these tests assert on live behind the agent-details tier.
+		showAgentDetails: true,
 		...overrides,
 	};
 }

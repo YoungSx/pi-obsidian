@@ -354,6 +354,7 @@ function createService(memoryAdapter: MemoryAdapter = new MemoryAdapter()): Obsi
 		thinkingLevel: "high",
 		providerApiKeys: { deepseek: "test-key" },
 		networkTransport: "requestUrl",
+		showAgentDetails: false,
 	};
 	const sessionManager = new ObsidianSessionManager(adapter, SESSION_DIR, "obsidian-vault:Test");
 	return new ObsidianAgentService(createFakeApp(adapter), () => settings, sessionManager, { streamFn: createFakeStreamFn() });

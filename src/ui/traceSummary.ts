@@ -11,6 +11,42 @@ import type { ToolResultMessage } from "@earendil-works/pi-ai";
 const MAX_DETAIL_LENGTH = 48;
 
 /**
+ * Plain-language names for the vault tools.
+ *
+ * The tool ids are the model's vocabulary, not the reader's: "get_active_note"
+ * and "grep" say nothing to someone whose mental model is notes and links.
+ * Unmapped ids fall through to the raw name, which is the honest answer for a
+ * tool this table has not been taught.
+ */
+const TOOL_LABELS: Readonly<Record<string, string>> = {
+	read: "Read a note",
+	write: "Wrote a note",
+	edit: "Edited a note",
+	ls: "Listed a folder",
+	find: "Looked for notes",
+	grep: "Searched the vault",
+	get_active_note: "Checked the open note",
+	note_links: "Followed links",
+	note_metadata: "Read note properties",
+	list_tasks: "Listed tasks",
+	summarize_tasks: "Summarized tasks",
+};
+
+/**
+ * Names a tool for the reader.
+ *
+ * The agent-details tier keeps the raw id, because someone reading tool
+ * payloads is working in the model's vocabulary and a translated name would
+ * make the row harder to match against the arguments below it.
+ */
+export function describeTool(toolName: string, showAgentDetails: boolean): string {
+	if (showAgentDetails) {
+		return toolName;
+	}
+	return TOOL_LABELS[toolName] ?? toolName;
+}
+
+/**
  * Arguments worth showing next to a tool name.
  *
  * A path answers "which note?" for every file tool, and a pattern answers

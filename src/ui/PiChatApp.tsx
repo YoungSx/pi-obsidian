@@ -139,6 +139,7 @@ export function PiChatApp({ service, inputController, component }: PiChatAppProp
 				pendingToolCalls={snapshot.pendingToolCalls}
 				isInitializing={isInitializing}
 				isConfigured={snapshot.isConfigured ?? false}
+				showAgentDetails={snapshot.showAgentDetails}
 				app={app}
 				component={component}
 				sourcePath={sourcePath}
@@ -149,6 +150,7 @@ export function PiChatApp({ service, inputController, component }: PiChatAppProp
 				isStreaming={snapshot.isStreaming}
 				isCompacting={snapshot.isCompacting}
 				isInitializing={isInitializing}
+				showAgentDetails={snapshot.showAgentDetails}
 				onInputChange={setInput}
 				onSend={() => void sendPrompt()}
 				onAbort={() => service.abort()}

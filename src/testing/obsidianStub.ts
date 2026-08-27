@@ -32,6 +32,7 @@ export const platformMock = {
 	isMobileApp: false,
 	isIosApp: false,
 	isAndroidApp: false,
+	isMacOS: false,
 };
 
 /** Arguments of the most recent `MarkdownRenderer.render` call. */

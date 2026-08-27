@@ -380,6 +380,20 @@
 	margin-top: var(--size-4-1);
 }
 
+/*
+ * A row with nothing to reveal (a tool call whose payload is hidden in the
+ * default tier) renders as a plain line: an empty `<details>` would offer a
+ * disclosure affordance that opens onto nothing.
+ */
+.pi-chat__trace--flat {
+	align-items: center;
+	color: var(--text-muted);
+	display: flex;
+	gap: var(--size-4-1);
+	min-height: var(--size-4-6);
+	padding: 0 var(--size-4-1);
+}
+
 .pi-chat__trace-summary {
 	align-items: center;
 	border-radius: var(--radius-s);

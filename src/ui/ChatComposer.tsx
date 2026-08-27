@@ -1,5 +1,7 @@
 import React, { useEffect, useRef } from "react";
+import { Platform } from "obsidian";
 import { IconButton } from "./ObsidianIcon";
+import { composerStatusText } from "./composerStatus";
 import { isSendShortcut } from "./keyboard";
 
 interface ChatComposerProps {
@@ -7,6 +9,8 @@ interface ChatComposerProps {
 	isStreaming: boolean;
 	isCompacting: boolean;
 	isInitializing: boolean;
+	/** Whether the panel may use agent-internal vocabulary in its status line. */
+	showAgentDetails: boolean;
 	onInputChange: (value: string) => void;
 	onSend: () => void;
 	onAbort: () => void;
@@ -19,6 +23,7 @@ export function ChatComposer({
 	isStreaming,
 	isCompacting,
 	isInitializing,
+	showAgentDetails,
 	onInputChange,
 	onSend,
 	onAbort,
@@ -93,7 +98,7 @@ export function ChatComposer({
 				/>
 				<div className="pi-chat__composer-bar">
 					<span className="pi-chat__composer-status" role="status" aria-live="polite">
-						{isInitializing ? "Opening chat…" : isCompacting ? "Preparing context…" : isStreaming ? "Pi is responding…" : ""}
+						{composerStatusText({ isInitializing, isCompacting, isStreaming, showAgentDetails, isMac: Platform.isMacOS })}
 					</span>
 					{isBusy ? (
 						<IconButton

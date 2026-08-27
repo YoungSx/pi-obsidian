@@ -28,6 +28,15 @@ export interface PiObsidianSettings {
 	providerApiKeys: Record<string, string>;
 	networkTransport: NetworkTransport;
 	/**
+	 * Whether the chat panel exposes agent-internal metrics — token counts,
+	 * spend, context-window occupancy and raw tool payloads.
+	 *
+	 * Off by default: an Obsidian user's vocabulary is notes and links, not
+	 * context windows, and the panel's job is to keep that plumbing out of the
+	 * way. Readers who do want the numbers turn it on once.
+	 */
+	showAgentDetails: boolean;
+	/**
 	 * User-supplied OpenAI-compatible endpoint. While active it replaces the
 	 * built-in provider catalog entirely; `undefined` means the user has never
 	 * touched the custom-endpoint form.
@@ -41,6 +50,7 @@ export const DEFAULT_SETTINGS: PiObsidianSettings = {
 	thinkingLevel: DEFAULT_THINKING_LEVEL,
 	providerApiKeys: {},
 	networkTransport: "requestUrl",
+	showAgentDetails: false,
 };
 
 export function normalizeSettings(data: Partial<PiObsidianSettings> | null | undefined): PiObsidianSettings {
@@ -56,6 +66,9 @@ export function normalizeSettings(data: Partial<PiObsidianSettings> | null | und
 		thinkingLevel,
 		providerApiKeys: { ...providerApiKeys },
 		networkTransport,
+		// Absent in vaults written before the setting existed; those users get the
+		// quiet default rather than inheriting the old always-verbose panel.
+		showAgentDetails: data?.showAgentDetails === true,
 		// Absent in older vaults; normalizeCustomEndpoint drops empty objects so
 		// a cleared form does not resurrect itself as an active endpoint.
 		customEndpoint: normalizeCustomEndpoint(data?.customEndpoint),
@@ -176,6 +189,7 @@ export class PiObsidianSettingTab extends PluginSettingTab {
 		this.addThinkingSetting(containerEl);
 		this.addNetworkTransportSetting(containerEl);
 		this.addApiKeySetting(containerEl);
+		this.addAgentDetailsSetting(containerEl);
 	}
 
 	/**
@@ -312,6 +326,25 @@ export class PiObsidianSettingTab extends PluginSettingTab {
 				dropdown.setValue(getPreferredThinkingLevel(this.plugin.settings));
 				dropdown.onChange(async (thinkingLevel) => {
 					this.plugin.settings.thinkingLevel = thinkingLevel as ModelThinkingLevel;
+					await this.plugin.saveSettings();
+				});
+			});
+	}
+
+	/**
+	 * Opt-in for the agent-internal readouts in the chat panel.
+	 *
+	 * Lives at the bottom because it changes how the panel reads rather than
+	 * where requests go: nobody has to answer it to get the plugin working.
+	 */
+	private addAgentDetailsSetting(containerEl: HTMLElement): void {
+		new Setting(containerEl)
+			.setName("Show agent details")
+			.setDesc("Show token counts, spend, context-window use, and raw tool arguments in the chat panel.")
+			.addToggle((toggle) => {
+				toggle.setValue(this.plugin.settings.showAgentDetails);
+				toggle.onChange(async (showAgentDetails) => {
+					this.plugin.settings.showAgentDetails = showAgentDetails;
 					await this.plugin.saveSettings();
 				});
 			});
