@@ -298,12 +298,15 @@ describe("ObsidianAgentService", () => {
 		expect(finalSnapshot?.usage.requests).toBe(2);
 	});
 
-	it("reports when there was nothing to compact instead of staying silent", async () => {
+	it("reports when there was nothing to compact on the notice channel, not as an error", async () => {
 		requestUrlMock.mockImplementation(async () => sseResponse([summaryChunk(), usageChunk()]));
 		const service = createService();
 		await service.compactNow();
 
-		expect(service.getSnapshot().errorMessage).toBe("Nothing to compact yet.");
+		// The error banner is an assertive alert; a "nothing happened" outcome
+		// routed through it made screen readers interrupt the user.
+		expect(service.getSnapshot().noticeMessage).toBe("Nothing to compact yet.");
+		expect(service.getSnapshot().errorMessage).toBeUndefined();
 		expect(service.getSnapshot().messages).toHaveLength(0);
 	});
 

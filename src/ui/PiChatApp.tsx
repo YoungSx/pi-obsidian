@@ -5,10 +5,12 @@ import type { ChatSnapshot, ObsidianAgentService } from "../agent/ObsidianAgentS
 import type { ActiveSessionInfo } from "../session/ObsidianSessionManager";
 import type { ChatInputController } from "./ChatInputController";
 import { getActiveNotePath } from "./activeNotePath";
+import { ChatBanner } from "./ChatBanner";
 import { ChatComposer } from "./ChatComposer";
 import { ChatHeader } from "./ChatHeader";
 import { MessageList } from "./MessageList";
 import { appendToDraft } from "./noteReference";
+import { canOpenPluginSettings, openPluginSettings } from "./pluginSettings";
 
 interface PiChatAppProps {
 	service: ObsidianAgentService;
@@ -23,19 +25,24 @@ export function PiChatApp({ service, inputController, component }: PiChatAppProp
 	const [sessions, setSessions] = useState<ActiveSessionInfo[]>([]);
 	const [isInitializing, setIsInitializing] = useState(true);
 	const [initializationError, setInitializationError] = useState<string>();
+	const [dismissedInitError, setDismissedInitError] = useState(false);
 	const sendPromptRef = useRef<() => void>(() => undefined);
 
 	const app = service.getApp();
 	// Recomputed per render (not memoized on identity) so switching the active
 	// note re-points `sourcePath`; reading the workspace is cheap.
 	const sourcePath = getActiveNotePath(app);
+	const canOpenSettings = canOpenPluginSettings(app);
 
 	useEffect(() => {
 		const unsubscribe = service.subscribe(setSnapshot);
 		void service
 			.initialize()
 			.then(() => setInitializationError(undefined))
-			.catch((error: unknown) => setInitializationError(error instanceof Error ? error.message : String(error)))
+			.catch((error: unknown) => {
+				setInitializationError(error instanceof Error ? error.message : String(error));
+				setDismissedInitError(false);
+			})
 			.finally(() => setIsInitializing(false));
 		return unsubscribe;
 	}, [service]);
@@ -127,11 +134,17 @@ export function PiChatApp({ service, inputController, component }: PiChatAppProp
 				onDeleteSession={(path) => void service.deleteSession(path)}
 			/>
 
-			{snapshot.errorMessage || initializationError ? (
-				<div className="pi-chat__error" role="alert" aria-live="assertive" aria-atomic="true">
-					{snapshot.errorMessage ?? initializationError}
-				</div>
-			) : null}
+			<ChatBanner
+				errorMessage={dismissedInitError ? snapshot.errorMessage : (snapshot.errorMessage ?? initializationError)}
+				noticeMessage={snapshot.noticeMessage}
+				onDismiss={() => {
+					// The initialization error is this component's own state, so it has
+					// to be dismissed here rather than through the service.
+					setDismissedInitError(true);
+					service.dismissMessages();
+				}}
+				onOpenSettings={canOpenSettings ? () => openPluginSettings(app) : undefined}
+			/>
 
 			<MessageList
 				messages={visibleMessages}
@@ -140,6 +153,7 @@ export function PiChatApp({ service, inputController, component }: PiChatAppProp
 				isInitializing={isInitializing}
 				isConfigured={snapshot.isConfigured ?? false}
 				showAgentDetails={snapshot.showAgentDetails}
+				onOpenSettings={canOpenSettings ? () => openPluginSettings(app) : undefined}
 				app={app}
 				component={component}
 				sourcePath={sourcePath}
