@@ -284,20 +284,32 @@
 
 /* --- messages --- */
 
+/*
+ * Card chrome belongs to the two conversational roles only. Tool calls, tool
+ * results and harness output render as flat trace rows (below), so a bordered
+ * card never contains a second bordered box.
+ */
 .pi-chat__message {
-	border: 1px solid var(--background-modifier-border);
 	border-radius: var(--radius-m);
 	padding: var(--size-4-2);
 }
 
+/*
+ * The user's own turn is the filled one. The leaf background is already
+ * `--background-secondary`, so filling the assistant instead would push the
+ * model forward and sink the user's own words into the panel — the inverse of
+ * every chat convention.
+ */
 .pi-chat__message--user {
 	align-self: flex-end;
-	background: var(--background-secondary);
+	background: var(--background-primary);
+	border: 1px solid var(--background-modifier-border);
 	max-width: 90%;
 }
 
+/* The assistant reads as the page: no fill, no border, just text. */
 .pi-chat__message--assistant {
-	background: var(--background-primary);
+	padding-inline: 0;
 }
 
 .pi-chat__message-role {
@@ -305,10 +317,8 @@
 	color: var(--text-muted);
 	display: flex;
 	font-size: var(--font-ui-smaller);
-	font-weight: var(--font-semibold);
 	gap: var(--size-4-1);
 	margin-bottom: var(--size-4-1);
-	text-transform: uppercase;
 }
 
 .pi-chat__message-content > :first-child {
@@ -317,6 +327,16 @@
 
 .pi-chat__message-content > :last-child {
 	margin-bottom: 0;
+}
+
+/* Aborted turn: the text below the marker is half-written, not a finished reply. */
+.pi-chat__interrupted {
+	align-items: center;
+	color: var(--text-muted);
+	display: flex;
+	font-size: var(--font-ui-smaller);
+	gap: var(--size-4-1);
+	margin: var(--size-4-2) 0 0;
 }
 
 .pi-chat__text {
@@ -347,69 +367,142 @@
 	margin-block: 0.4em;
 }
 
-/* --- tool trace --- */
+/* --- trace rows (tool calls, results, thinking, harness output) --- */
 
-.pi-chat__thinking,
-.pi-chat__tool-call,
-.pi-chat__tool-result {
-	background: var(--background-secondary);
-	border-radius: var(--radius-s);
+/*
+ * One collapsed vocabulary for every mechanical entry. Raw JSON and full tool
+ * output used to render expanded inline while thinking and diffs hid behind
+ * disclosures, so a single `grep` could bury the model's prose. Each of these is
+ * now a one-line row the reader opens on demand.
+ */
+.pi-chat__trace {
+	font-size: var(--font-ui-smaller);
 	margin-top: var(--size-4-1);
-	padding: var(--size-4-2);
 }
 
-.pi-chat__tool-result--error {
-	border: 1px solid var(--text-error);
+.pi-chat__trace-summary {
+	align-items: center;
+	border-radius: var(--radius-s);
+	color: var(--text-muted);
+	cursor: pointer;
+	display: flex;
+	gap: var(--size-4-1);
+	list-style: none;
+	min-height: var(--size-4-6);
+	padding: 0 var(--size-4-1);
+	user-select: none;
+}
+
+/* Obsidian ships webkit, so the default disclosure triangle needs both hooks. */
+.pi-chat__trace-summary::-webkit-details-marker {
+	display: none;
+}
+
+.pi-chat__trace-summary::marker {
+	content: "";
+}
+
+.pi-chat__trace-summary:hover {
+	background: var(--background-modifier-hover);
+}
+
+.pi-chat__trace-summary:focus-visible {
+	outline: 2px solid var(--background-modifier-border-focus);
+	outline-offset: -2px;
+}
+
+.pi-chat__trace-icon {
+	--icon-size: var(--icon-s);
+	color: var(--text-faint);
+	flex-shrink: 0;
+}
+
+.pi-chat__trace-name {
+	flex-shrink: 0;
+	font-family: var(--font-monospace);
+}
+
+/* The argument or outcome next to the name; first thing to give up width. */
+.pi-chat__trace-detail {
+	color: var(--text-faint);
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.pi-chat__trace--thinking .pi-chat__trace-name,
+.pi-chat__trace--harness .pi-chat__trace-name {
+	font-family: var(--font-interface);
+}
+
+.pi-chat__trace--error .pi-chat__trace-icon,
+.pi-chat__trace--error .pi-chat__trace-name {
+	color: var(--text-error);
+}
+
+.pi-chat__trace-body {
+	border-left: 1px solid var(--background-modifier-border);
+	margin-left: var(--size-4-2);
+	padding: var(--size-4-1) 0 var(--size-4-1) var(--size-4-2);
+}
+
+.pi-chat__trace-body pre {
+	margin: 0;
+	white-space: pre-wrap;
+}
+
+/* Long tool output stays bounded so one `grep` cannot own the whole panel. */
+.pi-chat__trace--result .pi-chat__trace-body,
+.pi-chat__trace--harness .pi-chat__trace-body {
+	max-height: 18rem;
+	overflow-y: auto;
 }
 
 .pi-chat__tool-status {
 	align-items: center;
-	background: var(--background-secondary);
-	border-radius: var(--radius-s);
 	color: var(--text-muted);
 	display: inline-flex;
 	font-size: var(--font-ui-smaller);
 	gap: var(--size-4-1);
 	margin-top: var(--size-4-2);
-	padding: var(--size-4-2);
-}
-
-/* Collapsed diff attached to write/edit tool results. */
-.pi-chat__diff > summary {
-	color: var(--text-success);
-	cursor: pointer;
-	font-family: var(--font-monospace);
-	font-size: var(--font-ui-smaller);
-	user-select: none;
-}
-
-.pi-chat__diff[open] > summary {
-	color: var(--text-muted);
-	margin-bottom: var(--size-4-1);
-}
-
-.pi-chat__tool-call pre {
-	white-space: pre-wrap;
+	padding: var(--size-4-1) var(--size-4-2);
 }
 
 /* --- "jump to latest" button --- */
 
+/*
+ * Floats over the transcript. `sticky` was wrong here: the scroller is
+ * `.pi-chat__messages`, and this button is its sibling on a non-scrolling flex
+ * parent, so sticky did nothing while the button still consumed flex space —
+ * the message list visibly shrank the moment it appeared. `absolute` against
+ * `.pi-chat__transcript` (already `position: relative`) takes it out of flow.
+ */
 .pi-chat__latest {
-	align-self: center;
+	align-items: center;
 	background: var(--background-secondary);
 	border: 1px solid var(--background-modifier-border);
 	border-radius: var(--radius-m);
+	bottom: var(--size-4-2);
 	box-shadow: var(--shadow-s);
 	color: var(--text-normal);
+	display: inline-flex;
 	font-size: var(--font-ui-smaller);
-	margin-top: calc(var(--size-4-1) * -1);
-	padding: var(--size-4-1) var(--size-4-2);
-	position: sticky;
-	bottom: var(--size-4-1);
+	gap: var(--size-4-1);
+	left: 50%;
+	min-height: var(--size-4-8);
+	padding: var(--size-4-1) var(--size-4-3);
+	position: absolute;
+	transform: translateX(-50%);
 }
 
 .pi-chat__latest:hover {
 	background: var(--background-modifier-hover);
+}
+
+.pi-chat__latest:focus-visible {
+	outline: 2px solid var(--background-modifier-border-focus);
+	outline-offset: 1px;
 }
 
 /* --- empty state --- */
