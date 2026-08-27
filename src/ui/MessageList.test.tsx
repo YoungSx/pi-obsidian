@@ -224,6 +224,57 @@ describe("MessageList message chrome", () => {
 	});
 });
 
+describe("MessageList reply actions", () => {
+	it("offers the note-facing actions on a settled reply, so an answer can reach a note", async () => {
+		const host = renderMessages([assistantMessage("the answer")], { onRetry: () => undefined });
+		await flushRender();
+
+		const group = host.querySelector(".pi-chat__message-actions");
+		expect(group?.getAttribute("role")).toBe("group");
+		const labels = Array.from(group?.querySelectorAll("button") ?? [], (button) => button.getAttribute("aria-label"));
+		expect(labels).toEqual(["Copy reply", "Insert at cursor", "Append to note", "Ask again"]);
+	});
+
+	it("hides retry while a turn is in flight, rather than queueing a second run", async () => {
+		const host = renderMessages([assistantMessage("the answer")]);
+		await flushRender();
+
+		const labels = Array.from(host.querySelectorAll(".pi-chat__message-actions button"), (button) => button.getAttribute("aria-label"));
+		expect(labels).not.toContain("Ask again");
+	});
+
+	it("shows no actions while the reply is still streaming", async () => {
+		const host = renderMessages([assistantMessage("half a th")], { isStreaming: true, onRetry: () => undefined });
+		await flushRender();
+
+		expect(host.querySelector(".pi-chat__message-actions")).toBeNull();
+	});
+
+	it("shows no actions on a turn that only called tools, since there is nothing to copy", async () => {
+		const host = renderMessages([assistantToolCall("read", { path: "Note.md" })], { onRetry: () => undefined });
+		await flushRender();
+
+		expect(host.querySelector(".pi-chat__message-actions")).toBeNull();
+	});
+
+	it("gives the user's own turn no reply actions", async () => {
+		const host = renderMessages([userMessage("a question")], { onRetry: () => undefined });
+		await flushRender();
+
+		expect(host.querySelector(".pi-chat__message-actions")).toBeNull();
+	});
+
+	it("reports the message index so the retry re-asks the right question", async () => {
+		const retried: number[] = [];
+		const host = renderMessages([userMessage("q"), assistantMessage("a")], { onRetry: (index) => retried.push(index) });
+		await flushRender();
+
+		host.querySelector<HTMLButtonElement>('[aria-label="Ask again"]')?.click();
+		await flushRender();
+		expect(retried).toEqual([1]);
+	});
+});
+
 describe("MessageList trace collapsing", () => {
 	it("renders a tool call as a plain row in the default tier, since the payload is hidden", async () => {
 		const host = renderMessages([assistantToolCall("read", { path: "Daily/2026-08-27.md", offset: 0 })]);
@@ -357,6 +408,7 @@ function emptyUsage(): AssistantMessage["usage"] {
 		output: 0,
 		cacheRead: 0,
 		cacheWrite: 0,
+		totalTokens: 0,
 		cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
 	} as AssistantMessage["usage"];
 }

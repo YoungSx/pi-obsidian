@@ -4,6 +4,8 @@ import type { AssistantMessage, ToolResultMessage, UserMessage } from "@earendil
 import type { App, Component, IconName } from "obsidian";
 import type { TextBlockKind } from "./markdownPolicy";
 import { MarkdownText } from "./MarkdownText";
+import { assistantText } from "./messageActions";
+import { ReplyActions } from "./ReplyActions";
 import { ObsidianIcon } from "./ObsidianIcon";
 import { countDiffLines, describeTool, summarizeToolPayload, summarizeToolResult } from "./traceSummary";
 
@@ -24,6 +26,11 @@ export interface MessageListProps {
 	 * which case the empty state names the path in prose instead.
 	 */
 	onOpenSettings?: () => void;
+	/**
+	 * Re-asks the question behind the reply at `index`. Absent while a turn is in
+	 * flight, which hides the action rather than letting it queue a second run.
+	 */
+	onRetry?: (index: number) => void;
 	/** Render context for `MarkdownRenderer.render`; supplied by the view. */
 	app: App;
 	component: Component;
@@ -54,6 +61,7 @@ export function MessageList({
 	isConfigured = true,
 	showAgentDetails = false,
 	onOpenSettings,
+	onRetry,
 	app,
 	component,
 	sourcePath,
@@ -116,7 +124,15 @@ export function MessageList({
 				{messages.length === 0 ? (
 					<EmptyState isInitializing={isInitializing} isConfigured={isConfigured} onOpenSettings={onOpenSettings} />
 				) : (
-					messages.map((message, index) => <MessageRow key={index} message={message} isStreaming={index === activeIndex} renderContext={context} />)
+					messages.map((message, index) => (
+						<MessageRow
+							key={index}
+							message={message}
+							isStreaming={index === activeIndex}
+							renderContext={context}
+							onRetry={onRetry ? () => onRetry(index) : undefined}
+						/>
+					))
 				)}
 				{pendingToolCalls.length > 0 ? (
 					<div aria-label="Tools running" className="pi-chat__tool-status" role="status">
@@ -166,18 +182,14 @@ function TurnAnnouncer({ messages, isStreaming }: { messages: AgentMessage[]; is
 }
 
 /**
- * The words a settled assistant turn actually said.
+ * What a settled assistant turn is announced as.
  *
- * Thinking and tool calls are deliberately excluded: they are mechanical
- * traffic the transcript already collapses, and reading them aloud would bury
- * the answer.
+ * Thinking and tool calls are excluded by {@link assistantText}: they are
+ * mechanical traffic the transcript already collapses, and reading them aloud
+ * would bury the answer.
  */
 function assistantSpeech(message: AssistantMessage): string {
-	const spoken = message.content
-		.filter((content): content is Extract<typeof content, { type: "text" }> => content.type === "text")
-		.map((content) => content.text)
-		.join("\n")
-		.trim();
+	const spoken = assistantText(message);
 	if (message.stopReason === "aborted") {
 		return spoken ? `${spoken} — you stopped this reply.` : "You stopped this reply.";
 	}
@@ -188,6 +200,11 @@ interface EmptyStateProps {
 	isInitializing: boolean;
 	isConfigured: boolean;
 	onOpenSettings?: () => void;
+	/**
+	 * Re-asks the question behind the reply at `index`. Absent while a turn is in
+	 * flight, which hides the action rather than letting it queue a second run.
+	 */
+	onRetry?: (index: number) => void;
 }
 
 /**
@@ -242,6 +259,7 @@ interface MessageRowProps {
 	message: AgentMessage;
 	isStreaming: boolean;
 	renderContext: MessageContext;
+	onRetry?: () => void;
 }
 
 /**
@@ -251,7 +269,7 @@ interface MessageRowProps {
  * calls, tool results, harness output, compaction summaries — renders flat, so
  * a card never contains another bordered box.
  */
-function MessageRow({ message, isStreaming, renderContext }: MessageRowProps): React.JSX.Element | null {
+function MessageRow({ message, isStreaming, renderContext, onRetry }: MessageRowProps): React.JSX.Element | null {
 	// The summary fronts a compacted transcript; it reads as a divider ("history
 	// above this was summarized"), not as one more message bubble.
 	if (message.role === "compactionSummary") {
@@ -275,6 +293,9 @@ function MessageRow({ message, isStreaming, renderContext }: MessageRowProps): R
 					<ObsidianIcon name="circle-slash" />
 					You stopped this reply.
 				</p>
+			) : null}
+			{message.role === "assistant" && !isStreaming ? (
+				<ReplyActions app={renderContext.app} text={assistantText(message)} onRetry={onRetry} />
 			) : null}
 		</article>
 	);
