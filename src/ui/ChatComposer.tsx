@@ -11,6 +11,15 @@ interface ChatComposerProps {
 	isStreaming: boolean;
 	isCompacting: boolean;
 	isInitializing: boolean;
+	/**
+	 * Whether the active model target has a key ready.
+	 *
+	 * Send is disabled without one: the request cannot go out, so a live button
+	 * that only produces an error banner is the same trap the empty-draft case
+	 * already fixed. The label carries the reason, since a disabled control has
+	 * no other channel to explain itself.
+	 */
+	isConfigured: boolean;
 	/** Whether the panel may use agent-internal vocabulary in its status line. */
 	showAgentDetails: boolean;
 	onInputChange: (value: string) => void;
@@ -33,6 +42,7 @@ export function ChatComposer({
 	isStreaming,
 	isCompacting,
 	isInitializing,
+	isConfigured,
 	showAgentDetails,
 	onInputChange,
 	onSend,
@@ -125,9 +135,9 @@ export function ChatComposer({
 					) : (
 						<IconButton
 							icon="send"
-							label={t.t("chat.sendMessage")}
+							label={t.t(isConfigured ? "chat.sendMessage" : "chat.sendNeedsKey")}
 							onClick={onSend}
-							disabled={isInitializing || !input.trim()}
+							disabled={isInitializing || !isConfigured || !input.trim()}
 							className="piem-chat__send-button mod-cta"
 						/>
 					)}

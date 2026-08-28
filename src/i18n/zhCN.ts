@@ -33,6 +33,7 @@ export const zhCN: DeepPartial<EnCopy> = {
 		stopCompaction: "停止整理",
 		stopResponse: "停止回复",
 		sendMessage: "发送消息",
+		sendNeedsKey: "填写 API 密钥后才能发送",
 		renameChat: "重命名对话",
 		deleteChat: "删除对话",
 		openChats: "打开对话列表",
