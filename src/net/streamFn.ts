@@ -1,10 +1,10 @@
 import type { StreamFn } from "@earendil-works/pi-agent-core";
-import { builtinProviders } from "@earendil-works/pi-ai/providers/all";
 import { anthropicMessagesApi } from "@earendil-works/pi-ai/api/anthropic-messages.lazy";
 import { openAICompletionsApi } from "@earendil-works/pi-ai/api/openai-completions.lazy";
 import { openAIResponsesApi } from "@earendil-works/pi-ai/api/openai-responses.lazy";
 import { createModels, createProvider } from "@earendil-works/pi-ai";
 import type { Api, Model, Models, Provider, ProviderStreams } from "@earendil-works/pi-ai";
+import { builtinProviders } from "./builtinCatalog";
 import { createFetchForTransport, type NetworkTransport } from "./obsidianFetch";
 import { CUSTOM_ENDPOINT_PROVIDER } from "../constants";
 import { isCustomEndpointActive, type CustomEndpointConfig } from "../customEndpoint";

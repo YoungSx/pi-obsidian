@@ -1,5 +1,4 @@
 import { App, Modal, Notice, Setting } from "obsidian";
-import { getBuiltinModels, getBuiltinProviders } from "@earendil-works/pi-ai/providers/all";
 import type { ConnectionTestResult } from "../../connectionTest";
 import {
 	describeProviderConfig,
@@ -7,6 +6,7 @@ import {
 	type ModelConfig,
 	type ProviderConfig,
 } from "../../modelConfig";
+import { getBuiltinModels, getBuiltinProviders } from "../../net/builtinCatalog";
 import { CatalogSuggest, type CatalogSuggestion } from "./CatalogSuggest";
 import type { Translator } from "../../i18n";
 import { attachTestButton, type TestRowHandle } from "./testResult";
