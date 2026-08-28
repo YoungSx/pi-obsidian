@@ -2,8 +2,32 @@
  *
  * Every colour, radius, spacing and font comes from Obsidian's semantic CSS
  * variables, so the panel inherits whatever theme (light/dark/community) the
- * vault runs. No hardcoded hex/rgb anywhere; the only custom property below is
- * `--pi-context-ratio`, an inline state value, not a theme token. */
+ * vault runs. No hardcoded hex/rgb anywhere; the only custom properties are
+ * inline state values (`--pi-context-ratio`, `--piem-composer-*`), not theme
+ * tokens.
+ *
+ * Type ramp — three roles, drawn from Obsidian's own UI scale so a theme that
+ * rescales the app rescales this panel with it:
+ *
+ *   read  `--font-ui-medium`  (15px)  transcript prose, the composer you type
+ *                                     it in, and section titles. The one tier
+ *                                     meant to be read in paragraphs.
+ *   ui    `--font-ui-small`   (13px)  sentences that are chrome: banner copy,
+ *                                     empty-state body, button labels.
+ *   meta  `--font-ui-smaller` (12px)  labels, counters, trace rows — scanned,
+ *                                     not read.
+ *
+ * Two weights only (normal / `--font-semibold`) and two text tones carry the
+ * rest, because 15/13/12 is a 1.25 and a 1.08 step: size alone cannot hold a
+ * hierarchy this tight, so weight, tone and space do the work with it.
+ *
+ * `--text-faint` is for icons, never for text at `meta`: at 12px it falls under
+ * the 4.5:1 WCAG 1.4.3 asks of normal-size text (the context chips below record
+ * the same finding).
+ *
+ * The settings panel keeps Obsidian's own `meta` sizing for anything sitting in
+ * a `.setting-item`, so plugin rows read as native next to core plugin rows —
+ * that is a deliberate exception to the ramp above, not a miss. */
 
 .piem-chat-view {
 	height: 100%;
@@ -398,6 +422,24 @@
 	font-size: var(--font-ui-smaller);
 	gap: var(--size-4-1);
 	margin-bottom: var(--size-4-1);
+}
+
+/*
+ * The `read` tier, stated rather than inherited.
+ *
+ * Nothing set a size here, so the transcript fell through to Obsidian's *note*
+ * body size (`--font-text-size`, 16px by default and user-configurable in
+ * Appearance) while every other string in the panel is drawn from the UI scale.
+ * That put the reply a step *above* the panel title at 15px — the one thing on
+ * screen that should read as the heading was the smallest of the two — and it
+ * meant a reader who sets 20px notes for long-form reading silently restyled a
+ * sidebar they never asked to change.
+ *
+ * Trace rows and the compaction body set their own size and so are unaffected:
+ * a matched declaration beats an inherited one.
+ */
+.piem-chat__message-content {
+	font-size: var(--font-ui-medium);
 }
 
 .piem-chat__message-content > :first-child {
@@ -995,7 +1037,14 @@
 	border-radius: var(--radius-s);
 	color: var(--text-normal);
 	font-family: var(--font-interface);
-	font-size: var(--font-ui-small);
+	/*
+	 * `read`, matching the transcript. This was `--font-ui-small`, which set the
+	 * draft a step below the reply it produces — the same sentence shrank when you
+	 * wrote it and grew when it came back. It is also the one field in the panel
+	 * you compose paragraphs in, so it belongs to the tier meant to be read in
+	 * paragraphs, not to the chrome tier around it.
+	 */
+	font-size: var(--font-ui-medium);
 	/* Both driven by `useAutosize`; the fallbacks apply before it first runs and
 	 * if the hook is ever absent. */
 	height: var(--piem-composer-height, auto);
