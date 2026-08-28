@@ -199,6 +199,14 @@ export const en = {
 		noModels: "No models yet.",
 		activeModelHeading: "Active model",
 		activeModelDesc: "Every request goes out on this one.",
+		/**
+		 * Shown when the vault names a builtin model this trimmed build dropped.
+		 *
+		 * Names the replacement as well as the loss: the next prompt is answered by
+		 * something, and not saying what makes the change look like a malfunction.
+		 */
+		missingBuiltinModel:
+			"This build no longer includes {provider}/{modelId}, so requests go to {replacement} instead. Add it as a provider and model below to keep using it.",
 		editModel: "Edit model",
 		deleteModel: "Delete model",
 		keySet: "key set",
@@ -223,6 +231,113 @@ export const en = {
 			"Chat logs are files in your vault, so they sync and back up with your notes. They hold the conversation and whatever note text was read while answering it.",
 		apiKeysHeading: "API keys",
 		restrictedKeyHint: "Use a restricted, low-limit key: a vault is a plain folder, and a key inside it travels with every backup and sync of that folder.",
+	},
+
+	/**
+	 * About tab rows. The hrefs live in `aboutCopy.ts` — only the wording is here.
+	 *
+	 * Each row's label has to read on its own, because assistive technology can
+	 * list a page's links out of context: "Open repository" survives that, "here"
+	 * does not. Translations must keep that property.
+	 */
+	about: {
+		version: "Version {version}",
+		sourceName: "Source code",
+		sourceDesc: "The plugin's repository on GitHub.",
+		sourceLabel: "Open repository",
+		issuesName: "Report a problem",
+		issuesDesc: "Bugs and feature requests go to the issue tracker.",
+		issuesLabel: "Open issues",
+		/**
+		 * Points at the licence file rather than naming the licence, so the panel
+		 * never has to be kept in sync with the terms it claims.
+		 */
+		licenseName: "License",
+		licenseDesc: "The terms this plugin is distributed under.",
+		licenseLabel: "Read the license",
+	},
+
+	/**
+	 * The compaction group on the Behavior tab.
+	 *
+	 * pi calls these reserve and retention tokens, but an Obsidian reader's
+	 * vocabulary is notes and chats, not context windows. The copy leads with the
+	 * consequence — what happens to their conversation — and mentions tokens only
+	 * as the unit the field takes.
+	 */
+	compaction: {
+		groupLabel: "Context tidying",
+		/** Names the default behaviour, so a reader who never opens the group knows it is handled. */
+		groupHint: "Advanced. Piem already summarizes older messages before the context fills.",
+		enabledName: "Summarize automatically",
+		enabledDesc:
+			"Replace older messages with a summary when the context is nearly full. Turn this off to keep every message and tidy up manually instead.",
+		reserveName: "Headroom before tidying",
+		reserveDesc:
+			"Tokens kept free for writing the summary. Raise it to tidy up earlier, lower it to use more of the window first. Default {default}.",
+		keepName: "Recent messages to keep",
+		keepDesc:
+			"Tokens of recent conversation left untouched by a summary. Raise it to keep more of the exchange verbatim. Default {default}.",
+		/**
+		 * What a rejected entry says. A field that silently reverts is the failure
+		 * mode worth avoiding: someone who types 200 and finds 16,384 back in the
+		 * box cannot tell whether the plugin refused, corrected, or ignored them.
+		 */
+		tokenFloor: "Values below {min} tokens are raised to it.",
+	},
+
+	/**
+	 * The History tab.
+	 *
+	 * These are the only settings in the plugin that decide the fate of the user's
+	 * own writing, so the wording follows two rules: never describe a limit
+	 * without saying what happens to what falls outside it, and always say trash,
+	 * because "removed" and "recoverable from trash" are different promises.
+	 */
+	sessions: {
+		retentionName: "Chats to keep",
+		/** Says trash in the same words the delete confirmation uses, so one recognises the other. */
+		retentionDesc:
+			"Older chats move to trash when a new one is created, so they can still be restored from there. Set to 0 to keep every chat.",
+		retentionFloor: "Values below {min} are raised to it.",
+		retentionUnlimited: "Every chat is kept. {stored}",
+		/** The warning that makes the number's effect visible before it acts. */
+		retentionWillTrash: "{stored} The next new chat moves the oldest {chats} to trash.",
+		retentionSafe: "{stored} Nothing is trashed until the limit is reached.",
+		storedNone: "No chats stored yet.",
+		storedOne: "1 chat stored.",
+		storedMany: "{count} chats stored.",
+		chatOne: "1 chat",
+		chatMany: "{count} chats",
+		dirName: "Chat folder",
+		/** Discloses both surprises up front: the logs sync, and the agent can read them. */
+		dirDesc:
+			"Folder inside this vault where chat logs are written. Logs there sync and back up with your notes, and Piem's own search tools can read them.",
+		dirRestartHint: "Takes effect for the next chat you create.",
+		dirUnchanged: "New chats are written to {dir}.",
+		/**
+		 * Says both halves, because the consequence must never be left implicit:
+		 * where new chats go, and that the old ones drop out of the list until
+		 * moved. A user who expects the list to follow the setting and finds it
+		 * short would read that as the plugin having lost their conversations.
+		 */
+		dirChanged:
+			"New chats will be written to {next}. Nothing is moved: chats in {current} stay on disk but drop out of the chat list until you move the files across.",
+		/** Field-level rejections. Each names the rule that was broken, not just that something is wrong. */
+		dirProblemEmpty: "Enter a folder inside this vault.",
+		dirProblemAbsolute: "Use a folder inside this vault, not a path on your computer.",
+		dirProblemEscape: "Folders cannot step outside the vault with '..'.",
+		dirProblemUnusable: "That is not a folder this vault can hold.",
+		/**
+		 * Chats left in the folder earlier releases used. Naming the path is the
+		 * whole value: it sits inside the config directory, which the file explorer
+		 * does not show, so a reader who does not know where to look cannot recover
+		 * them.
+		 */
+		legacyOne:
+			"1 chat from an earlier version is still in {dir}. Move the .jsonl files into the folder above to see them in the chat list again.",
+		legacyMany:
+			"{count} chats from an earlier version are still in {dir}. Move the .jsonl files into the folder above to see them in the chat list again.",
 	},
 
 	/** Connection-test verdicts, shown next to the Test button. */

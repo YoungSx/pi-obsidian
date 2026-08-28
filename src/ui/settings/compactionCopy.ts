@@ -1,4 +1,5 @@
 import { DEFAULT_COMPACTION_SETTINGS, MIN_COMPACTION_TOKENS } from "../../agent/compactionSettings";
+import type { Translator } from "../../i18n";
 
 /**
  * Wording for the compaction group, kept out of the panel so it can be tested.
@@ -7,7 +8,8 @@ import { DEFAULT_COMPACTION_SETTINGS, MIN_COMPACTION_TOKENS } from "../../agent/
  * reserve and retention tokens, but an Obsidian reader's vocabulary is notes and
  * chats, not context windows. The copy therefore leads with the consequence —
  * what happens to their conversation — and mentions tokens only as the unit the
- * field takes.
+ * field takes. The wording itself lives in the copy tables; this module resolves
+ * it and supplies the numbers the rows have to quote.
  */
 
 /** Label and help text for one row, plus the placeholder showing pi's default. */
@@ -17,32 +19,45 @@ export interface CompactionRowCopy {
 	placeholder: string;
 }
 
-export const COMPACTION_GROUP_LABEL = "Context tidying";
+export function compactionGroupLabel(t: Translator): string {
+	return t.t("compaction.groupLabel");
+}
 
 /**
  * Summary hint. Names the default behaviour so a reader who never opens the
  * group knows it is already handled, which is the point of collapsing it.
  */
-export const COMPACTION_GROUP_HINT = "Advanced. Piem already summarizes older messages before the context fills.";
+export function compactionGroupHint(t: Translator): string {
+	return t.t("compaction.groupHint");
+}
 
-export const COMPACTION_ENABLED_COPY: CompactionRowCopy = {
-	name: "Summarize automatically",
-	description:
-		"Replace older messages with a summary when the context is nearly full. Turn this off to keep every message and tidy up manually instead.",
-	placeholder: "",
-};
+export function compactionEnabledCopy(t: Translator): CompactionRowCopy {
+	return {
+		name: t.t("compaction.enabledName"),
+		description: t.t("compaction.enabledDesc"),
+		placeholder: "",
+	};
+}
 
-export const COMPACTION_RESERVE_COPY: CompactionRowCopy = {
-	name: "Headroom before tidying",
-	description: `Tokens kept free for writing the summary. Raise it to tidy up earlier, lower it to use more of the window first. Default ${formatTokens(DEFAULT_COMPACTION_SETTINGS.reserveTokens)}.`,
-	placeholder: String(DEFAULT_COMPACTION_SETTINGS.reserveTokens),
-};
+export function compactionReserveCopy(t: Translator): CompactionRowCopy {
+	return {
+		name: t.t("compaction.reserveName"),
+		description: t.t("compaction.reserveDesc", {
+			default: formatTokens(DEFAULT_COMPACTION_SETTINGS.reserveTokens, t),
+		}),
+		placeholder: String(DEFAULT_COMPACTION_SETTINGS.reserveTokens),
+	};
+}
 
-export const COMPACTION_KEEP_COPY: CompactionRowCopy = {
-	name: "Recent messages to keep",
-	description: `Tokens of recent conversation left untouched by a summary. Raise it to keep more of the exchange verbatim. Default ${formatTokens(DEFAULT_COMPACTION_SETTINGS.keepRecentTokens)}.`,
-	placeholder: String(DEFAULT_COMPACTION_SETTINGS.keepRecentTokens),
-};
+export function compactionKeepCopy(t: Translator): CompactionRowCopy {
+	return {
+		name: t.t("compaction.keepName"),
+		description: t.t("compaction.keepDesc", {
+			default: formatTokens(DEFAULT_COMPACTION_SETTINGS.keepRecentTokens, t),
+		}),
+		placeholder: String(DEFAULT_COMPACTION_SETTINGS.keepRecentTokens),
+	};
+}
 
 /**
  * What a rejected entry says.
@@ -51,11 +66,14 @@ export const COMPACTION_KEEP_COPY: CompactionRowCopy = {
  * types 200 and finds 16384 back in the box has no way to tell whether the
  * plugin refused, corrected, or ignored them.
  */
-export function describeTokenFloor(): string {
-	return `Values below ${formatTokens(MIN_COMPACTION_TOKENS)} tokens are raised to it.`;
+export function describeTokenFloor(t: Translator): string {
+	return t.t("compaction.tokenFloor", { min: formatTokens(MIN_COMPACTION_TOKENS, t) });
 }
 
-/** `16384` → `16,384`. Groups digits so a five-figure default is readable at a glance. */
-function formatTokens(tokens: number): string {
-	return tokens.toLocaleString("en-US");
+/**
+ * `16384` → `16,384`. Groups digits so a five-figure default is readable at a
+ * glance, in whatever grouping the resolved language uses.
+ */
+function formatTokens(tokens: number, t: Translator): string {
+	return tokens.toLocaleString(t.lang === "zh-cn" ? "zh-CN" : "en-US");
 }

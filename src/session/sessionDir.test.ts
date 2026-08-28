@@ -1,7 +1,6 @@
 import { describe, expect, it } from "bun:test";
 import {
 	DEFAULT_SESSION_DIR,
-	describeSessionDirProblem,
 	getLegacySessionDir,
 	isLegacySessionDir,
 	normalizeSessionDir,
@@ -63,23 +62,5 @@ describe("isLegacySessionDir", () => {
 
 		expect(isLegacySessionDir(legacy, ".config", "piem")).toBe(true);
 		expect(isLegacySessionDir(legacy, CONFIG_DIR, "piem")).toBe(false);
-	});
-});
-
-describe("describeSessionDirProblem", () => {
-	it("says nothing about a usable folder", () => {
-		expect(describeSessionDirProblem("Piem/chats")).toBeUndefined();
-	});
-
-	it("names the rule that was broken, not just that something is wrong", () => {
-		// The message is the only report the field gets, so it has to be actionable.
-		expect(describeSessionDirProblem("/Users/simon")).toContain("inside this vault");
-		expect(describeSessionDirProblem("C:/chats")).toContain("inside this vault");
-		expect(describeSessionDirProblem("../outside")).toContain("..");
-		expect(describeSessionDirProblem("")).toContain("folder inside this vault");
-	});
-
-	it("explains why plugin-internal folders are not accepted", () => {
-		expect(describeSessionDirProblem(`${CONFIG_DIR}/plugins/piem/sessions`)).toContain("not a folder this vault can hold");
 	});
 });

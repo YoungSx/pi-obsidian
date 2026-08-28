@@ -1,3 +1,5 @@
+import type { Translator } from "../../i18n";
+
 /**
  * Wording for the Models tab, kept apart from the panel so it can be tested.
  */
@@ -11,6 +13,14 @@
  * reach the dropped model's endpoint — the capability was not removed, only the
  * builtin shortcut to it.
  */
-export function describeMissingBuiltinModel(missing: { provider: string; modelId: string }, replacement: string): string {
-	return `This build no longer includes ${missing.provider}/${missing.modelId}, so requests go to ${replacement} instead. Add it as a provider and model below to keep using it.`;
+export function describeMissingBuiltinModel(
+	missing: { provider: string; modelId: string },
+	replacement: string,
+	t: Translator,
+): string {
+	return t.t("settings.missingBuiltinModel", {
+		provider: missing.provider,
+		modelId: missing.modelId,
+		replacement,
+	});
 }

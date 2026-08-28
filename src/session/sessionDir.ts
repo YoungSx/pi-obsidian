@@ -76,22 +76,3 @@ export function isLegacySessionDir(dir: string, configDir: string, pluginId: str
 	}
 }
 
-/**
- * Why a typed folder was rejected, or undefined when it is usable.
- *
- * Wording matches what `normalizeVaultPath` actually enforces, so the message
- * names the rule the user broke rather than restating that something is wrong.
- */
-export function describeSessionDirProblem(input: string): string | undefined {
-	const trimmed = input.trim();
-	if (!trimmed) {
-		return "Enter a folder inside this vault.";
-	}
-	if (trimmed.startsWith("/") || /^[A-Za-z]:/.test(trimmed)) {
-		return "Use a folder inside this vault, not a path on your computer.";
-	}
-	if (trimmed.split(/[/\\]/).includes("..")) {
-		return "Folders cannot step outside the vault with '..'.";
-	}
-	return normalizeSessionDir(trimmed) ? undefined : "That is not a folder this vault can hold.";
-}

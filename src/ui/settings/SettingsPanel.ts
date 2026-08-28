@@ -25,34 +25,35 @@ import { ModelModal } from "./ModelModal";
 import { ProviderModal } from "./ProviderModal";
 import { describeSecretStorage, type SecretStorageState } from "./secretStorageCopy";
 import { renderSettingsTabs, type SettingsTabDefinition } from "./SettingsTabs";
-import { ABOUT_LINKS, describeVersion, type AboutLink } from "./aboutCopy";
+import { aboutLinks, describeVersion, type AboutLink } from "./aboutCopy";
 import { describeMissingBuiltinModel } from "./modelsCopy";
 import { createCollapsibleSection } from "./collapsibleSection";
 import {
-	COMPACTION_ENABLED_COPY,
-	COMPACTION_GROUP_HINT,
-	COMPACTION_GROUP_LABEL,
-	COMPACTION_KEEP_COPY,
-	COMPACTION_RESERVE_COPY,
+	compactionEnabledCopy,
+	compactionGroupHint,
+	compactionGroupLabel,
+	compactionKeepCopy,
+	compactionReserveCopy,
 	describeTokenFloor,
 	type CompactionRowCopy,
 } from "./compactionCopy";
 import { MIN_COMPACTION_TOKENS, readTokenCount, resolveCompactionSettings, type CompactionConfig } from "../../agent/compactionSettings";
 import { readRetentionLimit, UNLIMITED_SESSION_RETENTION } from "../../session/retention";
 import {
+	describeLegacyChats,
 	describeRetention,
 	describeRetentionFloor,
-	describeLegacyChats,
 	describeSessionDirChange,
-	RETENTION_DESCRIPTION,
-	RETENTION_NAME,
+	describeSessionDirProblem,
+	retentionDescription,
+	retentionName,
 	RETENTION_PLACEHOLDER,
-	SESSION_DIR_DESCRIPTION,
-	SESSION_DIR_NAME,
+	sessionDirDescription,
+	sessionDirName,
+	sessionDirRestartHint,
 	SESSION_DIR_PLACEHOLDER,
-	SESSION_DIR_RESTART_HINT,
 } from "./sessionsCopy";
-import { DEFAULT_SESSION_DIR, describeSessionDirProblem, normalizeSessionDir } from "../../session/sessionDir";
+import { DEFAULT_SESSION_DIR, normalizeSessionDir } from "../../session/sessionDir";
 
 /**
  * Renders the settings panel.
@@ -205,7 +206,7 @@ function renderModelsTab(containerEl: HTMLElement, host: SettingsPanelHost): voi
 	if (missing) {
 		containerEl.createEl("p", {
 			cls: "piem-settings-warning",
-			text: describeMissingBuiltinModel(missing, host.describeTarget()),
+			text: describeMissingBuiltinModel(missing, host.describeTarget(), host.t),
 		});
 	}
 
@@ -430,10 +431,10 @@ function renderChatTab(containerEl: HTMLElement, host: SettingsPanelHost): void 
  * once is not made to hunt for what they set.
  */
 function renderCompactionGroup(containerEl: HTMLElement, host: SettingsPanelHost): void {
-	const { settings } = host;
+	const { settings, t } = host;
 	const body = createCollapsibleSection(containerEl, {
-		label: COMPACTION_GROUP_LABEL,
-		description: COMPACTION_GROUP_HINT,
+		label: compactionGroupLabel(t),
+		description: compactionGroupHint(t),
 		open: settings.compaction !== undefined,
 	});
 
@@ -451,9 +452,10 @@ function renderCompactionGroup(containerEl: HTMLElement, host: SettingsPanelHost
 
 	const resolved = resolveCompactionSettings(settings.compaction, host.contextWindow());
 
+	const enabledCopy = compactionEnabledCopy(t);
 	new Setting(body)
-		.setName(COMPACTION_ENABLED_COPY.name)
-		.setDesc(COMPACTION_ENABLED_COPY.description)
+		.setName(enabledCopy.name)
+		.setDesc(enabledCopy.description)
 		.addToggle((toggle) => {
 			toggle.setValue(resolved.enabled);
 			toggle.onChange(async (enabled) => {
@@ -465,14 +467,16 @@ function renderCompactionGroup(containerEl: HTMLElement, host: SettingsPanelHost
 		});
 
 	renderTokenRow(body, {
-		copy: COMPACTION_RESERVE_COPY,
+		copy: compactionReserveCopy(t),
 		value: settings.compaction?.reserveTokens,
 		onChange: (reserveTokens) => update({ reserveTokens }),
+		t,
 	});
 	renderTokenRow(body, {
-		copy: COMPACTION_KEEP_COPY,
+		copy: compactionKeepCopy(t),
 		value: settings.compaction?.keepRecentTokens,
 		onChange: (keepRecentTokens) => update({ keepRecentTokens }),
+		t,
 	});
 }
 
@@ -481,6 +485,8 @@ interface TokenRowOptions {
 	/** The stored value, or undefined when the row is following pi's default. */
 	value: number | undefined;
 	onChange(value: number | undefined): Promise<void>;
+	/** Resolves the floor advice appended to the description. */
+	t: Translator;
 }
 
 /**
@@ -495,7 +501,7 @@ interface TokenRowOptions {
 function renderTokenRow(containerEl: HTMLElement, options: TokenRowOptions): void {
 	new Setting(containerEl)
 		.setName(options.copy.name)
-		.setDesc(`${options.copy.description} ${describeTokenFloor()}`)
+		.setDesc(`${options.copy.description} ${describeTokenFloor(options.t)}`)
 		.addText((text) => {
 			text.inputEl.type = "number";
 			text.inputEl.min = String(MIN_COMPACTION_TOKENS);
@@ -544,7 +550,7 @@ function renderLegacyChatsNotice(containerEl: HTMLElement, host: SettingsPanelHo
 			notice.remove();
 			return;
 		}
-		notice.setText(describeLegacyChats(count, dir));
+		notice.setText(describeLegacyChats(count, dir, host.t));
 	});
 }
 
@@ -557,14 +563,14 @@ function renderLegacyChatsNotice(containerEl: HTMLElement, host: SettingsPanelHo
  * which would repoint the plugin on a typo.
  */
 function renderSessionDirRow(containerEl: HTMLElement, host: SettingsPanelHost): void {
-	const { settings } = host;
-	const setting = new Setting(containerEl).setName(SESSION_DIR_NAME);
-	setting.setDesc(`${SESSION_DIR_DESCRIPTION} ${SESSION_DIR_RESTART_HINT}`);
+	const { settings, t } = host;
+	const setting = new Setting(containerEl).setName(sessionDirName(t));
+	setting.setDesc(`${sessionDirDescription(t)} ${sessionDirRestartHint(t)}`);
 	const effect = setting.descEl.createDiv({ cls: "piem-settings-effect" });
 
 	const currentDir = host.activeSessionDir();
 	const describe = (next: string, problem?: string): void => {
-		effect.setText(problem ?? describeSessionDirChange(currentDir, next));
+		effect.setText(problem ?? describeSessionDirChange(currentDir, next, t));
 		// The state is carried in text, not colour alone: this line is the only
 		// report a rejected path gets.
 		effect.toggleClass("piem-settings-effect--error", problem !== undefined);
@@ -584,7 +590,7 @@ function renderSessionDirRow(containerEl: HTMLElement, host: SettingsPanelHost):
 				void host.save();
 				return;
 			}
-			const problem = describeSessionDirProblem(typed);
+			const problem = describeSessionDirProblem(typed, t);
 			if (problem) {
 				describe(typed, problem);
 				return;
@@ -603,10 +609,10 @@ function renderSessionDirRow(containerEl: HTMLElement, host: SettingsPanelHost):
 }
 
 function renderRetentionRow(containerEl: HTMLElement, host: SettingsPanelHost): void {
-	const { settings } = host;
+	const { settings, t } = host;
 
-	const setting = new Setting(containerEl).setName(RETENTION_NAME);
-	setting.setDesc(`${RETENTION_DESCRIPTION} ${describeRetentionFloor()}`);
+	const setting = new Setting(containerEl).setName(retentionName(t));
+	setting.setDesc(`${retentionDescription(t)} ${describeRetentionFloor(t)}`);
 	// Appended after `setDesc`, which replaces the description's contents. Its own
 	// element so the line can be rewritten after an edit without re-rendering the
 	// tab, which would throw focus out of the field.
@@ -616,7 +622,7 @@ function renderRetentionRow(containerEl: HTMLElement, host: SettingsPanelHost): 
 	// called once a real count exists, so the line never states a wrong one.
 	let storedCount: number | undefined;
 	const describe = (limit: number): void => {
-		effect.setText(storedCount === undefined ? "" : describeRetention(limit, storedCount));
+		effect.setText(storedCount === undefined ? "" : describeRetention(limit, storedCount, t));
 	};
 	void host.countStoredSessions().then((count) => {
 		storedCount = count;
@@ -671,9 +677,9 @@ function renderNetworkTab(containerEl: HTMLElement, host: SettingsPanelHost): vo
  */
 function renderAboutTab(containerEl: HTMLElement, host: SettingsPanelHost): void {
 	const { t } = host;
-	new Setting(containerEl).setName("Piem").setHeading().setDesc(describeVersion(host.manifest.version));
+	new Setting(containerEl).setName("Piem").setHeading().setDesc(describeVersion(host.manifest.version, t));
 
-	for (const link of ABOUT_LINKS) {
+	for (const link of aboutLinks(t)) {
 		renderLinkRow(containerEl, link);
 	}
 
