@@ -25,6 +25,7 @@ import {
 } from "./customEndpoint";
 import { renderSettingsPanel } from "./ui/settings/SettingsPanel";
 import { getT, isLanguageSetting, resolveLanguage, type LanguageHost, type LanguageSetting, type Translator } from "./i18n";
+import { DEFAULT_SEND_SHORTCUT, isSendShortcutSetting, type SendShortcut } from "./ui/keyboard";
 
 const OFF_THINKING_LEVEL: ModelThinkingLevel = "off";
 
@@ -60,6 +61,15 @@ export interface PiemSettings {
 	 * (resolved once per load); the concrete values override it.
 	 */
 	language: LanguageSetting;
+	/**
+	 * Which keypress sends the draft.
+	 *
+	 * Ctrl/Cmd+Enter sends under either value, so this only decides whether a bare
+	 * Enter sends too — see {@link isSendShortcut}. Always present: there is no
+	 * upstream default to defer to, and a chord the plugin picked has to be visible
+	 * in the panel rather than implied by an empty field.
+	 */
+	sendShortcut: SendShortcut;
 	/**
 	 * When history gets summarized, and how much survives.
 	 *
@@ -107,6 +117,7 @@ export const DEFAULT_SETTINGS: PiemSettings = {
 	networkTransport: "requestUrl",
 	showAgentDetails: false,
 	language: "auto",
+	sendShortcut: DEFAULT_SEND_SHORTCUT,
 	sessionRetention: DEFAULT_SESSION_RETENTION,
 	sessionDir: DEFAULT_SESSION_DIR,
 };
@@ -171,6 +182,10 @@ export function normalizeSettings(data: Partial<PiemSettings> | null | undefined
 		// quiet default rather than inheriting the old always-verbose panel.
 		showAgentDetails: data?.showAgentDetails === true,
 		language,
+		// Absent in vaults written before the setting existed. Those users get bare
+		// Enter, which adds a way to send rather than moving one: the Ctrl+Enter
+		// chord they already know keeps working under it.
+		sendShortcut: isSendShortcutSetting(data?.sendShortcut) ? data.sendShortcut : DEFAULT_SEND_SHORTCUT,
 		// Absent in vaults written before the cap existed. Those vaults may already
 		// hold more chats than it allows, and the first new chat trims them to it —
 		// to trash, so nothing is lost outright.

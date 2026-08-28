@@ -29,6 +29,7 @@ import { injectContext } from "./contextInjection";
 import { ContextRefs, type ContextRef } from "./contextRefs";
 import { OBSIDIAN_AGENT_SYSTEM_PROMPT } from "./systemPrompt";
 import { getT, resolveLanguage, type Language, type LanguageHost, type Translator } from "../i18n";
+import type { SendShortcut } from "../ui/keyboard";
 
 export interface ChatSnapshot {
 	messages: AgentMessage[];
@@ -89,6 +90,15 @@ export interface ChatSnapshot {
 	 * has no business reaching for.
 	 */
 	language: Language;
+	/**
+	 * Which keypress sends the draft.
+	 *
+	 * Mirrored onto the snapshot for the same reason as {@link showAgentDetails}:
+	 * the composer prints the chord on its Send button and binds the key that
+	 * matches, and both have to come from one place or the label can disagree with
+	 * the behaviour.
+	 */
+	sendShortcut: SendShortcut;
 	/**
 	 * Notes named to the model on the next turn, active note first.
 	 *
@@ -566,6 +576,7 @@ export class ObsidianAgentService {
 			// Vault declarations do not carry it; the cast is what lets the optional
 			// call be feature-detected at runtime.
 			language: resolveLanguage(this.app.vault as LanguageHost, settings.language),
+			sendShortcut: settings.sendShortcut,
 			contextRefs: this.contextRefs.list(),
 			isFollowingActiveNote: this.contextRefs.isFollowingActive(),
 		};

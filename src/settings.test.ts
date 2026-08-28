@@ -300,3 +300,23 @@ describe("getActiveConfiguration", () => {
 		expect(active?.provider.id).toBe("p1");
 	});
 });
+
+describe("normalizeSettings with the send shortcut", () => {
+	it("gives a vault written before the setting existed a bare Enter", () => {
+		// This adds a way to send rather than moving one: Ctrl/Cmd+Enter, the chord
+		// those users already know, still sends under `enter` — see `isSendShortcut`.
+		expect(normalizeSettings({}).sendShortcut).toBe("enter");
+	});
+
+	it("keeps an explicit choice", () => {
+		expect(normalizeSettings({ sendShortcut: "modEnter" }).sendShortcut).toBe("modEnter");
+		expect(normalizeSettings({ sendShortcut: "enter" }).sendShortcut).toBe("enter");
+	});
+
+	it("falls back rather than persisting a chord the build cannot honour", () => {
+		// A stored value this build does not recognize would reach `isSendShortcut`
+		// as an unknown chord, which sends on neither key.
+		expect(normalizeSettings({ sendShortcut: "shiftEnter" as never }).sendShortcut).toBe("enter");
+		expect(normalizeSettings({ sendShortcut: null as never }).sendShortcut).toBe("enter");
+	});
+});

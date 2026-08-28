@@ -99,6 +99,61 @@ function regenerableIndex(messages: AgentMessage[]): number | null {
 	return null;
 }
 
+/**
+ * Whether the turn has been accepted but produced nothing to look at yet.
+ *
+ * The gap this covers is the one a reader reports as "it ignored me": the prompt
+ * lands, the transcript ends on their own message, and the only sign anything
+ * happened is a control at the other end of the panel. The wait is a first-token
+ * latency the plugin does not control, so it is filled rather than hidden.
+ *
+ * False as soon as *anything* is visible — a token, a thought, a tool row — so
+ * the placeholder never sits under content that has already answered the same
+ * question. `toolsRunning` is passed in for that reason: the running-tools line
+ * directly above is already the progress report.
+ */
+function awaitsFirstToken(messages: AgentMessage[], isStreaming: boolean, toolsRunning: boolean): boolean {
+	if (!isStreaming || toolsRunning) {
+		return false;
+	}
+	const latest = messages[messages.length - 1];
+	return !latest || latest.role !== "assistant" || !hasVisibleContent(latest);
+}
+
+/** Whether an assistant turn has rendered anything: prose, a thought, or a tool row. */
+function hasVisibleContent(message: AssistantMessage): boolean {
+	return message.content.some((content) => (content.type === "text" ? content.text.trim().length > 0 : true));
+}
+
+/**
+ * The reply, before it has any words.
+ *
+ * A message card in the assistant's own position rather than a line of chrome
+ * somewhere else, because its job is to hold the place the answer will appear in
+ * — the reader's eye is already there. It is replaced by the real turn on the
+ * first token, so it never stacks with content.
+ *
+ * Not a live region: the settled turn is announced once by {@link TurnAnnouncer},
+ * and announcing the start as well would make a screen reader interrupt the user
+ * to say that nothing had happened yet. `aria-label` covers it for anyone
+ * navigating the transcript by hand.
+ */
+function PendingReply(): React.JSX.Element {
+	const t = useT();
+	return (
+		<article
+			className="piem-chat__message piem-chat__message--assistant piem-chat__message--pending"
+			aria-label={t.t("chat.replyingAria")}
+			aria-busy={true}
+		>
+			<span className="piem-chat__pending">
+				<ObsidianIcon name="loader-circle" className="piem-chat__spinner" />
+				{t.t("chat.replying")}
+			</span>
+		</article>
+	);
+}
+
 export function MessageList({
 	messages,
 	isStreaming,
@@ -206,6 +261,7 @@ export function MessageList({
 						{pendingToolCalls.map((toolName) => describeTool(toolName, showAgentDetails, t)).join(", ")}
 					</div>
 				) : null}
+				{awaitsFirstToken(messages, isStreaming, pendingToolCalls.length > 0) ? <PendingReply /> : null}
 			</main>
 			{!isAtLatest ? (
 				<button type="button" className="piem-chat__latest" onClick={scrollToLatest}>
@@ -373,11 +429,18 @@ function MessageRow({ message, isStreaming, renderContext, onRetry }: MessageRow
 		return <HarnessTrace message={message} context={renderContext} />;
 	}
 	return (
-		<article className={`piem-chat__message piem-chat__message--${message.role}`} aria-busy={isStreaming}>
-			<div className="piem-chat__message-role">
-				<ObsidianIcon name={message.role === "user" ? "user" : "sparkles"} />
-				{renderContext.t.t(message.role === "user" ? "chat.you" : "chat.agent")}
-			</div>
+		/*
+		 * No role banner. A two-party conversation in a 300px sidebar identifies its
+		 * speakers by side and fill already, and an avatar glyph plus the word "You"
+		 * spent a whole line per turn restating what the layout had said — on a
+		 * phone that is a visible fraction of the transcript. The accessible name
+		 * carries the role instead, so nothing is lost to a screen reader.
+		 */
+		<article
+			className={`piem-chat__message piem-chat__message--${message.role}`}
+			aria-busy={isStreaming}
+			aria-label={renderContext.t.t(message.role === "user" ? "chat.you" : "chat.agent")}
+		>
 			<div className="piem-chat__message-content">{renderMessageContent(message, { isStreaming, renderContext })}</div>
 			{wasInterrupted(message) ? (
 				<p className="piem-chat__interrupted">

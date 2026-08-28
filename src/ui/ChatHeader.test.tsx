@@ -36,7 +36,16 @@ async function renderHeader(snapshot: ChatSnapshot): Promise<HTMLElement> {
 	return host;
 }
 
-describe("ChatHeader context meter", () => {
+/**
+ * The header carries identity and session controls, and nothing else.
+ *
+ * The context meter, the spend counter and the compaction notice used to live in
+ * a second row here; their assertions moved to `ChatStatusBar.test.tsx` with the
+ * markup. What is pinned here is that they do *not* come back: a strip of live
+ * numbers between the reader and the first message of their own conversation is
+ * the layout bug that move fixed.
+ */
+describe("ChatHeader scope", () => {
 	beforeEach(() => {
 		createRootSync = createRootImpl;
 		document.body.replaceChildren();
@@ -46,38 +55,26 @@ describe("ChatHeader context meter", () => {
 		document.body.replaceChildren();
 	});
 
-	it("renders a heuristic estimate with a tilde and a bar, never an exact count", async () => {
-		const host = await renderHeader(snapshot({ contextFill: fill({ tokens: 12_400, ratio: 0.0124, heuristicOnly: true }) }));
+	it("keeps live readouts out of the header, even with agent details on", async () => {
+		const host = await renderHeader(snapshot({ showAgentDetails: true, usage: { tokens: 4_200, cost: 0.02, requests: 3 } }));
 
-		const meter = host.querySelector(".piem-chat__context");
-		expect(meter?.textContent).toContain("~12.4k / 1.00M");
-		expect(meter?.textContent).not.toContain("12,400");
-		expect(host.querySelector(".piem-chat__context-bar")).not.toBeNull();
-		expect(meter?.className).toContain("piem-chat__context--ok");
+		expect(host.querySelector(".piem-chat__statusbar")).toBeNull();
+		expect(host.querySelector(".piem-chat__context")).toBeNull();
+		expect(host.querySelector(".piem-chat__usage")).toBeNull();
 	});
 
-	it("turns warn in the last quarter of the runway and near once the threshold is crossed", async () => {
-		// Threshold sits at ~98.4%; its 75% mark is ~73.8%, so 85% is "warn".
-		const warnHost = await renderHeader(snapshot({ contextFill: fill({ tokens: 850_000, ratio: 0.85, heuristicOnly: false }) }));
-		expect(warnHost.querySelector(".piem-chat__context")?.className).toContain("--warn");
-
-		document.body.replaceChildren();
-		const nearHost = await renderHeader(snapshot({ contextFill: fill({ tokens: 990_000, ratio: 0.99, heuristicOnly: false }) }));
-		expect(nearHost.querySelector(".piem-chat__context")?.className).toContain("--near");
-	});
-
-	it("shows the compacting notice while the summarization request runs", async () => {
+	it("says nothing about compaction, which the status bar above the composer reports", async () => {
 		const host = await renderHeader(snapshot({ isCompacting: true }));
 
-		const banner = host.querySelector(".piem-chat__compacting");
-		expect(banner?.textContent).toBe("Compacting context…");
+		expect(host.querySelector(".piem-chat__compacting")).toBeNull();
 	});
 
-	it("hides both when there is nothing to show yet", async () => {
-		const host = await renderHeader(snapshot({ contextFill: null, isCompacting: false }));
+	it("is a single labelled row, not a stacked chrome block", async () => {
+		const host = await renderHeader(snapshot());
 
-		expect(host.querySelector(".piem-chat__context")).toBeNull();
-		expect(host.querySelector(".piem-chat__compacting")).toBeNull();
+		const header = host.querySelector("header.piem-chat__header");
+		expect(header?.getAttribute("aria-label")).toBe("Current chat");
+		expect(host.querySelector(".piem-chat__chrome")).toBeNull();
 	});
 });
 
@@ -91,28 +88,10 @@ describe("ChatHeader vocabulary tiers", () => {
 		document.body.replaceChildren();
 	});
 
-	it("keeps agent metrics out of the default panel", async () => {
-		const host = await renderHeader(snapshot({ showAgentDetails: false, usage: { tokens: 4_200, cost: 0.02, requests: 3 } }));
-
-		expect(host.querySelector(".piem-chat__context")).toBeNull();
-		expect(host.querySelector(".piem-chat__usage")).toBeNull();
-		// Nothing to report means no empty landmark either.
-		expect(host.querySelector(".piem-chat__statusbar")).toBeNull();
-	});
-
 	it("names the model without its provider path in the default tier", async () => {
 		const host = await renderHeader(snapshot({ showAgentDetails: false }));
 
 		expect(host.querySelector(".piem-chat__model")?.textContent).toBe("deepseek-v4-pro");
-	});
-
-	it("describes compaction in plain language until details are on", async () => {
-		const quietHost = await renderHeader(snapshot({ showAgentDetails: false, isCompacting: true }));
-		expect(quietHost.querySelector(".piem-chat__compacting")?.textContent).toContain("Tidying up earlier messages");
-
-		document.body.replaceChildren();
-		const detailHost = await renderHeader(snapshot({ isCompacting: true }));
-		expect(detailHost.querySelector(".piem-chat__compacting")?.textContent).toContain("Compacting context");
 	});
 
 	it("keeps every action button mounted so their positions never shift", async () => {
@@ -138,6 +117,7 @@ function snapshot(overrides: Partial<ChatSnapshot> = {}): ChatSnapshot {
 		// The metrics these tests assert on live behind the agent-details tier.
 		showAgentDetails: true,
 		language: "en",
+		sendShortcut: "enter",
 		contextRefs: [],
 		isFollowingActiveNote: true,
 		...overrides,

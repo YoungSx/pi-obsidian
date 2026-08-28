@@ -58,6 +58,16 @@ export const en = {
 		skipToComposer: "Skip to message box",
 		toolsRunning: "Tools running",
 		working: "Working: ",
+		/**
+		 * The placeholder turn shown between sending and the first token.
+		 *
+		 * Named as a turn in progress rather than as a wait ("Waiting for the
+		 * agent"): the reader wants to know the reply is coming, not that the panel
+		 * is idle. The same wording as {@link chatStatus.responding}, because the
+		 * bubble and the status bar report one state and must not name it two ways.
+		 */
+		replying: "Piem is replying…",
+		replyingAria: "Piem is replying",
 		latest: "Latest",
 		openingChatAria: "Opening chat",
 		connectModel: "Connect a model to start",
@@ -97,15 +107,33 @@ export const en = {
 		contextEstimatedPrefix: "Estimated ",
 	},
 
-	/** Status lines under the composer. */
-	composerStatus: {
+	/**
+	 * The chat status bar, between the transcript and the composer.
+	 *
+	 * One live surface for what the panel is doing. It used to be two — a status
+	 * line inside the composer and a compacting badge in the header — which
+	 * announced the same state twice to a screen reader and named it two ways.
+	 */
+	chatStatus: {
 		opening: "Opening chat…",
-		preparing: "Preparing context…",
 		tidyingUp: "Tidying up earlier messages…",
-		responding: "Piem is responding…",
-		sendShortcut: "{shortcut} to send",
-		shortcutMac: "⌘↵",
-		shortcutOther: "Ctrl+↵",
+		responding: "Piem is replying…",
+	},
+
+	/**
+	 * The Send control.
+	 *
+	 * The chord lives on the button rather than in a status line beside it: the
+	 * hint belongs to the control it describes, and a reader looking for how to
+	 * send looks at Send. The glyphs are keycaps, not words, so translations keep
+	 * them as they are.
+	 */
+	sendShortcut: {
+		enter: "↵",
+		modMac: "⌘↵",
+		modOther: "Ctrl+↵",
+		/** Accessible name and tooltip, e.g. "Send message · Ctrl+↵". */
+		buttonTitle: "{action} · {chord}",
 	},
 
 	/** Context meter in the chat header. */
@@ -263,6 +291,17 @@ export const en = {
 		thinkingLevelDesc: "How much reasoning to request. Levels the active model does not support are hidden.",
 		showAgentDetails: "Show agent details",
 		showAgentDetailsDesc: "Show token counts, spend, context-window use, and raw tool arguments in the chat panel.",
+		sendShortcut: "Send with",
+		/**
+		 * Names what the other key does under each option, because that is the
+		 * actual trade: whichever key does not send has to make a new line, and a
+		 * reader picking between them is deciding which one they press more often.
+		 */
+		sendShortcutDesc: "Which key sends the message. Ctrl+Enter and ⌘+Enter always send, whichever option is chosen.",
+		sendShortcutEnter: "Enter (Shift+Enter for a new line)",
+		sendShortcutModEnter: "Ctrl+Enter or ⌘+Enter (Enter makes a new line)",
+		/** Shown under the row on a phone, where a soft keyboard has no Shift+Enter. */
+		sendShortcutMobileNote: "On a phone, Enter always makes a new line — a soft keyboard has no Shift+Enter — so use the Send button.",
 		networkTransport: "Network transport",
 		networkTransportDesc:
 			"Request URL bypasses browser restrictions everywhere but buffers responses — tokens appear all at once. Fetch streams incrementally but may be blocked.",

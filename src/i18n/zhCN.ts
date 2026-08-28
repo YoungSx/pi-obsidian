@@ -46,6 +46,8 @@ export const zhCN: DeepPartial<EnCopy> = {
 		skipToComposer: "跳到输入框",
 		toolsRunning: "工具运行中",
 		working: "正在处理：",
+		replying: "Piem 正在回复…",
+		replyingAria: "Piem 正在回复",
 		latest: "最新",
 		openingChatAria: "正在打开对话",
 		connectModel: "连接一个模型以开始",
@@ -79,14 +81,18 @@ export const zhCN: DeepPartial<EnCopy> = {
 		contextEstimatedPrefix: "约 ",
 	},
 
-	composerStatus: {
+	chatStatus: {
 		opening: "正在打开对话…",
-		preparing: "正在准备上下文…",
 		tidyingUp: "正在整理较早的消息…",
 		responding: "Piem 正在回复…",
-		sendShortcut: "{shortcut} 发送",
-		shortcutMac: "⌘↵",
-		shortcutOther: "Ctrl+↵",
+	},
+
+	// 快捷键字形是键帽而非词语，各语言一律保持原样。
+	sendShortcut: {
+		enter: "↵",
+		modMac: "⌘↵",
+		modOther: "Ctrl+↵",
+		buttonTitle: "{action} · {chord}",
 	},
 
 	context: {
@@ -197,6 +203,11 @@ export const zhCN: DeepPartial<EnCopy> = {
 		thinkingLevelDesc: "请求多少推理。当前模型不支持的级别会被隐藏。",
 		showAgentDetails: "显示代理详情",
 		showAgentDetailsDesc: "在对话面板中显示 token 数、花费、上下文窗口占用和原始工具参数。",
+		sendShortcut: "发送方式",
+		sendShortcutDesc: "用哪个键发送消息。无论选哪项，Ctrl+回车 和 ⌘+回车 都能发送。",
+		sendShortcutEnter: "回车（Shift+回车 换行）",
+		sendShortcutModEnter: "Ctrl+回车 或 ⌘+回车（回车用于换行）",
+		sendShortcutMobileNote: "在手机上回车一律换行——软键盘没有 Shift+回车——请用发送按钮。",
 		networkTransport: "网络传输",
 		networkTransportDesc:
 			"请求 URL 可在各处绕过浏览器限制，但会缓冲响应——token 会一次性出现。Fetch 会增量流式返回，但可能被拦截。",

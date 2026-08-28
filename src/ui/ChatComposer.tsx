@@ -1,8 +1,8 @@
 import React, { useEffect, useId, useRef } from "react";
 import { Platform } from "obsidian";
-import { IconButton } from "./ObsidianIcon";
-import { sendHintText, transientStatusText } from "./composerStatus";
-import { isSendShortcut } from "./keyboard";
+import { IconButton, ObsidianIcon } from "./ObsidianIcon";
+import { isSendShortcut, resolveSendShortcut, sendShortcutAria, type SendShortcut } from "./keyboard";
+import { sendButtonTitle, sendShortcutLabel } from "./chatStatus";
 import { useT } from "./TranslatorContext";
 import { useAutosize } from "./useAutosize";
 
@@ -20,8 +20,8 @@ interface ChatComposerProps {
 	 * no other channel to explain itself.
 	 */
 	isConfigured: boolean;
-	/** Whether the panel may use agent-internal vocabulary in its status line. */
-	showAgentDetails: boolean;
+	/** The chord the user chose in settings; overridden on mobile, see {@link resolveSendShortcut}. */
+	sendShortcut: SendShortcut;
 	onInputChange: (value: string) => void;
 	onSend: () => void;
 	onAbort: () => void;
@@ -43,13 +43,24 @@ interface ChatComposerProps {
 	contextRow?: React.ReactNode;
 }
 
+/**
+ * The draft, the context row, and the send control.
+ *
+ * The keyboard hint rides on the Send button itself rather than in a status line
+ * beside it. A hint belongs to the control it describes: a reader wondering how
+ * to send looks at Send, and putting the chord in a separate line spends a whole
+ * row of a narrow sidebar to answer a question the button was already being
+ * asked. It also frees the slot the panel had been using for two purposes at
+ * once — the shortcut while idle, the turn state while busy — which meant the
+ * shortcut vanished exactly while a beginner was watching that spot.
+ */
 export function ChatComposer({
 	input,
 	isStreaming,
 	isCompacting,
 	isInitializing,
 	isConfigured,
-	showAgentDetails,
+	sendShortcut,
 	onInputChange,
 	onSend,
 	onAbort,
@@ -65,12 +76,29 @@ export function ChatComposer({
 	// view type, so two open chat panels would otherwise share one id and the
 	// skip link in each would jump to whichever mounted first.
 	const anchorId = useId();
-	const statusInput = { isInitializing, isCompacting, isStreaming, showAgentDetails, isMac: Platform.isMacOS };
+	const shortcut = resolveSendShortcut(sendShortcut, Platform.isMobile);
+	// Read by the capture-phase listener below, which is registered once:
+	// re-registering it whenever the setting changes would be a listener's worth
+	// of churn for a value the handler can simply read at event time.
+	const shortcutRef = useRef<SendShortcut>(shortcut);
 
 	onSendRef.current = onSend;
+	shortcutRef.current = shortcut;
 
 	useAutosize(textareaRef, input);
 
+	/*
+	 * The only keydown path.
+	 *
+	 * A native listener rather than React's `onKeyDown`, and *instead* of it: the
+	 * synthetic event React builds has no `isComposing`, so the IME guard in
+	 * {@link isSendShortcut} could not see it there. With both handlers wired, the
+	 * native one correctly declined the Enter that accepts a Chinese candidate and
+	 * then let the event reach React's, which sent the half-typed sentence.
+	 *
+	 * Capture phase on the textarea, so it also runs ahead of any Obsidian hotkey
+	 * bound to Enter, and `stopPropagation` keeps a send from reaching one.
+	 */
 	useEffect(() => {
 		const textarea = textareaRef.current;
 		if (!textarea) {
@@ -78,7 +106,7 @@ export function ChatComposer({
 		}
 
 		const handleNativeKeyDown = (event: KeyboardEvent): void => {
-			if (!isSendShortcut(event)) {
+			if (!isSendShortcut(event, shortcutRef.current)) {
 				return;
 			}
 			event.preventDefault();
@@ -114,14 +142,6 @@ export function ChatComposer({
 		onAnchorIdChange?.(anchorId);
 	}, [onAnchorIdChange, anchorId]);
 
-	const handleKeyDown = (event: React.KeyboardEvent<HTMLTextAreaElement>): void => {
-		if (!isSendShortcut(event)) {
-			return;
-		}
-		event.preventDefault();
-		event.stopPropagation();
-		onSend();
-	};
 
 	return (
 		<footer className="piem-chat__composer">
@@ -132,31 +152,13 @@ export function ChatComposer({
 					id={anchorId}
 					value={input}
 					onChange={(event) => onInputChange(event.currentTarget.value)}
-					onKeyDown={handleKeyDown}
 					placeholder={t.t("chat.placeholder")}
 					aria-label={t.t("chat.composerAria")}
-					aria-keyshortcuts="Control+Enter Meta+Enter"
+					aria-keyshortcuts={sendShortcutAria(shortcut)}
 					rows={2}
 				/>
 				<div className="piem-chat__composer-bar">
-					{/*
-					 * One slot, two elements. The live region carries only what changes;
-					 * the send hint sits outside it. They shared a node until every
-					 * settled turn re-announced the chord — a screen reader read
-					 * "⌘↵ to send" once per turn, twenty times in a twenty-turn chat.
-					 *
-					 * Wrapped so the bar still holds exactly two children, as it did when
-					 * the status was alone: `space-between` then spaces the slot against
-					 * the button, and whichever of the two is filled starts at the same
-					 * left edge.
-					 */}
-					<span className="piem-chat__composer-slot">
-						<span className="piem-chat__composer-status" role="status" aria-live="polite">
-							{transientStatusText(statusInput, t)}
-						</span>
-						{/* `isBusy` covers streaming and compaction but not opening, hence both tests. */}
-						{!isBusy && !isInitializing ? <span className="piem-chat__composer-hint">{sendHintText(statusInput, t)}</span> : null}
-					</span>
+
 					{isBusy ? (
 						<IconButton
 							icon="square"
@@ -165,16 +167,66 @@ export function ChatComposer({
 							className="piem-chat__stop-button"
 						/>
 					) : (
-						<IconButton
-							icon="send"
-							label={t.t(isConfigured ? "chat.sendMessage" : "chat.sendNeedsKey")}
-							onClick={onSend}
+						<SendButton
+							shortcut={shortcut}
+							isConfigured={isConfigured}
 							disabled={isInitializing || !isConfigured || !input.trim()}
-							className="piem-chat__send-button mod-cta"
+							onSend={onSend}
 						/>
 					)}
 				</div>
 			</div>
 		</footer>
+	);
+}
+
+interface SendButtonProps {
+	/** The chord in force on this device, already resolved for mobile. */
+	shortcut: SendShortcut;
+	/** Whether a key is configured; decides what the button says it is for. */
+	isConfigured: boolean;
+	disabled: boolean;
+	onSend: () => void;
+}
+
+/**
+ * Send, with its shortcut printed on it.
+ *
+ * Not an {@link IconButton}: this one carries visible text beside the glyph, and
+ * that text has to be `aria-hidden` so a screen reader does not read the keycaps
+ * "Ctrl+↵" as part of the button's name. The accessible name and the tooltip
+ * both come from {@link sendButtonTitle}, which states the action and the chord
+ * in one string.
+ *
+ * With no key configured the name becomes the reason instead, and the keycaps go
+ * away with it. A chord printed on a button that cannot fire is an instruction
+ * that does not work, and it would compete with the one thing the button has to
+ * say: that a key is what is missing. The chord returns as soon as pressing it
+ * would do something.
+ */
+function SendButton({ shortcut, isConfigured, disabled, onSend }: SendButtonProps): React.JSX.Element {
+	const t = useT();
+	const name = isConfigured ? sendButtonTitle(shortcut, Platform.isMacOS, t) : t.t("chat.sendNeedsKey");
+
+	return (
+		<button
+			type="button"
+			className="clickable-icon piem-chat__icon-button piem-chat__send-button mod-cta"
+			aria-label={name}
+			title={name}
+			disabled={disabled}
+			onClick={onSend}
+		>
+			<ObsidianIcon name="send" />
+			{/*
+			 * Keycaps, hidden from assistive tech: the accessible name above already
+			 * carries the chord, and reading the glyphs would repeat it as symbols.
+			 */}
+			{isConfigured ? (
+				<span className="piem-chat__send-chord" aria-hidden="true">
+					{sendShortcutLabel(shortcut, Platform.isMacOS, t)}
+				</span>
+			) : null}
+		</button>
 	);
 }
