@@ -33,8 +33,11 @@ export interface MessageListProps {
 	 */
 	onOpenSettings?: () => void;
 	/**
-	 * Re-asks the question behind the reply at `index`. Absent while a turn is in
-	 * flight, which hides the action rather than letting it queue a second run.
+	 * Regenerates the reply at `index` by re-asking the question behind it.
+	 *
+	 * Only ever called with the newest reply's index — see
+	 * {@link regenerableIndex}. Absent while a turn is in flight, which hides the
+	 * action rather than letting it queue a second run.
 	 */
 	onRetry?: (index: number) => void;
 	/** Render context for `MarkdownRenderer.render`; supplied by the view. */
@@ -59,6 +62,36 @@ function streamingIndex(isStreaming: boolean, messageCount: number): number | nu
 	return messageCount - 1;
 }
 
+/**
+ * The one reply that may be regenerated — the newest assistant turn.
+ *
+ * Regenerating rewinds the conversation to the question behind the reply, so
+ * offering it on an older reply discards every turn that followed. The control
+ * read as "ask again" and behaved as "cut the conversation here", with no
+ * confirmation and no way back, so it is confined to the turn where rewinding
+ * costs exactly the reply the button sits on.
+ *
+ * Walks backwards rather than checking the last index, because tool results and
+ * harness output can trail the reply — anchoring on the last entry would hide
+ * the action on the very turn a failed tool call makes worth retrying.
+ *
+ * A user turn found first means the newest question has no answer yet: the
+ * previous reply is no longer the tail, and rewinding to it would take that
+ * unanswered question down with it.
+ */
+function regenerableIndex(messages: AgentMessage[]): number | null {
+	for (let cursor = messages.length - 1; cursor >= 0; cursor -= 1) {
+		const role = messages[cursor]?.role;
+		if (role === "assistant") {
+			return cursor;
+		}
+		if (role === "user") {
+			return null;
+		}
+	}
+	return null;
+}
+
 export function MessageList({
 	messages,
 	isStreaming,
@@ -75,6 +108,7 @@ export function MessageList({
 	const t = useT();
 	const context: MessageContext = { app, component, sourcePath, showAgentDetails, t };
 	const activeIndex = streamingIndex(isStreaming, messages.length);
+	const regenerateIndex = regenerableIndex(messages);
 	const transcriptRef = useRef<HTMLElement | null>(null);
 	const shouldFollowRef = useRef(true);
 	const [isAtLatest, setIsAtLatest] = useState(true);
@@ -137,7 +171,7 @@ export function MessageList({
 							message={message}
 							isStreaming={index === activeIndex}
 							renderContext={context}
-							onRetry={onRetry ? () => onRetry(index) : undefined}
+							onRetry={onRetry && index === regenerateIndex ? () => onRetry(index) : undefined}
 						/>
 					))
 				)}
@@ -209,11 +243,6 @@ interface EmptyStateProps {
 	isInitializing: boolean;
 	isConfigured: boolean;
 	onOpenSettings?: () => void;
-	/**
-	 * Re-asks the question behind the reply at `index`. Absent while a turn is in
-	 * flight, which hides the action rather than letting it queue a second run.
-	 */
-	onRetry?: (index: number) => void;
 }
 
 /**
@@ -277,6 +306,7 @@ interface MessageRowProps {
 	message: AgentMessage;
 	isStreaming: boolean;
 	renderContext: MessageContext;
+	/** Regenerates this reply; supplied only for the newest one. */
 	onRetry?: () => void;
 }
 

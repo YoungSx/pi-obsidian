@@ -8,7 +8,13 @@ interface ReplyActionsProps {
 	app: App;
 	/** Prose the reply said, already stripped of thinking and tool calls. */
 	text: string;
-	/** Re-asks the question behind this reply; absent while a turn is in flight. */
+	/**
+	 * Regenerates this reply.
+	 *
+	 * Absent while a turn is in flight, and absent on every reply but the newest:
+	 * regenerating rewinds the conversation to the question behind the reply, so
+	 * on an older one it would discard every turn that followed.
+	 */
 	onRetry?: () => void;
 }
 
@@ -49,7 +55,12 @@ export function ReplyActions({ app, text, onRetry }: ReplyActionsProps): React.J
 				label={t.t("replyActions.append")}
 				onClick={() => notifyActionResult(appendToActiveNote(app, text), t.t("replyActions.needOpenNoteToAppend"))}
 			/>
-			{onRetry ? <IconButton icon="rotate-ccw" label={t.t("replyActions.askAgain")} onClick={onRetry} /> : null}
+			{/*
+			 * `refresh-cw`, not `rotate-ccw`: the counter-clockwise arrow is the
+			 * universal undo glyph, and this action is the one control in the row
+			 * that cannot be undone.
+			 */}
+			{onRetry ? <IconButton icon="refresh-cw" label={t.t("replyActions.regenerate")} onClick={onRetry} /> : null}
 		</div>
 	);
 }

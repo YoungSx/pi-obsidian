@@ -126,7 +126,13 @@ export const en = {
 		copy: "Copy reply",
 		insert: "Insert at cursor",
 		append: "Append to note",
-		askAgain: "Ask again",
+		/**
+		 * Names the outcome ("answer this again"), not a repeat of the question.
+		 *
+		 * It replaced "Ask again", which read as an addition next to the three
+		 * additive actions beside it while the action actually replaces the reply.
+		 */
+		regenerate: "Regenerate reply",
 		couldNotCopy: "Could not copy to the clipboard.",
 		needOpenNoteToInsert: "Open a note to insert this reply.",
 		needOpenNoteToAppend: "Open a note to append this reply.",
