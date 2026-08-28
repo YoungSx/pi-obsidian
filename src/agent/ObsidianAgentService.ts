@@ -1,8 +1,17 @@
 import type { App } from "obsidian";
 import type { Usage } from "@earendil-works/pi-ai";
-import { Agent, convertToLlm, type AgentEvent, type AgentMessage, type StreamFn, type ThinkingLevel } from "@earendil-works/pi-agent-core";
+import {
+	Agent,
+	convertToLlm,
+	type AgentEvent,
+	type AgentLoopTurnUpdate,
+	type AgentMessage,
+	type PrepareNextTurnContext,
+	type StreamFn,
+	type ThinkingLevel,
+} from "@earendil-works/pi-agent-core";
 import { createObsidianModels, withRequestDefaults, type ObsidianModelsBundle } from "../net/streamFn";
-import { compactIfNeeded, type CompactResult } from "./compaction";
+import { compactIfNeeded, needsCompaction, type CompactResult } from "./compaction";
 import { measureContextFill, sumUsage, type ContextFill, type UsageTotals } from "./usage";
 import { createObsidianTools } from "../tools/obsidianTools";
 import {
@@ -60,7 +69,7 @@ export interface ChatSnapshot {
 	 * number as if the provider had measured it.
 	 */
 	contextFill: ContextFill | null;
-	/** True while a pre-prompt compaction request is in flight (a real LLM call). */
+	/** True while a compaction request is in flight (a real LLM call), before a prompt or between the turns of a run. */
 	isCompacting: boolean;
 	/** Whether the active model target has a credential ready for requests. */
 	isConfigured?: boolean;
@@ -96,6 +105,17 @@ export interface ChatSnapshot {
 	 */
 	isFollowingActiveNote: boolean;
 }
+
+/**
+ * Mid-run compactions a single run may spend.
+ *
+ * The trigger is an estimate that leans on the newest assistant usage
+ * (`estimateContextTokens`), and that usage still reports the pre-compaction
+ * total until the next reply lands — so a run whose retained tail alone exceeds
+ * the budget would ask for a summary at every turn boundary while shrinking
+ * nothing. Four is past any honest run and still bounds the waste.
+ */
+const MAX_MID_RUN_COMPACTIONS = 4;
 
 type SnapshotListener = (snapshot: ChatSnapshot) => void;
 
@@ -135,6 +155,13 @@ export interface ObsidianAgentServiceOptions {
 	streamFn?: StreamFn;
 }
 
+interface CompactionRunOptions {
+	/** Summarize even when the context still fits; the command-palette path. */
+	force?: boolean;
+	/** Signal of the run a mid-run compaction belongs to, linked into the service's controller. */
+	signal?: AbortSignal;
+}
+
 export class ObsidianAgentService {
 	private readonly app: App;
 	private readonly getSettings: () => PiemSettings;
@@ -153,6 +180,16 @@ export class ObsidianAgentService {
 	 * lookup a retry needs: discarding a turn has to name the entry to rewind
 	 * to, and the in-memory transcript is the only place a live turn's id is
 	 * reachable from. Keyed weakly so the map cannot outlive the transcript.
+	 *
+	 * Never cleared mid-run, however tempting it looks after a compaction has
+	 * absorbed part of the transcript. `handleAgentEvent` re-persists the run's
+	 * whole message list on `agent_end`, and this map's `has` check is the only
+	 * thing that stops a second append — so clearing it would re-append every
+	 * message of the run under the current leaf, and a reload would replay the
+	 * run from after the compaction. The retained tail keeps its entries because
+	 * pi's `prepareCompaction` carries the original message objects through, and
+	 * the summary is a new object with no entry, which is correct: it is not a
+	 * user turn, so it is never a retry target.
 	 */
 	private messageEntryIds = new WeakMap<object, string>();
 	/**
@@ -173,7 +210,13 @@ export class ObsidianAgentService {
 	private lastCompaction: CompactResult | undefined;
 	/** Compaction bills a separate request whose usage is not in the transcript. */
 	private compactionUsage: Usage[] = [];
-	/** Guards the pre-prompt compaction window, where `agent.state.isStreaming` is still false. */
+	/**
+	 * Single-flight guard for compaction.
+	 *
+	 * Both windows need it: before a prompt `agent.state.isStreaming` is still
+	 * false, and between the turns of a run it is already true, so neither can
+	 * serve as the guard.
+	 */
 	private compaction: Promise<boolean> | null = null;
 	/** Mirrors `compaction` for the snapshot: true from launch until it settles. */
 	private isCompacting = false;
@@ -188,6 +231,8 @@ export class ObsidianAgentService {
 	 * the same object instead of one mirroring the other.
 	 */
 	private readonly contextRefs = new ContextRefs();
+	/** Mid-run compactions spent on the active run; the budget is per run. */
+	private midRunCompactions = 0;
 
 	constructor(app: App, getSettings: () => PiemSettings, sessionManager: ObsidianSessionManager, options: ObsidianAgentServiceOptions = {}) {
 		this.app = app;
@@ -246,6 +291,8 @@ export class ObsidianAgentService {
 			this.activeRunContext = this.contextRefs.list();
 			this.notify();
 			await this.compactContextIfNeeded(agent);
+			// The budget is per run, and `compactBetweenTurns` spends it.
+			this.midRunCompactions = 0;
 			await agent.prompt(trimmedPrompt);
 			sent = true;
 		} catch (error) {
@@ -324,8 +371,10 @@ export class ObsidianAgentService {
 	}
 
 	abort(): void {
-		// Compaction runs before the agent starts streaming, so it has its own
-		// controller; `agent.abort()` cannot reach it.
+		// A compaction before a prompt is only reachable through this controller,
+		// because the agent is not streaming yet. One between turns is reachable
+		// both ways — `runExclusiveCompaction` links the run's signal into this
+		// controller — so aborting both is right and idempotent.
 		this.compactionController?.abort();
 		const agent = this.agent;
 		if (!agent) {
@@ -610,7 +659,9 @@ export class ObsidianAgentService {
 		this.pendingToolNames.clear();
 		const settings = this.getSettings();
 		const model = getSelectedModel(settings);
-		const agent = new Agent({
+		// Annotated because the `prepareNextTurnWithContext` closure below refers to
+		// `agent`, and an inferred type would be circular.
+		const agent: Agent = new Agent({
 			// The custom endpoint rides the same transport as builtin providers;
 			// only the provider registration differs. Resolved per request rather
 			// than captured here, so an endpoint configured after this agent was
@@ -635,6 +686,15 @@ export class ObsidianAgentService {
 				messages,
 			},
 			getApiKey: (provider) => this.getApiKey(provider),
+			// Fires after a turn's tool calls finish and before the next provider
+			// request (`runLoop`, at its `prepareNextTurn` call) — the only point
+			// inside a run where the context can still be replaced. The
+			// `WithContext` variant is required because plain `prepareNextTurn`
+			// receives no context, and pi prefers it when both are set
+			// (`createLoopConfig`). Closing over this run's `agent` rather than
+			// `this.agent` is what lets `performCompaction` tell a stale result
+			// from a current one.
+			prepareNextTurnWithContext: (turn, signal) => this.compactBetweenTurns(agent, turn, signal),
 			sessionId: this.sessionInfo?.id,
 			toolExecution: "sequential",
 			// Pi normally feeds a failed tool result back to the model and starts
@@ -671,12 +731,93 @@ export class ObsidianAgentService {
 	}
 
 	/**
+	 * Summarizes older history between the turns of a run that is already streaming.
+	 *
+	 * One prompt drives many provider requests: `runLoop` keeps calling
+	 * `streamAssistantResponse` while tool calls arrive, each time with the whole
+	 * accumulated context including every tool result. A long agentic turn can
+	 * therefore outgrow the window that {@link compactContextIfNeeded} sized
+	 * before the prompt went out, and without this the run dies on a provider
+	 * context-length error with no way to recover.
+	 *
+	 * Returning a replacement context is what makes the next request *in this
+	 * run* see the summary; assigning `agent.state.messages` alone would only fix
+	 * the transcript the panel renders. Failure and cancellation both return
+	 * undefined, which leaves pi's own context in place and lets the run continue
+	 * against a context the provider judges — the same bargain struck before a
+	 * prompt.
+	 *
+	 * Two structural facts make replacing the context here safe. The hook never
+	 * fires between an assistant tool-call message and its results, because
+	 * `runLoop` appends every result and emits `turn_end` first — and pi's
+	 * `findValidCutPoints` refuses `toolResult` as a cut point, so the compacted
+	 * list cannot begin with an orphaned result. And it still *ends* with one,
+	 * because `retainedTail` is a suffix of its input, satisfying pi's rule that
+	 * a continued context end in a user or tool-result message.
+	 */
+	private async compactBetweenTurns(
+		agent: Agent,
+		turn: PrepareNextTurnContext,
+		signal?: AbortSignal,
+	): Promise<AgentLoopTurnUpdate | undefined> {
+		if (!this.shouldCompactBetweenTurns(agent, turn, signal)) {
+			return undefined;
+		}
+		this.midRunCompactions += 1;
+		if (!(await this.runExclusiveCompaction(agent, { signal }))) {
+			return undefined;
+		}
+		// Derived from the transcript `performCompaction` just assigned rather
+		// than computed alongside it: the compacted list exists in exactly one
+		// place, which is what makes the two arrays impossible to get out of step.
+		//
+		// The `.slice()` is load-bearing. This array and `agent.state.messages`
+		// are separate lists that track in parallel — the loop pushes into its own
+		// as it streams and as tool results land, while `processEvents` pushes
+		// into the state's on every `message_end`. Handing over the state's array
+		// itself would have both writers appending to one list, duplicating every
+		// later message.
+		return { context: { ...turn.context, messages: agent.state.messages.slice() } };
+	}
+
+	/**
+	 * Whether this turn boundary is worth a summarization request.
+	 *
+	 * Decided before {@link runExclusiveCompaction} is entered on purpose: that
+	 * method raises `isCompacting` as soon as it is called and the composer
+	 * renders it, so asking pi's threshold question afterwards would flash
+	 * "Tidying up earlier messages…" at every turn boundary of every run.
+	 * {@link needsCompaction} is the same predicate `compactIfNeeded` applies to
+	 * itself, so the two cannot disagree.
+	 */
+	private shouldCompactBetweenTurns(agent: Agent, turn: PrepareNextTurnContext, signal?: AbortSignal): boolean {
+		if (signal?.aborted) {
+			return false;
+		}
+		// No tool results means no further request in this run: the inner loop
+		// only continues on tool calls or queued steering messages, and this
+		// plugin never calls `steer()`/`followUp()`. Summarizing here would buy a
+		// summary for a request that never goes out, and the next prompt's own
+		// pre-prompt compaction covers that context anyway.
+		if (turn.toolResults.length === 0) {
+			return false;
+		}
+		if (this.midRunCompactions >= MAX_MID_RUN_COMPACTIONS) {
+			return false;
+		}
+		return needsCompaction(agent.state.messages, getSelectedModel(this.getSettings()));
+	}
+
+	/**
 	 * Summarizes older history before prompting when the context is nearly full.
 	 *
 	 * This runs while the agent is still idle, so `agent.state.isStreaming` cannot
 	 * guard it — concurrent callers are serialized on `compaction` instead. A
 	 * failed compaction is surfaced but not fatal: the prompt still goes out and
 	 * the provider decides whether the context fits.
+	 *
+	 * Sizes the context for the *first* request of the run only.
+	 * {@link compactBetweenTurns} covers the rest.
 	 */
 	private async compactContextIfNeeded(agent: Agent): Promise<void> {
 		await this.runExclusiveCompaction(agent);
@@ -706,7 +847,7 @@ export class ObsidianAgentService {
 		try {
 			this.errorMessage = undefined;
 			this.noticeMessage = undefined;
-			const compacted = await this.runExclusiveCompaction(agent, true);
+			const compacted = await this.runExclusiveCompaction(agent, { force: true });
 			if (!compacted && !this.errorMessage) {
 				this.setNotice("Nothing to compact yet.");
 			}
@@ -721,16 +862,32 @@ export class ObsidianAgentService {
 	 * show "Compacting context…" while the LLM call is in flight), cleared in a
 	 * finally so an abort or failure cannot leave the banner stuck.
 	 *
+	 * All three callers share this: before a prompt, on the command-palette path
+	 * (`force`), and between the turns of a run (`signal`). Sharing it is what
+	 * gives them one `isCompacting` lifecycle, one single-flight guard, and one
+	 * set of success side effects.
+	 *
 	 * Returns whether anything was compacted; failures are surfaced, not thrown.
 	 */
-	private async runExclusiveCompaction(agent: Agent, force = false): Promise<boolean> {
+	private async runExclusiveCompaction(agent: Agent, options: CompactionRunOptions = {}): Promise<boolean> {
 		if (!this.compaction) {
 			this.compactionController = new AbortController();
-			this.compaction = this.trackCompaction(agent, this.compactionController.signal, force);
+			this.compaction = this.trackCompaction(agent, this.compactionController.signal, options.force === true);
 		}
+		// The run's signal is linked into this service's controller rather than
+		// replacing it, so a compaction between turns stays reachable from every
+		// existing cancel path — `abort()`, `dispose()`, `openSession()` and
+		// `deleteSession()` all abort `compactionController` — while
+		// `agent.abort()` also cancels it through the run's own signal.
+		// `AbortSignal.any` would say this in one line but postdates the
+		// WebView versions `minAppVersion` admits.
+		const controller = this.compactionController;
+		const stop = (): void => controller?.abort();
+		options.signal?.addEventListener("abort", stop, { once: true });
 		try {
 			return await this.compaction;
 		} finally {
+			options.signal?.removeEventListener("abort", stop);
 			this.compaction = null;
 			this.compactionController = null;
 		}
@@ -758,7 +915,24 @@ export class ObsidianAgentService {
 			force,
 		});
 
+		// The conversation can move on while the summary is in flight: "New chat",
+		// opening another session, and deleting the active one each build a fresh
+		// agent through `replaceAgent`. Acting on this result then would assign the
+		// old transcript back and append its summary into the *new* session's log.
+		// Compacting between turns widens that window from milliseconds to seconds.
+		if (this.agent !== agent) {
+			return false;
+		}
+
 		if (outcome.status === "failed") {
+			// A cancelled compaction is not a failure worth a banner: pi reports the
+			// abort through this same `failed` outcome (`CompactionError` with code
+			// "aborted", which `retryAssistantCall` treats as terminal and never
+			// retries), and a user who pressed stop is already being told the run
+			// stopped.
+			if (signal.aborted) {
+				return false;
+			}
 			this.setError(`Could not compact the conversation: ${outcome.message}`);
 			return false;
 		}

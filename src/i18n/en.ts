@@ -159,6 +159,8 @@ export const en = {
 		noteMetadata: "Read note properties",
 		listTasks: "Listed tasks",
 		summarizeTasks: "Summarized tasks",
+		moveNote: "Renamed or moved a note",
+		trashNote: "Sent a note to trash",
 		failed: "failed",
 	},
 

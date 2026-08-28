@@ -63,6 +63,23 @@ export interface CompactionRequest {
 }
 
 /**
+ * Whether pi would compact this context right now.
+ *
+ * Exported so a caller that must announce a compaction *before* launching it —
+ * the between-turns hook raises `isCompacting`, which the composer renders —
+ * asks the same question {@link compactIfNeeded} asks itself. Asking a
+ * different one would flash the compaction banner at turn boundaries that then
+ * skip.
+ */
+export function needsCompaction(
+	messages: AgentMessage[],
+	model: Model<Api>,
+	settings: CompactionSettings = DEFAULT_COMPACTION_SETTINGS,
+): boolean {
+	return shouldCompact(estimateContextTokens(messages).tokens, model.contextWindow, settings);
+}
+
+/**
  * Summarizes older history when the context is close to the model's window.
  *
  * pi owns every decision here — when to compact ({@link shouldCompact}), where
@@ -72,8 +89,7 @@ export interface CompactionRequest {
  */
 export async function compactIfNeeded(request: CompactionRequest): Promise<CompactionOutcome> {
 	const settings = request.settings ?? DEFAULT_COMPACTION_SETTINGS;
-	const contextTokens = estimateContextTokens(request.messages).tokens;
-	if (!request.force && !shouldCompact(contextTokens, request.model.contextWindow, settings)) {
+	if (!request.force && !needsCompaction(request.messages, request.model, settings)) {
 		return { status: "skipped" };
 	}
 
@@ -150,9 +166,33 @@ function toHarnessEntries(messages: AgentMessage[], previous?: CompactResult): E
 		details: previous.details,
 		usage: previous.usage,
 	};
-	// The leading message is the summary this compaction entry already carries.
-	const remaining = messages[0]?.role === "compactionSummary" ? messages.slice(1) : messages;
+	const remaining = dropRetainedPrefix(messages, previous.retainedTail);
 	return [compaction, ...remaining.map((message, index) => toMessageEntry(message, index, compaction.id))];
+}
+
+/**
+ * Drops the prefix the compaction entry already carries.
+ *
+ * A compacted transcript *is* `[summary, ...retainedTail]`, and pi
+ * re-materializes the tail from the entry itself (`prepareCompaction`, its
+ * `virtualRetainedEntries`). Listing those messages again as entries made pi
+ * see each of them twice, so the next compaction's own `retainedTail` — and the
+ * JSONL line {@link ObsidianSessionManager.appendCompaction} writes from it —
+ * came back with every message duplicated.
+ *
+ * Matched by identity rather than by length: `prepareCompaction` pushes
+ * `entry.message` into the tail, so a live tail holds the very objects the
+ * transcript holds, and a reloaded one shares the parsed array. Identity also
+ * stops a transcript a retry has truncated from losing real messages to a
+ * count that no longer describes it.
+ */
+function dropRetainedPrefix(messages: AgentMessage[], retainedTail: AgentMessage[]): AgentMessage[] {
+	const afterSummary = messages[0]?.role === "compactionSummary" ? messages.slice(1) : messages;
+	let matched = 0;
+	while (matched < retainedTail.length && afterSummary[matched] === retainedTail[matched]) {
+		matched += 1;
+	}
+	return afterSummary.slice(matched);
 }
 
 function toMessageEntry(message: AgentMessage, index: number, parentId: string | null = null): MessageEntry {

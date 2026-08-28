@@ -31,6 +31,8 @@ const TOOL_COPY_KEYS = {
 	note_metadata: "traceTool.noteMetadata",
 	list_tasks: "traceTool.listTasks",
 	summarize_tasks: "traceTool.summarizeTasks",
+	move_note: "traceTool.moveNote",
+	trash_note: "traceTool.trashNote",
 } as const;
 
 /**
@@ -54,8 +56,12 @@ export function describeTool(toolName: string, showAgentDetails: boolean, t: Tra
  * A path answers "which note?" for every file tool, and a pattern answers
  * "searching for what?" for grep/find, which is the whole question a reader has
  * about a collapsed call. Everything else stays inside the disclosure.
+ *
+ * `from` covers `move_note`, which has no `path` at all; without it that row
+ * would show the tool name alone and the reader could not tell which note moved.
+ * It sits after `path` so no existing tool's row changes.
  */
-const PREFERRED_ARGUMENT_KEYS = ["path", "pattern", "query", "folder", "file"] as const;
+const PREFERRED_ARGUMENT_KEYS = ["path", "from", "pattern", "query", "folder", "file"] as const;
 
 /**
  * Picks the argument worth putting in a collapsed tool-call row.

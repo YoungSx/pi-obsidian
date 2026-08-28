@@ -140,6 +140,8 @@ export const zhCN: DeepPartial<EnCopy> = {
 		noteMetadata: "读取了笔记属性",
 		listTasks: "列出了任务",
 		summarizeTasks: "总结了任务",
+		moveNote: "重命名或移动了一条笔记",
+		trashNote: "把一条笔记移到了回收站",
 		failed: "失败",
 	},
 
