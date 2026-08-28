@@ -177,6 +177,7 @@ export const en = {
 	settings: {
 		tabModels: "Models",
 		tabChat: "Chat",
+		tabSessions: "History",
 		tabNetwork: "Network",
 		tabAbout: "About",
 		tabLanguage: "Language",
@@ -218,6 +219,8 @@ export const en = {
 		whatLeavesVault: "What leaves this vault",
 		whatLeavesVaultDesc:
 			"Prompts, vault content read by tools, and tool results are sent to the provider serving the active model. Nothing is sent anywhere else.",
+		chatLogsInVault:
+			"Chat logs are files in your vault, so they sync and back up with your notes. They hold the conversation and whatever note text was read while answering it.",
 		apiKeysHeading: "API keys",
 		restrictedKeyHint: "Use a restricted, low-limit key: a vault is a plain folder, and a key inside it travels with every backup and sync of that folder.",
 	},

@@ -1145,6 +1145,114 @@
 }
 
 /*
+ * Disclosure group for advanced settings.
+ *
+ * Styled to read as a row rather than a panel: no fill, no border box, just a
+ * marker and a label sitting on the same left edge as the settings above it.
+ * Giving it a background would make an optional group look like the most
+ * important thing on the tab.
+ */
+.piem-settings-advanced {
+	border-top: 1px solid var(--background-modifier-border);
+	margin-top: var(--size-4-2);
+}
+
+.piem-settings-advanced__summary {
+	align-items: baseline;
+	cursor: pointer;
+	display: flex;
+	flex-wrap: wrap;
+	gap: var(--size-4-1) var(--size-4-2);
+	padding: var(--size-4-3) 0;
+}
+
+/*
+ * Restated because the summary's own box is transparent and Obsidian draws no
+ * ring for it, which leaves keyboard users unable to see what they are about to
+ * open.
+ */
+.piem-settings-advanced__summary:focus-visible {
+	outline: 2px solid var(--background-modifier-border-focus);
+	outline-offset: 2px;
+}
+
+.piem-settings-advanced__label {
+	color: var(--text-normal);
+	font-size: var(--font-ui-small);
+	font-weight: var(--font-semibold);
+}
+
+.piem-settings-advanced__hint {
+	color: var(--text-muted);
+	font-size: var(--font-ui-smaller);
+}
+
+/* The group's first row has the summary above it, so it needs no second rule. */
+.piem-settings-advanced__body > .setting-item:first-child {
+	border-top: none;
+	padding-top: 0;
+}
+
+/*
+ * What a setting will actually do, under its description.
+ *
+ * A separate line rather than appended prose because it changes as the user
+ * types while the description does not, and because it names a consequence — how
+ * many chats are about to move to trash — that should not read as more boilerplate.
+ * Collapsed while empty so the row does not reserve space for a line that has not
+ * arrived from disk yet.
+ */
+.piem-settings-effect {
+	color: var(--text-muted);
+	font-size: var(--font-ui-smaller);
+	margin-top: var(--size-4-1);
+}
+
+.piem-settings-effect:empty {
+	display: none;
+}
+
+/*
+ * A rejected value's reason. Colour alone would not carry it — the line is the
+ * only report the field gets, and it has to read as a problem rather than as
+ * more help text.
+ */
+.piem-settings-effect--error {
+	color: var(--text-error);
+}
+
+/*
+ * Notice about chats left in the folder an earlier release used.
+ *
+ * Rendered as a paragraph after the rows rather than inside one: it belongs to
+ * neither setting, it appears only for vaults upgraded across the move, and it
+ * disappears for good once those chats are dealt with.
+ */
+.piem-settings-legacy {
+	color: var(--text-muted);
+	font-size: var(--font-ui-small);
+	margin: var(--size-4-4) 0 0;
+}
+
+.piem-settings-legacy:empty {
+	display: none;
+}
+
+/*
+ * Configuration that no longer resolves, named at the top of the Models tab.
+ *
+ * Plain text in the warning colour, no fill and no rule: it reports a
+ * substitution the user should know about, not a failure the panel is in, and a
+ * coloured slab above the provider list would claim the latter. The wording
+ * carries the state on its own, so colour is never the only signal.
+ */
+.piem-settings-warning {
+	color: var(--text-warning);
+	font-size: var(--font-ui-small);
+	margin: 0 0 var(--size-4-4);
+}
+
+/*
  * External link standing in for a row's control on the About tab.
  *
  * Sized to the surrounding UI font rather than inheriting body size, so it sits

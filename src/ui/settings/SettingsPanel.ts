@@ -26,6 +26,33 @@ import { ProviderModal } from "./ProviderModal";
 import { describeSecretStorage, type SecretStorageState } from "./secretStorageCopy";
 import { renderSettingsTabs, type SettingsTabDefinition } from "./SettingsTabs";
 import { ABOUT_LINKS, describeVersion, type AboutLink } from "./aboutCopy";
+import { describeMissingBuiltinModel } from "./modelsCopy";
+import { createCollapsibleSection } from "./collapsibleSection";
+import {
+	COMPACTION_ENABLED_COPY,
+	COMPACTION_GROUP_HINT,
+	COMPACTION_GROUP_LABEL,
+	COMPACTION_KEEP_COPY,
+	COMPACTION_RESERVE_COPY,
+	describeTokenFloor,
+	type CompactionRowCopy,
+} from "./compactionCopy";
+import { MIN_COMPACTION_TOKENS, readTokenCount, resolveCompactionSettings, type CompactionConfig } from "../../agent/compactionSettings";
+import { readRetentionLimit, UNLIMITED_SESSION_RETENTION } from "../../session/retention";
+import {
+	describeRetention,
+	describeRetentionFloor,
+	describeLegacyChats,
+	describeSessionDirChange,
+	RETENTION_DESCRIPTION,
+	RETENTION_NAME,
+	RETENTION_PLACEHOLDER,
+	SESSION_DIR_DESCRIPTION,
+	SESSION_DIR_NAME,
+	SESSION_DIR_PLACEHOLDER,
+	SESSION_DIR_RESTART_HINT,
+} from "./sessionsCopy";
+import { DEFAULT_SESSION_DIR, describeSessionDirProblem, normalizeSessionDir } from "../../session/sessionDir";
 
 /**
  * Renders the settings panel.
@@ -59,6 +86,41 @@ export interface SettingsPanelHost {
 	/** Copy for the whole panel, resolved from {@link SettingsPanelSettings.language}. */
 	t: Translator;
 	/**
+	 * The active model's context window, which the compaction group clamps its
+	 * token fields against. A function because the active model changes while the
+	 * panel is open.
+	 */
+	contextWindow(): number;
+	/**
+	 * Chats currently stored, for the Sessions tab's effect line.
+	 *
+	 * Asynchronous because the count lives on disk: the directory has to be listed
+	 * and every log parsed. The row renders without it and fills the line in when
+	 * it arrives, rather than blocking the tab on a directory scan.
+	 */
+	countStoredSessions(): Promise<number>;
+	/**
+	 * The builtin provider/model pair this build no longer carries, when a vault is
+	 * still configured with one. Undefined in every case where nothing was
+	 * substituted.
+	 */
+	missingBuiltinModel(): { provider: string; modelId: string } | undefined;
+	/**
+	 * The folder chat logs are being written to right now.
+	 *
+	 * Read from the live session manager rather than from settings: a vault
+	 * upgraded from an earlier release has no stored folder and is still using the
+	 * plugin-internal one, and the row has to name where the logs actually are.
+	 */
+	activeSessionDir(): string;
+	/**
+	 * Chats left in the folder earlier releases used, and where that folder is.
+	 *
+	 * Zero when there are none, which is the case for every vault installed after
+	 * the move — the notice then renders nothing at all.
+	 */
+	countLegacySessions(): Promise<{ count: number; dir: string }>;
+	/**
 	 * Plugin metadata shown on the About tab.
 	 *
 	 * A narrow field rather than the plugin itself: this interface declares only
@@ -76,6 +138,9 @@ export interface SettingsPanelSettings {
 	networkTransport: NetworkTransport;
 	showAgentDetails: boolean;
 	language: LanguageSetting;
+	compaction?: CompactionConfig;
+	sessionRetention: number;
+	sessionDir: string;
 }
 
 /** Which tab is open. Module-level so it survives a re-render of the panel. */
@@ -88,6 +153,14 @@ export function renderSettingsPanel(containerEl: HTMLElement, host: SettingsPane
 	const tabs: SettingsTabDefinition[] = [
 		{ id: "models", label: t.t("settings.tabModels"), render: (el) => renderModelsTab(el, host) },
 		{ id: "chat", label: t.t("settings.tabChat"), render: (el) => renderChatTab(el, host) },
+		// Its own tab rather than a row under Network: chat storage has nothing to
+		// do with how requests leave the vault, and these are the only settings in
+		// the panel that decide what happens to the user's own writing.
+		//
+		// Labelled "History" rather than "Sessions": session is the internal name for
+		// a chat, and the tab strip is the wrong place to teach a reader a second word
+		// for their own conversations.
+		{ id: "sessions", label: t.t("settings.tabSessions"), render: (el) => renderSessionsTab(el, host) },
 		{ id: "language", label: t.t("settings.tabLanguage"), render: (el) => renderLanguageTab(el, host) },
 		{ id: "network", label: t.t("settings.tabNetwork"), render: (el) => renderNetworkTab(el, host) },
 		{ id: "about", label: t.t("settings.tabAbout"), render: (el) => renderAboutTab(el, host) },
@@ -124,6 +197,17 @@ function renderModelsTab(containerEl: HTMLElement, host: SettingsPanelHost): voi
 	const status = containerEl.createDiv({ cls: "piem-settings-status" });
 	status.createSpan({ cls: "piem-settings-status__label", text: host.t.t("settings.statusActiveModel") });
 	status.createSpan({ cls: "piem-settings-status__value", text: host.describeTarget() });
+
+	// A vault configured against a builtin model this build no longer carries is
+	// silently answered by a different one. Saying so is the difference between a
+	// user knowing which model replied and wondering why the answers changed.
+	const missing = host.missingBuiltinModel();
+	if (missing) {
+		containerEl.createEl("p", {
+			cls: "piem-settings-warning",
+			text: describeMissingBuiltinModel(missing, host.describeTarget()),
+		});
+	}
 
 	renderProviderList(containerEl, host, refresh);
 	renderModelList(containerEl, host, refresh);
@@ -332,6 +416,232 @@ function renderChatTab(containerEl: HTMLElement, host: SettingsPanelHost): void 
 				await host.save();
 			});
 		});
+
+	renderCompactionGroup(containerEl, host);
+}
+
+/**
+ * The three compaction controls, behind a disclosure.
+ *
+ * Collapsed rather than laid out flat because they are the only settings in the
+ * panel a reader can make worse by touching: the defaults are pi's own, tuned
+ * against real conversations, and the reason to change them is narrow. The group
+ * starts open when the vault already holds a value, so a user who configured it
+ * once is not made to hunt for what they set.
+ */
+function renderCompactionGroup(containerEl: HTMLElement, host: SettingsPanelHost): void {
+	const { settings } = host;
+	const body = createCollapsibleSection(containerEl, {
+		label: COMPACTION_GROUP_LABEL,
+		description: COMPACTION_GROUP_HINT,
+		open: settings.compaction !== undefined,
+	});
+
+	/** Writes one field, dropping it when cleared so the row falls back to pi's default. */
+	const update = async (patch: CompactionConfig): Promise<void> => {
+		const next: CompactionConfig = { ...settings.compaction, ...patch };
+		for (const [key, value] of Object.entries(next)) {
+			if (value === undefined) {
+				delete next[key as keyof CompactionConfig];
+			}
+		}
+		settings.compaction = Object.keys(next).length > 0 ? next : undefined;
+		await host.save();
+	};
+
+	const resolved = resolveCompactionSettings(settings.compaction, host.contextWindow());
+
+	new Setting(body)
+		.setName(COMPACTION_ENABLED_COPY.name)
+		.setDesc(COMPACTION_ENABLED_COPY.description)
+		.addToggle((toggle) => {
+			toggle.setValue(resolved.enabled);
+			toggle.onChange(async (enabled) => {
+				// Written even when it matches pi's default: the user made this
+				// choice explicitly, and dropping it would silently re-enable
+				// compaction if pi ever flipped its own default.
+				await update({ enabled });
+			});
+		});
+
+	renderTokenRow(body, {
+		copy: COMPACTION_RESERVE_COPY,
+		value: settings.compaction?.reserveTokens,
+		onChange: (reserveTokens) => update({ reserveTokens }),
+	});
+	renderTokenRow(body, {
+		copy: COMPACTION_KEEP_COPY,
+		value: settings.compaction?.keepRecentTokens,
+		onChange: (keepRecentTokens) => update({ keepRecentTokens }),
+	});
+}
+
+interface TokenRowOptions {
+	copy: CompactionRowCopy;
+	/** The stored value, or undefined when the row is following pi's default. */
+	value: number | undefined;
+	onChange(value: number | undefined): Promise<void>;
+}
+
+/**
+ * One token field.
+ *
+ * Empty means "follow pi's default", which is why the placeholder is the default
+ * itself rather than a hint: the box shows what will be used when it is blank.
+ * The floor is stated in the description instead of enforced on keystroke —
+ * rewriting the field while someone is still typing the second digit of `16384`
+ * fights the user.
+ */
+function renderTokenRow(containerEl: HTMLElement, options: TokenRowOptions): void {
+	new Setting(containerEl)
+		.setName(options.copy.name)
+		.setDesc(`${options.copy.description} ${describeTokenFloor()}`)
+		.addText((text) => {
+			text.inputEl.type = "number";
+			text.inputEl.min = String(MIN_COMPACTION_TOKENS);
+			text.setPlaceholder(options.copy.placeholder);
+			text.setValue(options.value === undefined ? "" : String(options.value));
+			// Committed on blur, not per keystroke: every intermediate value of a
+			// five-digit number is itself a valid setting, and saving each one would
+			// rebuild the agent's configuration four times per edit.
+			text.inputEl.addEventListener("blur", () => {
+				const parsed = readTokenCount(text.inputEl.value);
+				// Reflect the coerced value so a raised or rejected entry is visible
+				// rather than leaving the box disagreeing with what was stored.
+				text.setValue(parsed === undefined ? "" : String(parsed));
+				void options.onChange(parsed);
+			});
+		});
+}
+
+/**
+ * Where chats are kept, and how many.
+ *
+ * The count of stored chats is read once per render and shown under the field,
+ * because the setting's effect is invisible otherwise: the number alone does not
+ * say whether anything is about to be trashed, and the answer depends on state
+ * the user cannot see from the settings dialog.
+ */
+function renderSessionsTab(containerEl: HTMLElement, host: SettingsPanelHost): void {
+	renderSessionDirRow(containerEl, host);
+	renderRetentionRow(containerEl, host);
+	renderLegacyChatsNotice(containerEl, host);
+}
+
+/**
+ * Names the folder earlier releases wrote to, when chats are still in it.
+ *
+ * The release that moved the default folder makes those chats disappear from the
+ * chat list without anything having been deleted, and the folder is inside the
+ * config directory, which Obsidian's file explorer does not show. Without this
+ * line a user has no way to find them. Rendered only when the folder actually
+ * holds something, so it is not permanent furniture.
+ */
+function renderLegacyChatsNotice(containerEl: HTMLElement, host: SettingsPanelHost): void {
+	const notice = containerEl.createEl("p", { cls: "piem-settings-legacy" });
+	void host.countLegacySessions().then(({ count, dir }) => {
+		if (count === 0) {
+			notice.remove();
+			return;
+		}
+		notice.setText(describeLegacyChats(count, dir));
+	});
+}
+
+/**
+ * The folder chat logs go to.
+ *
+ * Validated on blur and reported in place rather than through a `Notice`: the
+ * mistake is in the field the user is looking at, and a rejected path has to
+ * leave the previous folder in force instead of falling back to the default,
+ * which would repoint the plugin on a typo.
+ */
+function renderSessionDirRow(containerEl: HTMLElement, host: SettingsPanelHost): void {
+	const { settings } = host;
+	const setting = new Setting(containerEl).setName(SESSION_DIR_NAME);
+	setting.setDesc(`${SESSION_DIR_DESCRIPTION} ${SESSION_DIR_RESTART_HINT}`);
+	const effect = setting.descEl.createDiv({ cls: "piem-settings-effect" });
+
+	const currentDir = host.activeSessionDir();
+	const describe = (next: string, problem?: string): void => {
+		effect.setText(problem ?? describeSessionDirChange(currentDir, next));
+		// The state is carried in text, not colour alone: this line is the only
+		// report a rejected path gets.
+		effect.toggleClass("piem-settings-effect--error", problem !== undefined);
+	};
+	describe(settings.sessionDir);
+
+	setting.addText((text) => {
+		text.setPlaceholder(SESSION_DIR_PLACEHOLDER);
+		text.setValue(settings.sessionDir);
+		text.inputEl.addEventListener("blur", () => {
+			const typed = text.inputEl.value.trim();
+			// An emptied field means "use the default", the same as a fresh vault.
+			if (!typed) {
+				text.setValue(DEFAULT_SESSION_DIR);
+				settings.sessionDir = DEFAULT_SESSION_DIR;
+				describe(DEFAULT_SESSION_DIR);
+				void host.save();
+				return;
+			}
+			const problem = describeSessionDirProblem(typed);
+			if (problem) {
+				describe(typed, problem);
+				return;
+			}
+			const normalized = normalizeSessionDir(typed);
+			if (!normalized || normalized === settings.sessionDir) {
+				describe(typed, problem);
+				return;
+			}
+			text.setValue(normalized);
+			settings.sessionDir = normalized;
+			describe(normalized);
+			void host.save();
+		});
+	});
+}
+
+function renderRetentionRow(containerEl: HTMLElement, host: SettingsPanelHost): void {
+	const { settings } = host;
+
+	const setting = new Setting(containerEl).setName(RETENTION_NAME);
+	setting.setDesc(`${RETENTION_DESCRIPTION} ${describeRetentionFloor()}`);
+	// Appended after `setDesc`, which replaces the description's contents. Its own
+	// element so the line can be rewritten after an edit without re-rendering the
+	// tab, which would throw focus out of the field.
+	const effect = setting.descEl.createDiv({ cls: "piem-settings-effect" });
+
+	// Undefined until the directory has been read; `describeRetention` is only
+	// called once a real count exists, so the line never states a wrong one.
+	let storedCount: number | undefined;
+	const describe = (limit: number): void => {
+		effect.setText(storedCount === undefined ? "" : describeRetention(limit, storedCount));
+	};
+	void host.countStoredSessions().then((count) => {
+		storedCount = count;
+		describe(settings.sessionRetention);
+	});
+
+	setting.addText((text) => {
+		text.inputEl.type = "number";
+		text.inputEl.min = String(UNLIMITED_SESSION_RETENTION);
+		text.setPlaceholder(RETENTION_PLACEHOLDER);
+		text.setValue(String(settings.sessionRetention));
+		// Committed on blur so a half-typed "1" of "100" never becomes the cap —
+		// which, being lower than the real intent, would trash chats the user was
+		// still in the middle of asking to keep.
+		text.inputEl.addEventListener("blur", () => {
+			const limit = readRetentionLimit(text.inputEl.value);
+			text.setValue(String(limit));
+			describe(limit);
+			if (limit === settings.sessionRetention) {
+				return;
+			}
+			settings.sessionRetention = limit;
+			void host.save();
+		});
+	});
 }
 
 function renderNetworkTab(containerEl: HTMLElement, host: SettingsPanelHost): void {
@@ -369,6 +679,11 @@ function renderAboutTab(containerEl: HTMLElement, host: SettingsPanelHost): void
 
 	new Setting(containerEl).setName(t.t("settings.whatLeavesVault")).setHeading();
 	containerEl.createEl("p", { text: t.t("settings.whatLeavesVaultDesc") });
+	// Stated here because it is the one consequence of the chat folder living in
+	// the vault that a reader would otherwise meet by surprise: whatever syncs or
+	// backs up the vault now carries the conversations too, and those contain note
+	// text the tools read.
+	containerEl.createEl("p", { text: t.t("settings.chatLogsInVault") });
 
 	new Setting(containerEl).setName(t.t("settings.apiKeysHeading")).setHeading();
 	containerEl.createEl("p", { text: describeSecretStorage(host.secretStorage, t) });

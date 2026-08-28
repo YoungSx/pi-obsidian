@@ -149,6 +149,7 @@ export const zhCN: DeepPartial<EnCopy> = {
 	settings: {
 		tabModels: "模型",
 		tabChat: "对话",
+		tabSessions: "历史",
 		tabNetwork: "网络",
 		tabAbout: "关于",
 		tabLanguage: "语言",
@@ -190,6 +191,8 @@ export const zhCN: DeepPartial<EnCopy> = {
 		whatLeavesVault: "什么会离开笔记库",
 		whatLeavesVaultDesc:
 			"提示词、工具读取的笔记库内容以及工具结果，会发送给服务于当前模型的提供方。不会发送到任何其他地方。",
+		chatLogsInVault:
+			"聊天记录是笔记库里的文件，会随你的笔记一起同步和备份。它们包含对话内容，以及回答过程中读取的笔记原文。",
 		apiKeysHeading: "API 密钥",
 		restrictedKeyHint: "请使用受限、低限额的密钥：笔记库是一个普通文件夹，里面的密钥会随着该文件夹的每次备份和同步一起传播。",
 	},
