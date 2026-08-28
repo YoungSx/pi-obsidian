@@ -59,6 +59,17 @@ export default tseslint.config(
 			"import/no-nodejs-modules": "off",
 		},
 	},
+	{
+		// Asserts on `styles.css` as a file, because the decisions it pins are
+		// stylesheet structure rather than component behaviour: which media
+		// feature guards the touch-target rules, and whether "muted" is spelled
+		// as a colour token or as an opacity. Reading the stylesheet is the whole
+		// mechanism, and it never reaches the bundle.
+		files: ["src/ui/panelA11y.test.ts"],
+		rules: {
+			"import/no-nodejs-modules": "off",
+		},
+	},
 	globalIgnores([
 		"node_modules",
 		// Nested agent worktrees are separate checkouts; linting them here would
