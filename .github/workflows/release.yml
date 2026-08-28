@@ -30,6 +30,14 @@ jobs:
             - name: Check bundle for loader-incompatible constructs
               run: npm run check:bundle
 
+            # The copy tables are the single source for every user-visible
+            # string; this catches the ones that never got there. Two branches
+            # have shipped hardcoded English past review, and the ContextRow
+            # case was six `aria-label`s — invisible on screen, and asserted in
+            # English by the component's own passing tests.
+            - name: Check for hardcoded user-visible copy
+              run: npm run check:copy
+
             # Includes the smoke test that evaluates main.js the way Obsidian
             # does and runs onload on both desktop and mobile platform shapes.
             - name: Test
