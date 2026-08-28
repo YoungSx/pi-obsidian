@@ -15,6 +15,7 @@ installObsidianStub();
 
 // Dynamic imports so the mocked module wins over any cached real one.
 const { ObsidianAgentService } = await import("./ObsidianAgentService");
+const { OBSIDIAN_AGENT_SYSTEM_PROMPT } = await import("./systemPrompt");
 const { TFile: TFileClass, TFolder: TFolderClass } = await import("obsidian");
 
 // Tests drive ObsidianSessionManager directly, so the directory is supplied here
@@ -1076,6 +1077,94 @@ describe("prompt commands", () => {
 	});
 });
 
+describe("vault skills", () => {
+	/** Captures the system prompt the fake provider actually received. */
+	function createPromptCapturingStreamFn(prompts: string[]): StreamFn {
+		return (_model, context) => {
+			prompts.push(context.systemPrompt ?? "");
+			return createFakeStreamFn()(_model, context);
+		};
+	}
+
+	const SUMMARIZE_SKILL = "---\nname: summarize\ndescription: Summarize a note\n---\nDo the summary.";
+
+	function createSkillsService(app: App, prompts: string[]): ObsidianAgentServiceType {
+		return new ObsidianAgentService(
+			app,
+			() => defaultTestSettings(),
+			new ObsidianSessionManager(asDataAdapter(new MemoryAdapter()), SESSION_DIR, "obsidian-vault:Test"),
+			{ streamFn: createPromptCapturingStreamFn(prompts) },
+		);
+	}
+
+	it("composes vault skills into the system prompt the model receives", async () => {
+		// The prompt travels through state into the request context, so asserting
+		// on what the streamFn saw proves the whole path, not just the field.
+		const prompts: string[] = [];
+		const service = createSkillsService(
+			createVaultAppWithSkills({ "Piem/skills/summarize/SKILL.md": SUMMARIZE_SKILL }),
+			prompts,
+		);
+
+		await service.sendPrompt("Hello");
+
+		const prompt = prompts.at(-1) ?? "";
+		expect(prompt.startsWith("You are Piem inside Obsidian.")).toBe(true);
+		expect(prompt).toContain("<available_skills>");
+		expect(prompt).toContain("summarize");
+		expect(prompt).toContain("Piem/skills/summarize/SKILL.md");
+	});
+
+	it("keeps a skill-less vault's prompt identical to the bare base", async () => {
+		const prompts: string[] = [];
+		const service = createSkillsService(createFakeApp(asDataAdapter(new MemoryAdapter())), prompts);
+
+		await service.sendPrompt("Hello");
+
+		// `formatSkillsForSystemPrompt` renders an empty set as "", so the composed
+		// prompt is the base constant verbatim — no appended block, no stray bytes.
+		expect(prompts.at(-1)).toBe(OBSIDIAN_AGENT_SYSTEM_PROMPT);
+		expect(prompts.at(-1)).not.toContain("<available_skills>");
+	});
+
+	it("surfaces skill diagnostics as a notice the user can still see", async () => {
+		// Regression guard for the sendPrompt ordering: refreshConfiguration runs
+		// reloadSkills, which sets the notice; clearing beforehand is what keeps
+		// the warning from being erased in the same breath.
+		const prompts: string[] = [];
+		const service = createSkillsService(
+			createVaultAppWithSkills({
+				"Piem/skills/summarize/SKILL.md": SUMMARIZE_SKILL,
+				"Piem/skills/bad/SKILL.md": "---\nname: Not_A_Name\ndescription: broken\n---\nBody",
+			}),
+			prompts,
+		);
+
+		await service.sendPrompt("Hello");
+
+		// pi's diagnostic message names the offending skill, not the file path;
+		// the notice is what survives the sendPrompt clear-then-reload ordering.
+		expect(service.getSnapshot().noticeMessage).toContain("Not_A_Name");
+	});
+
+	it("refreshes a live agent's prompt when the vault gains a skill", async () => {
+		const skillFiles: Record<string, string> = {};
+		const prompts: string[] = [];
+		const service = createSkillsService(createVaultAppWithSkills(skillFiles), prompts);
+
+		await service.sendPrompt("Hello");
+		expect(prompts.at(-1)).not.toContain("<available_skills>");
+
+		// The user saves a new SKILL.md; saveSettings → refreshConfiguration picks
+		// it up, so the running conversation sees it without a plugin reload.
+		skillFiles["Piem/skills/new/SKILL.md"] = SUMMARIZE_SKILL;
+		await service.refreshConfiguration();
+		await service.sendPrompt("Hello again");
+
+		expect(prompts.at(-1)).toContain("new/SKILL.md");
+	});
+});
+
 function createService(
 	memoryAdapter: MemoryAdapter = new MemoryAdapter(),
 	overrides: { streamFn?: StreamFn; vaultFiles?: Record<string, string> } = {},
@@ -1083,13 +1172,77 @@ function createService(
 	return createServiceWithSettings(memoryAdapter, overrides).service;
 }
 
-/** Same, but hands back the live settings object so a test can mutate it. */
-function createServiceWithSettings(
-	memoryAdapter: MemoryAdapter = new MemoryAdapter(),
-	overrides: { streamFn?: StreamFn; vaultFiles?: Record<string, string> } = {},
-): { service: ObsidianAgentServiceType; settings: PiemSettings } {
-	const adapter = asDataAdapter(memoryAdapter);
-	const settings: PiemSettings = {
+/**
+ * A vault stub with a real folder tree, so skills under `Piem/skills` resolve.
+ *
+ * `createFakeApp` returns null for every lookup, which is exactly right for the
+ * other tests (a missing skills folder loads as empty) and exactly wrong here.
+ * Importing a richer vault from another test file would drag its `mock.module`
+ * registration along, so this one stands alone — same trade the
+ * `organizeTools.test.ts` vault stub already documents.
+ */
+function createVaultAppWithSkills(skillFiles: Record<string, string>): App {
+	// Derived per call rather than snapshotted at construction, so a test that
+	// mutates `skillFiles` between turns (simulating the user saving a new
+	// SKILL.md) sees the new file on the next reload.
+	const liveFiles = () =>
+		new Map<string, { content: string; size: number }>(
+			Object.entries(skillFiles).map(([path, content]) => [path, { content, size: content.length }]),
+		);
+	const liveFolders = () => {
+		const folders = new Set<string>();
+		for (const path of Object.keys(skillFiles)) {
+			let current = "";
+			for (const segment of path.split("/").slice(0, -1)) {
+				current = current ? `${current}/${segment}` : segment;
+				folders.add(current);
+			}
+		}
+		return folders;
+	};
+	const fileFor = (path: string): TFile => {
+		const entry = liveFiles().get(path)!;
+		const file: TFile = new TFileClass();
+		file.path = path;
+		file.name = path.split("/").pop() ?? path;
+		file.stat = { ctime: 0, mtime: 0, size: entry.size };
+		return file;
+	};
+	const folderFor = (path: string): TFolder => {
+		const files = liveFiles();
+		const folders = liveFolders();
+		const folder: TFolder = new TFolderClass();
+		folder.path = path;
+		folder.name = path.split("/").pop() ?? path;
+		folder.children = [
+			...[...files.keys()].filter((p) => getParent(p) === path).map(fileFor),
+			...[...folders].filter((p) => getParent(p) === path).map(folderFor),
+		];
+		return folder;
+	};
+	return {
+		vault: {
+			adapter: asDataAdapter(new MemoryAdapter()),
+			getName: () => "Test",
+			getFiles: () => [...liveFiles().keys()],
+			getRoot: () => folderFor(""),
+			getFileByPath: (path: string) => (liveFiles().has(path) ? fileFor(path) : null),
+			getFolderByPath: (path: string) => (liveFolders().has(path) ? folderFor(path) : null),
+			// `VaultExecutionEnv.requireFile` resolves through this, not the two
+			// above; a stub that omits it loads skills that list but never read.
+			getAbstractFileByPath: (path: string) =>
+				liveFiles().has(path) ? fileFor(path) : liveFolders().has(path) ? folderFor(path) : null,
+			read: async (file: TFile) => liveFiles().get(file.path)!.content,
+		},
+		workspace: {
+			getActiveViewOfType: () => null,
+		},
+	} as unknown as App;
+}
+
+/** The settings every service test starts from, so custom ones can spread it. */
+function defaultTestSettings(): PiemSettings {
+	return {
 		...DEFAULT_SETTINGS,
 		providers: [],
 		models: [],
@@ -1104,6 +1257,15 @@ function createServiceWithSettings(
 		sessionRetention: DEFAULT_SESSION_RETENTION,
 		sessionDir: DEFAULT_SESSION_DIR,
 	};
+}
+
+/** Same, but hands back the live settings object so a test can mutate it. */
+function createServiceWithSettings(
+	memoryAdapter: MemoryAdapter = new MemoryAdapter(),
+	overrides: { streamFn?: StreamFn; vaultFiles?: Record<string, string> } = {},
+): { service: ObsidianAgentServiceType; settings: PiemSettings } {
+	const adapter = asDataAdapter(memoryAdapter);
+	const settings = defaultTestSettings();
 	const sessionManager = new ObsidianSessionManager(adapter, SESSION_DIR, "obsidian-vault:Test");
 	const service = new ObsidianAgentService(createFakeApp(adapter, overrides.vaultFiles), () => settings, sessionManager, {
 		streamFn: overrides.streamFn ?? createFakeStreamFn(),
