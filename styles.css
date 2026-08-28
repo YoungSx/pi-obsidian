@@ -424,26 +424,45 @@
  * Always rendered, never hover-revealed: hover-only controls are unreachable by
  * touch, and `isDesktopOnly: false` means this panel runs on a phone. Muted
  * until interacted with so the row does not compete with the reply itself.
+ *
+ * "Muted" is expressed as a colour, not as `opacity`, because these are icon
+ * buttons and WCAG 1.4.11 wants 3:1 against the background in the resting
+ * state. An `opacity` here cannot deliver that: Obsidian's own `.clickable-icon`
+ * already carries `opacity: var(--icon-opacity)` (0.85), so a container value
+ * multiplies with it. Measured in Chromium against the real app.css on
+ * 2026-08-28, `opacity: 0.55` composited to an effective alpha of 0.47 and
+ * 2.10:1 in the light theme and 2.80:1 in the dark one — both failing, and the
+ * dark theme failing in a way that inspecting only `opacity: 0.55` hides.
+ * Raising it does not rescue the approach either: 0.70 still measured 2.68:1.
+ *
+ * Setting `--icon-color` rather than `color` is what makes this reach the
+ * glyphs. `.clickable-icon` declares `color: var(--icon-color)` on itself, so a
+ * `color` on this container loses to the button's own declaration; the custom
+ * property inherits past it and wins. Same reason the row no longer needs a
+ * coarse-pointer exception: there is no hover-dependent dimming left to undo.
+ * Resting state now measures 4.64:1 light / 6.12:1 dark.
+ *
+ * `--icon-color-hover` has to be set alongside it. Obsidian re-declares
+ * `color: var(--icon-color-hover)` inside `.clickable-icon:hover`, and that
+ * variable defaults to `--text-muted` — so pointing at a button used to drag the
+ * glyph back down to muted, i.e. it went dimmer relative to its own hover
+ * background at the exact moment of interaction. Verified in Chromium: without
+ * this line the computed colour stayed rgb(92, 92, 92) while `--icon-color` had
+ * already resolved to #222222.
  */
 .piem-chat__message-actions {
+	--icon-color: var(--text-muted);
+	--icon-color-hover: var(--text-muted);
 	display: flex;
 	gap: var(--size-4-1);
 	margin-top: var(--size-4-1);
-	opacity: 0.55;
-	transition: opacity 0.15s ease-out;
+	transition: color 0.15s ease-out;
 }
 
 .piem-chat__message-actions:hover,
 .piem-chat__message-actions:focus-within {
-	opacity: 1;
-}
-
-/* A coarse pointer has no hover, so the row stays legible without one. */
-@media (pointer: coarse) {
-
-	.piem-chat__message-actions {
-		opacity: 1;
-	}
+	--icon-color: var(--text-normal);
+	--icon-color-hover: var(--text-normal);
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -838,16 +857,24 @@
  * Always rendered, never hover-revealed — same reasoning as the reply actions:
  * a hover-only control cannot be reached by touch. Muted so the row does not
  * compete with the composer, and restored on hover *or* keyboard focus.
+ *
+ * Muted via `--icon-color` for the contrast reasons spelled out on
+ * `.piem-chat__message-actions`: `opacity` here compounded with the 0.85 that
+ * `.clickable-icon` already applies, a plain `color` would lose to that same
+ * rule's own `color` declaration, and `--icon-color-hover` has to move with it or
+ * Obsidian's `.clickable-icon:hover` pulls the glyph back to muted.
  */
 .piem-chat__context-action {
+	--icon-color: var(--text-muted);
+	--icon-color-hover: var(--text-muted);
 	flex-shrink: 0;
-	opacity: 0.55;
-	transition: opacity 0.15s ease-out;
+	transition: color 0.15s ease-out;
 }
 
 .piem-chat__context-chip:hover .piem-chat__context-action,
 .piem-chat__context-chip:focus-within .piem-chat__context-action {
-	opacity: 1;
+	--icon-color: var(--text-normal);
+	--icon-color-hover: var(--text-normal);
 }
 
 /*
@@ -860,12 +887,7 @@
 	flex-shrink: 0;
 }
 
-@media (pointer: coarse) {
-
-	/* A coarse pointer has no hover, so the controls stay legible without one. */
-	.piem-chat__context-action {
-		opacity: 1;
-	}
+@media (any-pointer: coarse) {
 
 	/*
 	 * The global coarse-pointer rule grows every icon button to --size-4-12, which
@@ -991,13 +1013,34 @@
  * Apple asks for 44pt and WCAG 2.5.8 for 24px minimum; a thumb gets the larger
  * of the two. Keyed on the pointer rather than width, because a narrow desktop
  * leaf is still driven by a mouse.
+ *
+ * `any-pointer` rather than `pointer`: `pointer` describes only the *primary*
+ * input, so an iPad with a Magic Keyboard — a mainstream way to run Obsidian
+ * mobile — reports `fine` and used to fall back to 32px targets even though the
+ * screen stays the main way people reach this panel. Touchscreen laptops read
+ * the same. The cost is that a mouse user on a touchscreen laptop also gets
+ * 48px buttons; that trade is deliberate, since an oversized target is a small
+ * visual redundancy for a mouse while an undersized one is a functional barrier
+ * for a thumb.
  */
-@media (pointer: coarse) {
+@media (any-pointer: coarse) {
 
 	.piem-chat__icon-button,
 	.piem-chat__send-button.mod-cta {
 		min-height: var(--size-4-12);
 		min-width: var(--size-4-12);
+	}
+
+	/*
+	 * Height only. This button carries an icon *and* a label, so its width comes
+	 * from content; a min-width would stretch a two-word button across the panel
+	 * and fight the `translateX(-50%)` centring. It needs its own rule because it
+	 * is a bare <button>, not an .piem-chat__icon-button, so the selector above
+	 * never reached it — leaving a 32px target floating in the thumb zone at the
+	 * bottom of the transcript, which is the one place a touch-first control sits.
+	 */
+	.piem-chat__latest {
+		min-height: var(--size-4-12);
 	}
 
 	.piem-chat__trace-summary,
