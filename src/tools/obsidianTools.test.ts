@@ -134,6 +134,32 @@ function positionAtLine(line: number): { start: Loc; end: Loc } {
 	};
 }
 
+describe("tool registration", () => {
+	it("registers every vault tool under its expected name", () => {
+		const app = createTaskApp([]);
+
+		const names = createObsidianTools(app).map((tool) => tool.name);
+
+		// `organizeTools.test.ts` and friends call their factories directly, so this
+		// is the only place a tool that was written but never registered shows up.
+		expect(names).toEqual([
+			"read",
+			"write",
+			"edit",
+			"ls",
+			"find",
+			"grep",
+			"list_tasks",
+			"summarize_tasks",
+			"get_note_links",
+			"get_note_metadata",
+			"get_active_note",
+			"move_note",
+			"trash_note",
+		]);
+	});
+});
+
 describe("abort handling", () => {
 	it("rejects every tool when the signal is already aborted", async () => {
 		const app = createTaskApp([
