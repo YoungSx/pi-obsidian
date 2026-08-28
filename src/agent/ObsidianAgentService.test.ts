@@ -5,6 +5,8 @@ import type { Api, AssistantMessage, Context, Model, SimpleStreamOptions } from 
 import { createAssistantMessageEventStream } from "@earendil-works/pi-ai";
 import type { StreamFn } from "@earendil-works/pi-agent-core";
 import { ObsidianSessionManager } from "../session/ObsidianSessionManager";
+import { DEFAULT_SESSION_RETENTION } from "../session/retention";
+import { DEFAULT_SESSION_DIR } from "../session/sessionDir";
 import type { PiemSettings } from "../settings";
 import type { ObsidianAgentService as ObsidianAgentServiceType } from "./ObsidianAgentService";
 
@@ -130,6 +132,8 @@ describe("ObsidianAgentService", () => {
 			networkTransport: "requestUrl",
 			showAgentDetails: false,
 			language: "en",
+			sessionRetention: DEFAULT_SESSION_RETENTION,
+			sessionDir: DEFAULT_SESSION_DIR,
 		};
 		const adapter = new MemoryAdapter();
 		const service = new ObsidianAgentService(
@@ -912,6 +916,8 @@ function createServiceWithSettings(
 		networkTransport: "requestUrl",
 		showAgentDetails: false,
 		language: "en",
+		sessionRetention: DEFAULT_SESSION_RETENTION,
+		sessionDir: DEFAULT_SESSION_DIR,
 	};
 	const sessionManager = new ObsidianSessionManager(adapter, SESSION_DIR, "obsidian-vault:Test");
 	const service = new ObsidianAgentService(createFakeApp(adapter), () => settings, sessionManager, {

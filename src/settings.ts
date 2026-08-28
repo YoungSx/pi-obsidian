@@ -1,7 +1,6 @@
 import { App, PluginSettingTab } from "obsidian";
 import { getSupportedThinkingLevels } from "@earendil-works/pi-ai";
-import { getBuiltinModels } from "@earendil-works/pi-ai/providers/all";
-import type { BuiltinProvider } from "@earendil-works/pi-ai/providers/all";
+import { getBuiltinModels } from "./net/builtinCatalog";
 import type { Model, ModelThinkingLevel } from "@earendil-works/pi-ai";
 import type PiObsidianPlugin from "./main";
 import { CUSTOM_ENDPOINT_PROVIDER, DEFAULT_MODEL_ID, DEFAULT_PROVIDER, DEFAULT_THINKING_LEVEL } from "./constants";
@@ -15,6 +14,9 @@ import {
 	type ModelConfig,
 	type ProviderConfig,
 } from "./modelConfig";
+import { normalizeCompactionConfig, type CompactionConfig } from "./agent/compactionSettings";
+import { DEFAULT_SESSION_RETENTION, readRetentionLimit } from "./session/retention";
+import { DEFAULT_SESSION_DIR, normalizeSessionDir } from "./session/sessionDir";
 import {
 	buildCustomEndpointModel,
 	isCustomEndpointActive,
@@ -59,6 +61,33 @@ export interface PiemSettings {
 	 */
 	language: LanguageSetting;
 	/**
+	 * When history gets summarized, and how much survives.
+	 *
+	 * Partial by design: an absent field follows pi's own default rather than
+	 * freezing the value it had when the vault was created, so a pi upgrade that
+	 * retunes compaction still reaches users who never opened the advanced group.
+	 * Resolution and clamping live in {@link resolveCompactionSettings}.
+	 */
+	compaction?: CompactionConfig;
+	/**
+	 * How many chats are kept before the oldest are moved to trash.
+	 *
+	 * {@link UNLIMITED_SESSION_RETENTION} keeps every chat, which is the old
+	 * behaviour. Always present — unlike compaction, there is no pi default to
+	 * defer to, and a cap the plugin picked has to be visible in the panel rather
+	 * than implied by an empty field.
+	 */
+	sessionRetention: number;
+	/**
+	 * Folder chat logs are written to, relative to the vault root.
+	 *
+	 * Always resolved: a vault written before this setting existed gets
+	 * {@link DEFAULT_SESSION_DIR} too, so every install writes chat logs where the
+	 * user can see them. The logs an earlier release left in the plugin folder are
+	 * not moved; the Sessions tab names that folder so they can be recovered.
+	 */
+	sessionDir: string;
+	/**
 	 * Legacy single-endpoint form, superseded by {@link providers}/{@link models}.
 	 *
 	 * Retained after migration rather than cleared: a user who rolls back to an
@@ -78,6 +107,8 @@ export const DEFAULT_SETTINGS: PiemSettings = {
 	networkTransport: "requestUrl",
 	showAgentDetails: false,
 	language: "auto",
+	sessionRetention: DEFAULT_SESSION_RETENTION,
+	sessionDir: DEFAULT_SESSION_DIR,
 };
 
 /**
@@ -102,6 +133,8 @@ export function normalizeSettings(data: Partial<PiemSettings> | null | undefined
 	// Absent in older vaults; normalizeCustomEndpoint drops empty objects so
 	// a cleared form does not resurrect itself as an active endpoint.
 	const customEndpoint = normalizeCustomEndpoint(data?.customEndpoint);
+
+	const compaction = normalizeCompactionConfig(data?.compaction);
 
 	const { providers, models } = normalizeProviderAndModelLists(data?.providers, data?.models);
 	let activeModelId = typeof data?.activeModelId === "string" ? data.activeModelId.trim() : "";
@@ -138,16 +171,30 @@ export function normalizeSettings(data: Partial<PiemSettings> | null | undefined
 		// quiet default rather than inheriting the old always-verbose panel.
 		showAgentDetails: data?.showAgentDetails === true,
 		language,
+		// Absent in vaults written before the cap existed. Those vaults may already
+		// hold more chats than it allows, and the first new chat trims them to it —
+		// to trash, so nothing is lost outright.
+		sessionRetention: readRetentionLimit(data?.sessionRetention),
+		// Falls back to the vault-folder default, including on a vault written
+		// before this setting existed: chat logs belong with the user's notes, where
+		// they can be opened, searched, and backed up. Nothing is moved — chats in
+		// the old plugin folder stay on disk, and the Sessions tab says where.
+		sessionDir: normalizeSessionDir(data?.sessionDir) ?? DEFAULT_SESSION_DIR,
 		customEndpoint,
 	};
 	if (activeModelId) {
 		settings.activeModelId = activeModelId;
 	}
+	// Omitted rather than stored as `{}` so an untouched vault's data.json stays
+	// as it was, and "unset" keeps meaning "follow pi".
+	if (compaction) {
+		settings.compaction = compaction;
+	}
 	return settings;
 }
 
-export function getProviderModels(provider: string) {
-	return getBuiltinModels(provider as BuiltinProvider);
+export function getProviderModels(provider: string): Model<string>[] {
+	return getBuiltinModels(provider);
 }
 
 /** The active {@link ModelConfig}, or undefined when a builtin model is selected. */
@@ -203,6 +250,30 @@ export function getSelectedModel(settings: PiemSettings): Model<string> {
 		throw new Error(`Default model ${DEFAULT_PROVIDER}/${DEFAULT_MODEL_ID} is not available.`);
 	}
 	return fallbackModel;
+}
+
+/**
+ * Whether the builtin provider/model pair a vault is configured with is gone.
+ *
+ * The catalog this build ships is a subset of pi-ai's, so a vault configured
+ * against a provider that has since been dropped resolves through
+ * {@link getSelectedModel}'s last-resort fallback and silently starts talking to
+ * a different model. That is the one outcome the catalog trimming had to avoid,
+ * so the panel names it instead: this reports the stale pair, and the Models tab
+ * renders it as a notice pointing at the configured-provider flow, which can
+ * still reach any endpoint.
+ *
+ * Returns undefined when a configured model is active, when the pair resolves, or
+ * when a legacy endpoint is in force — in each case nothing was substituted.
+ */
+export function findMissingBuiltinModel(settings: PiemSettings): { provider: string; modelId: string } | undefined {
+	if (getActiveConfiguration(settings) || isCustomEndpointActive(settings.customEndpoint)) {
+		return undefined;
+	}
+	if (getProviderModels(settings.provider).some((model) => model.id === settings.modelId)) {
+		return undefined;
+	}
+	return { provider: settings.provider, modelId: settings.modelId };
 }
 
 /**
@@ -320,6 +391,12 @@ export class PiemSettingTab extends PluginSettingTab {
 			preferredThinkingLevel: () => getPreferredThinkingLevel(this.plugin.settings),
 			describeTarget: () => describeModelTarget(this.plugin.settings, getT(language)),
 			t: getT(language),
+			contextWindow: () => getSelectedModel(this.plugin.settings).contextWindow,
+			countStoredSessions: () => this.plugin.countStoredSessions(),
+			activeSessionDir: () => this.plugin.getActiveSessionDir(),
+			countLegacySessions: () => this.plugin.countLegacySessions(),
+			missingBuiltinModel: () => findMissingBuiltinModel(this.plugin.settings),
+			manifest: { version: this.plugin.manifest.version },
 		});
 	}
 }
