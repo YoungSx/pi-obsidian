@@ -8,6 +8,10 @@ import {
 	replaceById,
 	type ConfigLists,
 } from "./configLists";
+import { getT } from "../../i18n";
+
+const en = getT("en");
+const zh = getT("zh-cn");
 
 /**
  * Deletion is the panel's only silently destructive path.
@@ -118,16 +122,21 @@ describe("removeModel", () => {
 
 describe("describeProviderDeletion", () => {
 	it("names the models that go with it", () => {
-		const lines = describeProviderDeletion([model("m1", "p1"), model("m2", "p1")]);
+		const lines = describeProviderDeletion([model("m1", "p1"), model("m2", "p1")], en);
 		expect(lines[1]).toBe("The 2 models served by it are removed too: m1, m2.");
 	});
 
 	it("uses the singular for one model", () => {
-		expect(describeProviderDeletion([model("m1", "p1")])[1]).toBe("The model served by it is removed too: m1.");
+		expect(describeProviderDeletion([model("m1", "p1")], en)[1]).toBe("The model served by it is removed too: m1.");
+	});
+
+	it("keeps the count and names when translated", () => {
+		const lines = describeProviderDeletion([model("m1", "p1"), model("m2", "p1")], zh);
+		expect(lines[1]).toBe("由它提供服务的 2 个模型也会被移除：m1, m2。");
 	});
 
 	it("says nothing about models when none are bound", () => {
-		expect(describeProviderDeletion([])).toHaveLength(1);
+		expect(describeProviderDeletion([], en)).toHaveLength(1);
 	});
 });
 
@@ -135,11 +144,11 @@ describe("describeModelDeletion", () => {
 	it("warns when the active model is the one going", () => {
 		const target = model("m1", "p1");
 		const state = lists({ models: [target], activeModelId: "m1" });
-		expect(describeModelDeletion(state, target)).toHaveLength(2);
+		expect(describeModelDeletion(state, target, en)).toHaveLength(2);
 	});
 
 	it("stays quiet for an inactive model", () => {
 		const target = model("m1", "p1");
-		expect(describeModelDeletion(lists({ models: [target], activeModelId: "m2" }), target)).toHaveLength(1);
+		expect(describeModelDeletion(lists({ models: [target], activeModelId: "m2" }), target, en)).toHaveLength(1);
 	});
 });

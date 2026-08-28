@@ -3,6 +3,7 @@ import { Platform } from "obsidian";
 import { IconButton } from "./ObsidianIcon";
 import { composerStatusText } from "./composerStatus";
 import { isSendShortcut } from "./keyboard";
+import { useT } from "./TranslatorContext";
 import { useAutosize } from "./useAutosize";
 
 interface ChatComposerProps {
@@ -39,6 +40,7 @@ export function ChatComposer({
 	onFocusRequested,
 	contextRow,
 }: ChatComposerProps): React.JSX.Element {
+	const t = useT();
 	const textareaRef = useRef<HTMLTextAreaElement | null>(null);
 	const onSendRef = useRef<() => void>(onSend);
 	const isBusy = isStreaming || isCompacting;
@@ -104,26 +106,26 @@ export function ChatComposer({
 					value={input}
 					onChange={(event) => onInputChange(event.currentTarget.value)}
 					onKeyDown={handleKeyDown}
-					placeholder="Ask Piem…"
-					aria-label="Message Piem"
+					placeholder={t.t("chat.placeholder")}
+					aria-label={t.t("chat.composerAria")}
 					aria-keyshortcuts="Control+Enter Meta+Enter"
 					rows={2}
 				/>
 				<div className="piem-chat__composer-bar">
 					<span className="piem-chat__composer-status" role="status" aria-live="polite">
-						{composerStatusText({ isInitializing, isCompacting, isStreaming, showAgentDetails, isMac: Platform.isMacOS })}
+						{composerStatusText({ isInitializing, isCompacting, isStreaming, showAgentDetails, isMac: Platform.isMacOS }, t)}
 					</span>
 					{isBusy ? (
 						<IconButton
 							icon="square"
-							label={isCompacting ? "Stop compaction" : "Stop response"}
+							label={t.t(isCompacting ? "chat.stopCompaction" : "chat.stopResponse")}
 							onClick={onAbort}
 							className="piem-chat__stop-button"
 						/>
 					) : (
 						<IconButton
 							icon="send"
-							label="Send message"
+							label={t.t("chat.sendMessage")}
 							onClick={onSend}
 							disabled={isInitializing || !input.trim()}
 							className="piem-chat__send-button mod-cta"

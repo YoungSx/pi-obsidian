@@ -1,4 +1,5 @@
 import type { Models } from "@earendil-works/pi-ai";
+import type { Translator } from "./i18n";
 import { buildConfiguredModel, type ModelConfig, type ProviderConfig } from "./modelConfig";
 import { probeModelListing, type ModelListingResult } from "./net/modelListing";
 
@@ -24,6 +25,10 @@ import { probeModelListing, type ModelListingResult } from "./net/modelListing";
  *
  * A provider test prefers the chat probe whenever the user has configured a
  * model to send, and falls back to listing when they have not.
+ *
+ * Every verdict is phrased through a {@link Translator} the caller passes in:
+ * these strings land in the settings panel, so they follow the same language as
+ * the rest of the UI rather than defaulting to English.
  */
 
 /** Outcome of a connection test, shaped for direct rendering next to a row. */
@@ -60,13 +65,14 @@ const PROBE_MAX_TOKENS = 1;
  * pi-ai surfaces provider failures as `ModelsError` and SDK failures as plain
  * `Error`; both carry the server's own wording, which is far more actionable
  * than a generic "request failed" — a 401 says the key is wrong, a 404 says the
- * model id is.
+ * model id is. Only the fallback for a non-`Error` throw is translated, since
+ * the server's own wording is not ours to restate.
  */
-function describeError(error: unknown): string {
+function describeError(error: unknown, t: Translator): string {
 	if (error instanceof Error) {
 		return error.message;
 	}
-	return typeof error === "string" ? error : "Unknown error";
+	return typeof error === "string" ? error : t.t("connectionTest.unknownError");
 }
 
 /** How to name the provider in a verdict: its label when it has one, else its URL. */
@@ -87,13 +93,14 @@ export async function testModelConnection(
 	models: Models,
 	model: ModelConfig,
 	provider: ProviderConfig,
+	t: Translator,
 	options: ConnectionTestOptions = {},
 ): Promise<ConnectionTestResult> {
 	if (!provider.apiKey.trim()) {
-		return { ok: false, detail: "No API key for this provider yet." };
+		return { ok: false, detail: t.t("connectionTest.noKey") };
 	}
 	if (!model.modelApiId.trim()) {
-		return { ok: false, detail: "This model has no model ID yet." };
+		return { ok: false, detail: t.t("connectionTest.noModelId") };
 	}
 
 	try {
@@ -105,14 +112,23 @@ export async function testModelConnection(
 		// A stream can terminate with an error message rather than throwing, so
 		// the reported stop reason decides the verdict, not the absence of a throw.
 		if (response.stopReason === "error" || response.stopReason === "aborted") {
-			return { ok: false, detail: response.errorMessage || `Request ${response.stopReason}.` };
+			// One key per reason instead of interpolating `stopReason`: it is the
+			// provider library's enum, so a template would drop a raw English token
+			// into a translated sentence.
+			const reason = t.t(
+				response.stopReason === "aborted" ? "connectionTest.requestAborted" : "connectionTest.requestFailed",
+			);
+			return { ok: false, detail: response.errorMessage || reason };
 		}
 		// `responseModel` is what the server says it served, which catches a
 		// gateway silently substituting a different model.
-		const served = response.responseModel && response.responseModel !== model.modelApiId ? ` — served ${response.responseModel}` : "";
-		return { ok: true, detail: `Reached ${nameProvider(provider)}${served}.` };
+		const served =
+			response.responseModel && response.responseModel !== model.modelApiId
+				? t.t("connectionTest.servedSuffix", { model: response.responseModel })
+				: "";
+		return { ok: true, detail: t.t("connectionTest.reached", { target: nameProvider(provider), served }) };
 	} catch (error) {
-		return { ok: false, detail: describeError(error) };
+		return { ok: false, detail: describeError(error, t) };
 	}
 }
 
@@ -126,29 +142,31 @@ export async function testModelConnection(
  * key is the exact failure this module exists to prevent — so the verdict says
  * what *was* established and names the one action that closes the gap.
  */
-function describeListingResult(provider: ProviderConfig, listing: ModelListingResult): ConnectionTestResult {
-	const name = nameProvider(provider);
+function describeListingResult(provider: ProviderConfig, listing: ModelListingResult, t: Translator): ConnectionTestResult {
+	const target = nameProvider(provider);
+	// The server's own wording, relayed verbatim: it is the actionable part, and
+	// translating a message we did not write is not ours to do.
 	const relayed = listing.message ? ` ${listing.message}` : "";
 	if (listing.status >= 200 && listing.status < 300) {
 		const count = listing.modelIds.length;
 		if (count === 0) {
-			return { ok: true, detail: `Reached ${name}, but it lists no models.` };
+			return { ok: true, detail: t.t("connectionTest.listingNoModels", { target }) };
 		}
-		return { ok: true, detail: `Reached ${name} — it lists ${count} model${count === 1 ? "" : "s"}.` };
+		// A separate singular key rather than an English `s` suffix, so a language
+		// that pluralizes differently is not forced through English grammar.
+		if (count === 1) {
+			return { ok: true, detail: t.t("connectionTest.listingOneModel", { target }) };
+		}
+		return { ok: true, detail: t.t("connectionTest.listingModels", { target, count: String(count) }) };
 	}
 	if (listing.status === 401 || listing.status === 403) {
-		if (!provider.apiKey.trim()) {
-			return { ok: false, detail: `${name} requires an API key (${listing.status}).${relayed}` };
-		}
-		return { ok: false, detail: `${name} rejected the API key (${listing.status}).${relayed}` };
+		const key = provider.apiKey.trim() ? "connectionTest.listingRejectedKey" : "connectionTest.listingNeedsKey";
+		return { ok: false, detail: t.t(key, { target, status: String(listing.status), relayed }) };
 	}
 	if (listing.status === 404 || listing.status === 405 || listing.status === 501) {
-		return {
-			ok: false,
-			detail: `Reached ${name}, but it does not list models, so the key could not be checked. Add a model under this provider to test a real request.`,
-		};
+		return { ok: false, detail: t.t("connectionTest.listingUnsupported", { target }) };
 	}
-	return { ok: false, detail: `${name} answered ${listing.status}.${relayed}` };
+	return { ok: false, detail: t.t("connectionTest.listingStatus", { target, status: String(listing.status), relayed }) };
 }
 
 /**
@@ -174,19 +192,20 @@ export async function testProviderConnection(
 	models: Models,
 	provider: ProviderConfig,
 	providerModels: readonly ModelConfig[],
+	t: Translator,
 	options: ConnectionTestOptions = {},
 ): Promise<ConnectionTestResult> {
 	const probe = providerModels.find((model) => model.providerId === provider.id && model.modelApiId.trim());
 	if (probe) {
-		const result = await testModelConnection(models, probe, provider, options);
-		const detail = `${result.detail} (probed with ${probe.modelApiId.trim()})`;
+		const result = await testModelConnection(models, probe, provider, t, options);
+		const detail = `${result.detail}${t.t("connectionTest.probedWith", { model: probe.modelApiId.trim() })}`;
 		return result.ok ? { ok: true, detail } : { ok: false, detail };
 	}
 
 	try {
 		const listing = await probeModelListing(provider, { fetch: options.fetch ?? globalThis.fetch, signal: options.signal });
-		return describeListingResult(provider, listing);
+		return describeListingResult(provider, listing, t);
 	} catch (error) {
-		return { ok: false, detail: describeError(error) };
+		return { ok: false, detail: describeError(error, t) };
 	}
 }

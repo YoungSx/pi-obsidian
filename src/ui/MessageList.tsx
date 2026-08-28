@@ -6,6 +6,8 @@ import type { TextBlockKind } from "./markdownPolicy";
 import { MarkdownText } from "./MarkdownText";
 import { assistantText } from "./messageActions";
 import { ReplyActions } from "./ReplyActions";
+import { useT } from "./TranslatorContext";
+import type { Translator } from "../i18n";
 import { ObsidianIcon } from "./ObsidianIcon";
 import { countDiffLines, describeTool, summarizeToolPayload, summarizeToolResult } from "./traceSummary";
 
@@ -70,7 +72,8 @@ export function MessageList({
 	component,
 	sourcePath,
 }: MessageListProps): React.JSX.Element {
-	const context: MessageContext = { app, component, sourcePath, showAgentDetails };
+	const t = useT();
+	const context: MessageContext = { app, component, sourcePath, showAgentDetails, t };
 	const activeIndex = streamingIndex(isStreaming, messages.length);
 	const transcriptRef = useRef<HTMLElement | null>(null);
 	const shouldFollowRef = useRef(true);
@@ -120,7 +123,7 @@ export function MessageList({
 				ref={transcriptRef}
 				className="piem-chat__messages"
 				role="log"
-				aria-label="Conversation"
+				aria-label={t.t("chat.conversationAria")}
 				aria-busy={isStreaming || isInitializing}
 				tabIndex={0}
 				onScroll={updateFollowState}
@@ -139,16 +142,17 @@ export function MessageList({
 					))
 				)}
 				{pendingToolCalls.length > 0 ? (
-					<div aria-label="Tools running" className="piem-chat__tool-status" role="status">
+					<div aria-label={t.t("chat.toolsRunning")} className="piem-chat__tool-status" role="status">
 						<ObsidianIcon name="loader-circle" className="piem-chat__spinner" />
-						Working: {pendingToolCalls.map((toolName) => describeTool(toolName, showAgentDetails)).join(", ")}
+						{t.t("chat.working")}
+						{pendingToolCalls.map((toolName) => describeTool(toolName, showAgentDetails, t)).join(", ")}
 					</div>
 				) : null}
 			</main>
 			{!isAtLatest ? (
 				<button type="button" className="piem-chat__latest" onClick={scrollToLatest}>
 					<ObsidianIcon name="arrow-down" />
-					Latest
+					{t.t("chat.latest")}
 				</button>
 			) : null}
 			<TurnAnnouncer messages={messages} isStreaming={isStreaming} />
@@ -165,6 +169,7 @@ export function MessageList({
  * to settle, then publishes the finished text into a dedicated region.
  */
 function TurnAnnouncer({ messages, isStreaming }: { messages: AgentMessage[]; isStreaming: boolean }): React.JSX.Element {
+	const t = useT();
 	const [announcement, setAnnouncement] = useState("");
 
 	useEffect(() => {
@@ -175,8 +180,8 @@ function TurnAnnouncer({ messages, isStreaming }: { messages: AgentMessage[]; is
 		if (!latest || latest.role !== "assistant") {
 			return;
 		}
-		setAnnouncement(assistantSpeech(latest));
-	}, [messages, isStreaming]);
+		setAnnouncement(assistantSpeech(latest, t));
+	}, [messages, isStreaming, t]);
 
 	return (
 		<p className="piem-chat__visually-hidden" role="status" aria-live="polite" aria-atomic="true">
@@ -192,10 +197,10 @@ function TurnAnnouncer({ messages, isStreaming }: { messages: AgentMessage[]; is
  * mechanical traffic the transcript already collapses, and reading them aloud
  * would bury the answer.
  */
-function assistantSpeech(message: AssistantMessage): string {
+function assistantSpeech(message: AssistantMessage, t: Translator): string {
 	const spoken = assistantText(message);
 	if (message.stopReason === "aborted") {
-		return spoken ? `${spoken} — you stopped this reply.` : "You stopped this reply.";
+		return spoken ? `${spoken} — ${t.t("chat.youStoppedSpoken")}` : t.t("chat.youStopped");
 	}
 	return spoken;
 }
@@ -220,9 +225,10 @@ interface EmptyStateProps {
  * notes, and that a selection can be sent from the editor.
  */
 function EmptyState({ isInitializing, isConfigured, onOpenSettings }: EmptyStateProps): React.JSX.Element {
+	const t = useT();
 	if (isInitializing) {
 		return (
-			<div className="piem-chat__skeleton" role="status" aria-label="Opening chat">
+			<div className="piem-chat__skeleton" role="status" aria-label={t.t("chat.openingChatAria")}>
 				{/* Skeleton rather than a spinner in the middle of the content area:
 				    the panel loads into a task, so it shows the shape it is about to
 				    fill. Announced once via the label; the bars are decorative. */}
@@ -236,16 +242,20 @@ function EmptyState({ isInitializing, isConfigured, onOpenSettings }: EmptyState
 		return (
 			<div className="piem-chat__empty">
 				<ObsidianIcon name="key-round" className="piem-chat__empty-icon" />
-				<p className="piem-chat__empty-title">Connect a model to start</p>
+				<p className="piem-chat__empty-title">{t.t("chat.connectModel")}</p>
 				{onOpenSettings ? (
 					<>
-						<p>Piem needs an API key before it can answer.</p>
+						<p>{t.t("chat.needsApiKey")}</p>
 						<button type="button" className="mod-cta piem-chat__empty-action" onClick={onOpenSettings}>
-							Add an API key
+							{t.t("chat.addApiKey")}
 						</button>
 					</>
 				) : (
-					<p>Add an API key in <strong>Settings → Piem</strong>.</p>
+					<p>
+						{t.t("chat.addApiKeyHintBefore")}
+						<strong>{t.t("chat.addApiKeyHintPath")}</strong>
+						{t.t("chat.addApiKeyHintAfter")}
+					</p>
 				)}
 			</div>
 		);
@@ -253,8 +263,12 @@ function EmptyState({ isInitializing, isConfigured, onOpenSettings }: EmptyState
 	return (
 		<div className="piem-chat__empty">
 			<ObsidianIcon name="message-circle" className="piem-chat__empty-icon" />
-			<p className="piem-chat__empty-title">Ask about your vault</p>
-			<p>Piem can read, search, and edit notes here. Try “summarize my open note”, or select text and run <strong>Ask about selection</strong>.</p>
+			<p className="piem-chat__empty-title">{t.t("chat.askAboutVault")}</p>
+			<p>
+				{t.t("chat.askAboutVaultHintBefore")}
+				<strong>{t.t("chat.askAboutVaultHintCommand")}</strong>
+				{t.t("chat.askAboutVaultHintAfter")}
+			</p>
 		</div>
 	);
 }
@@ -289,13 +303,13 @@ function MessageRow({ message, isStreaming, renderContext, onRetry }: MessageRow
 		<article className={`piem-chat__message piem-chat__message--${message.role}`} aria-busy={isStreaming}>
 			<div className="piem-chat__message-role">
 				<ObsidianIcon name={message.role === "user" ? "user" : "sparkles"} />
-				{message.role === "user" ? "You" : "Piem"}
+				{renderContext.t.t(message.role === "user" ? "chat.you" : "chat.agent")}
 			</div>
 			<div className="piem-chat__message-content">{renderMessageContent(message, { isStreaming, renderContext })}</div>
 			{wasInterrupted(message) ? (
 				<p className="piem-chat__interrupted">
 					<ObsidianIcon name="circle-slash" />
-					You stopped this reply.
+					{renderContext.t.t("chat.youStopped")}
 				</p>
 			) : null}
 			{message.role === "assistant" && !isStreaming ? (
@@ -319,9 +333,10 @@ function wasInterrupted(message: UserMessage | AssistantMessage): boolean {
  * by the Markdown pipeline.
  */
 function CompactionDivider({ message, renderContext }: { message: CompactionSummaryMessage; renderContext: MessageContext }): React.JSX.Element {
+	const t = useT();
 	return (
-		<section aria-label="Compacted history" className="piem-chat__compaction">
-			<div className="piem-chat__compaction-heading">Earlier history was summarized to fit the context window.</div>
+		<section aria-label={t.t("chat.compactedAria")} className="piem-chat__compaction">
+			<div className="piem-chat__compaction-heading">{t.t("chat.earlierSummarized")}</div>
 			<Block text={message.summary} kind="harness" isStreaming={false} context={renderContext} />
 		</section>
 	);
@@ -335,6 +350,14 @@ interface MessageContext {
 	sourcePath: string;
 	/** Mirrors the user setting; decides tool naming and payload visibility. */
 	showAgentDetails: boolean;
+	/**
+	 * Copy for the render helpers.
+	 *
+	 * Carried on the context rather than read through {@link useT}: these are
+	 * plain functions called during render, not components, so they cannot hold a
+	 * hook of their own.
+	 */
+	t: Translator;
 }
 
 function renderMessageContent(message: UserMessage | AssistantMessage, args: RenderArgs): React.ReactNode {
@@ -367,7 +390,7 @@ function renderUserMessage(message: UserMessage, args: RenderArgs): React.ReactN
 		if (content.type === "text") {
 			return <Block key={index} text={content.text} kind="user" isStreaming={args.isStreaming} context={args.renderContext} />;
 		}
-		return <div key={index}>[image: {content.mimeType}]</div>;
+		return <div key={index}>{args.renderContext.t.t("chat.imagePlaceholder", { mimeType: content.mimeType })}</div>;
 	});
 }
 
@@ -378,7 +401,7 @@ function renderAssistantMessage(message: AssistantMessage, args: RenderArgs): Re
 		}
 		if (content.type === "thinking") {
 			return (
-				<Trace key={index} icon="brain" name="Thought it through" className="piem-chat__trace--thinking">
+				<Trace key={index} icon="brain" name={args.renderContext.t.t("chat.thoughtItThrough")} className="piem-chat__trace--thinking">
 					<Block text={content.thinking} kind="thinking" isStreaming={args.isStreaming} context={args.renderContext} />
 				</Trace>
 			);
@@ -388,7 +411,7 @@ function renderAssistantMessage(message: AssistantMessage, args: RenderArgs): Re
 			<Trace
 				key={index}
 				icon="wrench"
-				name={describeTool(content.name, showDetails)}
+				name={describeTool(content.name, showDetails, args.renderContext.t)}
 				detail={summarizeToolPayload(content.arguments)}
 				// Without the payload there is nothing behind the row to open, so it
 				// renders as a plain line rather than an empty disclosure.
@@ -449,12 +472,12 @@ function Trace({ icon, name, detail, className, body, children }: TraceProps): R
 function ToolResultTrace({ message, context }: { message: ToolResultMessage; context: MessageContext }): React.JSX.Element {
 	const diff = extractDiff(message.details);
 	const classes = ["piem-chat__trace", "piem-chat__trace--result", message.isError ? "piem-chat__trace--error" : null].filter(Boolean).join(" ");
-	const detail = diff ? formatDiffCounts(diff) : summarizeToolResult(message);
+	const detail = diff ? formatDiffCounts(diff) : summarizeToolResult(message, context.t);
 	return (
 		<details className={classes}>
 			<summary className="piem-chat__trace-summary">
 				<ObsidianIcon name={message.isError ? "alert-triangle" : "check"} className="piem-chat__trace-icon" />
-				<span className="piem-chat__trace-name">{describeTool(message.toolName, context.showAgentDetails)}</span>
+				<span className="piem-chat__trace-name">{describeTool(message.toolName, context.showAgentDetails, context.t)}</span>
 				{detail ? <span className="piem-chat__trace-detail">{detail}</span> : null}
 			</summary>
 			<div className="piem-chat__trace-body">
@@ -462,7 +485,7 @@ function ToolResultTrace({ message, context }: { message: ToolResultMessage; con
 					if (content.type === "text") {
 						return <Block key={index} text={content.text} kind="toolResult" isStreaming={false} context={context} />;
 					}
-					return <div key={index}>[image: {content.mimeType}]</div>;
+					return <div key={index}>{context.t.t("chat.imagePlaceholder", { mimeType: content.mimeType })}</div>;
 				})}
 				{diff ? <Block text={`\`\`\`diff\n${diff}\n\`\`\``} kind="assistant" isStreaming={false} context={context} /> : null}
 			</div>
@@ -505,7 +528,7 @@ function HarnessTrace({ message, context }: { message: AgentMessage; context: Me
 		return null;
 	}
 	return (
-		<Trace icon={harnessIcon(message.role)} name={harnessLabel(message.role)} className="piem-chat__trace--harness">
+		<Trace icon={harnessIcon(message.role)} name={harnessLabel(message.role, context.t)} className="piem-chat__trace--harness">
 			{rendered}
 		</Trace>
 	);
@@ -526,7 +549,7 @@ function renderHarnessBody(message: AgentMessage, context: MessageContext): Reac
 			if (content.type === "text") {
 				return <Block key={index} text={content.text} kind="harness" isStreaming={false} context={context} />;
 			}
-			return <div key={index}>[image: {content.mimeType}]</div>;
+			return <div key={index}>{context.t.t("chat.imagePlaceholder", { mimeType: content.mimeType })}</div>;
 		});
 	}
 	return null;
@@ -539,14 +562,14 @@ function renderHarnessBody(message: AgentMessage, context: MessageContext): Reac
  * model's own name for anything unrecognized, so harness-injected messages were
  * presented as words the model had said.
  */
-function harnessLabel(role: string): string {
+function harnessLabel(role: string, t: Translator): string {
 	if (role === "bashExecution") {
-		return "Command";
+		return t.t("chat.rowLabelCommand");
 	}
 	if (role === "branchSummary") {
-		return "Summary";
+		return t.t("chat.rowLabelSummary");
 	}
-	return "System";
+	return t.t("chat.rowLabelSystem");
 }
 
 function harnessIcon(role: string): IconName {

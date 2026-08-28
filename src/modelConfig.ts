@@ -1,4 +1,5 @@
 import { uuidv7 } from "@earendil-works/pi-ai";
+import type { Translator } from "./i18n";
 import type { Model } from "@earendil-works/pi-ai";
 import type { CustomEndpointConfig } from "./customEndpoint";
 import { DEFAULT_CUSTOM_ENDPOINT_CONTEXT_WINDOW, DEFAULT_CUSTOM_ENDPOINT_MAX_TOKENS } from "./customEndpoint";
@@ -34,12 +35,17 @@ export const WIRE_PROTOCOLS: readonly WireProtocol[] = ["openai-completions", "o
  */
 export const DEFAULT_WIRE_PROTOCOL: WireProtocol = "openai-completions";
 
-/** Human-readable protocol labels for settings UI. */
-export const WIRE_PROTOCOL_LABELS: Record<WireProtocol, string> = {
-	"openai-completions": "OpenAI Chat Completions",
-	"openai-responses": "OpenAI Responses",
-	"anthropic-messages": "Anthropic Messages",
-};
+/** Copy keys for the protocol labels, keyed by the value stored on a provider. */
+const WIRE_PROTOCOL_COPY_KEYS = {
+	"openai-completions": "wireProtocol.openaiChat",
+	"openai-responses": "wireProtocol.openaiResponses",
+	"anthropic-messages": "wireProtocol.anthropicMessages",
+} as const;
+
+/** Human-readable protocol label for the settings UI. */
+export function wireProtocolLabel(protocol: WireProtocol, t: Translator): string {
+	return t.t(WIRE_PROTOCOL_COPY_KEYS[protocol]);
+}
 
 /**
  * A reachable endpoint plus its credential — connection concerns only.

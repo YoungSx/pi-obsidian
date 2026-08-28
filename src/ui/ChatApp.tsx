@@ -13,6 +13,7 @@ import { ContextRow } from "./ContextRow";
 import { MessageList } from "./MessageList";
 import { appendToDraft } from "./noteReference";
 import { canOpenPluginSettings, openPluginSettings } from "./pluginSettings";
+import { TranslatorProvider } from "./TranslatorContext";
 import { useSessionDraft } from "./useSessionDraft";
 
 interface ChatAppProps {
@@ -139,73 +140,75 @@ export function ChatApp({ service, inputController, component, draftStore }: Cha
 	}, [inputController]);
 
 	return (
-		<div className="piem-chat" aria-busy={snapshot.isStreaming || snapshot.isCompacting || isInitializing}>
-			<ChatHeader
-				app={service.getApp()}
-				snapshot={snapshot}
-				sessions={sessions}
-				onOpenSession={(path) => void service.openSession(path)}
-				onNewSession={() => void service.newSession()}
-				onRenameSession={(name) => void service.renameSession(name)}
-				onDeleteSession={(path) => void service.deleteSession(path)}
-			/>
+		<TranslatorProvider language={snapshot.language}>
+			<div className="piem-chat" aria-busy={snapshot.isStreaming || snapshot.isCompacting || isInitializing}>
+				<ChatHeader
+					app={service.getApp()}
+					snapshot={snapshot}
+					sessions={sessions}
+					onOpenSession={(path) => void service.openSession(path)}
+					onNewSession={() => void service.newSession()}
+					onRenameSession={(name) => void service.renameSession(name)}
+					onDeleteSession={(path) => void service.deleteSession(path)}
+				/>
 
-			<ChatBanner
-				errorMessage={dismissedInitError ? snapshot.errorMessage : (snapshot.errorMessage ?? initializationError)}
-				noticeMessage={snapshot.noticeMessage}
-				onDismiss={() => {
-					// The initialization error is this component's own state, so it has
-					// to be dismissed here rather than through the service.
-					setDismissedInitError(true);
-					service.dismissMessages();
-				}}
-				onOpenSettings={canOpenSettings ? () => openPluginSettings(app) : undefined}
-			/>
+				<ChatBanner
+					errorMessage={dismissedInitError ? snapshot.errorMessage : (snapshot.errorMessage ?? initializationError)}
+					noticeMessage={snapshot.noticeMessage}
+					onDismiss={() => {
+						// The initialization error is this component's own state, so it has
+						// to be dismissed here rather than through the service.
+						setDismissedInitError(true);
+						service.dismissMessages();
+					}}
+					onOpenSettings={canOpenSettings ? () => openPluginSettings(app) : undefined}
+				/>
 
-			<MessageList
-				messages={visibleMessages}
-				isStreaming={snapshot.isStreaming}
-				pendingToolCalls={snapshot.pendingToolCalls}
-				isInitializing={isInitializing}
-				isConfigured={snapshot.isConfigured ?? false}
-				showAgentDetails={snapshot.showAgentDetails}
-				onOpenSettings={canOpenSettings ? () => openPluginSettings(app) : undefined}
-				onRetry={snapshot.isStreaming || snapshot.isCompacting ? undefined : (index) => void service.retryFrom(index)}
-				app={app}
-				component={component}
-				sourcePath={sourcePath}
-			/>
+				<MessageList
+					messages={visibleMessages}
+					isStreaming={snapshot.isStreaming}
+					pendingToolCalls={snapshot.pendingToolCalls}
+					isInitializing={isInitializing}
+					isConfigured={snapshot.isConfigured ?? false}
+					showAgentDetails={snapshot.showAgentDetails}
+					onOpenSettings={canOpenSettings ? () => openPluginSettings(app) : undefined}
+					onRetry={snapshot.isStreaming || snapshot.isCompacting ? undefined : (index) => void service.retryFrom(index)}
+					app={app}
+					component={component}
+					sourcePath={sourcePath}
+				/>
 
-			<ChatComposer
-				input={input}
-				isStreaming={snapshot.isStreaming}
-				isCompacting={snapshot.isCompacting}
-				isInitializing={isInitializing}
-				showAgentDetails={snapshot.showAgentDetails}
-				onInputChange={setInput}
-				onSend={() => void sendPrompt()}
-				onAbort={() => service.abort()}
-				onFocusRequested={handleFocusRequested}
-				contextRow={
-					<ContextRow
-						refs={snapshot.contextRefs}
-						isFollowingActive={snapshot.isFollowingActiveNote}
-						onOpen={(path) => {
-							// This is already an exact vault path. `openLinkText` parses `#`
-							// and `|` as wikilink syntax, so use the file API instead.
-							const file = app.vault.getFileByPath(path);
-							if (!file) {
-								return;
-							}
-							const leaf = app.workspace.getMostRecentLeaf() ?? app.workspace.getLeaf(false);
-							void leaf.openFile(file);
-						}}
-						onPin={(path) => service.pinContextRef(path)}
-						onUnpin={(path) => service.unpinContextRef(path)}
-						onSetFollowActive={(follow) => service.setFollowActiveNote(follow)}
-					/>
-				}
-			/>
-		</div>
+				<ChatComposer
+					input={input}
+					isStreaming={snapshot.isStreaming}
+					isCompacting={snapshot.isCompacting}
+					isInitializing={isInitializing}
+					showAgentDetails={snapshot.showAgentDetails}
+					onInputChange={setInput}
+					onSend={() => void sendPrompt()}
+					onAbort={() => service.abort()}
+					onFocusRequested={handleFocusRequested}
+					contextRow={
+						<ContextRow
+							refs={snapshot.contextRefs}
+							isFollowingActive={snapshot.isFollowingActiveNote}
+							onOpen={(path) => {
+								// This is already an exact vault path. `openLinkText` parses `#`
+								// and `|` as wikilink syntax, so use the file API instead.
+								const file = app.vault.getFileByPath(path);
+								if (!file) {
+									return;
+								}
+								const leaf = app.workspace.getMostRecentLeaf() ?? app.workspace.getLeaf(false);
+								void leaf.openFile(file);
+							}}
+							onPin={(path) => service.pinContextRef(path)}
+							onUnpin={(path) => service.unpinContextRef(path)}
+							onSetFollowActive={(follow) => service.setFollowActiveNote(follow)}
+						/>
+					}
+				/>
+			</div>
+		</TranslatorProvider>
 	);
 }

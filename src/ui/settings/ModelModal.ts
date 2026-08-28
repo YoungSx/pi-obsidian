@@ -8,6 +8,7 @@ import {
 	type ProviderConfig,
 } from "../../modelConfig";
 import { CatalogSuggest, type CatalogSuggestion } from "./CatalogSuggest";
+import type { Translator } from "../../i18n";
 import { attachTestButton, type TestRowHandle } from "./testResult";
 
 /**
@@ -28,6 +29,8 @@ export interface ModelModalOptions {
 	model?: ModelConfig;
 	/** Providers available to bind to. Must be non-empty. */
 	providers: readonly ProviderConfig[];
+	/** Copy for every label, description, and button in this form. */
+	t: Translator;
 	/** Runs a live request against the draft. */
 	test(draft: ModelConfig): Promise<ConnectionTestResult>;
 	/** Persists the result. Called only on a valid submit. */
@@ -64,15 +67,19 @@ export function buildModelSuggestions(): CatalogSuggestion[] {
  * Exported and DOM-free so the rules are unit-testable: this is the panel's only
  * guard against saving a row that can never serve a request.
  */
-export function validateModelDraft(draft: ModelConfig, providers: readonly ProviderConfig[]): string | undefined {
+export function validateModelDraft(
+	draft: ModelConfig,
+	providers: readonly ProviderConfig[],
+	t: Translator,
+): string | undefined {
 	if (!draft.providerId) {
-		return "Choose a provider.";
+		return t.t("modelModal.chooseProvider");
 	}
 	if (!providers.some((provider) => provider.id === draft.providerId)) {
-		return "That provider no longer exists.";
+		return t.t("modelModal.providerMissing");
 	}
 	if (!draft.modelApiId.trim()) {
-		return "A model ID is required.";
+		return t.t("modelModal.modelIdRequired");
 	}
 	return undefined;
 }
@@ -94,11 +101,12 @@ export class ModelModal extends Modal {
 		const { contentEl } = this;
 		contentEl.empty();
 		contentEl.addClass("piem-settings-modal");
-		this.setTitle(this.isNew ? "Add model" : "Edit model");
+		const { t } = this.options;
+		this.setTitle(t.t(this.isNew ? "modelModal.addTitle" : "modelModal.editTitle"));
 
 		new Setting(contentEl)
-			.setName("Provider")
-			.setDesc("Which configured endpoint serves this model.")
+			.setName(t.t("modelModal.provider"))
+			.setDesc(t.t("modelModal.providerDesc"))
 			.addDropdown((dropdown) => {
 				for (const provider of this.options.providers) {
 					dropdown.addOption(provider.id, describeProviderConfig(provider));
@@ -111,13 +119,12 @@ export class ModelModal extends Modal {
 			});
 
 		new Setting(contentEl)
-			.setName("Model ID")
-			.setDesc("Sent to the server verbatim. Start typing to search known model ids, or enter your own.")
+			.setName(t.t("modelModal.modelId"))
+			.setDesc(t.t("modelModal.modelIdDesc"))
 			.addText((text) => {
 				// A model id, not prose: sentence-casing it would show an id no
 				// server accepts.
-				// eslint-disable-next-line obsidianmd/ui/sentence-case
-				text.setPlaceholder("gpt-4o-mini");
+				text.setPlaceholder(t.t("modelModal.modelIdPlaceholder"));
 				text.setValue(this.draft.modelApiId);
 				text.onChange((value) => {
 					this.draft.modelApiId = value;
@@ -130,10 +137,10 @@ export class ModelModal extends Modal {
 			});
 
 		new Setting(contentEl)
-			.setName("Display name")
-			.setDesc("Shown in the model picker. Leave blank to use the model ID.")
+			.setName(t.t("modelModal.displayName"))
+			.setDesc(t.t("modelModal.displayNameDesc"))
 			.addText((text) => {
-				text.setPlaceholder(this.draft.modelApiId || "My model");
+				text.setPlaceholder(this.draft.modelApiId || t.t("modelModal.displayNamePlaceholder"));
 				text.setValue(this.draft.displayName);
 				text.onChange((value) => {
 					this.draft.displayName = value;
@@ -141,11 +148,11 @@ export class ModelModal extends Modal {
 			});
 
 		new Setting(contentEl)
-			.setName("Context window")
-			.setDesc("Tokens this model accepts. Compaction plans against it; leave blank for the default.")
+			.setName(t.t("modelModal.contextWindow"))
+			.setDesc(t.t("modelModal.contextWindowDesc"))
 			.addText((text) => {
 				text.inputEl.type = "number";
-				text.setPlaceholder("128000");
+				text.setPlaceholder(t.t("modelModal.contextWindowPlaceholder"));
 				text.setValue(this.draft.contextWindow ? String(this.draft.contextWindow) : "");
 				text.onChange((value) => {
 					const parsed = Number.parseInt(value, 10);
@@ -154,8 +161,8 @@ export class ModelModal extends Modal {
 			});
 
 		new Setting(contentEl)
-			.setName("Supports thinking")
-			.setDesc("Enable only if this model accepts reasoning parameters. Strict servers reject them outright.")
+			.setName(t.t("modelModal.supportsThinking"))
+			.setDesc(t.t("modelModal.supportsThinkingDesc"))
 			.addToggle((toggle) => {
 				toggle.setValue(this.draft.reasoning);
 				toggle.onChange((reasoning) => {
@@ -166,17 +173,17 @@ export class ModelModal extends Modal {
 
 		// Placed above the save row so a failing verdict is read before committing.
 		const testSetting = new Setting(contentEl)
-			.setName("Connection")
-			.setDesc("Sends one minimal request to confirm the provider, key, and model ID work together.");
-		this.testRow = attachTestButton(testSetting, () => this.runTest());
+			.setName(t.t("modelModal.connection"))
+			.setDesc(t.t("modelModal.connectionDesc"));
+		this.testRow = attachTestButton(testSetting, t, () => this.runTest());
 
 		new Setting(contentEl)
 			.addButton((button) => {
-				button.setButtonText("Cancel");
+				button.setButtonText(t.t("modelModal.cancel"));
 				button.onClick(() => this.close());
 			})
 			.addButton((button) => {
-				button.setButtonText(this.isNew ? "Add" : "Save");
+				button.setButtonText(t.t(this.isNew ? "modelModal.add" : "modelModal.save"));
 				button.setCta();
 				button.onClick(() => void this.submit());
 			});
@@ -195,7 +202,7 @@ export class ModelModal extends Modal {
 	 */
 	private async runTest(): Promise<ConnectionTestResult> {
 		const draft = this.trimmedDraft();
-		const problem = validateModelDraft(draft, this.options.providers);
+		const problem = validateModelDraft(draft, this.options.providers, this.options.t);
 		if (problem) {
 			return { ok: false, detail: problem };
 		}
@@ -212,18 +219,19 @@ export class ModelModal extends Modal {
 	}
 
 	private async submit(): Promise<void> {
+		const { t } = this.options;
 		const draft = this.trimmedDraft();
-		const problem = validateModelDraft(draft, this.options.providers);
+		const problem = validateModelDraft(draft, this.options.providers, t);
 		if (problem) {
 			new Notice(problem);
 			return;
 		}
 		try {
 			await this.options.onSubmit(draft);
-			new Notice(this.isNew ? "Model added." : "Model saved.");
+			new Notice(t.t(this.isNew ? "modelModal.added" : "modelModal.saved"));
 			this.close();
 		} catch (cause) {
-			new Notice(`Could not save the model: ${cause instanceof Error ? cause.message : String(cause)}`);
+			new Notice(t.t("modelModal.couldNotSave", { message: cause instanceof Error ? cause.message : String(cause) }));
 		}
 	}
 }

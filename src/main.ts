@@ -18,6 +18,7 @@ import { ObsidianSessionManager } from "./session/ObsidianSessionManager";
 import { ObsidianAgentService } from "./agent/ObsidianAgentService";
 import { PiemChatView } from "./ui/PiemChatView";
 import { requestNoteReference, warnIfTruncated } from "./ui/noteReferenceCommand";
+import { getT, resolveLanguage, type LanguageHost, type Translator } from "./i18n";
 
 /** Persists `settings` with every non-empty secret sealed through `codec`. */
 function sealCurrentSettings(settings: PiemSettings, codec: SecretCodec): Partial<PiemSettings> {
@@ -67,8 +68,22 @@ export default class PiObsidianPlugin extends Plugin {
 		return this.secretEnvironment;
 	}
 
+	/**
+	 * Copy in the user's current language.
+	 *
+	 * Resolved per call rather than cached so a `Notice` fired after the setting
+	 * changes speaks the new language. Command names cannot follow — Obsidian
+	 * reads those once at registration — so those are captured in `onload` and
+	 * only change on the next reload, which is the same behaviour every localized
+	 * Obsidian plugin has.
+	 */
+	private t(): Translator {
+		return getT(resolveLanguage(this.app.vault as LanguageHost, this.settings.language));
+	}
+
 	async onload(): Promise<void> {
 		await this.loadSettings();
+		const t = this.t();
 
 		const sessionManager = ObsidianSessionManager.forPlugin(this.app, this);
 		this.agentService = new ObsidianAgentService(this.app, () => this.settings, sessionManager);
@@ -78,21 +93,21 @@ export default class PiObsidianPlugin extends Plugin {
 		this.addSettingTab(new PiemSettingTab(this.app, this, this.requireSecretEnvironment()));
 		this.addCommand({
 			id: "open-chat",
-			name: "Open chat",
+			name: t.t("commands.openChat"),
 			callback: () => {
 				void this.activateChatView();
 			},
 		});
 		this.addCommand({
 			id: "new-chat",
-			name: "New chat",
+			name: t.t("commands.newChat"),
 			callback: () => {
 				void this.startNewChat();
 			},
 		});
 		this.addCommand({
 			id: "abort-chat",
-			name: "Stop response",
+			name: t.t("commands.stopResponse"),
 			// `checking` asks whether the command should be listed at all, so the abort
 			// must stay behind the `!checking` guard or merely opening the palette fires it.
 			checkCallback: (checking) => {
@@ -108,7 +123,7 @@ export default class PiObsidianPlugin extends Plugin {
 		});
 		this.addCommand({
 			id: "compact-chat",
-			name: "Tidy up earlier messages",
+			name: t.t("commands.tidyUp"),
 			// `compactNow` existed but nothing reached it, so a full context could
 			// only be resolved by waiting for the automatic threshold.
 			checkCallback: (checking) => {
@@ -124,7 +139,7 @@ export default class PiObsidianPlugin extends Plugin {
 		});
 		this.addCommand({
 			id: "focus-chat",
-			name: "Focus chat input",
+			name: t.t("commands.focusInput"),
 			checkCallback: (checking) => {
 				const view = this.findChatView();
 				if (!view) {
@@ -138,19 +153,19 @@ export default class PiObsidianPlugin extends Plugin {
 		});
 		this.addCommand({
 			id: "ask-about-selection",
-			name: "Ask about selection",
+			name: t.t("commands.askAboutSelection"),
 			editorCallback: (editor, info) => {
 				void this.askPiemAboutSelection(editor, info.file?.path ?? null);
 			},
 		});
 		this.addCommand({
 			id: "ask-about-note",
-			name: "Ask about this note",
+			name: t.t("commands.askAboutNote"),
 			editorCallback: (editor, info) => {
 				void this.askPiemAboutSelection(editor, info.file?.path ?? null, { selectionOnly: false });
 			},
 		});
-		this.addRibbonIcon("bot", "Open chat", () => {
+		this.addRibbonIcon("bot", t.t("commands.ribbonOpenChat"), () => {
 			void this.activateChatView();
 		});
 		this.registerEvent(
@@ -161,7 +176,7 @@ export default class PiObsidianPlugin extends Plugin {
 				}
 				menu.addItem((item) =>
 					item
-						.setTitle("Ask about selection")
+						.setTitle(t.t("commands.menuAskAboutSelection"))
 						.setIcon("bot")
 						.onClick(() => {
 							void this.askPiemAboutSelection(editor, path);
@@ -261,6 +276,9 @@ export default class PiObsidianPlugin extends Plugin {
 		const environment = this.requireSecretEnvironment();
 		await this.saveData(sealCurrentSettings(this.settings, environment.codec()));
 		await this.agentService?.refreshConfiguration();
+		// The panel re-renders from the snapshot on its own, but the tab title is
+		// drawn by Obsidian outside React, so a language change needs this nudge.
+		this.findChatView()?.refreshHeader();
 	}
 
 	private async startNewChat(): Promise<void> {
@@ -282,13 +300,13 @@ export default class PiObsidianPlugin extends Plugin {
 			...options,
 			deliver: (text, truncated) => {
 				void this.deliverReference(text);
-				warnIfTruncated(truncated);
+				warnIfTruncated(truncated, this.t());
 			},
 		});
 		if (handled) {
 			return;
 		}
-		new Notice("No active note to ask about.");
+		new Notice(this.t().t("commands.noActiveNote"));
 	}
 
 	private async deliverReference(text: string): Promise<void> {
@@ -300,8 +318,15 @@ export default class PiObsidianPlugin extends Plugin {
 		view?.focusInput();
 	}
 
+	/**
+	 * The open chat view, when there is one.
+	 *
+	 * Reached from `saveSettings`, which persistence tests drive against a plugin
+	 * stub that has no workspace — so the lookup is optional rather than assuming
+	 * a fully constructed `App`.
+	 */
 	private findChatView(): PiemChatView | null {
-		const view = this.app.workspace.getLeavesOfType(VIEW_TYPE_PIEM_CHAT)[0]?.view;
+		const view = this.app?.workspace?.getLeavesOfType(VIEW_TYPE_PIEM_CHAT)[0]?.view;
 		return view instanceof PiemChatView ? view : null;
 	}
 
@@ -314,7 +339,7 @@ export default class PiObsidianPlugin extends Plugin {
 
 		const leaf = this.app.workspace.getRightLeaf(false);
 		if (!leaf) {
-			new Notice("Could not open the chat view.");
+			new Notice(this.t().t("commands.couldNotOpenChat"));
 			return;
 		}
 

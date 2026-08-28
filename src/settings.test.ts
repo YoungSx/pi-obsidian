@@ -4,6 +4,11 @@ import { installObsidianStub } from "./testing/obsidianStub";
 import type { PiemSettings } from "./settings";
 import type { ModelConfig, ProviderConfig, WireProtocol } from "./modelConfig";
 
+import { getT } from "./i18n";
+
+const t = getT("en");
+const zh = getT("zh-cn");
+
 // `settings.ts` imports the `obsidian` module at runtime; the shared stub must
 // be registered before the dynamic import below resolves it.
 installObsidianStub();
@@ -112,11 +117,12 @@ describe("getConfiguredApiKey", () => {
 describe("describeModelTarget", () => {
 	it("names the endpoint's model id rather than the synthetic provider constant", () => {
 		const settings = builtinSettings({ customEndpoint: { baseUrl: "https://x/v1", apiKey: "", modelId: "qwen3-32b" } });
-		expect(describeModelTarget(settings)).toBe("The custom endpoint (qwen3-32b)");
+		expect(describeModelTarget(settings, t)).toBe("The custom endpoint (qwen3-32b)");
+		expect(describeModelTarget(settings, zh)).toBe("自定义端点（qwen3-32b）");
 	});
 
 	it("names provider and model for builtin configurations", () => {
-		expect(describeModelTarget(builtinSettings())).toBe("Deepseek/deepseek-v4-pro");
+		expect(describeModelTarget(builtinSettings(), t)).toBe("Deepseek/deepseek-v4-pro");
 	});
 });
 
@@ -265,7 +271,7 @@ describe("describeModelTarget for configured providers", () => {
 			models: [{ id: "m1", providerId: "p1", modelApiId: "qwen-token-plan-individual", displayName: "Qwen Plus", reasoning: false }],
 			activeModelId: "m1",
 		});
-		expect(describeModelTarget(settings)).toBe("Qwen Plus (My gateway)");
+		expect(describeModelTarget(settings, t)).toBe("Qwen Plus (My gateway)");
 	});
 
 	it("falls back to the raw model id when no display name was given", () => {
@@ -274,7 +280,7 @@ describe("describeModelTarget for configured providers", () => {
 			models: [{ id: "m1", providerId: "p1", modelApiId: "raw-id", displayName: "", reasoning: false }],
 			activeModelId: "m1",
 		});
-		expect(describeModelTarget(settings)).toBe("raw-id (https://gw/v1)");
+		expect(describeModelTarget(settings, t)).toBe("raw-id (https://gw/v1)");
 	});
 });
 

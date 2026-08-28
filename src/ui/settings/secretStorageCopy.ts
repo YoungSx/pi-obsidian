@@ -10,14 +10,14 @@
  * the panel cannot contradict itself.
  */
 
+import type { Translator } from "../../i18n";
+
 /** Whether this device can encrypt secrets at rest. */
 export type SecretStorageState = "encrypted" | "plaintext";
 
 /** Sentence describing where a key is stored, for use as a field description. */
-export function describeSecretStorage(state: SecretStorageState): string {
-	return state === "encrypted"
-		? "Stored in this vault's plugin config, encrypted with your operating system's keychain."
-		: "This device has no OS keychain available, so keys are stored as plaintext in this vault's plugin config.";
+export function describeSecretStorage(state: SecretStorageState, t: Translator): string {
+	return state === "encrypted" ? t.t("secretStorage.encrypted") : t.t("secretStorage.plaintext");
 }
 
 /**
@@ -26,6 +26,6 @@ export function describeSecretStorage(state: SecretStorageState): string {
  * The restricted-key advice is worth repeating next to every input because it is
  * the one mitigation that holds regardless of how the key is stored.
  */
-export function describeApiKeyField(state: SecretStorageState, target: string): string {
-	return `Sent only to ${target}. ${describeSecretStorage(state)} Use a restricted, low-limit key.`;
+export function describeApiKeyField(state: SecretStorageState, target: string, t: Translator): string {
+	return t.t("secretStorage.keyField", { target, storage: describeSecretStorage(state, t) });
 }

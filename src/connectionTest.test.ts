@@ -3,6 +3,11 @@ import { createModels, fauxAssistantMessage, fauxProvider } from "@earendil-work
 import type { Models } from "@earendil-works/pi-ai";
 import { testModelConnection, testProviderConnection } from "./connectionTest";
 import type { ModelConfig, ProviderConfig, WireProtocol } from "./modelConfig";
+import { getT } from "./i18n";
+
+/** Verdicts are phrased through a translator, so each test states which language it reads. */
+const t = getT("en");
+const zh = getT("zh-cn");
 
 /**
  * Builds a `Models` collection whose single provider is pi-ai's own faux
@@ -68,7 +73,7 @@ describe("testModelConnection", () => {
 		const { models, faux } = modelsWith("prov-1");
 		faux.setResponses([fauxAssistantMessage("ok")]);
 
-		const result = await testModelConnection(models, model(), provider());
+		const result = await testModelConnection(models, model(), provider(), t);
 		expect(result.ok).toBe(true);
 		expect(result.detail).toContain("My gateway");
 	});
@@ -77,20 +82,27 @@ describe("testModelConnection", () => {
 		const { models, faux } = modelsWith("prov-1");
 		faux.setResponses([fauxAssistantMessage("ok")]);
 
-		await testModelConnection(models, model(), provider());
+		await testModelConnection(models, model(), provider(), t);
 		expect(faux.state.callCount).toBe(1);
 	});
 
 	it("points at the empty field instead of the server when no key is set", async () => {
 		const { models } = modelsWith("prov-1");
-		const result = await testModelConnection(models, model(), provider({ apiKey: "   " }));
+		const result = await testModelConnection(models, model(), provider({ apiKey: "   " }), t);
 		expect(result.ok).toBe(false);
 		expect(result.detail).toContain("API key");
 	});
 
+	it("reports that same verdict in the reader's language", async () => {
+		const { models } = modelsWith("prov-1");
+		const result = await testModelConnection(models, model(), provider({ apiKey: "   " }), zh);
+		expect(result.ok).toBe(false);
+		expect(result.detail).toBe("此提供方还没有 API 密钥。");
+	});
+
 	it("spends no request when the model has no id to send", async () => {
 		const { models, faux } = modelsWith("prov-1");
-		const result = await testModelConnection(models, model({ modelApiId: "" }), provider());
+		const result = await testModelConnection(models, model({ modelApiId: "" }), provider(), t);
 		expect(result.ok).toBe(false);
 		expect(faux.state.callCount).toBe(0);
 	});
@@ -99,10 +111,22 @@ describe("testModelConnection", () => {
 		const { models, faux } = modelsWith("prov-1");
 		faux.setResponses([fauxAssistantMessage("", { stopReason: "error", errorMessage: "401 invalid api key" })]);
 
-		const result = await testModelConnection(models, model(), provider());
+		const result = await testModelConnection(models, model(), provider(), t);
 		expect(result.ok).toBe(false);
 		// The server's own wording is what tells a user which field is wrong.
 		expect(result.detail).toBe("401 invalid api key");
+	});
+
+	it("names the stop reason in the reader's language when the server said nothing", async () => {
+		// Regression guard: the reason used to be interpolated as the provider
+		// library's own enum, so a Chinese reader got "请求 error。" — half a
+		// sentence in each language.
+		const { models, faux } = modelsWith("prov-1");
+		faux.setResponses([fauxAssistantMessage("", { stopReason: "error", errorMessage: "" })]);
+		expect((await testModelConnection(models, model(), provider(), zh)).detail).toBe("请求失败。");
+
+		faux.setResponses([fauxAssistantMessage("", { stopReason: "aborted", errorMessage: "" })]);
+		expect((await testModelConnection(models, model(), provider(), t)).detail).toBe("Request aborted.");
 	});
 
 	it("surfaces a thrown provider error verbatim", async () => {
@@ -113,7 +137,7 @@ describe("testModelConnection", () => {
 			},
 		]);
 
-		const result = await testModelConnection(models, model(), provider());
+		const result = await testModelConnection(models, model(), provider(), t);
 		expect(result.ok).toBe(false);
 		expect(result.detail).toBe("404 model not found");
 	});
@@ -124,7 +148,7 @@ describe("testModelConnection", () => {
 		// is the only signal that the request did not go where the user thinks.
 		faux.setResponses([(context, options, state, requestModel) => ({ ...fauxAssistantMessage("ok"), model: requestModel.id, responseModel: "cheaper-model" })]);
 
-		const result = await testModelConnection(models, model({ modelApiId: "probe-model" }), provider());
+		const result = await testModelConnection(models, model({ modelApiId: "probe-model" }), provider(), t);
 		expect(result.ok).toBe(true);
 		expect(result.detail).toContain("served cheaper-model");
 	});
@@ -133,7 +157,7 @@ describe("testModelConnection", () => {
 		const { models, faux } = modelsWith("prov-1");
 		faux.setResponses([{ ...fauxAssistantMessage("ok"), responseModel: "probe-model" }]);
 
-		const result = await testModelConnection(models, model({ modelApiId: "probe-model" }), provider());
+		const result = await testModelConnection(models, model({ modelApiId: "probe-model" }), provider(), t);
 		expect(result.detail).not.toContain("served");
 	});
 
@@ -141,7 +165,7 @@ describe("testModelConnection", () => {
 		const { models, faux } = modelsWith("prov-1");
 		faux.setResponses([fauxAssistantMessage("ok")]);
 
-		const result = await testModelConnection(models, model(), provider({ name: "" }));
+		const result = await testModelConnection(models, model(), provider({ name: "" }), t);
 		expect(result.detail).toContain("https://gw.internal/v1");
 	});
 
@@ -149,7 +173,7 @@ describe("testModelConnection", () => {
 		for (const protocol of ["openai-completions", "openai-responses", "anthropic-messages"] as const) {
 			const { models, faux } = modelsWith("prov-1", protocol);
 			faux.setResponses([fauxAssistantMessage("ok")]);
-			const result = await testModelConnection(models, model(), provider({ protocol }));
+			const result = await testModelConnection(models, model(), provider({ protocol }), t);
 			expect(result.ok).toBe(true);
 		}
 	});
@@ -168,7 +192,7 @@ describe("testModelConnection", () => {
 			},
 		]);
 
-		await testModelConnection(models, model(), provider(), { fetch: injected });
+		await testModelConnection(models, model(), provider(), t, { fetch: injected });
 		expect(seen).toBe(injected);
 	});
 });
@@ -178,7 +202,7 @@ describe("testProviderConnection", () => {
 		const { models, faux } = modelsWith("prov-1");
 		faux.setResponses([fauxAssistantMessage("ok")]);
 
-		const result = await testProviderConnection(models, provider(), [model()]);
+		const result = await testProviderConnection(models, provider(), [model()], t);
 		expect(result.ok).toBe(true);
 		expect(faux.state.callCount).toBe(1);
 	});
@@ -187,7 +211,7 @@ describe("testProviderConnection", () => {
 		const { models, faux } = modelsWith("prov-1");
 		faux.setResponses([fauxAssistantMessage("ok")]);
 
-		const result = await testProviderConnection(models, provider(), [model()]);
+		const result = await testProviderConnection(models, provider(), [model()], t);
 		expect(result.detail).toContain("probed with probe-model");
 	});
 
@@ -195,7 +219,7 @@ describe("testProviderConnection", () => {
 		const { models, faux } = modelsWith("prov-1");
 		faux.setResponses([fauxAssistantMessage("", { stopReason: "error", errorMessage: "404 model not found" })]);
 
-		const result = await testProviderConnection(models, provider(), [model()]);
+		const result = await testProviderConnection(models, provider(), [model()], t);
 		expect(result.ok).toBe(false);
 		expect(result.detail).toContain("404 model not found");
 		expect(result.detail).toContain("probed with probe-model");
@@ -205,7 +229,7 @@ describe("testProviderConnection", () => {
 		const { models, faux } = modelsWith("prov-1");
 		const { fetch, urls } = listingFetch(200, listingBody("a", "b"));
 
-		const result = await testProviderConnection(models, provider(), [], { fetch });
+		const result = await testProviderConnection(models, provider(), [], t, { fetch });
 		expect(result.ok).toBe(true);
 		expect(result.detail).toContain("My gateway");
 		// A listing probe costs no tokens, so no chat request may be spent.
@@ -217,7 +241,7 @@ describe("testProviderConnection", () => {
 		const { models, faux } = modelsWith("prov-1");
 		const { fetch, urls } = listingFetch(200, listingBody("a"));
 
-		const result = await testProviderConnection(models, provider(), [model({ providerId: "other" })], { fetch });
+		const result = await testProviderConnection(models, provider(), [model({ providerId: "other" })], t, { fetch });
 		expect(result.ok).toBe(true);
 		expect(faux.state.callCount).toBe(0);
 		expect(urls).toHaveLength(1);
@@ -227,7 +251,7 @@ describe("testProviderConnection", () => {
 		const { models, faux } = modelsWith("prov-1");
 		const { fetch, urls } = listingFetch(200, listingBody("a"));
 
-		const result = await testProviderConnection(models, provider(), [model({ modelApiId: "" })], { fetch });
+		const result = await testProviderConnection(models, provider(), [model({ modelApiId: "" })], t, { fetch });
 		expect(result.ok).toBe(true);
 		expect(faux.state.callCount).toBe(0);
 		expect(urls).toHaveLength(1);
@@ -237,7 +261,7 @@ describe("testProviderConnection", () => {
 		const { models } = modelsWith("prov-1");
 		const { fetch } = listingFetch(200, listingBody("a", "b", "c"));
 
-		const result = await testProviderConnection(models, provider(), [], { fetch });
+		const result = await testProviderConnection(models, provider(), [], t, { fetch });
 		expect(result.detail).toContain("3 models");
 	});
 
@@ -245,7 +269,7 @@ describe("testProviderConnection", () => {
 		const { models } = modelsWith("prov-1");
 		const { fetch } = listingFetch(200, listingBody());
 
-		const result = await testProviderConnection(models, provider(), [], { fetch });
+		const result = await testProviderConnection(models, provider(), [], t, { fetch });
 		expect(result.ok).toBe(true);
 		expect(result.detail).toContain("no models");
 	});
@@ -254,7 +278,7 @@ describe("testProviderConnection", () => {
 		const { models } = modelsWith("prov-1");
 		const { fetch } = listingFetch(200, "<html>gateway ok</html>");
 
-		const result = await testProviderConnection(models, provider(), [], { fetch });
+		const result = await testProviderConnection(models, provider(), [], t, { fetch });
 		expect(result.ok).toBe(true);
 	});
 
@@ -262,7 +286,7 @@ describe("testProviderConnection", () => {
 		const { models } = modelsWith("prov-1");
 		const { fetch } = listingFetch(401, JSON.stringify({ error: { message: "invalid api key" } }));
 
-		const result = await testProviderConnection(models, provider(), [], { fetch });
+		const result = await testProviderConnection(models, provider(), [], t, { fetch });
 		expect(result.ok).toBe(false);
 		expect(result.detail).toContain("rejected the API key");
 		expect(result.detail).toContain("invalid api key");
@@ -272,7 +296,7 @@ describe("testProviderConnection", () => {
 		const { models } = modelsWith("prov-1");
 		const { fetch } = listingFetch(401, "");
 
-		const result = await testProviderConnection(models, provider({ apiKey: "   " }), [], { fetch });
+		const result = await testProviderConnection(models, provider({ apiKey: "   " }), [], t, { fetch });
 		expect(result.ok).toBe(false);
 		expect(result.detail).toContain("requires an API key");
 	});
@@ -281,7 +305,7 @@ describe("testProviderConnection", () => {
 		const { models } = modelsWith("prov-1");
 		const { fetch } = listingFetch(200, listingBody("local-model"));
 
-		const result = await testProviderConnection(models, provider({ apiKey: "" }), [], { fetch });
+		const result = await testProviderConnection(models, provider({ apiKey: "" }), [], t, { fetch });
 		expect(result.ok).toBe(true);
 	});
 
@@ -289,7 +313,7 @@ describe("testProviderConnection", () => {
 		const { models } = modelsWith("prov-1");
 		const { fetch } = listingFetch(404, "");
 
-		const result = await testProviderConnection(models, provider(), [], { fetch });
+		const result = await testProviderConnection(models, provider(), [], t, { fetch });
 		// Red, not green: the URL answered but the credential was never exercised,
 		// and the message has to name the one action that closes that gap.
 		expect(result.ok).toBe(false);
@@ -301,7 +325,7 @@ describe("testProviderConnection", () => {
 		const { models } = modelsWith("prov-1");
 		const { fetch } = listingFetch(429, JSON.stringify({ error: { message: "slow down" } }));
 
-		const result = await testProviderConnection(models, provider(), [], { fetch });
+		const result = await testProviderConnection(models, provider(), [], t, { fetch });
 		expect(result.ok).toBe(false);
 		expect(result.detail).toContain("429");
 		expect(result.detail).toContain("slow down");
@@ -313,7 +337,7 @@ describe("testProviderConnection", () => {
 			throw new Error("net::ERR_NAME_NOT_RESOLVED");
 		}) as typeof globalThis.fetch;
 
-		const result = await testProviderConnection(models, provider(), [], { fetch });
+		const result = await testProviderConnection(models, provider(), [], t, { fetch });
 		expect(result.ok).toBe(false);
 		expect(result.detail).toBe("net::ERR_NAME_NOT_RESOLVED");
 	});

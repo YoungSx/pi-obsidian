@@ -1,6 +1,10 @@
 import { describe, expect, it } from "bun:test";
 import type { ToolResultMessage } from "@earendil-works/pi-ai";
 import { countDiffLines, describeTool, summarizeToolPayload, summarizeToolResult } from "./traceSummary";
+import { getT } from "../i18n";
+
+const en = getT("en");
+const zh = getT("zh-cn");
 
 describe("summarizeToolPayload", () => {
 	it("prefers the path, the one argument that answers 'which note'", () => {
@@ -27,30 +31,41 @@ describe("summarizeToolPayload", () => {
 
 describe("summarizeToolResult", () => {
 	it("uses the result's first non-empty line, which this plugin's tools write as a sentence", () => {
-		expect(summarizeToolResult(result("\n\nApplied 2 edits to Note.md.\nmore detail"))).toBe("Applied 2 edits to Note.md.");
+		expect(summarizeToolResult(result("\n\nApplied 2 edits to Note.md.\nmore detail"), en)).toBe("Applied 2 edits to Note.md.");
 	});
 
 	it("reports a failure even when the error carried no text", () => {
-		expect(summarizeToolResult({ ...result(""), content: [], isError: true })).toBe("failed");
+		expect(summarizeToolResult({ ...result(""), content: [], isError: true }, en)).toBe("failed");
+	});
+
+	it("reports a failure in the reader's language", () => {
+		expect(summarizeToolResult({ ...result(""), content: [], isError: true }, zh)).toBe("失败");
 	});
 
 	it("stays empty for a successful result with no text, so the row shows the tool name alone", () => {
-		expect(summarizeToolResult({ ...result(""), content: [] })).toBe("");
+		expect(summarizeToolResult({ ...result(""), content: [] }, en)).toBe("");
 	});
 });
 
 describe("describeTool", () => {
 	it("names vault tools in the reader's vocabulary by default", () => {
-		expect(describeTool("grep", false)).toBe("Searched the vault");
-		expect(describeTool("get_active_note", false)).toBe("Checked the open note");
+		expect(describeTool("grep", false, en)).toBe("Searched the vault");
+		expect(describeTool("get_active_note", false, en)).toBe("Checked the open note");
+	});
+
+	it("names them in Chinese when that is the reader's language", () => {
+		expect(describeTool("grep", false, zh)).toBe("搜索了笔记库");
+		expect(describeTool("get_active_note", false, zh)).toBe("查看了当前笔记");
 	});
 
 	it("keeps the raw id once details are on, so the row matches the payload below it", () => {
-		expect(describeTool("grep", true)).toBe("grep");
+		expect(describeTool("grep", true, en)).toBe("grep");
+		expect(describeTool("grep", true, zh)).toBe("grep");
 	});
 
 	it("falls through to the raw id for a tool it has not been taught", () => {
-		expect(describeTool("some_new_tool", false)).toBe("some_new_tool");
+		expect(describeTool("some_new_tool", false, en)).toBe("some_new_tool");
+		expect(describeTool("some_new_tool", false, zh)).toBe("some_new_tool");
 	});
 });
 

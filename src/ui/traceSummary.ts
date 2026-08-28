@@ -1,4 +1,5 @@
 import type { ToolResultMessage } from "@earendil-works/pi-ai";
+import type { Translator } from "../i18n";
 
 /**
  * One-line summaries for the collapsed trace rows in the transcript.
@@ -11,28 +12,28 @@ import type { ToolResultMessage } from "@earendil-works/pi-ai";
 const MAX_DETAIL_LENGTH = 48;
 
 /**
- * Plain-language names for the vault tools.
+ * Maps a tool id to its copy key.
  *
  * The tool ids are the model's vocabulary, not the reader's: "get_active_note"
  * and "grep" say nothing to someone whose mental model is notes and links.
  * Unmapped ids fall through to the raw name, which is the honest answer for a
  * tool this table has not been taught.
  */
-const TOOL_LABELS: Readonly<Record<string, string>> = {
-	read: "Read a note",
-	write: "Wrote a note",
-	edit: "Edited a note",
-	ls: "Listed a folder",
-	find: "Looked for notes",
-	grep: "Searched the vault",
-	get_active_note: "Checked the open note",
-	note_links: "Followed links",
-	note_metadata: "Read note properties",
-	list_tasks: "Listed tasks",
-	summarize_tasks: "Summarized tasks",
-	move_note: "Renamed or moved a note",
-	trash_note: "Sent a note to trash",
-};
+const TOOL_COPY_KEYS = {
+	read: "traceTool.read",
+	write: "traceTool.write",
+	edit: "traceTool.edit",
+	ls: "traceTool.ls",
+	find: "traceTool.find",
+	grep: "traceTool.grep",
+	get_active_note: "traceTool.getActiveNote",
+	note_links: "traceTool.noteLinks",
+	note_metadata: "traceTool.noteMetadata",
+	list_tasks: "traceTool.listTasks",
+	summarize_tasks: "traceTool.summarizeTasks",
+	move_note: "traceTool.moveNote",
+	trash_note: "traceTool.trashNote",
+} as const;
 
 /**
  * Names a tool for the reader.
@@ -41,11 +42,12 @@ const TOOL_LABELS: Readonly<Record<string, string>> = {
  * payloads is working in the model's vocabulary and a translated name would
  * make the row harder to match against the arguments below it.
  */
-export function describeTool(toolName: string, showAgentDetails: boolean): string {
+export function describeTool(toolName: string, showAgentDetails: boolean, t: Translator): string {
 	if (showAgentDetails) {
 		return toolName;
 	}
-	return TOOL_LABELS[toolName] ?? toolName;
+	const key = TOOL_COPY_KEYS[toolName as keyof typeof TOOL_COPY_KEYS];
+	return key ? t.t(key) : toolName;
 }
 
 /**
@@ -88,10 +90,10 @@ export function summarizeToolPayload(payload: unknown): string {
  * successes fall back to the first line of output, which for this plugin's tools
  * is already a written sentence ("Applied 2 edits to Note.md.").
  */
-export function summarizeToolResult(message: ToolResultMessage): string {
+export function summarizeToolResult(message: ToolResultMessage, t: Translator): string {
 	const firstText = message.content.find((content) => content.type === "text");
 	if (!firstText || firstText.type !== "text") {
-		return message.isError ? "failed" : "";
+		return message.isError ? t.t("traceTool.failed") : "";
 	}
 	const firstLine = firstText.text.split("\n").find((line) => line.trim()) ?? "";
 	return clip(firstLine.trim());
