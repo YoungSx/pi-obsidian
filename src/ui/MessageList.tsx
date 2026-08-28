@@ -9,7 +9,7 @@ import { ReplyActions } from "./ReplyActions";
 import { useT } from "./TranslatorContext";
 import type { Translator } from "../i18n";
 import { ObsidianIcon } from "./ObsidianIcon";
-import { countDiffLines, describeTool, summarizeToolPayload, summarizeToolResult } from "./traceSummary";
+import { countDiffLines, describeTool, isToolIdentifier, summarizeToolPayload, summarizeToolResult } from "./traceSummary";
 
 export interface MessageListProps {
 	messages: AgentMessage[];
@@ -410,7 +410,7 @@ function CompactionDivider({ message, renderContext }: { message: CompactionSumm
 	return (
 		<section aria-label={t.t("chat.compactedAria")} className="piem-chat__compaction">
 			<div className="piem-chat__compaction-heading">{t.t("chat.earlierSummarized")}</div>
-			<Block text={message.summary} kind="harness" isStreaming={false} context={renderContext} />
+			<Block text={message.summary} kind="summary" isStreaming={false} context={renderContext} />
 		</section>
 	);
 }
@@ -485,6 +485,7 @@ function renderAssistantMessage(message: AssistantMessage, args: RenderArgs): Re
 				key={index}
 				icon="wrench"
 				name={describeTool(content.name, showDetails, args.renderContext.t)}
+				nameIsIdentifier={isToolIdentifier(content.name, showDetails)}
 				detail={summarizeToolPayload(content.arguments)}
 				// Without the payload there is nothing behind the row to open, so it
 				// renders as a plain line rather than an empty disclosure.
@@ -499,9 +500,27 @@ interface TraceProps {
 	name: string;
 	detail?: string;
 	className?: string;
+	/**
+	 * True when `name` is a raw tool id (`get_active_note`) rather than a written
+	 * label ("Read a note"). Only an id is set in monospace; the rows whose names
+	 * are sentences — thinking, harness output, and every translated tool name —
+	 * are set in the interface font.
+	 */
+	nameIsIdentifier?: boolean;
 	/** Revealed content; `null` renders a plain row with no disclosure affordance. */
 	body?: React.ReactNode;
 	children?: React.ReactNode;
+}
+
+/**
+ * Class for a trace row's name.
+ *
+ * Shared by {@link Trace} and {@link ToolResultTrace}, which draw the same row
+ * from different data and would otherwise each decide the typeface for
+ * themselves.
+ */
+function traceNameClass(isIdentifier: boolean): string {
+	return `piem-chat__trace-name piem-chat__trace-name--${isIdentifier ? "identifier" : "label"}`;
 }
 
 /**
@@ -513,13 +532,13 @@ interface TraceProps {
  * single `grep` could bury the model's actual prose. Everything mechanical now
  * collapses to a 1-line row the reader opens on demand.
  */
-function Trace({ icon, name, detail, className, body, children }: TraceProps): React.JSX.Element {
+function Trace({ icon, name, detail, className, nameIsIdentifier = false, body, children }: TraceProps): React.JSX.Element {
 	const revealed = body === undefined ? children : body;
 	const classes = ["piem-chat__trace", className].filter(Boolean).join(" ");
 	const row = (
 		<>
 			<ObsidianIcon name={icon} className="piem-chat__trace-icon" />
-			<span className="piem-chat__trace-name">{name}</span>
+			<span className={traceNameClass(nameIsIdentifier)}>{name}</span>
 			{detail ? <span className="piem-chat__trace-detail">{detail}</span> : null}
 		</>
 	);
@@ -550,7 +569,9 @@ function ToolResultTrace({ message, context }: { message: ToolResultMessage; con
 		<details className={classes}>
 			<summary className="piem-chat__trace-summary">
 				<ObsidianIcon name={message.isError ? "alert-triangle" : "check"} className="piem-chat__trace-icon" />
-				<span className="piem-chat__trace-name">{describeTool(message.toolName, context.showAgentDetails, context.t)}</span>
+				<span className={traceNameClass(isToolIdentifier(message.toolName, context.showAgentDetails))}>
+					{describeTool(message.toolName, context.showAgentDetails, context.t)}
+				</span>
 				{detail ? <span className="piem-chat__trace-detail">{detail}</span> : null}
 			</summary>
 			<div className="piem-chat__trace-body">
@@ -611,8 +632,11 @@ function renderHarnessBody(message: AgentMessage, context: MessageContext): Reac
 	if (message.role === "bashExecution") {
 		return <Block text={`$ ${message.command}\n${message.output}`} kind="harness" isStreaming={false} context={context} />;
 	}
+	// Prose the model wrote about the conversation, not a transcript: it is set in
+	// the interface font like any other writing. `harness` below stays monospace
+	// because bash output only lines up in a fixed pitch.
 	if (message.role === "branchSummary") {
-		return <Block text={message.summary} kind="harness" isStreaming={false} context={context} />;
+		return <Block text={message.summary} kind="summary" isStreaming={false} context={context} />;
 	}
 	if (message.role === "custom") {
 		if (typeof message.content === "string") {

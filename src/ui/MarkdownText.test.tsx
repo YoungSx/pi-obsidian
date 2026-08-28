@@ -95,6 +95,27 @@ describe("MarkdownText", () => {
 		expect(host.querySelector("pre.piem-chat__text")).not.toBeNull();
 	});
 
+	/*
+	 * The face class has to reach the DOM, on both branches. A `<pre>` that carries
+	 * neither falls back to the UA's monospace default, which silently looks correct
+	 * for machine output and wrong for everything else — so the prose cases are the
+	 * ones worth pinning.
+	 */
+	it("sets machine output in the monospace face", async () => {
+		const { host } = await renderBlock({ text: "a.md\nb.md", kind: "toolResult" });
+
+		expect(host.querySelector("pre.piem-chat__text--machine")).not.toBeNull();
+		expect(host.querySelector("pre.piem-chat__text--prose")).toBeNull();
+	});
+
+	it("sets a streaming reply in the prose face, and keeps it there once settled", async () => {
+		const streaming = await renderBlock({ text: "half a sen", kind: "assistant", isStreaming: true });
+		expect(streaming.host.querySelector("pre.piem-chat__text--prose")).not.toBeNull();
+
+		const settled = await renderBlock({ text: "half a sentence.", kind: "assistant" });
+		expect(settled.host.querySelector(".piem-chat__markdown.piem-chat__text--prose")).not.toBeNull();
+	});
+
 	it("clears stale content when the text changes instead of stacking renders", async () => {
 		const { host, markdown } = await renderBlock({ text: "first", kind: "assistant" });
 		expect(host.querySelectorAll(".stub-rendered")).toHaveLength(1);
