@@ -48,6 +48,13 @@ export interface MessageListProps {
 	 * empty when no note is active.
 	 */
 	sourcePath: string;
+	/**
+	 * Element id of the composer's textarea, for the skip link above the
+	 * transcript. Absent until the composer has mounted and reported it, which is
+	 * also why the link is not rendered before then — a `href="#"` with no target
+	 * is a tab stop that goes nowhere.
+	 */
+	composerAnchorId?: string;
 }
 
 /**
@@ -104,6 +111,7 @@ export function MessageList({
 	app,
 	component,
 	sourcePath,
+	composerAnchorId,
 }: MessageListProps): React.JSX.Element {
 	const t = useT();
 	const context: MessageContext = { app, component, sourcePath, showAgentDetails, t };
@@ -147,6 +155,22 @@ export function MessageList({
 
 	return (
 		<div className="piem-chat__transcript">
+			{/*
+			 * Bypass Blocks (WCAG 2.4.1). Every reply contributes four action
+			 * buttons and every tool call a focusable summary, so a twenty-turn
+			 * conversation puts well over a hundred tab stops between the top of
+			 * the panel and the composer, with no way around them. Hidden until
+			 * focused, so it costs a keyboard user one Tab and everyone else
+			 * nothing.
+			 *
+			 * Omitted while the transcript is empty: a link that skips nothing is
+			 * just one more stop.
+			 */}
+			{composerAnchorId && messages.length > 0 ? (
+				<a href={`#${composerAnchorId}`} className="piem-chat__skip-link" onClick={(event) => focusAnchor(event, composerAnchorId)}>
+					{t.t("chat.skipToComposer")}
+				</a>
+			) : null}
 			{/*
 			 * Not a live region. It used to carry `aria-live="polite"` plus
 			 * `aria-relevant="additions text"`, so the streaming message
@@ -192,6 +216,25 @@ export function MessageList({
 			<TurnAnnouncer messages={messages} isStreaming={isStreaming} />
 		</div>
 	);
+}
+
+/**
+ * Moves focus to the composer, instead of letting the fragment do it.
+ *
+ * The `href` stays — it is what makes this a link to assistive tech, and what
+ * makes Enter activate it — but the default action is not relied on. Obsidian
+ * runs in an Electron webview whose document URL it owns, so appending a hash
+ * to it is the host's business, not the panel's; and a fragment navigation
+ * scrolls to the target without reliably focusing it. Focusing by id is
+ * deterministic in both respects.
+ */
+function focusAnchor(event: React.MouseEvent<HTMLAnchorElement>, anchorId: string): void {
+	const target = event.currentTarget.ownerDocument.getElementById(anchorId);
+	if (!target) {
+		return;
+	}
+	event.preventDefault();
+	target.focus();
 }
 
 /**

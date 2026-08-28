@@ -54,6 +54,8 @@ export const en = {
 		openSettings: "Open settings",
 		dismissMessage: "Dismiss message",
 		conversationAria: "Conversation",
+		/** Skip link above the transcript; see WCAG 2.4.1 (Bypass Blocks). */
+		skipToComposer: "Skip to message box",
 		toolsRunning: "Tools running",
 		working: "Working: ",
 		latest: "Latest",

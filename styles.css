@@ -993,6 +993,53 @@
 	color: var(--text-error);
 }
 
+/* --- keyboard bypass --- */
+
+/*
+ * Bypass Blocks (WCAG 2.4.1) for the transcript.
+ *
+ * A long conversation puts every reply's action row and every tool row between
+ * the top of the panel and the composer — twenty turns is well over a hundred
+ * tab stops. This is the one Tab that gets past them.
+ *
+ * Clipped away rather than moved off the top: neither `.piem-chat__transcript`
+ * nor `.piem-chat` clips its overflow, so a negative `top` would leave the link
+ * visible over the header instead of hiding it. `clip-path` removes it from view
+ * without removing it from the focus order — unlike `display: none` or
+ * `visibility: hidden`, which would make a skip link that can never be reached.
+ *
+ * Positioned against `.piem-chat__transcript`, which is already
+ * `position: relative`.
+ */
+.piem-chat__skip-link {
+	background: var(--background-secondary);
+	border: 1px solid var(--background-modifier-border);
+	border-radius: var(--radius-s);
+	clip-path: inset(50%);
+	color: var(--text-normal);
+	font-size: var(--font-ui-smaller);
+	left: var(--size-4-2);
+	padding: var(--size-4-1) var(--size-4-2);
+	position: absolute;
+	text-decoration: none;
+	top: var(--size-4-2);
+	/* Over the transcript it covers, which is a scroll container drawn later. */
+	z-index: 1;
+}
+
+/*
+ * `:focus`, not the `:focus-visible` used on the buttons elsewhere. Those only
+ * hide a focus ring from a mouse click, on a control that is drawn either way.
+ * This one is drawn *only* while focused, so any focus that did not match —
+ * a programmatic one, or a UA that scopes `:focus-visible` more tightly — would
+ * strand the user on an element they cannot see.
+ */
+.piem-chat__skip-link:focus {
+	clip-path: none;
+	outline: 2px solid var(--background-modifier-border-focus);
+	outline-offset: 1px;
+}
+
 /* --- screen-reader-only --- */
 
 .piem-chat__visually-hidden {
