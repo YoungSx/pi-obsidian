@@ -9,6 +9,7 @@ installObsidianStub();
 const document = installDom();
 
 // Dynamic imports so the mocked `obsidian` module wins over any cached real one.
+const { ChatComposer } = await import("./ChatComposer");
 const { ChatHeader } = await import("./ChatHeader");
 const { createRoot: createRootImpl } = await import("react-dom/client");
 
@@ -76,6 +77,88 @@ describe("ChatHeader accessibility", () => {
 		const host = await renderHeader(snapshot({ isCompacting: true }));
 
 		expect(host.querySelector(".piem-chat__compacting")?.getAttribute("role")).toBe("status");
+	});
+});
+
+type ComposerProps = Parameters<typeof ChatComposer>[0];
+
+/**
+ * Renders the composer in its happy state, so each test overrides only the one
+ * condition it is about.
+ *
+ * The default draft is deliberately non-empty: an empty one is already reason
+ * enough to disable Send, and it would mask whether the key check does anything.
+ */
+async function renderComposer(overrides: Partial<ComposerProps> = {}): Promise<HTMLElement> {
+	const host = document.createElement("div");
+	document.body.appendChild(host);
+	const root = roots.get(host) ?? createRootSync(host);
+	roots.set(host, root);
+	root.render(
+		<ChatComposer
+			input="what is in this note?"
+			isStreaming={false}
+			isCompacting={false}
+			isInitializing={false}
+			isConfigured={true}
+			showAgentDetails={true}
+			onInputChange={() => undefined}
+			onSend={() => undefined}
+			onAbort={() => undefined}
+			{...overrides}
+		/>,
+	);
+	await flushRender();
+	return host;
+}
+
+describe("ChatComposer accessibility", () => {
+	beforeEach(() => {
+		createRootSync = createRootImpl;
+		document.body.replaceChildren();
+	});
+
+	afterEach(() => {
+		document.body.replaceChildren();
+	});
+
+	it("says why Send is unavailable rather than repeating its name", async () => {
+		const host = await renderComposer({ isConfigured: false });
+
+		const send = host.querySelector<HTMLButtonElement>(".piem-chat__send-button");
+		expect(send?.disabled).toBe(true);
+		// A disabled control has no other channel to explain itself, so the reason
+		// has to live in the accessible name — and the tooltip has to agree, since
+		// the button is unreachable by keyboard once disabled.
+		expect(send?.getAttribute("aria-label")).toBe("Add an API key to send");
+		expect(send?.getAttribute("title")).toBe("Add an API key to send");
+	});
+
+	it("returns to the plain send label once a key is configured", async () => {
+		const host = await renderComposer();
+
+		const send = host.querySelector<HTMLButtonElement>(".piem-chat__send-button");
+		expect(send?.disabled).toBe(false);
+		expect(send?.getAttribute("aria-label")).toBe("Send message");
+	});
+
+	it("keeps Send disabled when the key and the draft are both missing", async () => {
+		const host = await renderComposer({ isConfigured: false, input: "" });
+
+		// Two independent reasons to stay disabled must not cancel out, and the
+		// missing key is the one worth naming: it outlives this draft.
+		const send = host.querySelector<HTMLButtonElement>(".piem-chat__send-button");
+		expect(send?.disabled).toBe(true);
+		expect(send?.getAttribute("aria-label")).toBe("Add an API key to send");
+	});
+
+	it("swaps in a labelled Stop control while streaming, leaving no Send to mis-click", async () => {
+		const host = await renderComposer({ isStreaming: true });
+
+		const stop = host.querySelector<HTMLButtonElement>(".piem-chat__stop-button");
+		expect(stop?.getAttribute("aria-label")).toBe("Stop response");
+		expect(stop?.disabled).toBe(false);
+		expect(host.querySelector(".piem-chat__send-button")).toBeNull();
 	});
 });
 
