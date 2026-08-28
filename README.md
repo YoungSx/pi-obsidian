@@ -62,6 +62,35 @@ Tool paths must be vault-relative. Absolute paths and `..` path escapes are
 rejected, and access to the plugin's own internals (`.obsidian/plugins/piem`)
 is blocked by default.
 
+## Skills
+
+Skills are reusable instructions you author as Markdown files in the vault.
+Create a folder `Piem/skills/` and drop a `SKILL.md` inside a named
+subfolder — for example `Piem/skills/summarize/SKILL.md`:
+
+```markdown
+---
+name: summarize
+description: Summarize the active note in three bullet points
+---
+
+When asked to summarize, read the active note first, then reply with exactly
+three bullets covering its thesis, evidence, and open questions.
+```
+
+The `name` must match the folder name (lowercase, digits, hyphens only); the
+`description` is what the model sees when deciding whether the skill applies.
+At the start of each turn, Piem walks `Piem/skills/` and lists every skill it
+finds in the system prompt — so the model knows your skills exist and can
+follow them when a request matches. Skills are not persisted into the session:
+they are read fresh from the vault every turn, so editing or adding one takes
+effect on your next message without reloading the plugin.
+
+A skill whose frontmatter is malformed still loads but produces a warning in
+the chat banner; the warning clears on your next message. The folder is
+visible in Obsidian's file explorer, so you can open, search, and sync skills
+like any other note.
+
 ## Storage
 
 Sessions are stored as JSONL files under

@@ -35,6 +35,8 @@ import { arrayBufferToBase64, extractImageRefs, mimeTypeForPath, sanitizeMessage
 import { injectContext } from "./contextInjection";
 import { ContextRefs, type ContextRef } from "./contextRefs";
 import { OBSIDIAN_AGENT_SYSTEM_PROMPT } from "./systemPrompt";
+import { composeSystemPrompt, formatSkillDiagnostics, loadVaultSkills } from "./skillLoader";
+import type { Skill } from "@earendil-works/pi-agent-core";
 import { getT, resolveLanguage, type Language, type LanguageHost, type Translator } from "../i18n";
 import type { SendShortcut } from "../ui/keyboard";
 import { VaultExecutionEnv } from "../vault/VaultExecutionEnv";
@@ -302,6 +304,15 @@ export class ObsidianAgentService {
 	private templateDiagnostics: PromptTemplateDiagnostic[] = [];
 	/** Prevents two retries from racing while the branch pointer is being persisted. */
 	private retryInFlight = false;
+	/**
+	 * Vault skills, reloaded whenever the agent is (re)built.
+	 *
+	 * Kept here rather than folded straight into the prompt so the diagnostics
+	 * can be reported once per load and the prompt composition stays
+	 * synchronous from `replaceAgent`'s perspective — it reads the last
+	 * finished load rather than awaiting one.
+	 */
+	private skills: Skill[] = [];
 
 	constructor(app: App, getSettings: () => PiemSettings, sessionManager: ObsidianSessionManager, options: ObsidianAgentServiceOptions = {}) {
 		this.app = app;
@@ -373,14 +384,16 @@ export class ObsidianAgentService {
 			return false;
 		}
 
-		await this.refreshConfiguration();
-
-		// Clear stale banners before vault reading: a missing-embed notice raised
-		// while resolving images below must survive into the run, not be wiped by
-		// the try block's reset. The run's own error path still overwrites
+		// Stale banners are cleared exactly once, and before
+		// `refreshConfiguration` rather than after it. Two things depend on this
+		// single point: the reload inside `refreshConfiguration` surfaces fresh
+		// skill diagnostics as a notice, and the image resolution below can raise
+		// a missing-embed notice — clearing after either would erase a warning
+		// before it was ever seen. The run's own error path still overwrites
 		// `errorMessage` in `catch`.
 		this.errorMessage = undefined;
 		this.noticeMessage = undefined;
+		await this.refreshConfiguration();
 
 		// Phase 2: resolve `![[cat.png]]` embeds into ImageContent read from the
 		// vault. The bytes travel alongside the text, so the embed syntax is
@@ -711,6 +724,10 @@ export class ObsidianAgentService {
 		this.agent.state.model = getSelectedModel(this.getSettings());
 		this.agent.state.thinkingLevel = defaults.thinkingLevel;
 		this.agent.state.tools = createObsidianTools(this.app, this.env, this.getSettings());
+		// Skills are read from the vault here too: `saveSettings` calls this after
+		// every settings change, and the panel re-reads the folder with it, so a
+		// newly saved skill reaches the running conversation without a reload.
+		await this.reloadSkills();
 		await this.sessionManager.ensureConfiguration(defaults);
 		await this.refreshSessionInfo();
 		this.notify();
@@ -835,6 +852,7 @@ export class ObsidianAgentService {
 	}
 
 	private async initializeAgent(): Promise<void> {
+		await this.reloadSkills();
 		const defaults = this.getSessionDefaults();
 		this.sessionInfo = await this.sessionManager.continueRecentSession(defaults);
 		const context = await this.sessionManager.buildSessionContext();
@@ -910,7 +928,11 @@ export class ObsidianAgentService {
 			// cannot retarget a tool loop halfway through a user request.
 			transformContext: async (messages) => injectContext(messages, this.activeRunContext ?? this.contextRefs.list()),
 			initialState: {
-				systemPrompt: OBSIDIAN_AGENT_SYSTEM_PROMPT,
+				// Skills were loaded by the same async path that led here
+				// (`initializeAgent` / `openSession` / `newSession` all await
+				// `reloadSkills` first), so the composed prompt is current; a live
+				// agent gets its prompt refreshed by `reloadSkills` itself.
+				systemPrompt: composeSystemPrompt(OBSIDIAN_AGENT_SYSTEM_PROMPT, this.skills),
 				model,
 				thinkingLevel: getPreferredThinkingLevel(settings),
 				tools: createObsidianTools(this.app, this.env, settings),
@@ -936,6 +958,28 @@ export class ObsidianAgentService {
 		});
 		this.agent = agent;
 		this.unsubscribeAgent = agent.subscribe((event) => this.handleAgentEvent(event));
+	}
+
+	/**
+	 * Reloads vault skills and pushes them into the live agent's system prompt.
+	 *
+	 * Runs before a new agent is built and again whenever configuration
+	 * refreshes, so a skill the user just saved in the vault reaches the next
+	 * turn without a plugin reload. The diagnostics are warnings about the
+	 * user's own files — a typo'd `SKILL.md` is not a chat failure — so they
+	 * ride the notice channel, which the next user turn clears, rather than the
+	 * assertive error banner.
+	 */
+	private async reloadSkills(): Promise<void> {
+		const { skills, diagnostics } = await loadVaultSkills(this.env);
+		this.skills = skills;
+		const problems = formatSkillDiagnostics(diagnostics);
+		if (problems) {
+			this.setNotice(problems);
+		}
+		if (this.agent) {
+			this.agent.state.systemPrompt = composeSystemPrompt(OBSIDIAN_AGENT_SYSTEM_PROMPT, skills);
+		}
 	}
 
 	private async handleAgentEvent(event: AgentEvent): Promise<void> {
