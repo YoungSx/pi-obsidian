@@ -11,7 +11,8 @@
 		"version": "node version-bump.mjs && git add manifest.json versions.json",
 		"lint": "eslint .",
 		"check:bundle": "node scripts/check-bundle.mjs",
-		"verify": "npm run build && npm run check:bundle && bun test && npm run lint"
+		"check:copy": "node scripts/check-copy.mjs",
+		"verify": "npm run build && npm run check:bundle && npm run check:copy && bun test && npm run lint"
 	},
 	"keywords": [],
 	"license": "0-BSD",

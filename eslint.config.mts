@@ -41,6 +41,24 @@ export default tseslint.config(
 			"obsidianmd/hardcoded-config-path": "off",
 		},
 	},
+	{
+		// Build-time tooling, not plugin runtime code: the copy gate reads the
+		// source tree off disk, and its test drives the gate as a subprocess over
+		// scratch files, so `node:fs` and the Bun runner's globals are the
+		// mechanism rather than an oversight. The rules that rightly keep Node
+		// builtins out of a mobile-capable plugin are scoped off by path, the same
+		// way `pluginLoader` is above — nothing under `scripts/` is bundled into
+		// `main.js`.
+		files: ["scripts/**/*.ts", "scripts/**/*.mjs"],
+		languageOptions: {
+			globals: {
+				Bun: "readonly",
+			},
+		},
+		rules: {
+			"import/no-nodejs-modules": "off",
+		},
+	},
 	globalIgnores([
 		"node_modules",
 		// Nested agent worktrees are separate checkouts; linting them here would
