@@ -58,6 +58,15 @@ describe("meterTitle", () => {
 		expect(meterTitle(fill({ heuristicOnly: false }), zh)).toContain("98%");
 		expect(meterTitle(fill({ heuristicOnly: true }), zh)).toContain("估算");
 	});
+
+	it("names no threshold when automatic compaction is off", () => {
+		// The tooltip is the only place the panel states what happens at the line,
+		// so quoting a percentage that nothing acts on would be a false promise.
+		const title = meterTitle(fill({ heuristicOnly: false, compactionEnabled: false }), en);
+
+		expect(title).not.toContain("98%");
+		expect(title).toContain("Tidy up earlier messages");
+	});
 });
 
 describe("formatThinkingLevel", () => {
@@ -72,6 +81,7 @@ function fill(overrides: Partial<ContextFill> = {}): ContextFill {
 		contextWindow: 1_000_000,
 		ratio: 0.0124,
 		compactionRatio: (1_000_000 - 16_384) / 1_000_000,
+		compactionEnabled: true,
 		heuristicOnly: true,
 		...overrides,
 	};

@@ -94,6 +94,7 @@ export const zhCN: DeepPartial<EnCopy> = {
 		reasoning: "推理",
 		meterHeuristic: "根据消息大小估算；首次回复后会更新。",
 		meterMeasured: "提供方报告的上下文占用。接近 {percent}% 时开始整理。",
+		meterNoCompaction: "提供方报告的上下文占用。自动整理已关闭，占满前请使用「整理较早的消息」命令。",
 	},
 
 	replyActions: {

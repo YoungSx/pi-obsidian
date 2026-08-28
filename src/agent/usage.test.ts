@@ -2,6 +2,7 @@ import { describe, expect, it } from "bun:test";
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import type { Usage } from "@earendil-works/pi-ai";
 import { formatCost, formatTokens, measureContextFill, sumUsage } from "./usage";
+import { DEFAULT_COMPACTION_SETTINGS, type CompactionSettings } from "./compactionSettings";
 
 describe("sumUsage", () => {
 	it("reports no requests for a transcript without assistant turns", () => {
@@ -49,7 +50,7 @@ describe("formatting", () => {
 
 describe("measureContextFill", () => {
 	it("marks a fresh conversation as heuristic-only, before any usage exists", () => {
-		const fill = measureContextFill([userMessage("hello")], 100_000);
+		const fill = measureContextFill([userMessage("hello")], 100_000, compactionSettings());
 
 		expect(fill.heuristicOnly).toBe(true);
 		expect(fill.tokens).toBeGreaterThan(0);
@@ -62,32 +63,53 @@ describe("measureContextFill", () => {
 			userMessage("tiny trailing prompt"),
 		];
 
-		const fill = measureContextFill(messages, 10_000);
+		const fill = measureContextFill(messages, 10_000, compactionSettings());
 
 		expect(fill.heuristicOnly).toBe(false);
 		expect(fill.ratio).toBeGreaterThan(0.4);
 	});
 
-	it("derives the compaction threshold from the same reserve pi compacts on", () => {
-		const fill = measureContextFill([], 1_000_000);
+	it("derives the compaction threshold from the reserve it was handed", () => {
+		const fill = measureContextFill([], 1_000_000, compactionSettings({ reserveTokens: 16_384 }));
 
-		// DEFAULT_COMPACTION_SETTINGS.reserveTokens is 16_384 → threshold at ~98.4%.
 		expect(fill.compactionRatio).toBeCloseTo((1_000_000 - 16_384) / 1_000_000, 6);
+	});
+
+	it("moves the threshold with the configured reserve, so the meter tracks the user's setting", () => {
+		// The regression this guards: the meter used to read pi's default while
+		// compaction acted on the configured value, so the bar and the trigger
+		// disagreed by exactly the difference between the two.
+		const fill = measureContextFill([], 1_000_000, compactionSettings({ reserveTokens: 200_000 }));
+
+		expect(fill.compactionRatio).toBeCloseTo(0.8, 6);
+	});
+
+	it("reports compaction being off, so the meter stops promising a threshold", () => {
+		expect(measureContextFill([], 100_000, compactionSettings({ enabled: false })).compactionEnabled).toBe(false);
+		expect(measureContextFill([], 100_000, compactionSettings()).compactionEnabled).toBe(true);
 	});
 
 	it("orders occupancy by reported usage so the meter can colour itself", () => {
 		const ratioAt = (tokens: number): number =>
-			measureContextFill([assistantMessage(usage({ input: tokens, output: 0, totalTokens: tokens, cost: 0 }))], 10_000).ratio;
+			measureContextFill(
+				[assistantMessage(usage({ input: tokens, output: 0, totalTokens: tokens, cost: 0 }))],
+				10_000,
+				compactionSettings(),
+			).ratio;
 
 		expect(ratioAt(9_000)).toBeGreaterThan(ratioAt(7_000));
 	});
 
 	it("reports the window the caller passed, not a hardcoded one", () => {
-		const fill = measureContextFill([], 128_000);
+		const fill = measureContextFill([], 128_000, compactionSettings());
 
 		expect(fill.contextWindow).toBe(128_000);
 	});
 });
+
+function compactionSettings(overrides: Partial<CompactionSettings> = {}): CompactionSettings {
+	return { ...DEFAULT_COMPACTION_SETTINGS, ...overrides };
+}
 
 function usage(parts: { input: number; output: number; cacheRead?: number; totalTokens: number; cost: number }): Usage {
 	return {
