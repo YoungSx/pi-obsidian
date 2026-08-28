@@ -3,6 +3,8 @@ import type { DataAdapter } from "obsidian";
 import { DraftStore } from "./DraftStore";
 
 const DRAFT_PATH = `.${"obsidian"}/plugins/piem/sessions/drafts.json`;
+/** A second location, never seeded, standing in for a newly chosen chat folder. */
+const OTHER_DRAFT_PATH = `.${"obsidian"}/plugins/piem/elsewhere/drafts.json`;
 
 /**
  * Minimal adapter with the four calls `DraftStore` makes, plus counters so a
@@ -44,6 +46,21 @@ class MemoryAdapter {
 
 function createStore(adapter = new MemoryAdapter()): { store: DraftStore; adapter: MemoryAdapter } {
 	return { store: new DraftStore(adapter as unknown as DataAdapter, DRAFT_PATH), adapter };
+}
+
+/**
+ * Points a live store at another file and makes it load again, as reconfiguring
+ * the chat folder does.
+ *
+ * Reaches past the public surface deliberately: the load is memoised, and the
+ * behaviour under test is what a *second* load leaves behind. Constructing a
+ * fresh store instead would start from an empty object and pass either way.
+ */
+async function reloadFrom(store: DraftStore, filePath: string): Promise<void> {
+	const internals = store as unknown as { filePath: string; loaded: Promise<void> | null };
+	internals.filePath = filePath;
+	internals.loaded = null;
+	await store.get("ignored");
 }
 
 describe("DraftStore per-chat isolation", () => {
@@ -151,6 +168,21 @@ describe("DraftStore persistence", () => {
 		expect(Object.keys(persisted)).toHaveLength(50);
 		// The newest survive; `updatedAt` ordering decides, not insertion order.
 		expect(persisted["session-54"]).toBeDefined();
+	});
+
+	it("forgets the previous folder's drafts when the new one holds no draft file", async () => {
+		// Regression: `load` returned early when the file was absent without clearing
+		// what it already held, so after the chat folder changed the old folder's
+		// drafts stayed in memory and the next write filed them under the new folder —
+		// one chat's unsent text appearing in another's composer.
+		const adapter = new MemoryAdapter();
+		adapter.seed(JSON.stringify({ "session-a": { text: "typed in the old folder", updatedAt: 1 } }));
+		const { store } = createStore(adapter);
+		expect(await store.get("session-a")).toBe("typed in the old folder");
+
+		await reloadFrom(store, OTHER_DRAFT_PATH);
+
+		expect(await store.get("session-a")).toBe("");
 	});
 
 	it("does not write after dispose cancels the pending debounce", async () => {
