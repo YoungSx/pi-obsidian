@@ -39,6 +39,12 @@ export const en = {
 		stopCompaction: "Stop compaction",
 		stopResponse: "Stop response",
 		sendMessage: "Send message",
+		/**
+		 * Replaces the send label while no key is configured. States the reason
+		 * rather than repeating "send": it is the only explanation a disabled
+		 * button can offer, through both its tooltip and its accessible name.
+		 */
+		sendNeedsKey: "Add an API key to send",
 		renameChat: "Rename chat",
 		deleteChat: "Delete chat",
 		openChats: "Open chats",

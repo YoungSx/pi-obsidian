@@ -90,6 +90,10 @@ export function ChatApp({ service, inputController, component, draftStore }: Cha
 			return;
 		}
 		if (!snapshot.isConfigured) {
+			// Send is disabled without a key, but the ⌘↵ submit command routes through
+			// `sendPromptRef` and never sees the button's disabled state. Let it reach
+			// the service so it surfaces the error banner, and deliberately skip
+			// `clearDraft()` so a request that cannot go out keeps the user's text.
 			await service.sendPrompt(prompt);
 			return;
 		}
@@ -183,6 +187,7 @@ export function ChatApp({ service, inputController, component, draftStore }: Cha
 					isStreaming={snapshot.isStreaming}
 					isCompacting={snapshot.isCompacting}
 					isInitializing={isInitializing}
+					isConfigured={snapshot.isConfigured ?? false}
 					showAgentDetails={snapshot.showAgentDetails}
 					onInputChange={setInput}
 					onSend={() => void sendPrompt()}
