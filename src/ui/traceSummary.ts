@@ -30,6 +30,8 @@ const TOOL_LABELS: Readonly<Record<string, string>> = {
 	note_metadata: "Read note properties",
 	list_tasks: "Listed tasks",
 	summarize_tasks: "Summarized tasks",
+	move_note: "Renamed or moved a note",
+	trash_note: "Sent a note to trash",
 };
 
 /**
@@ -52,8 +54,12 @@ export function describeTool(toolName: string, showAgentDetails: boolean): strin
  * A path answers "which note?" for every file tool, and a pattern answers
  * "searching for what?" for grep/find, which is the whole question a reader has
  * about a collapsed call. Everything else stays inside the disclosure.
+ *
+ * `from` covers `move_note`, which has no `path` at all; without it that row
+ * would show the tool name alone and the reader could not tell which note moved.
+ * It sits after `path` so no existing tool's row changes.
  */
-const PREFERRED_ARGUMENT_KEYS = ["path", "pattern", "query", "folder", "file"] as const;
+const PREFERRED_ARGUMENT_KEYS = ["path", "from", "pattern", "query", "folder", "file"] as const;
 
 /**
  * Picks the argument worth putting in a collapsed tool-call row.

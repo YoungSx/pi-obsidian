@@ -10,18 +10,7 @@ import {
 	type ShellExecOptions,
 } from "@earendil-works/pi-agent-core";
 import { getParentPath, normalizeVaultPath } from "./path";
-
-/**
- * Resolves to `true` when `fileManager` is present (desktop + most mobile
- * setups). The Obsidian `App` type declares `fileManager` as non-optional, but
- * the test harness constructs `App` stubs from partial objects, and older
- * mobile builds have been observed without it. Treating it as optional here
- * keeps the env usable in those contexts — `remove`/`renameFile` fall back to
- * `vault.delete` (permanent) only when the file manager is genuinely absent.
- */
-function hasFileManager(app: App): app is App & { fileManager: App["fileManager"] } {
-	return typeof (app as unknown as { fileManager?: unknown }).fileManager === "object";
-}
+import { trashOrDelete } from "./trash";
 
 /**
  * Exposes an Obsidian vault as pi's {@link ExecutionEnv} so the native
@@ -341,20 +330,8 @@ export class VaultExecutionEnv implements ExecutionEnv {
 		return err(new FileError("not_found", `File not found: ${path}`, path));
 	}
 
-	/**
-	 * Trashes a file or folder, preferring `FileManager.trashFile` (which
-	 * respects the user's deletion preference) and falling back to
-	 * `vault.delete(force)` only when the file manager is unavailable.
-	 */
 	private async trash(target: TFile | TFolder, force = false): Promise<void> {
-		if (hasFileManager(this.app)) {
-			await this.app.fileManager.trashFile(target);
-			return;
-		}
-		// Fallback for environments where fileManager is absent (test stubs,
-		// edge mobile). Permanent delete is the only option here.
-		// eslint-disable-next-line obsidianmd/prefer-file-manager-trash-file
-		await this.vault.delete(target, force);
+		await trashOrDelete(this.app, target, { force });
 	}
 
 	private async run<T>(path: string, operation: () => Promise<Result<T, FileError>>): Promise<Result<T, FileError>> {

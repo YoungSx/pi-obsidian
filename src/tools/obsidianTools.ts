@@ -4,6 +4,7 @@ import { createEditTool, createReadTool, createWriteTool } from "@earendil-works
 import { createNativeFileTools } from "../vault/harnessAdapter";
 import { createNoteLinksTool, createNoteMetadataTool } from "./linkTools";
 import { createActiveNoteTool } from "./noteTools";
+import { createMoveNoteTool, createTrashNoteTool } from "./organizeTools";
 import { createFindTool, createGrepTool, createLsTool } from "./searchTools";
 import { createListTasksTool, createSummarizeTasksTool } from "./taskTools";
 
@@ -18,8 +19,10 @@ import { createListTasksTool, createSummarizeTasksTool } from "./taskTools";
  * per-path locks off env object identity, so separate envs would each get
  * their own queue and mutations could interleave.
  *
- * The remaining tools (ls, find, grep, tasks, notes) are vault-specific and
- * stay hand-written.
+ * The remaining tools (ls, find, grep, tasks, notes, move, trash) are
+ * vault-specific and stay hand-written. move/trash stay out of the native set
+ * on purpose: pi's `FileSystem` rename replaces its destination, while a
+ * user-facing move must refuse an occupied one.
  */
 export function createObsidianTools(app: App): AgentTool[] {
 	return [
@@ -36,5 +39,7 @@ export function createObsidianTools(app: App): AgentTool[] {
 		createNoteLinksTool(app),
 		createNoteMetadataTool(app),
 		createActiveNoteTool(app),
+		createMoveNoteTool(app),
+		createTrashNoteTool(app),
 	];
 }
