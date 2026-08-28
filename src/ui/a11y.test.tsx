@@ -20,10 +20,10 @@ let createRootSync: typeof createRootImpl;
 /**
  * Accessibility assertions for the chat panel chrome.
  *
- * These pin the non-visual contract of the UI: state carried by colour must
- * also be named in text, action groups must expose their purpose to assistive
- * tech, and the composer's Send/Stop swap must stay a labelled control in both
- * states.
+ * These pin the non-visual contract of the UI: action groups must expose their
+ * purpose to assistive tech, and landmarks must be named. The colour-is-not-the-
+ * only-channel assertions for the context meter live in `ChatStatusBar.test.tsx`
+ * now, alongside the meter itself.
  */
 
 const app = {} as App;
@@ -71,15 +71,6 @@ describe("ChatHeader accessibility", () => {
 		document.body.replaceChildren();
 	});
 
-	it("names the context state in text instead of relying on colour alone", async () => {
-		const nearHost = await renderHeader(snapshot({ contextFill: fill({ tokens: 990_000, ratio: 0.99 }) }));
-		expect(nearHost.querySelector(".piem-chat__context")?.textContent).toContain("context nearly full");
-
-		document.body.replaceChildren();
-		const okHost = await renderHeader(snapshot());
-		expect(okHost.querySelector(".piem-chat__context")?.textContent).toContain(", ok");
-	});
-
 	it("exposes the header actions as a labelled toolbar", async () => {
 		const host = await renderHeader(snapshot());
 
@@ -88,10 +79,10 @@ describe("ChatHeader accessibility", () => {
 		expect(toolbar?.getAttribute("aria-label")).toBe("Chat actions");
 	});
 
-	it("announces the compacting banner as a status region", async () => {
-		const host = await renderHeader(snapshot({ isCompacting: true }));
+	it("names the current chat, so the landmark is not an unlabelled region", async () => {
+		const host = await renderHeader(snapshot());
 
-		expect(host.querySelector(".piem-chat__compacting")?.getAttribute("role")).toBe("status");
+		expect(host.querySelector("header.piem-chat__header")?.getAttribute("aria-label")).toBe("Current chat");
 	});
 });
 
@@ -116,7 +107,7 @@ async function renderComposer(overrides: Partial<ComposerProps> = {}): Promise<H
 			isCompacting={false}
 			isInitializing={false}
 			isConfigured={true}
-			showAgentDetails={true}
+			sendShortcut="enter"
 			onInputChange={() => undefined}
 			onSend={() => undefined}
 			onAbort={() => undefined}
@@ -149,12 +140,21 @@ describe("ChatComposer accessibility", () => {
 		expect(send?.getAttribute("title")).toBe("Add an API key to send");
 	});
 
-	it("returns to the plain send label once a key is configured", async () => {
+	it("returns to naming the action, with its chord, once a key is configured", async () => {
 		const host = await renderComposer();
 
+		// The name carries the shortcut now that the hint rides on the button
+		// instead of a status line beside it; the reason-it-is-unavailable label
+		// replaces the whole thing rather than being appended to it.
 		const send = host.querySelector<HTMLButtonElement>(".piem-chat__send-button");
 		expect(send?.disabled).toBe(false);
-		expect(send?.getAttribute("aria-label")).toBe("Send message");
+		expect(send?.getAttribute("aria-label")).toBe("Send message · ↵");
+	});
+
+	it("drops the chord while Send cannot fire, so no keypress is advertised in vain", async () => {
+		const host = await renderComposer({ isConfigured: false });
+
+		expect(host.querySelector(".piem-chat__send-chord")).toBeNull();
 	});
 
 	it("keeps Send disabled when the key and the draft are both missing", async () => {
@@ -176,48 +176,49 @@ describe("ChatComposer accessibility", () => {
 		expect(host.querySelector(".piem-chat__send-button")).toBeNull();
 	});
 
-	it("keeps the send hint out of the live region, so a settled turn does not re-announce it", async () => {
-		// Both used to be one node. Every turn that ended flipped the live region
-		// from "Piem is responding…" back to the chord, and a screen reader read
-		// the chord out — once per turn, for the length of the conversation.
+	it("keeps the send hint out of any live region, so a settled turn does not re-announce it", async () => {
+		// The hint and the turn state shared one `aria-live` node, so every turn
+		// that ended flipped the region back to the chord and a screen reader read
+		// it out — once per turn, for the length of the conversation. They are now
+		// separate surfaces: the hint rides on the Send button, and the state line
+		// lives in `ChatStatusBar` above the composer.
 		const host = await renderComposer();
 
-		const status = host.querySelector(".piem-chat__composer-status");
-		expect(status?.getAttribute("aria-live")).toBe("polite");
-		expect(status?.textContent).toBe("");
-
-		const hint = host.querySelector(".piem-chat__composer-hint");
-		expect(hint?.textContent).toBe("Ctrl+↵ to send");
-		expect(hint?.hasAttribute("aria-live")).toBe(false);
-		expect(hint?.hasAttribute("role")).toBe(false);
+		expect(host.querySelector(".piem-chat__composer-status")).toBeNull();
+		expect(host.querySelector(".piem-chat__composer-hint")).toBeNull();
+		// Nothing inside the composer announces itself at all.
+		expect(host.querySelectorAll("[aria-live]")).toHaveLength(0);
 	});
 
-	it("keeps both in one slot, so the bar does not reflow when a turn settles", async () => {
-		// The status stays mounted while empty — a live region is only announced if
-		// it is already in the DOM. As a direct child of the bar it would still take
-		// its share of the gap and the flex slack while holding nothing, so the hint
-		// would shift sideways every time a turn ended.
+	it("carries the chord on the control it describes, not in a region beside it", async () => {
 		const host = await renderComposer();
 
-		const slot = host.querySelector(".piem-chat__composer-slot");
-		expect(slot?.querySelector(".piem-chat__composer-status")).not.toBeNull();
-		expect(slot?.querySelector(".piem-chat__composer-hint")).not.toBeNull();
-		// Bar holds the slot and the button, as it held the status and the button before.
-		expect(host.querySelector(".piem-chat__composer-bar")?.children.length).toBe(2);
+		const chord = host.querySelector(".piem-chat__send-chord");
+		expect(chord?.textContent).toBe("↵");
+		// Silent to assistive tech: the button's own name already states the chord,
+		// so reading the keycaps would repeat it as symbols.
+		expect(chord?.getAttribute("aria-hidden")).toBe("true");
+		expect(chord?.hasAttribute("aria-live")).toBe(false);
 	});
 
-	it("hands the slot back to the live region while a turn is in flight", async () => {
-		const host = await renderComposer({ isStreaming: true });
+	it("leaves the bar holding only the send control", async () => {
+		// The status/hint slot is gone, so the bar has one child rather than two.
+		// It is right-aligned in the stylesheet for that reason; `space-between`
+		// would have parked a lone Send against the left edge.
+		const host = await renderComposer();
 
-		expect(host.querySelector(".piem-chat__composer-status")?.textContent).toBe("Piem is responding…");
-		expect(host.querySelector(".piem-chat__composer-hint")).toBeNull();
+		expect(host.querySelector(".piem-chat__composer-bar")?.children.length).toBe(1);
 	});
 
-	it("withholds the hint while opening, which is not covered by the busy flags", async () => {
-		const host = await renderComposer({ isInitializing: true });
+	it("says nothing about the turn state, which the status bar owns", async () => {
+		// One state must not be reported by two surfaces: they would announce it
+		// twice to a screen reader, and could word it two ways.
+		const streamingHost = await renderComposer({ isStreaming: true });
+		expect(streamingHost.textContent).not.toContain("replying");
 
-		expect(host.querySelector(".piem-chat__composer-status")?.textContent).toBe("Opening chat…");
-		expect(host.querySelector(".piem-chat__composer-hint")).toBeNull();
+		document.body.replaceChildren();
+		const openingHost = await renderComposer({ isInitializing: true });
+		expect(openingHost.textContent).not.toContain("Opening chat");
 	});
 });
 

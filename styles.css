@@ -44,24 +44,19 @@
 	padding: var(--size-4-2);
 }
 
-/* --- chrome: header + status bar --- */
+/* --- header --- */
 
 /*
- * The leaf tab already names the view ("Pi chat"), so the chrome carries only
- * live metadata: who you are talking to, how full the context is, and the
- * actions that steer the session. Two stacked rows so a narrow leaf never
- * forces the title and the buttons to fight for one line.
+ * The leaf tab already names the view ("Pi chat"), so the header carries only
+ * identity and the controls that steer the session. It used to wrap a second row
+ * of live metrics; those moved to the status bar above the composer, because a
+ * strip of numbers between the reader and the first message of their own
+ * conversation inverted the panel's reading order.
  */
-.piem-chat__chrome {
-	display: flex;
-	flex-direction: column;
-	gap: var(--size-4-1);
-	flex-shrink: 0;
-}
-
 .piem-chat__header {
 	align-items: flex-start;
 	display: flex;
+	flex-shrink: 0;
 	gap: var(--size-4-2);
 	justify-content: space-between;
 }
@@ -137,15 +132,43 @@
 	opacity: 0.4;
 }
 
-/* --- status bar --- */
+/* --- status bar (between the transcript and the composer) --- */
 
+/*
+ * Ambient, consulted rather than read — the reason an editor puts its word count
+ * in a footer. It reports on the transcript above it and explains the state of
+ * the controls below it, so it belongs between the two.
+ *
+ * Absent entirely when there is nothing to report, so an idle chat in the default
+ * tier spends no height on it. That is why the separation is `padding-top` on the
+ * composer rather than a border here: a bar that appears must not shift the
+ * composer down by a rule's worth of pixels every time a turn starts.
+ */
 .piem-chat__statusbar {
 	align-items: center;
 	color: var(--text-muted);
 	display: flex;
+	flex-shrink: 0;
 	flex-wrap: wrap;
 	font-size: var(--font-ui-smaller);
 	gap: var(--size-4-2);
+	/* Nudged in to sit under the transcript's text rather than its scroll gutter. */
+	padding: var(--size-4-1) var(--size-4-1) 0;
+}
+
+/*
+ * The live surface for what the panel is doing. Takes the row's leading edge and
+ * gives up width first: the metrics beside it are tabular and fixed-width, while
+ * this is a sentence that can be clipped without losing its subject.
+ */
+.piem-chat__status {
+	align-items: center;
+	display: inline-flex;
+	gap: var(--size-4-1);
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
 }
 
 /* --- context-window indicator --- */
@@ -228,13 +251,12 @@
 	font-variant-numeric: tabular-nums;
 }
 
-/* Shown while the summarization request is in flight (it is a real LLM call). */
-.piem-chat__compacting {
-	align-items: center;
-	color: var(--text-faint);
-	display: inline-flex;
-	gap: var(--size-4-1);
-}
+/*
+ * Applied to the status text while the summarization request is in flight (it is
+ * a real LLM call). A modifier rather than its own element: the bar carries one
+ * live line, and compaction is one of the things that line can say. Layout comes
+ * from `.piem-chat__status`; this adds only the pulse below.
+ */
 
 @keyframes pi-compaction-pulse {
 
@@ -448,6 +470,25 @@
 
 .piem-chat__message-content > :last-child {
 	margin-bottom: 0;
+}
+
+/*
+ * The turn that has been asked for but not started arriving.
+ *
+ * Borrows the assistant's own chrome (`--assistant`, so no fill and no border)
+ * and adds only the line itself. It is a placeholder for a message, so it must
+ * occupy the place a message will: rendering it as a footnote somewhere else
+ * would move the reader's eye twice — once to the promise, once to the reply.
+ */
+.piem-chat__message--pending {
+	color: var(--text-muted);
+	font-size: var(--font-ui-smaller);
+}
+
+.piem-chat__pending {
+	align-items: center;
+	display: inline-flex;
+	gap: var(--size-4-1);
 }
 
 /* Aborted turn: the text below the marker is half-written, not a finished reply. */
@@ -846,6 +887,7 @@
 
 .piem-chat__context-chip {
 	align-items: center;
+	border: none;
 	border-radius: var(--radius-s);
 	display: inline-flex;
 	font-size: var(--font-ui-smaller);
@@ -859,24 +901,33 @@
 }
 
 /*
- * A followed note arrived on its own and will change on its own, so it is drawn
- * provisionally — dashed. A pin was deliberate and stays put, so it reads solid.
- * The two are different kinds of thing, not two states of one thing.
+ * Fill, not border.
+ *
+ * These chips sit inside the composer shell, which already draws a 1px
+ * `--background-modifier-border` frame. A chip drawing its own border in the
+ * same token, 8px inside it, produced two parallel hairlines — a box in a box,
+ * with the shell's own edge read as the chip's outer ring.
+ *
+ * The followed/pinned distinction survives the change and reads better for it.
+ * A followed note arrived by itself and will change by itself, so it gets no
+ * fill: it is barely an object, part of the shell it sits in. A pin was chosen
+ * and stays, so it is filled — a thing sitting *on* the shell. That maps
+ * provisional-vs-kept onto presence rather than onto a dash pattern nobody
+ * decodes, and it is reinforced by the icon (file vs pin) and stated outright in
+ * the accessible name.
  *
  * Both keep `--text-muted`. A step down to `--text-faint` would have carried
  * "provisional" in the colour too, but the file name is the chip's only text and
  * `--font-ui-smaller` is 12px, where Obsidian's faint tone falls under the 4.5:1
- * WCAG 1.4.3 asks of normal-size text. The dashed border and the accessible name
- * carry the distinction instead; elsewhere `--text-faint` is used for text that
- * sits beside a `--text-muted` anchor, which this has none of.
+ * WCAG 1.4.3 asks of normal-size text.
  */
 .piem-chat__context-chip--active {
-	border: 1px dashed var(--background-modifier-border);
+	background: transparent;
 	color: var(--text-muted);
 }
 
 .piem-chat__context-chip--pinned {
-	border: 1px solid var(--background-modifier-border);
+	background: var(--background-primary);
 	color: var(--text-muted);
 }
 
@@ -921,11 +972,10 @@
  * full path stays reachable through the title and the accessible name, and the
  * model always receives it in full.
  *
- * Named `chip-label` rather than `context-label`, which the header's
- * context-window meter already owns. Sharing it made that rule's
+ * Named `chip-label` rather than `context-label`, which the context-window meter
+ * in the status bar already owns. Sharing the name made that rule's
  * `color: var(--text-muted)` apply here too, and a matched declaration beats an
- * inherited one — so the chip's own `--text-faint` never reached the only text it
- * has, collapsing the followed and pinned styles into the same thing.
+ * inherited one — so a chip's own colour never reached the only text it has.
  */
 .piem-chat__context-chip-label {
 	min-width: 0;
@@ -1058,45 +1108,47 @@
 	outline: none;
 }
 
+/*
+ * Holds the one send control, at the trailing edge.
+ *
+ * `space-between` while it held a status line on the left and Send on the right;
+ * with the status line moved out, that same rule would have parked a lone Send
+ * against the left edge, away from the corner every send button lives in.
+ */
 .piem-chat__composer-bar {
 	align-items: center;
 	display: flex;
 	gap: var(--size-4-2);
-	justify-content: space-between;
+	justify-content: flex-end;
 }
 
 /*
- * The left half of the bar: whichever of the status and the hint has something
- * to say.
+ * Send rides on Obsidian's `mod-cta` (call-to-action) accent; Stop is a plain
+ * icon button so it never competes visually with Send.
  *
- * One wrapper rather than two flex siblings, because the status has to stay
- * mounted even while empty — a live region is only announced if it is already in
- * the DOM. As a sibling it would still take its share of the bar's `gap` and its
- * flex slack while holding nothing, nudging the hint rightward on every turn
- * that settled. Inside the wrapper, an empty status contributes nothing.
+ * Not square any more: the send chord is printed on the button, so the width is
+ * driven by its content. `min-width` stays as a floor for the touch target —
+ * with a label the content always clears it, and it still applies if a
+ * translation ever leaves the chord empty.
  */
-.piem-chat__composer-slot {
-	flex: 1 1 auto;
-	min-width: 0;
-}
-
-/*
- * One visual slot, two elements. Only the status is a live region; the send hint
- * is static copy that would otherwise be re-announced every time a turn settled.
- * They never render together, so sharing the typography keeps the slot identical
- * whichever one is filling it.
- */
-.piem-chat__composer-status,
-.piem-chat__composer-hint {
-	color: var(--text-muted);
-	font-size: var(--font-ui-smaller);
-}
-
-/* Send rides on Obsidian's `mod-cta` (call-to-action) accent; Stop is a plain
- * icon button so it never competes visually with Send. */
 .piem-chat__send-button.mod-cta {
+	gap: var(--size-4-1);
 	min-height: var(--size-4-8);
 	min-width: var(--size-4-8);
+	padding-inline: var(--size-4-2);
+	width: auto;
+}
+
+/*
+ * Keycaps on the Send button.
+ *
+ * A step down in size, not in colour: this is the hint a first-time reader is
+ * looking for, and dimming text on a saturated accent fill is where contrast
+ * goes. `mod-cta` owns the pairing, so the caps inherit its text colour.
+ */
+.piem-chat__send-chord {
+	font-size: var(--font-ui-smaller);
+	white-space: nowrap;
 }
 
 .piem-chat__stop-button {
@@ -1207,9 +1259,10 @@
 /* --- narrow leaf / mobile --- */
 
 /*
- * Below ~32rem the identity and actions stop fitting on one row. Drop the
- * model line into the status bar, let the action toolbar wrap below the title,
- * and stop constraining user messages to 90% so they don't clip on phones.
+ * Below ~32rem the title and the action toolbar stop fitting on one row, so the
+ * toolbar wraps beneath the title. User messages stop being held to 90% here as
+ * well, or a phone clips them, and the context bar gives up a third of its width
+ * — it is a proportion, and it reads as one at 3rem.
  */
 @media (max-width: 32rem) {
 

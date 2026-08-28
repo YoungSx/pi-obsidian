@@ -212,12 +212,16 @@ describe("MessageList message chrome", () => {
 		document.body.replaceChildren();
 	});
 
-	it("labels the conversational roles in human vocabulary, not internal enum names", async () => {
+	it("names the speaker on the card itself rather than printing a role banner", async () => {
 		const host = renderMessages([userMessage("hi"), assistantMessage("hello")]);
 		await flushRender();
 
-		const roles = Array.from(host.querySelectorAll(".piem-chat__message-role"), (el) => el.textContent);
-		expect(roles).toEqual(["You", "Piem"]);
+		// The avatar glyph and the word "You" spent a line per turn restating what
+		// side and fill already say. The role moved onto the accessible name, so a
+		// screen reader still gets it while the transcript stops paying for it.
+		expect(host.querySelector(".piem-chat__message-role")).toBeNull();
+		const names = Array.from(host.querySelectorAll("article.piem-chat__message"), (el) => el.getAttribute("aria-label"));
+		expect(names).toEqual(["You", "Piem"]);
 	});
 
 	it("gives card chrome to conversation only, so a tool result never nests inside one", async () => {
@@ -252,6 +256,84 @@ describe("MessageList message chrome", () => {
 		const trace = host.querySelector("details.piem-chat__trace--harness");
 		expect(trace?.querySelector(".piem-chat__trace-name")?.textContent).toBe("System");
 		expect(trace?.textContent).not.toContain("Piem");
+	});
+});
+
+/**
+ * The gap between sending and the first token.
+ *
+ * Reported as "it ignored me": the prompt lands, the transcript ends on the
+ * user's own message, and the only sign anything happened is a control at the
+ * other end of the panel. The wait is first-token latency the plugin does not
+ * control, so it is filled with a placeholder in the assistant's own position.
+ */
+describe("MessageList pending reply", () => {
+	beforeEach(() => {
+		createRootSync = createRootImpl;
+	});
+
+	afterEach(() => {
+		document.body.replaceChildren();
+	});
+
+	it("holds the assistant's place while the turn has produced nothing yet", async () => {
+		const host = renderMessages([userMessage("summarize my note")], { isStreaming: true });
+		await flushRender();
+
+		const pending = host.querySelector(".piem-chat__message--pending");
+		expect(pending?.textContent).toContain("Piem is replying…");
+		// The assistant's own chrome, so it sits where the answer will appear.
+		expect(pending?.className).toContain("piem-chat__message--assistant");
+	});
+
+	it("names the placeholder for assistive tech without announcing it", async () => {
+		const host = renderMessages([userMessage("hi")], { isStreaming: true });
+		await flushRender();
+
+		const pending = host.querySelector(".piem-chat__message--pending");
+		expect(pending?.getAttribute("aria-label")).toBe("Piem is replying");
+		// Announcing the start as well as the finish would interrupt the user to
+		// say that nothing had happened yet; `TurnAnnouncer` speaks the result.
+		expect(pending?.getAttribute("aria-live")).toBeNull();
+		expect(pending?.getAttribute("role")).toBeNull();
+	});
+
+	it("gives way to the first token, so it never stacks with the reply", async () => {
+		const host = renderMessages([userMessage("hi"), assistantMessage("Here")], { isStreaming: true });
+		await flushRender();
+
+		expect(host.querySelector(".piem-chat__message--pending")).toBeNull();
+	});
+
+	it("gives way to a thought, which is already visible progress", async () => {
+		const host = renderMessages([userMessage("hi"), assistantThinking("weighing it up")], { isStreaming: true });
+		await flushRender();
+
+		expect(host.querySelector(".piem-chat__message--pending")).toBeNull();
+	});
+
+	it("treats an assistant turn with only empty text as still pending", async () => {
+		// The streaming message is appended before its first delta arrives, so the
+		// empty shell must not count as something to look at.
+		const host = renderMessages([userMessage("hi"), assistantMessage("")], { isStreaming: true });
+		await flushRender();
+
+		expect(host.querySelector(".piem-chat__message--pending")).not.toBeNull();
+	});
+
+	it("stands down while a tool runs, since the line above already reports it", async () => {
+		const host = renderMessages([userMessage("hi")], { isStreaming: true, pendingToolCalls: ["read"] });
+		await flushRender();
+
+		expect(host.querySelector(".piem-chat__tool-status")).not.toBeNull();
+		expect(host.querySelector(".piem-chat__message--pending")).toBeNull();
+	});
+
+	it("shows nothing once the turn has settled", async () => {
+		const host = renderMessages([userMessage("hi"), assistantMessage("done")], { isStreaming: false });
+		await flushRender();
+
+		expect(host.querySelector(".piem-chat__message--pending")).toBeNull();
 	});
 });
 

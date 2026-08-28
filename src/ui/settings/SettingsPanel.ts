@@ -1,4 +1,4 @@
-import { Setting, type App } from "obsidian";
+import { Platform, Setting, type App } from "obsidian";
 import type { ModelThinkingLevel } from "@earendil-works/pi-ai";
 import type { ConnectionTestResult } from "../../connectionTest";
 import { testModelConnection, testProviderConnection } from "../../connectionTest";
@@ -28,6 +28,7 @@ import { renderSettingsTabs, type SettingsTabDefinition } from "./SettingsTabs";
 import { aboutLinks, describeVersion, type AboutLink } from "./aboutCopy";
 import { describeMissingBuiltinModel } from "./modelsCopy";
 import { createCollapsibleSection } from "./collapsibleSection";
+import { isSendShortcutSetting, type SendShortcut } from "../keyboard";
 import {
 	compactionEnabledCopy,
 	compactionGroupHint,
@@ -138,6 +139,7 @@ export interface SettingsPanelSettings {
 	thinkingLevel: ModelThinkingLevel;
 	networkTransport: NetworkTransport;
 	showAgentDetails: boolean;
+	sendShortcut: SendShortcut;
 	language: LanguageSetting;
 	compaction?: CompactionConfig;
 	sessionRetention: number;
@@ -407,6 +409,8 @@ function renderChatTab(containerEl: HTMLElement, host: SettingsPanelHost): void 
 			});
 		});
 
+	renderSendShortcutRow(containerEl, host);
+
 	new Setting(containerEl)
 		.setName(t.t("settings.showAgentDetails"))
 		.setDesc(t.t("settings.showAgentDetailsDesc"))
@@ -419,6 +423,46 @@ function renderChatTab(containerEl: HTMLElement, host: SettingsPanelHost): void 
 		});
 
 	renderCompactionGroup(containerEl, host);
+}
+
+/**
+ * Which key sends the draft.
+ *
+ * A dropdown rather than a toggle: a toggle would have to be labelled "send on
+ * Enter", which states one option and leaves the reader to infer the other, and
+ * the actual choice is between two chords both of which the reader may already
+ * have a habit for. Each option names what the *other* key then does, because
+ * that is the real trade — whichever key does not send has to make a new line.
+ *
+ * On a phone the row is annotated rather than hidden: the stored value still
+ * describes the keyboard it was chosen on, and {@link resolveSendShortcut}
+ * overrides it only for the session. Hiding the control would leave a mobile
+ * reader unable to see, let alone change, what their desktop does.
+ */
+function renderSendShortcutRow(containerEl: HTMLElement, host: SettingsPanelHost): void {
+	const { settings, t } = host;
+	const setting = new Setting(containerEl)
+		.setName(t.t("settings.sendShortcut"))
+		.setDesc(t.t("settings.sendShortcutDesc"))
+		.addDropdown((dropdown) => {
+			dropdown.addOption("enter", t.t("settings.sendShortcutEnter"));
+			dropdown.addOption("modEnter", t.t("settings.sendShortcutModEnter"));
+			dropdown.setValue(settings.sendShortcut);
+			dropdown.onChange(async (value) => {
+				// Guarded rather than cast: the dropdown is the only writer today, but
+				// the setting is persisted and a stray value would reach `isSendShortcut`
+				// as a chord it does not recognize, silently disabling sending by key.
+				if (!isSendShortcutSetting(value)) {
+					return;
+				}
+				settings.sendShortcut = value;
+				await host.save();
+			});
+		});
+
+	if (Platform.isMobile) {
+		setting.descEl.createDiv({ cls: "piem-settings-effect", text: t.t("settings.sendShortcutMobileNote") });
+	}
 }
 
 /**

@@ -9,6 +9,7 @@ import { getActiveNotePath } from "./activeNotePath";
 import { ChatBanner } from "./ChatBanner";
 import { ChatComposer } from "./ChatComposer";
 import { ChatHeader } from "./ChatHeader";
+import { ChatStatusBar } from "./ChatStatusBar";
 import { ContextRow } from "./ContextRow";
 import { MessageList } from "./MessageList";
 import { appendToDraft } from "./noteReference";
@@ -189,13 +190,28 @@ export function ChatApp({ service, inputController, component, draftStore }: Cha
 					composerAnchorId={composerAnchorId}
 				/>
 
+				{/*
+				 * Between the transcript and the composer, not under the header. It
+				 * reports on the conversation above it and explains the state of the
+				 * controls below it, and pinning it to the top pushed the first message
+				 * down behind numbers the reader had not asked to read first.
+				 */}
+				<ChatStatusBar
+					isInitializing={isInitializing}
+					isCompacting={snapshot.isCompacting}
+					isStreaming={snapshot.isStreaming}
+					contextFill={snapshot.contextFill}
+					usage={snapshot.usage}
+					showAgentDetails={snapshot.showAgentDetails}
+				/>
+
 				<ChatComposer
 					input={input}
 					isStreaming={snapshot.isStreaming}
 					isCompacting={snapshot.isCompacting}
 					isInitializing={isInitializing}
 					isConfigured={snapshot.isConfigured ?? false}
-					showAgentDetails={snapshot.showAgentDetails}
+					sendShortcut={snapshot.sendShortcut}
 					onInputChange={setInput}
 					onSend={() => void sendPrompt()}
 					onAbort={() => service.abort()}

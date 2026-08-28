@@ -28,11 +28,14 @@ interface ContextRowProps {
  * Chips, not cards. A sidebar's vertical space is its scarcest resource, and a
  * card costs roughly 60px to carry the same one line of text a 24px chip does.
  *
- * The two kinds render differently on purpose. A followed note arrived by
- * itself and will change by itself, so it is drawn provisionally — dashed, and
- * a step fainter. A pinned note was chosen and will stay, so it is drawn
- * solidly. Rendering both as the same dismissible object would make the row
- * lie: dismissing a followed note and then opening another file would bring it
+ * The two kinds render differently on purpose, and neither draws a border. The
+ * row sits inside the composer shell, which already has one, so a chip framing
+ * itself in the same token put two hairlines 8px apart — a box in a box. The
+ * distinction is carried by fill instead: a followed note arrived by itself and
+ * will change by itself, so it has none and reads as part of the shell; a pinned
+ * note was chosen and stays, so it is filled and reads as an object sitting on
+ * it. Rendering both as the same dismissible object would make the row lie:
+ * dismissing a followed note and then opening another file would bring it
  * straight back, having achieved nothing. Dismissing the followed chip
  * therefore turns *following* off, which is a state the row can honestly show.
  *
@@ -138,10 +141,9 @@ function ContextChip({ contextRef, onOpen, onPin, onUnpin, onStopFollowing }: Co
 			 * user cannot recover from context.
 			 *
 			 * The accessible name also names the kind, because visually the two are
-			 * told apart only by a dashed vs solid border and one step of text colour.
-			 * The icons cannot carry it — they are `aria-hidden` — so without this a
-			 * screen reader user could not tell a note that will change by itself from
-			 * one they chose to keep.
+			 * told apart only by whether the chip is filled. The icons cannot carry it
+			 * — they are `aria-hidden` — so without this a screen reader user could
+			 * not tell a note that will change by itself from one they chose to keep.
 			 */}
 			<button
 				type="button"
