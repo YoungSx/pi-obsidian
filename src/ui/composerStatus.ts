@@ -18,13 +18,15 @@ export interface ComposerStatusInput {
 }
 
 /**
- * Describes what the composer is doing, or how to send when it is idle.
+ * What the composer is doing, or empty when it is doing nothing.
  *
- * The idle slot used to render an empty string, which wasted the one place a
- * reader is already looking for the send shortcut — `aria-keyshortcuts` only
- * reaches assistive tech, and the buttons carry no hint.
+ * Only transient states belong here, because this string feeds a live region.
+ * The idle slot used to carry the send hint, which meant every turn that
+ * settled back to idle re-announced the same chord — twenty turns, twenty
+ * readings of "⌘↵ to send". {@link sendHintText} carries that copy instead,
+ * outside the region.
  */
-export function composerStatusText(input: ComposerStatusInput, t: Translator): string {
+export function transientStatusText(input: ComposerStatusInput, t: Translator): string {
 	if (input.isInitializing) {
 		return t.t("composerStatus.opening");
 	}
@@ -34,6 +36,18 @@ export function composerStatusText(input: ComposerStatusInput, t: Translator): s
 	if (input.isStreaming) {
 		return t.t("composerStatus.responding");
 	}
+	return "";
+}
+
+/**
+ * How to send, for the idle composer.
+ *
+ * Worth showing at all because it is the only place a sighted reader learns the
+ * chord: `aria-keyshortcuts` reaches assistive tech only, and the buttons carry
+ * no hint. Worth keeping out of the live region because it is a hint, not an
+ * event — nothing about it changes when a turn ends.
+ */
+export function sendHintText(input: ComposerStatusInput, t: Translator): string {
 	return t.t("composerStatus.sendShortcut", { shortcut: sendShortcutLabel(input.isMac, t) });
 }
 

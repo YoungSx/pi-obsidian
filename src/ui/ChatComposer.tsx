@@ -1,7 +1,7 @@
 import React, { useEffect, useRef } from "react";
 import { Platform } from "obsidian";
 import { IconButton } from "./ObsidianIcon";
-import { composerStatusText } from "./composerStatus";
+import { sendHintText, transientStatusText } from "./composerStatus";
 import { isSendShortcut } from "./keyboard";
 import { useT } from "./TranslatorContext";
 import { useAutosize } from "./useAutosize";
@@ -54,6 +54,7 @@ export function ChatComposer({
 	const textareaRef = useRef<HTMLTextAreaElement | null>(null);
 	const onSendRef = useRef<() => void>(onSend);
 	const isBusy = isStreaming || isCompacting;
+	const statusInput = { isInitializing, isCompacting, isStreaming, showAgentDetails, isMac: Platform.isMacOS };
 
 	onSendRef.current = onSend;
 
@@ -122,8 +123,23 @@ export function ChatComposer({
 					rows={2}
 				/>
 				<div className="piem-chat__composer-bar">
-					<span className="piem-chat__composer-status" role="status" aria-live="polite">
-						{composerStatusText({ isInitializing, isCompacting, isStreaming, showAgentDetails, isMac: Platform.isMacOS }, t)}
+					{/*
+					 * One slot, two elements. The live region carries only what changes;
+					 * the send hint sits outside it. They shared a node until every
+					 * settled turn re-announced the chord — a screen reader read
+					 * "⌘↵ to send" once per turn, twenty times in a twenty-turn chat.
+					 *
+					 * Wrapped so the bar still holds exactly two children, as it did when
+					 * the status was alone: `space-between` then spaces the slot against
+					 * the button, and whichever of the two is filled starts at the same
+					 * left edge.
+					 */}
+					<span className="piem-chat__composer-slot">
+						<span className="piem-chat__composer-status" role="status" aria-live="polite">
+							{transientStatusText(statusInput, t)}
+						</span>
+						{/* `isBusy` covers streaming and compaction but not opening, hence both tests. */}
+						{!isBusy && !isInitializing ? <span className="piem-chat__composer-hint">{sendHintText(statusInput, t)}</span> : null}
 					</span>
 					{isBusy ? (
 						<IconButton

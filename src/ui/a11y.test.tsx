@@ -160,6 +160,50 @@ describe("ChatComposer accessibility", () => {
 		expect(stop?.disabled).toBe(false);
 		expect(host.querySelector(".piem-chat__send-button")).toBeNull();
 	});
+
+	it("keeps the send hint out of the live region, so a settled turn does not re-announce it", async () => {
+		// Both used to be one node. Every turn that ended flipped the live region
+		// from "Piem is responding…" back to the chord, and a screen reader read
+		// the chord out — once per turn, for the length of the conversation.
+		const host = await renderComposer();
+
+		const status = host.querySelector(".piem-chat__composer-status");
+		expect(status?.getAttribute("aria-live")).toBe("polite");
+		expect(status?.textContent).toBe("");
+
+		const hint = host.querySelector(".piem-chat__composer-hint");
+		expect(hint?.textContent).toBe("Ctrl+↵ to send");
+		expect(hint?.hasAttribute("aria-live")).toBe(false);
+		expect(hint?.hasAttribute("role")).toBe(false);
+	});
+
+	it("keeps both in one slot, so the bar does not reflow when a turn settles", async () => {
+		// The status stays mounted while empty — a live region is only announced if
+		// it is already in the DOM. As a direct child of the bar it would still take
+		// its share of the gap and the flex slack while holding nothing, so the hint
+		// would shift sideways every time a turn ended.
+		const host = await renderComposer();
+
+		const slot = host.querySelector(".piem-chat__composer-slot");
+		expect(slot?.querySelector(".piem-chat__composer-status")).not.toBeNull();
+		expect(slot?.querySelector(".piem-chat__composer-hint")).not.toBeNull();
+		// Bar holds the slot and the button, as it held the status and the button before.
+		expect(host.querySelector(".piem-chat__composer-bar")?.children.length).toBe(2);
+	});
+
+	it("hands the slot back to the live region while a turn is in flight", async () => {
+		const host = await renderComposer({ isStreaming: true });
+
+		expect(host.querySelector(".piem-chat__composer-status")?.textContent).toBe("Piem is responding…");
+		expect(host.querySelector(".piem-chat__composer-hint")).toBeNull();
+	});
+
+	it("withholds the hint while opening, which is not covered by the busy flags", async () => {
+		const host = await renderComposer({ isInitializing: true });
+
+		expect(host.querySelector(".piem-chat__composer-status")?.textContent).toBe("Opening chat…");
+		expect(host.querySelector(".piem-chat__composer-hint")).toBeNull();
+	});
 });
 
 function snapshot(overrides: Partial<ChatSnapshot> = {}): ChatSnapshot {

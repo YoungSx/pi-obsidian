@@ -955,11 +955,31 @@
 	justify-content: space-between;
 }
 
-.piem-chat__composer-status {
-	color: var(--text-muted);
+/*
+ * The left half of the bar: whichever of the status and the hint has something
+ * to say.
+ *
+ * One wrapper rather than two flex siblings, because the status has to stay
+ * mounted even while empty — a live region is only announced if it is already in
+ * the DOM. As a sibling it would still take its share of the bar's `gap` and its
+ * flex slack while holding nothing, nudging the hint rightward on every turn
+ * that settled. Inside the wrapper, an empty status contributes nothing.
+ */
+.piem-chat__composer-slot {
 	flex: 1 1 auto;
-	font-size: var(--font-ui-smaller);
 	min-width: 0;
+}
+
+/*
+ * One visual slot, two elements. Only the status is a live region; the send hint
+ * is static copy that would otherwise be re-announced every time a turn settled.
+ * They never render together, so sharing the typography keeps the slot identical
+ * whichever one is filling it.
+ */
+.piem-chat__composer-status,
+.piem-chat__composer-hint {
+	color: var(--text-muted);
+	font-size: var(--font-ui-smaller);
 }
 
 /* Send rides on Obsidian's `mod-cta` (call-to-action) accent; Stop is a plain
