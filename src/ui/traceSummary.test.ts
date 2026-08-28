@@ -1,6 +1,6 @@
 import { describe, expect, it } from "bun:test";
 import type { ToolResultMessage } from "@earendil-works/pi-ai";
-import { countDiffLines, describeTool, summarizeToolPayload, summarizeToolResult } from "./traceSummary";
+import { countDiffLines, describeTool, isToolIdentifier, summarizeToolPayload, summarizeToolResult } from "./traceSummary";
 import { getT } from "../i18n";
 
 const en = getT("en");
@@ -66,6 +66,35 @@ describe("describeTool", () => {
 	it("falls through to the raw id for a tool it has not been taught", () => {
 		expect(describeTool("some_new_tool", false, en)).toBe("some_new_tool");
 		expect(describeTool("some_new_tool", false, zh)).toBe("some_new_tool");
+	});
+});
+
+/*
+ * One case per `describeTool` case above: the two read the same table, and the
+ * row's typeface is only right as long as they agree on what came back.
+ */
+describe("isToolIdentifier", () => {
+	it("reports a translated name as prose, not an identifier", () => {
+		expect(isToolIdentifier("grep", false)).toBe(false);
+		expect(isToolIdentifier("get_active_note", false)).toBe(false);
+	});
+
+	it("reports the raw id as an identifier once details are on", () => {
+		expect(isToolIdentifier("grep", true)).toBe(true);
+	});
+
+	it("reports an untaught tool as an identifier, since that is what shows", () => {
+		expect(isToolIdentifier("some_new_tool", false)).toBe(true);
+	});
+
+	it("agrees with describeTool on every case, in either language", () => {
+		for (const tool of ["grep", "get_active_note", "some_new_tool"]) {
+			for (const showDetails of [false, true]) {
+				const shown = describeTool(tool, showDetails, en);
+				expect(isToolIdentifier(tool, showDetails)).toBe(shown === tool);
+				expect(isToolIdentifier(tool, showDetails)).toBe(describeTool(tool, showDetails, zh) === tool);
+			}
+		}
 	});
 });
 

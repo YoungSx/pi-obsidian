@@ -472,11 +472,32 @@
 	}
 }
 
+/*
+ * Plain (non-Markdown) text block. `<pre>` for the preserved whitespace, so the
+ * UA's monospace default has to be answered explicitly — see the two face rules
+ * below, one of which every block carries.
+ */
 .piem-chat__text {
 	background: transparent;
-	font-family: var(--font-interface);
 	margin: 0;
 	white-space: pre-wrap;
+}
+
+/*
+ * Prose vs. machine output, decided in `markdownPolicy.ts` and stated here.
+ *
+ * These used to be one rule setting `--font-interface` on every plain block,
+ * which meant grep hits, file contents, `JSON.stringify` payloads and bash
+ * transcripts were all set in a proportional font: the one kind of text whose
+ * columns carry meaning was the one kind that could not line them up. A diff's
+ * `+`/`-` gutter and a table of search results both stop being readable.
+ */
+.piem-chat__text--prose {
+	font-family: var(--font-interface);
+}
+
+.piem-chat__text--machine {
+	font-family: var(--font-monospace);
 }
 
 /* Rendered Markdown (assistant/user text). Obsidian's renderer emits its own
@@ -566,7 +587,30 @@
 
 .piem-chat__trace-name {
 	flex-shrink: 0;
+}
+
+/*
+ * A raw tool id (`get_active_note`, `note_metadata`) is an identifier the reader
+ * matches character-for-character against the payload below it, so it is set in
+ * monospace.
+ */
+.piem-chat__trace-name--identifier {
 	font-family: var(--font-monospace);
+}
+
+/*
+ * A written label ("Read a note", "Thought it through", "Command") is a phrase,
+ * so it is set in the interface font.
+ *
+ * This used to be inferred from the row's variant — thinking and harness rows
+ * were named as the exceptions — which quietly assumed every *tool* row carried
+ * an id. In the default tier they carry translated sentences, so the whole
+ * transcript's tool rows were set in monospace: "Edited a note" in the font
+ * reserved for code, and Chinese labels in a fixed pitch they were never designed
+ * for. `isToolIdentifier` now answers it from the same table the naming reads.
+ */
+.piem-chat__trace-name--label {
+	font-family: var(--font-interface);
 }
 
 /* The argument or outcome next to the name; first thing to give up width. */
@@ -576,11 +620,6 @@
 	overflow: hidden;
 	text-overflow: ellipsis;
 	white-space: nowrap;
-}
-
-.piem-chat__trace--thinking .piem-chat__trace-name,
-.piem-chat__trace--harness .piem-chat__trace-name {
-	font-family: var(--font-interface);
 }
 
 .piem-chat__trace--error .piem-chat__trace-icon,

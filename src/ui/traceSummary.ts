@@ -51,6 +51,23 @@ export function describeTool(toolName: string, showAgentDetails: boolean, t: Tra
 }
 
 /**
+ * Whether {@link describeTool} handed back a raw tool id rather than a sentence.
+ *
+ * The trace row sets its name in monospace, which is right for `get_active_note`
+ * and wrong for "Read a note" — and the row cannot tell which it received, so it
+ * set both the same way. This answers that from the same table
+ * {@link describeTool} reads, so the two cannot drift: an id is what comes back
+ * in the agent-details tier, and also in the default tier for a tool the table
+ * has not been taught.
+ */
+export function isToolIdentifier(toolName: string, showAgentDetails: boolean): boolean {
+	if (showAgentDetails) {
+		return true;
+	}
+	return !(toolName in TOOL_COPY_KEYS);
+}
+
+/**
  * Arguments worth showing next to a tool name.
  *
  * A path answers "which note?" for every file tool, and a pattern answers

@@ -1,6 +1,6 @@
 import React, { useEffect, useRef } from "react";
 import { MarkdownRenderer, type App, type Component } from "obsidian";
-import { resolveTextRenderMode, type TextBlockKind } from "./markdownPolicy";
+import { resolveTextFace, resolveTextRenderMode, type TextBlockKind } from "./markdownPolicy";
 
 export interface MarkdownTextProps {
 	text: string;
@@ -28,12 +28,21 @@ export interface MarkdownTextProps {
  *
  * Plain blocks keep the `<pre>` treatment (streaming text, tool arguments,
  * tool results).
+ *
+ * Both branches carry the block's typeface class, because the plain branch used
+ * to set every kind in the interface font — one declaration covering streaming
+ * prose and machine output alike. Prose was right; the output was not. A grep
+ * table, a `ls` listing and an indented `JSON.stringify` payload only line up in
+ * a fixed-width font, and they were being set proportionally, so their columns
+ * did not. The class states the typeface either way rather than leaving it to one
+ * blanket rule.
  */
 export function MarkdownText({ text, kind, isStreaming = false, app, component, sourcePath }: MarkdownTextProps): React.JSX.Element {
+	const faceClass = `piem-chat__text--${resolveTextFace(kind)}`;
 	if (resolveTextRenderMode(kind, isStreaming) === "plain") {
-		return <pre className="piem-chat__text">{text}</pre>;
+		return <pre className={`piem-chat__text ${faceClass}`}>{text}</pre>;
 	}
-	return <MarkdownContainer markdown={text} app={app} component={component} sourcePath={sourcePath} />;
+	return <MarkdownContainer markdown={text} faceClass={faceClass} app={app} component={component} sourcePath={sourcePath} />;
 }
 
 /**
@@ -55,7 +64,7 @@ export function MarkdownText({ text, kind, isStreaming = false, app, component, 
  * that was current when it rendered, which is the right base for the links it
  * actually contains.
  */
-function MarkdownContainer({ markdown, app, component, sourcePath }: { markdown: string; app: App; component: Component; sourcePath: string }): React.JSX.Element {
+function MarkdownContainer({ markdown, faceClass, app, component, sourcePath }: { markdown: string; faceClass: string; app: App; component: Component; sourcePath: string }): React.JSX.Element {
 	const ref = useRef<HTMLDivElement | null>(null);
 	const sourcePathRef = useRef(sourcePath);
 
@@ -75,5 +84,5 @@ function MarkdownContainer({ markdown, app, component, sourcePath }: { markdown:
 		};
 	}, [app, component, markdown]);
 
-	return <div className="piem-chat__markdown" ref={ref} />;
+	return <div className={`piem-chat__markdown ${faceClass}`} ref={ref} />;
 }

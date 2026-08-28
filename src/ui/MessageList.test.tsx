@@ -77,6 +77,17 @@ describe("MessageList compaction divider", () => {
 		expect(text?.textContent).toBe("**not** markdown #heading");
 	});
 
+	// It rode on `harness` to stay verbatim, and inherited that kind's monospace with
+	// it: sentences set in the font reserved for bash output.
+	it("sets the summary in the prose face, not the monospace one harness output gets", async () => {
+		renderMessages([compactionSummary("Summary of everything earlier")]);
+		await flushRender();
+
+		const text = document.querySelector(".piem-chat__compaction pre");
+		expect(text?.classList.contains("piem-chat__text--prose")).toBe(true);
+		expect(text?.classList.contains("piem-chat__text--machine")).toBe(false);
+	});
+
 	it("announces running tools as a status region, in the reader's vocabulary", async () => {
 		const host = renderMessages([]);
 		await flushRender();
@@ -341,7 +352,11 @@ describe("MessageList trace collapsing", () => {
 		expect(trace).not.toBeNull();
 		// An empty disclosure would offer to open onto nothing.
 		expect(host.querySelector("details.piem-chat__trace")).toBeNull();
-		expect(trace?.querySelector(".piem-chat__trace-name")?.textContent).toBe("Read a note");
+		const name = trace?.querySelector(".piem-chat__trace-name");
+		expect(name?.textContent).toBe("Read a note");
+		// A translated sentence, so it is set in the interface font. The row used to
+		// infer this from its variant and put every tool name in monospace.
+		expect(name?.classList.contains("piem-chat__trace-name--label")).toBe(true);
 		expect(trace?.querySelector(".piem-chat__trace-detail")?.textContent).toBe("Daily/2026-08-27.md");
 	});
 
@@ -351,7 +366,10 @@ describe("MessageList trace collapsing", () => {
 
 		const trace = host.querySelector("details.piem-chat__trace");
 		expect(trace?.hasAttribute("open")).toBe(false);
-		expect(trace?.querySelector(".piem-chat__trace-name")?.textContent).toBe("read");
+		const name = trace?.querySelector(".piem-chat__trace-name");
+		expect(name?.textContent).toBe("read");
+		// A raw id here, matched character-for-character against the payload below it.
+		expect(name?.classList.contains("piem-chat__trace-name--identifier")).toBe(true);
 		expect(trace?.querySelector(".piem-chat__trace-body")?.textContent).toContain('"path": "Daily/2026-08-27.md"');
 	});
 
@@ -371,7 +389,11 @@ describe("MessageList trace collapsing", () => {
 		const trace = host.querySelector("details.piem-chat__trace--error");
 		expect(trace).not.toBeNull();
 		expect(trace?.querySelector(".piem-chat__trace-detail")?.textContent).toBe("File not found.");
-		expect(trace?.querySelector(".piem-chat__trace-name")?.textContent).toBe("Edited a note");
+		const name = trace?.querySelector(".piem-chat__trace-name");
+		expect(name?.textContent).toBe("Edited a note");
+		// A result row draws its own name, so it has to reach the same verdict as a
+		// call row rather than deciding the typeface for itself.
+		expect(name?.classList.contains("piem-chat__trace-name--label")).toBe(true);
 	});
 });
 
