@@ -17,6 +17,14 @@ interface ChatComposerProps {
 	onAbort: () => void;
 	/** Receives the textarea focus function, so commands outside React can focus it. */
 	onFocusRequested?: (focus: (() => void) | null) => void;
+	/**
+	 * The context chip row, rendered inside the composer shell above the textarea.
+	 *
+	 * Passed in rather than built here so this component keeps knowing only about
+	 * the draft and the send controls, and so the row sits inside the shell's focus
+	 * ring — it is part of what you are about to send, not chrome above it.
+	 */
+	contextRow?: React.ReactNode;
 }
 
 export function ChatComposer({
@@ -29,6 +37,7 @@ export function ChatComposer({
 	onSend,
 	onAbort,
 	onFocusRequested,
+	contextRow,
 }: ChatComposerProps): React.JSX.Element {
 	const textareaRef = useRef<HTMLTextAreaElement | null>(null);
 	const onSendRef = useRef<() => void>(onSend);
@@ -89,6 +98,7 @@ export function ChatComposer({
 	return (
 		<footer className="piem-chat__composer">
 			<div className="piem-chat__composer-shell">
+				{contextRow}
 				<textarea
 					ref={textareaRef}
 					value={input}

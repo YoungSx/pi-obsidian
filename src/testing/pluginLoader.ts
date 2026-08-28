@@ -274,6 +274,9 @@ export function createStubApp(): unknown {
 			getRightLeaf: () => null,
 			revealLeaf: async (): Promise<void> => undefined,
 			getActiveViewOfType: () => null,
+			// The chat view reads this on construction to seed the note it reports to
+			// the model; null stands for "no file open".
+			getActiveFile: () => null,
 			on: () => ({}),
 			off: () => undefined,
 			trigger: () => undefined,

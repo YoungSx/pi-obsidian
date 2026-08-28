@@ -10,9 +10,11 @@ export interface MarkdownTextProps {
 	app: App;
 	component: Component;
 	/**
-	 * Note path used to resolve `[[wikilinks]]` and relative image paths;
-	 * empty when no note is active. Computed once per app render so it does not
-	 * churn on every message re-render.
+	 * Note path used to resolve `[[wikilinks]]` and relative image paths; empty
+	 * when no note is active.
+	 *
+	 * Read at render time and deliberately not a re-render trigger — see
+	 * {@link MarkdownContainer}.
 	 */
 	sourcePath: string;
 }
@@ -42,9 +44,22 @@ export function MarkdownText({ text, kind, isStreaming = false, app, component, 
  * copy of the content. The promise result is deliberately not awaited by React
  * state; appending happens inside Obsidian's renderer and cleanup only needs to
  * drop whatever landed.
+ *
+ * `sourcePath` is read through a ref rather than listed as a dependency. It is
+ * only a link-resolution base, and re-rendering because it changed would mean
+ * tearing down and re-rendering every block in the transcript through Obsidian's
+ * renderer each time the user opened a different note. That used to be
+ * unreachable — nothing re-rendered the panel on a note switch — but the context
+ * chips subscribe to the workspace, so the switch now reaches React and the
+ * dependency would fire on every one. Already-rendered content keeps the path
+ * that was current when it rendered, which is the right base for the links it
+ * actually contains.
  */
 function MarkdownContainer({ markdown, app, component, sourcePath }: { markdown: string; app: App; component: Component; sourcePath: string }): React.JSX.Element {
 	const ref = useRef<HTMLDivElement | null>(null);
+	const sourcePathRef = useRef(sourcePath);
+
+	sourcePathRef.current = sourcePath;
 
 	useEffect(() => {
 		const el = ref.current;
@@ -52,13 +67,13 @@ function MarkdownContainer({ markdown, app, component, sourcePath }: { markdown:
 			return undefined;
 		}
 		el.empty();
-		void MarkdownRenderer.render(app, markdown, el, sourcePath, component).catch((error: unknown) => {
+		void MarkdownRenderer.render(app, markdown, el, sourcePathRef.current, component).catch((error: unknown) => {
 			console.error("piem: markdown render failed", error);
 		});
 		return () => {
 			el.empty();
 		};
-	}, [app, component, markdown, sourcePath]);
+	}, [app, component, markdown]);
 
 	return <div className="piem-chat__markdown" ref={ref} />;
 }
