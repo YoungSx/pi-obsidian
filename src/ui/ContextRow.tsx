@@ -1,6 +1,7 @@
 import React, { useEffect, useRef } from "react";
 import { contextRefLabel, type ContextRef } from "../agent/contextRefs";
 import { IconButton, ObsidianIcon } from "./ObsidianIcon";
+import { useT } from "./TranslatorContext";
 
 interface ContextRowProps {
 	/** Notes the next turn will name, active first. Empty renders nothing. */
@@ -53,6 +54,7 @@ export function ContextRow({
 	onUnpin,
 	onSetFollowActive,
 }: ContextRowProps): React.JSX.Element | null {
+	const t = useT();
 	const rowRef = useRef<HTMLDivElement | null>(null);
 	const resumeRef = useRef<HTMLButtonElement | null>(null);
 	// Which control should receive focus after the render that follows a dismissal.
@@ -80,7 +82,7 @@ export function ContextRow({
 	}
 
 	return (
-		<div className="piem-chat__context-row" role="group" aria-label="Notes shared with Piem" ref={rowRef}>
+		<div className="piem-chat__context-row" role="group" aria-label={t.t("contextRow.rowAria")} ref={rowRef}>
 			{refs.map((ref) => (
 				<ContextChip
 					key={`${ref.kind}:${ref.path}`}
@@ -102,7 +104,7 @@ export function ContextRow({
 			{isFollowingActive ? null : (
 				<IconButton
 					icon="eye-off"
-					label="Follow the active note"
+					label={t.t("contextRow.followActive")}
 					onClick={() => onSetFollowActive(true)}
 					className="piem-chat__context-resume"
 					buttonRef={resumeRef}
@@ -121,6 +123,7 @@ interface ContextChipProps {
 }
 
 function ContextChip({ contextRef, onOpen, onPin, onUnpin, onStopFollowing }: ContextChipProps): React.JSX.Element {
+	const t = useT();
 	const isActive = contextRef.kind === "active";
 	const label = contextRefLabel(contextRef.path);
 	const modifier = isActive ? "piem-chat__context-chip--active" : "piem-chat__context-chip--pinned";
@@ -144,7 +147,7 @@ function ContextChip({ contextRef, onOpen, onPin, onUnpin, onStopFollowing }: Co
 				type="button"
 				className="piem-chat__context-open"
 				title={contextRef.path}
-				aria-label={isActive ? `Open ${contextRef.path}, followed automatically` : `Open ${contextRef.path}, pinned`}
+				aria-label={t.t(isActive ? "contextRow.openFollowed" : "contextRow.openPinned", { path: contextRef.path })}
 				onClick={() => onOpen(contextRef.path)}
 			>
 				<ObsidianIcon name={isActive ? "file-text" : "pin"} className="piem-chat__context-icon" />
@@ -155,7 +158,12 @@ function ContextChip({ contextRef, onOpen, onPin, onUnpin, onStopFollowing }: Co
 					{/* Hidden once the note is pinned: pressing it again does nothing, and a
 					    live control that does nothing is worse than no control. */}
 					{contextRef.isPinned ? null : (
-						<IconButton icon="pin" label={`Pin ${label} to this chat`} onClick={() => onPin(contextRef.path)} className="piem-chat__context-action" />
+						<IconButton
+							icon="pin"
+							label={t.t("contextRow.pinToChat", { name: label })}
+							onClick={() => onPin(contextRef.path)}
+							className="piem-chat__context-action"
+						/>
 					)}
 					{/*
 					 * Not "remove this note" — focus would put it right back. What this
@@ -164,7 +172,7 @@ function ContextChip({ contextRef, onOpen, onPin, onUnpin, onStopFollowing }: Co
 					 */}
 					<IconButton
 						icon="x"
-						label="Stop following the active note"
+						label={t.t("contextRow.stopFollowing")}
 						onClick={onStopFollowing}
 						className="piem-chat__context-action"
 					/>
@@ -172,7 +180,7 @@ function ContextChip({ contextRef, onOpen, onPin, onUnpin, onStopFollowing }: Co
 			) : (
 				<IconButton
 					icon="x"
-					label={`Remove ${label} from context`}
+					label={t.t("contextRow.removeFromContext", { name: label })}
 					onClick={() => onUnpin(contextRef.path)}
 					className="piem-chat__context-action"
 				/>

@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { getT, resolveLanguage } from "./index";
 import { en } from "./en";
+import { zhCN } from "./zhCN";
 
 describe("getT", () => {
 	test("reads English leaves by dotted path", () => {
@@ -36,6 +37,20 @@ describe("getT", () => {
 			expect(t.t("language.en")).toBe("English");
 			expect(t.t("language.zh-cn")).toBe("简体中文");
 		}
+	});
+
+	test("the Chinese table covers every English leaf", () => {
+		// The English fallback means a forgotten translation is invisible: the
+		// interface still renders, in the wrong language, and every other test in
+		// this file still passes. That is how `contextRow` reached a Chinese vault
+		// as seven English accessible names. Asserting on the table directly —
+		// rather than through the translator, which would silently fall back — is
+		// what makes an omission fail here instead of on a user's screen.
+		const missing = collectLeaves(en, "")
+			.map(({ path }) => path)
+			.filter((path) => typeof readTable(zhCN, path.split(".")) !== "string");
+
+		expect(missing).toEqual([]);
 	});
 
 	test("every English leaf is reachable through a translator", () => {
@@ -102,4 +117,15 @@ function collectLeaves(
 		}
 	}
 	return out;
+}
+
+/** Reads one table at a dotted path without the English fallback. */
+function readTable(node: unknown, path: readonly string[]): unknown {
+	for (const key of path) {
+		if (!node || typeof node !== "object") {
+			return undefined;
+		}
+		node = (node as Record<string, unknown>)[key];
+	}
+	return node;
 }

@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
+import type { Language } from "../i18n";
 import { flushRender, installDom } from "../testing/dom";
 import { installObsidianStub } from "../testing/obsidianStub";
 
@@ -7,27 +8,35 @@ const document = installDom();
 
 // Dynamic imports so the mocked `obsidian` module wins over any cached real one.
 const { ContextRow } = await import("./ContextRow");
+const { TranslatorProvider } = await import("./TranslatorContext");
 const { createRoot } = await import("react-dom/client");
 
 type ContextRowProps = Parameters<typeof ContextRow>[0];
 
 const noop = (): void => undefined;
 
-async function renderRow(overrides: Partial<ContextRowProps> = {}): Promise<HTMLElement> {
+async function renderRow(overrides: Partial<ContextRowProps> = {}, language: Language = "en"): Promise<HTMLElement> {
 	const host = document.createElement("div");
 	document.body.appendChild(host);
 	const root = roots.get(host) ?? createRoot(host);
 	roots.set(host, root);
 	root.render(
-		<ContextRow
-			refs={[]}
-			isFollowingActive={true}
-			onOpen={noop}
-			onPin={noop}
-			onUnpin={noop}
-			onSetFollowActive={noop}
-			{...overrides}
-		/>,
+		// Wrapped in the provider the panel supplies at runtime (ChatApp reads it
+		// off the snapshot), so a language can be named per test. English is the
+		// default because that is also the context's default: the assertions below
+		// are unchanged from before this row was translated, which is what makes
+		// them evidence that the English wording survived the move word for word.
+		<TranslatorProvider language={language}>
+			<ContextRow
+				refs={[]}
+				isFollowingActive={true}
+				onOpen={noop}
+				onPin={noop}
+				onUnpin={noop}
+				onSetFollowActive={noop}
+				{...overrides}
+			/>
+		</TranslatorProvider>,
 	);
 	await flushRender();
 	return host;
@@ -276,6 +285,48 @@ describe("ContextRow", () => {
 		await flushRender();
 
 		expect(document.activeElement?.getAttribute("aria-label")).toBe("Open Notes/first.md, pinned");
+	});
+
+	it("translates the accessible names, which is the row's only channel for the kind", async () => {
+		const host = await renderRow(
+			{
+				refs: [
+					{ kind: "active", path: "Notes/today.md", isPinned: false },
+					{ kind: "pinned", path: "Notes/spec.md", isPinned: true },
+				],
+			},
+			"zh-cn",
+		);
+
+		// This row was the last component holding hardcoded English, and the
+		// strings it held were all accessible names. A Chinese vault therefore
+		// looked fully translated — the chips render file names, which are data —
+		// while the one channel carrying "followed" vs "pinned" spoke a foreign
+		// language to exactly the users who had nothing else to read.
+		const names = Array.from(host.querySelectorAll(".piem-chat__context-open"), (button) =>
+			button.getAttribute("aria-label"),
+		);
+		expect(names).toEqual(["打开 Notes/today.md，自动跟随中", "打开 Notes/spec.md，已固定"]);
+		expect(host.querySelector(".piem-chat__context-row")?.getAttribute("aria-label")).toBe("共享给 Piem 的笔记");
+	});
+
+	it("translates the controls without translating the file name", async () => {
+		const host = await renderRow({ refs: [{ kind: "active", path: "Notes/today.md", isPinned: false }] }, "zh-cn");
+
+		// The interpolated name is a real path out of the vault, so it stays
+		// verbatim inside a translated sentence — which is the whole reason these
+		// leaves take a `{name}` placeholder instead of being assembled by
+		// concatenation.
+		expect(labels(host)).toContain("把 today 固定到此对话");
+		// Still the behaviour, not the note: a translation that said "移除此笔记"
+		// would promise something the control cannot deliver in any language.
+		expect(labels(host)).toContain("停止跟随当前笔记");
+	});
+
+	it("translates the resume control, the one way back from a dismissal", async () => {
+		const host = await renderRow({ refs: [], isFollowingActive: false }, "zh-cn");
+
+		expect(host.querySelector(".piem-chat__context-resume")?.getAttribute("aria-label")).toBe("跟随当前笔记");
 	});
 
 	it("keeps a pinned note distinct from a followed one at the same path", async () => {
