@@ -15,11 +15,33 @@
  * like "set globalThis.File to `import('node:buffer').File`" in error messages.
  * A regex flags those; a parser sees them for what they are, plain text.
  */
-import { readFileSync } from "node:fs";
+import { readFileSync, statSync } from "node:fs";
 import process from "node:process";
 import esbuild from "esbuild";
 
 const BUNDLE = process.argv[2] ?? "main.js";
+
+/**
+ * Hard ceiling on the shipped bundle, in bytes.
+ *
+ * Obsidian evaluates `main.js` in full on every launch, phones included, so
+ * weight here is start-up latency the user pays for on every single app open.
+ * Nothing else in the suite notices it: a bundle that doubles in size still
+ * parses, still loads, still passes every test.
+ *
+ * The number is anchored to measurement, not taste. Trimming pi-ai's provider
+ * catalog down to the shipped slice (see {@link ../src/net/builtinCatalog.ts})
+ * took the bundle from ~1.83 MiB to ~1.47 MiB. The ceiling sits at 1.65 MiB:
+ * roughly 180 KiB of deliberate headroom, enough that ordinary feature work
+ * does not trip the gate, while a regression that pulls the full catalog — or
+ * anything else of that order — lands above the line and gets caught here
+ * rather than on a user's phone.
+ */
+const MAX_BUNDLE_BYTES = Math.round(1.65 * 1024 * 1024);
+
+function formatSize(bytes) {
+	return `${(bytes / 1024 / 1024).toFixed(2)} MiB`;
+}
 
 /**
  * Import kinds that Obsidian's eval-based loader cannot satisfy.
@@ -84,8 +106,12 @@ function positionOf(source, index) {
 }
 
 let source;
+let sizeInBytes;
 try {
 	source = readFileSync(BUNDLE, "utf8");
+	// Measured off the artifact rather than the decoded string: the on-disk byte
+	// count is what Obsidian actually reads at launch.
+	sizeInBytes = statSync(BUNDLE).size;
 } catch (error) {
 	console.error(`check-bundle: cannot read ${BUNDLE}: ${error.message}`);
 	console.error("Run `npm run build` first.");
@@ -129,6 +155,14 @@ if (!/module\.exports\b/.test(source)) {
 	});
 }
 
+if (sizeInBytes > MAX_BUNDLE_BYTES) {
+	failures.push({
+		name: `bundle over size limit (${formatSize(sizeInBytes)} > ${formatSize(MAX_BUNDLE_BYTES)})`,
+		why: `Every byte here is parsed on each Obsidian launch, on phones too. The usual cause is a newly imported module dragging in a large dependency; the known one is pi-ai's full provider catalog, which any import of "@earendil-works/pi-ai/providers/all" (or of a barrel that re-exports it) pulls in whole. Import the specific provider and models entrypoints instead, as src/net/builtinCatalog.ts does.`,
+		at: "-",
+	});
+}
+
 if (failures.length > 0) {
 	console.error(`check-bundle: ${failures.length} problem(s) in ${BUNDLE}\n`);
 	for (const failure of failures) {
@@ -139,4 +173,7 @@ if (failures.length > 0) {
 }
 
 const kinds = [...new Set(imports.map((entry) => entry.kind))].sort().join(", ");
-console.log(`check-bundle: ${BUNDLE} clean (${imports.length} imports, kinds: ${kinds || "none"})`);
+const headroom = formatSize(MAX_BUNDLE_BYTES - sizeInBytes);
+console.log(
+	`check-bundle: ${BUNDLE} clean (${imports.length} imports, kinds: ${kinds || "none"}; ${formatSize(sizeInBytes)} of ${formatSize(MAX_BUNDLE_BYTES)}, ${headroom} headroom)`,
+);
