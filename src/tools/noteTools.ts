@@ -13,7 +13,10 @@ export function createActiveNoteTool(app: App): AgentTool<typeof ActiveNoteParam
 	return {
 		name: "get_active_note",
 		label: "Get active note",
-		description: "Return the active Markdown note path, with optional selected text and file content.",
+		// The active note's path already arrives in the per-turn <context> block, so
+		// the description steers away from the no-argument call that only re-reads it.
+		description:
+			"Read the active Markdown note's selected text or body content. Its path is already in your context, so do not call this only to learn the path.",
 		parameters: ActiveNoteParameters,
 		execute: async (_toolCallId, params, signal) => {
 			throwIfAborted(signal);

@@ -5,6 +5,7 @@ import { VIEW_TYPE_PIEM_CHAT } from "../constants";
 import type { ObsidianAgentService } from "../agent/ObsidianAgentService";
 import { ChatApp } from "./ChatApp";
 import { ChatInputController } from "./ChatInputController";
+import { resolveWorkingNotePath, watchActiveNote } from "./activeNoteWatch";
 import type { DraftStore } from "../session/DraftStore";
 
 export class PiemChatView extends ItemView {
@@ -24,6 +25,22 @@ export class PiemChatView extends ItemView {
 			this.inputController.submit();
 			return false;
 		});
+		// Tells the service which note the user is looking at, so every turn can name
+		// it. Registered here rather than in `onOpen` because `registerEvent` is bound
+		// to this component's load/unload, while `onOpen` can run again without an
+		// intervening unload — handlers would accumulate one per open. Vault rename and
+		// delete events keep pinned paths truthful when the file explorer changes them.
+		for (const ref of watchActiveNote(
+			this.app,
+			(path) => this.service.setActiveNotePath(path),
+			(oldPath, newPath) => this.service.renameContextPath(oldPath, newPath),
+			(path) => this.service.forgetContextPath(path),
+		)) {
+			this.registerEvent(ref);
+		}
+		// Seeds the current note: the events only report changes from here on, and the
+		// panel is usually opened while a note is already in focus.
+		this.service.setActiveNotePath(resolveWorkingNotePath(this.app));
 	}
 
 	getViewType(): string {

@@ -122,11 +122,49 @@ describe("MarkdownText", () => {
 			console.error = originalError;
 		}
 	});
+
+	it("does not re-render when only the source path changed", async () => {
+		const { host } = await renderBlock({ text: "hello", kind: "assistant" });
+		expect(markdownRenderMock).toHaveBeenCalledTimes(1);
+
+		rerenderWith(host, "hello", "Notes/elsewhere.md");
+		await flushRender();
+
+		// The context chips subscribe to the workspace, so a note switch now reaches
+		// React. If `sourcePath` were a render dependency, every switch would tear
+		// down and re-render every block in the transcript through Obsidian's
+		// renderer — once per message, per switch.
+		expect(markdownRenderMock).toHaveBeenCalledTimes(1);
+	});
+
+	it("still re-renders when the text changed", async () => {
+		const { host } = await renderBlock({ text: "first", kind: "assistant" });
+		expect(markdownRenderMock).toHaveBeenCalledTimes(1);
+
+		rerenderWith(host, "second");
+		await flushRender(() => markdownRenderMock.mock.calls.length > 1);
+
+		// Guards the fix above from going too far: content still drives a re-render,
+		// so a streamed message that settles is redrawn.
+		expect(markdownRenderMock).toHaveBeenCalledTimes(2);
+	});
+
+	it("uses the source path that was current when the block rendered", async () => {
+		const { host } = await renderBlock({ text: "hello", kind: "assistant" });
+
+		rerenderWith(host, "changed", "Notes/elsewhere.md");
+		await flushRender(() => markdownRenderMock.mock.calls.length > 1);
+
+		// The ref is kept current, so the next render that does happen picks up the
+		// newer path rather than a stale captured one.
+		const latest = markdownRenderMock.mock.calls.at(-1)?.[0] as { sourcePath: string };
+		expect(latest.sourcePath).toBe("Notes/elsewhere.md");
+	});
 });
 
-function rerenderWith(host: HTMLElement, text: string): void {
+function rerenderWith(host: HTMLElement, text: string, path: string = sourcePath): void {
 	rootOf(host)?.render(
-		<MarkdownText text={text} kind="assistant" app={app} component={component} sourcePath={sourcePath} />,
+		<MarkdownText text={text} kind="assistant" app={app} component={component} sourcePath={path} />,
 	);
 }
 

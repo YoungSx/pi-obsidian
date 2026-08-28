@@ -15,6 +15,8 @@ import {
 } from "../settings";
 import { ObsidianSessionManager, type ActiveSessionInfo, type SessionDefaults } from "../session/ObsidianSessionManager";
 import type { SessionContext } from "../session/jsonl";
+import { injectContext } from "./contextInjection";
+import { ContextRefs, type ContextRef } from "./contextRefs";
 import { OBSIDIAN_AGENT_SYSTEM_PROMPT } from "./systemPrompt";
 
 export interface ChatSnapshot {
@@ -67,6 +69,22 @@ export interface ChatSnapshot {
 	 * the UI reads one snapshot rather than reaching for settings itself.
 	 */
 	showAgentDetails: boolean;
+	/**
+	 * Notes named to the model on the next turn, active note first.
+	 *
+	 * The same list the injection sends, so the chip row cannot advertise context
+	 * the model was not given. Empty when no Markdown note is active and nothing
+	 * is pinned, which renders no row at all.
+	 */
+	contextRefs: ContextRef[];
+	/**
+	 * Whether the active note is being followed.
+	 *
+	 * Distinct from `contextRefs` being empty: following with nothing open looks
+	 * the same in the list but offers a different control, since the user has
+	 * nothing to re-enable.
+	 */
+	isFollowingActiveNote: boolean;
 }
 
 type SnapshotListener = (snapshot: ChatSnapshot) => void;
@@ -150,6 +168,16 @@ export class ObsidianAgentService {
 	/** Mirrors `compaction` for the snapshot: true from launch until it settles. */
 	private isCompacting = false;
 	private compactionController: AbortController | null = null;
+	/** Frozen for one user turn so a mid-loop note switch cannot retarget a write. */
+	private activeRunContext: ContextRef[] | null = null;
+	/**
+	 * Notes reported to the model each turn.
+	 *
+	 * Owned here rather than in React so it survives the panel being closed and
+	 * reopened inside one conversation, and so the injection and the chip row read
+	 * the same object instead of one mirroring the other.
+	 */
+	private readonly contextRefs = new ContextRefs();
 
 	constructor(app: App, getSettings: () => PiemSettings, sessionManager: ObsidianSessionManager, options: ObsidianAgentServiceOptions = {}) {
 		this.app = app;
@@ -204,6 +232,7 @@ export class ObsidianAgentService {
 		try {
 			this.errorMessage = undefined;
 			this.noticeMessage = undefined;
+			this.activeRunContext = this.contextRefs.list();
 			this.notify();
 			await this.compactContextIfNeeded(agent);
 			await agent.prompt(trimmedPrompt);
@@ -211,6 +240,7 @@ export class ObsidianAgentService {
 		} catch (error) {
 			this.errorMessage = error instanceof Error ? error.message : String(error);
 		} finally {
+			this.activeRunContext = null;
 			this.notifySettledState();
 		}
 		return sent;
@@ -301,6 +331,10 @@ export class ObsidianAgentService {
 		this.messageEntryIds = new WeakMap<object, string>();
 		this.lastCompaction = undefined;
 		this.compactionUsage = [];
+		// Pins and a dismissed follow belong to the conversation that collected them;
+		// carrying either forward would shape a fresh chat the user never set up that
+		// way. The active note is left alone because it describes the workspace.
+		this.contextRefs.reset();
 		this.replaceAgent([]);
 		this.errorMessage = undefined;
 		this.sessionRevision += 1;
@@ -334,6 +368,9 @@ export class ObsidianAgentService {
 		// Usage is per-transcript, and a reloaded session's compaction cost was
 		// already paid in an earlier run, so the running total starts from history.
 		this.compactionUsage = [];
+		// Same reasoning as `newSession`: the incoming conversation gets a clean
+		// follow state and no inherited pins.
+		this.contextRefs.reset();
 		this.adoptSessionContext(context);
 		this.errorMessage = undefined;
 		await this.sessionManager.ensureConfiguration(this.getSessionDefaults());
@@ -452,7 +489,59 @@ export class ObsidianAgentService {
 			isCompacting: this.isCompacting,
 			isConfigured: this.hasApiKey(),
 			showAgentDetails: settings.showAgentDetails,
+			contextRefs: this.contextRefs.list(),
+			isFollowingActiveNote: this.contextRefs.isFollowingActive(),
 		};
+	}
+
+	/**
+	 * Records the note the user is looking at, or `null` when the focused view is
+	 * not a Markdown note.
+	 *
+	 * Driven by a workspace subscription, which also fires for the chat panel's own
+	 * leaf and for repeated focus of the same file. Notifying only on a real change
+	 * keeps those from re-rendering the panel, which matters because `notify`
+	 * rebuilds the whole snapshot and React cannot bail out on a fresh object.
+	 */
+	setActiveNotePath(path: string | null): void {
+		if (this.contextRefs.setActivePath(path)) {
+			this.notify();
+		}
+	}
+
+	/** Starts or stops naming the active note to the model. */
+	setFollowActiveNote(follow: boolean): void {
+		if (this.contextRefs.setFollowActive(follow)) {
+			this.notify();
+		}
+	}
+
+	/** Keeps naming `path` even after the user navigates away. */
+	pinContextRef(path: string): void {
+		if (this.contextRefs.pin(path)) {
+			this.notify();
+		}
+	}
+
+	/** Drops a pinned note. */
+	unpinContextRef(path: string): void {
+		if (this.contextRefs.unpin(path)) {
+			this.notify();
+		}
+	}
+
+	/** Keeps active and pinned context aligned with a vault rename. */
+	renameContextPath(oldPath: string, newPath: string): void {
+		if (this.contextRefs.renamePath(oldPath, newPath)) {
+			this.notify();
+		}
+	}
+
+	/** Removes deleted files or folders from active and pinned context. */
+	forgetContextPath(path: string): void {
+		if (this.contextRefs.forgetPath(path)) {
+			this.notify();
+		}
 	}
 
 	private async initializeAgent(): Promise<void> {
@@ -502,6 +591,13 @@ export class ObsidianAgentService {
 			// default one silently filters that role out, which would discard every
 			// compacted turn without surfacing an error.
 			convertToLlm,
+			// Names the active and pinned notes to the model on every turn. pi applies
+			// this per LLM request against a copy of the transcript, so the block is
+			// re-derived for each turn of a tool loop and never reaches
+			// `state.messages` — nothing lands in the session log or the panel. Read
+			// through a per-run snapshot while a prompt is active, so a note switch
+			// cannot retarget a tool loop halfway through a user request.
+			transformContext: async (messages) => injectContext(messages, this.activeRunContext ?? this.contextRefs.list()),
 			initialState: {
 				systemPrompt: OBSIDIAN_AGENT_SYSTEM_PROMPT,
 				model,

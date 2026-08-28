@@ -9,6 +9,7 @@ import { getActiveNotePath } from "./activeNotePath";
 import { ChatBanner } from "./ChatBanner";
 import { ChatComposer } from "./ChatComposer";
 import { ChatHeader } from "./ChatHeader";
+import { ContextRow } from "./ContextRow";
 import { MessageList } from "./MessageList";
 import { appendToDraft } from "./noteReference";
 import { canOpenPluginSettings, openPluginSettings } from "./pluginSettings";
@@ -41,8 +42,10 @@ export function ChatApp({ service, inputController, component, draftStore }: Cha
 	inputRef.current = input;
 
 	const app = service.getApp();
-	// Recomputed per render (not memoized on identity) so switching the active
-	// note re-points `sourcePath`; reading the workspace is cheap.
+	// Link-resolution base for rendered Markdown, recomputed per render because
+	// reading the workspace is cheap. It is not a render trigger: `MarkdownText`
+	// reads it through a ref, so a note switch does not re-render the transcript.
+	// What the model is told about is `snapshot.contextRefs`, not this.
 	const sourcePath = getActiveNotePath(app);
 	const canOpenSettings = canOpenPluginSettings(app);
 
@@ -183,6 +186,25 @@ export function ChatApp({ service, inputController, component, draftStore }: Cha
 				onSend={() => void sendPrompt()}
 				onAbort={() => service.abort()}
 				onFocusRequested={handleFocusRequested}
+				contextRow={
+					<ContextRow
+						refs={snapshot.contextRefs}
+						isFollowingActive={snapshot.isFollowingActiveNote}
+						onOpen={(path) => {
+							// This is already an exact vault path. `openLinkText` parses `#`
+							// and `|` as wikilink syntax, so use the file API instead.
+							const file = app.vault.getFileByPath(path);
+							if (!file) {
+								return;
+							}
+							const leaf = app.workspace.getMostRecentLeaf() ?? app.workspace.getLeaf(false);
+							void leaf.openFile(file);
+						}}
+						onPin={(path) => service.pinContextRef(path)}
+						onUnpin={(path) => service.unpinContextRef(path)}
+						onSetFollowActive={(follow) => service.setFollowActiveNote(follow)}
+					/>
+				}
 			/>
 		</div>
 	);

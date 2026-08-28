@@ -726,6 +726,176 @@
 	}
 }
 
+/* --- context chips (notes named to the model each turn) --- */
+
+/*
+ * Chips rather than cards: a card spends ~60px of sidebar height to carry the
+ * one line of text a chip carries in ~24px. The row is absent entirely when
+ * there is nothing to report, so the idle cost is zero.
+ */
+.piem-chat__context-row {
+	align-items: center;
+	display: flex;
+	flex-wrap: wrap;
+	gap: var(--size-4-1);
+	/* Past a few wrapped lines the row stops being scannable and starts eating the
+	 * transcript; scroll instead of growing without bound. */
+	max-height: 5.5rem;
+	overflow-y: auto;
+}
+
+.piem-chat__context-chip {
+	align-items: center;
+	border-radius: var(--radius-s);
+	display: inline-flex;
+	font-size: var(--font-ui-smaller);
+	gap: var(--size-4-1);
+	/* WCAG 2.5.8 asks 24px of any pointer target; --size-4-6 is exactly that. */
+	min-height: var(--size-4-6);
+	/* Lets the label ellipsize instead of pushing the chip past the sidebar. */
+	max-width: 100%;
+	min-width: 0;
+	padding: 0 var(--size-4-1);
+}
+
+/*
+ * A followed note arrived on its own and will change on its own, so it is drawn
+ * provisionally — dashed. A pin was deliberate and stays put, so it reads solid.
+ * The two are different kinds of thing, not two states of one thing.
+ *
+ * Both keep `--text-muted`. A step down to `--text-faint` would have carried
+ * "provisional" in the colour too, but the file name is the chip's only text and
+ * `--font-ui-smaller` is 12px, where Obsidian's faint tone falls under the 4.5:1
+ * WCAG 1.4.3 asks of normal-size text. The dashed border and the accessible name
+ * carry the distinction instead; elsewhere `--text-faint` is used for text that
+ * sits beside a `--text-muted` anchor, which this has none of.
+ */
+.piem-chat__context-chip--active {
+	border: 1px dashed var(--background-modifier-border);
+	color: var(--text-muted);
+}
+
+.piem-chat__context-chip--pinned {
+	border: 1px solid var(--background-modifier-border);
+	color: var(--text-muted);
+}
+
+.piem-chat__context-chip:hover {
+	background: var(--background-modifier-hover);
+}
+
+/* The label carries the click target, so it owns the chip's layout share. */
+.piem-chat__context-open {
+	align-items: center;
+	background: transparent;
+	border: none;
+	box-shadow: none;
+	color: inherit;
+	cursor: pointer;
+	display: inline-flex;
+	font-size: inherit;
+	gap: var(--size-4-1);
+	/* Matches the chip so the whole height is clickable, not just the glyph row. */
+	min-height: var(--size-4-6);
+	min-width: 0;
+	padding: 0;
+}
+
+.piem-chat__context-open:hover {
+	color: var(--text-normal);
+}
+
+.piem-chat__context-open:focus-visible {
+	outline: 2px solid var(--background-modifier-border-focus);
+	outline-offset: -2px;
+}
+
+.piem-chat__context-icon {
+	--icon-size: var(--icon-xs);
+	flex-shrink: 0;
+}
+
+/*
+ * Only the file name is shown: a real vault path
+ * ("Projects/2026/Q3/team/weekly-0827.md") has no chance in a 300px sidebar. The
+ * full path stays reachable through the title and the accessible name, and the
+ * model always receives it in full.
+ *
+ * Named `chip-label` rather than `context-label`, which the header's
+ * context-window meter already owns. Sharing it made that rule's
+ * `color: var(--text-muted)` apply here too, and a matched declaration beats an
+ * inherited one — so the chip's own `--text-faint` never reached the only text it
+ * has, collapsing the followed and pinned styles into the same thing.
+ */
+.piem-chat__context-chip-label {
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+/*
+ * Always rendered, never hover-revealed — same reasoning as the reply actions:
+ * a hover-only control cannot be reached by touch. Muted so the row does not
+ * compete with the composer, and restored on hover *or* keyboard focus.
+ */
+.piem-chat__context-action {
+	flex-shrink: 0;
+	opacity: 0.55;
+	transition: opacity 0.15s ease-out;
+}
+
+.piem-chat__context-chip:hover .piem-chat__context-action,
+.piem-chat__context-chip:focus-within .piem-chat__context-action {
+	opacity: 1;
+}
+
+/*
+ * Full strength, unlike the per-chip controls. Once following is dismissed and
+ * nothing is pinned this glyph is the row's entire content and the only way back,
+ * so muting it would hide the sole exit from a state the user can otherwise not
+ * leave for the rest of the conversation.
+ */
+.piem-chat__context-resume {
+	flex-shrink: 0;
+}
+
+@media (pointer: coarse) {
+
+	/* A coarse pointer has no hover, so the controls stay legible without one. */
+	.piem-chat__context-action {
+		opacity: 1;
+	}
+
+	/*
+	 * The global coarse-pointer rule grows every icon button to --size-4-12, which
+	 * would silently stretch a 24px chip to 48px and leave a 300px sidebar with
+	 * almost no room for the label. Inside a chip the buttons are not isolated
+	 * targets — they sit in a row that is itself comfortably tappable — so they
+	 * keep the 32px that already clears the 24px WCAG 2.5.8 minimum, and the chip
+	 * grows to a deliberate 36px rather than an accidental 48px.
+	 */
+	.piem-chat__context-chip {
+		min-height: var(--size-4-9);
+	}
+
+	.piem-chat__context-open {
+		min-height: var(--size-4-9);
+	}
+
+	.piem-chat__context-chip .piem-chat__context-action {
+		min-height: var(--size-4-8);
+		min-width: var(--size-4-8);
+	}
+}
+
+@media (prefers-reduced-motion: reduce) {
+
+	.piem-chat__context-action {
+		transition: none;
+	}
+}
+
 /* --- composer --- */
 
 .piem-chat__composer {
@@ -748,7 +918,7 @@
  * The shell carries the single focus indicator. The textarea used to draw its
  * own outline on top of this border, so one focus produced two rings.
  */
-.piem-chat__composer-shell:focus-within {
+.piem-chat__composer-shell:has(textarea:focus) {
 	border-color: var(--background-modifier-border-focus);
 	box-shadow: 0 0 0 1px var(--background-modifier-border-focus);
 }
