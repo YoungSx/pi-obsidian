@@ -112,6 +112,40 @@ describe("compactIfNeeded", () => {
 		expect(outcome.status).toBe("compacted");
 	});
 
+	/**
+	 * A second compaction used to see the previous one's retained tail twice: the
+	 * tail was passed in as part of the `compaction` entry *and* re-listed as
+	 * message entries, because a compacted transcript already is
+	 * `[summary, ...retainedTail]`. Both copies reached the new
+	 * `retainedTail` — and from there the JSONL line written for it.
+	 */
+	it("does not re-list a tail the previous compaction already carries", async () => {
+		const keptQuestion = userMessage("KEPT QUESTION");
+		const keptAnswer = assistantMessage("KEPT ANSWER", { ...EMPTY_USAGE, input: 4_000, totalTokens: 4_000 });
+		const previous = createCompactResult("EARLIER HISTORY", [keptQuestion, keptAnswer]);
+		// Something has to follow the tail, or there is genuinely nothing left to
+		// compact and pi reports "skipped" before the duplication could show.
+		const messages = [...toCompactedMessages(previous), userMessage("NEXT QUESTION")];
+
+		const outcome = await compactIfNeeded({
+			messages,
+			model: createModel({ contextWindow: 2_000 }),
+			models: createModels("SECOND SUMMARY"),
+			thinkingLevel: "off",
+			previous,
+			force: true,
+		});
+
+		expect(outcome.status).toBe("compacted");
+		if (outcome.status !== "compacted") {
+			return;
+		}
+		// By reference: the duplicate was the same object twice, so comparing
+		// content would not tell the two copies apart.
+		expect(outcome.result.retainedTail.filter((message) => message === keptQuestion)).toHaveLength(1);
+		expect(outcome.result.retainedTail.filter((message) => message === keptAnswer)).toHaveLength(1);
+	});
+
 	it("fails without retrying when the policy is disabled", async () => {
 		const outcome = await compactIfNeeded({
 			messages: buildOverflowingHistory(),
