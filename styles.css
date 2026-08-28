@@ -1145,6 +1145,18 @@
 }
 
 /*
+ * External link standing in for a row's control on the About tab.
+ *
+ * Sized to the surrounding UI font rather than inheriting body size, so it sits
+ * on the same baseline as the buttons and dropdowns in every other row's
+ * control slot.
+ */
+.piem-settings-link {
+	font-size: var(--font-ui-small);
+	white-space: nowrap;
+}
+
+/*
  * The provider and model forms are longer than a default modal is tall, so the
  * body scrolls inside a bounded height rather than growing past the viewport
  * and putting the save button out of reach.

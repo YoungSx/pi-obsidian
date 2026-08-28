@@ -25,6 +25,7 @@ import { ModelModal } from "./ModelModal";
 import { ProviderModal } from "./ProviderModal";
 import { describeSecretStorage, type SecretStorageState } from "./secretStorageCopy";
 import { renderSettingsTabs, type SettingsTabDefinition } from "./SettingsTabs";
+import { ABOUT_LINKS, describeVersion, type AboutLink } from "./aboutCopy";
 
 /**
  * Renders the settings panel.
@@ -57,6 +58,13 @@ export interface SettingsPanelHost {
 	describeTarget(): string;
 	/** Copy for the whole panel, resolved from {@link SettingsPanelSettings.language}. */
 	t: Translator;
+	/**
+	 * Plugin metadata shown on the About tab.
+	 *
+	 * A narrow field rather than the plugin itself: this interface declares only
+	 * what the panel reads, and one version string is all the About tab needs.
+	 */
+	manifest: { version: string };
 }
 
 /** The slice of settings this panel reads and writes. */
@@ -343,8 +351,22 @@ function renderNetworkTab(containerEl: HTMLElement, host: SettingsPanelHost): vo
 		});
 }
 
+/**
+ * Sentence-cased row names and one link each.
+ *
+ * Rendered as `Setting` rows rather than a paragraph of inline links so the
+ * three destinations are scannable and each gets a real focus target — a prose
+ * blob of links reads as one sentence to a screen reader and gives a keyboard
+ * user nothing to land on but the links themselves.
+ */
 function renderAboutTab(containerEl: HTMLElement, host: SettingsPanelHost): void {
 	const { t } = host;
+	new Setting(containerEl).setName("Piem").setHeading().setDesc(describeVersion(host.manifest.version));
+
+	for (const link of ABOUT_LINKS) {
+		renderLinkRow(containerEl, link);
+	}
+
 	new Setting(containerEl).setName(t.t("settings.whatLeavesVault")).setHeading();
 	containerEl.createEl("p", { text: t.t("settings.whatLeavesVaultDesc") });
 
@@ -377,6 +399,25 @@ function renderLanguageTab(containerEl: HTMLElement, host: SettingsPanelHost): v
 				await host.save();
 			});
 		});
+}
+
+/**
+ * One settings row whose control is an external link.
+ *
+ * A plain `<a href>` rather than a button that calls a shell API: Obsidian
+ * routes external hrefs to the system browser on desktop and mobile alike, and
+ * a real link keeps the middle-click, copy-address, and open-in-background
+ * affordances a synthetic button would remove. `rel` is set because the target
+ * opens in a new context and must not receive a handle back to the app window.
+ */
+function renderLinkRow(containerEl: HTMLElement, row: AboutLink): void {
+	const setting = new Setting(containerEl).setName(row.name).setDesc(row.description);
+	setting.controlEl.createEl("a", {
+		text: row.label,
+		href: row.href,
+		cls: "piem-settings-link",
+		attr: { target: "_blank", rel: "noopener noreferrer" },
+	});
 }
 
 /** Row description for a provider: protocol, key state, and how many models use it. */
