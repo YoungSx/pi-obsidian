@@ -15,6 +15,7 @@ import {
 import { createSecretEnvironment, type SecretEnvironment } from "./secretsStore";
 import { DraftStore } from "./session/DraftStore";
 import { ObsidianSessionManager } from "./session/ObsidianSessionManager";
+import { getLegacySessionDir, isLegacySessionDir } from "./session/sessionDir";
 import { ObsidianAgentService } from "./agent/ObsidianAgentService";
 import { PiemChatView } from "./ui/PiemChatView";
 import { requestNoteReference, warnIfTruncated } from "./ui/noteReferenceCommand";
@@ -51,6 +52,15 @@ export default class PiObsidianPlugin extends Plugin {
 	private agentService: ObsidianAgentService | null = null;
 	private draftStore: DraftStore | null = null;
 	/**
+	 * Held so the settings tab can report on the chat folder.
+	 *
+	 * The panel asks where logs are actually being written and how many are there,
+	 * and the manager is what resolves the stored folder. Nullable rather than
+	 * asserted: the settings tab outlives a failed `onload`, and a dialog reporting
+	 * on chats must not be the thing that throws.
+	 */
+	private sessionManager: ObsidianSessionManager | null = null;
+	/**
 	 * Resolved once per load. In-memory settings always hold plaintext; this
 	 * codec is what converts to and from the persisted form at the
 	 * `loadData`/`saveData` boundary.
@@ -85,7 +95,11 @@ export default class PiObsidianPlugin extends Plugin {
 		await this.loadSettings();
 		const t = this.t();
 
-		const sessionManager = ObsidianSessionManager.forPlugin(this.app, this);
+		// The manager reads the folder and the cap through this closure rather than
+		// from a snapshot, so a change in the Sessions tab reaches the next chat
+		// without reloading the plugin.
+		const sessionManager = ObsidianSessionManager.forPlugin(this.app, this, () => this.settings);
+		this.sessionManager = sessionManager;
 		this.agentService = new ObsidianAgentService(this.app, () => this.settings, sessionManager);
 		this.draftStore = DraftStore.forPlugin(this.app, this);
 
@@ -193,6 +207,42 @@ export default class PiObsidianPlugin extends Plugin {
 		// that would otherwise fire against an unloaded plugin.
 		this.draftStore?.dispose();
 		this.draftStore = null;
+		this.sessionManager = null;
+	}
+
+	/** Chat logs stored in the folder now in effect. Zero before the first chat. */
+	async countStoredSessions(): Promise<number> {
+		return (await this.sessionManager?.countStoredSessions()) ?? 0;
+	}
+
+	/**
+	 * The folder chat logs are being written to.
+	 *
+	 * Read from the manager rather than from settings so the row names the resolved
+	 * folder, the one writes actually land in. Falls back to the raw setting only
+	 * when there is no manager to ask.
+	 */
+	getActiveSessionDir(): string {
+		return this.sessionManager?.getSessionDir() ?? this.settings.sessionDir;
+	}
+
+	/**
+	 * Chats left in the folder earlier releases wrote to.
+	 *
+	 * Nothing is migrated, so this is how a user finds them: the folder sits inside
+	 * the config directory, which Obsidian's file explorer does not show. Reports
+	 * zero when that folder is the active one, since those chats are then in the
+	 * chat list and there is nothing to point at.
+	 */
+	async countLegacySessions(): Promise<{ count: number; dir: string }> {
+		const configDir = this.app.vault.configDir;
+		const dir = getLegacySessionDir(configDir, this.manifest.id);
+		// Compared through `isLegacySessionDir` rather than by string: the manager
+		// hands back a normalized path, which the raw legacy path need not match.
+		if (!this.sessionManager || isLegacySessionDir(this.getActiveSessionDir(), configDir, this.manifest.id)) {
+			return { count: 0, dir };
+		}
+		return { count: await this.sessionManager.countSessionsIn(dir), dir };
 	}
 
 	/**

@@ -179,6 +179,12 @@ export class DraftStore {
 	private async load(): Promise<void> {
 		try {
 			if (!(await this.adapter.exists(this.filePath))) {
+				// A location with no draft file means no drafts, which has to clear
+				// whatever is held: loading against a second location — the chat folder
+				// changed — otherwise leaves the previous folder's drafts in memory, and
+				// the next write files them under the new folder. One chat's unsent text
+				// would then surface in another's composer.
+				this.drafts = {};
 				return;
 			}
 			this.drafts = parseDraftFile(await this.adapter.read(this.filePath));

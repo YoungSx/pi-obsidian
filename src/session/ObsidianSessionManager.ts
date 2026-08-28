@@ -17,6 +17,7 @@ import {
 	type SessionInfoEntry,
 	type ThinkingLevelChangeSessionEntry,
 } from "./jsonl";
+import { selectSessionsToEvict, UNLIMITED_SESSION_RETENTION } from "./retention";
 
 export interface SessionDefaults {
 	provider: string;
@@ -38,35 +39,78 @@ interface SessionFileInfo extends ActiveSessionInfo {
 	modifiedTime: number;
 }
 
+/**
+ * Where chats go and how many are kept, asked per operation rather than captured.
+ *
+ * Both are settings the user can change with the plugin running, and the Sessions
+ * tab promises the folder "takes effect for the next chat you create" — which
+ * only holds if the manager asks at creation time instead of remembering what it
+ * was constructed with.
+ */
+export interface SessionPolicy {
+	sessionDir(): string;
+	/** {@link UNLIMITED_SESSION_RETENTION} keeps every chat. */
+	retentionLimit(): number;
+}
+
+/**
+ * The slice of settings the policy is built from.
+ *
+ * Declared structurally instead of importing `PiemSettings`, so this module stays
+ * upstream of `settings.ts` — which already imports the retention and folder
+ * helpers that live beside it.
+ */
+export interface SessionSettings {
+	sessionDir: string;
+	sessionRetention: number;
+}
+
 export class ObsidianSessionManager {
 	private readonly adapter: DataAdapter;
-	private readonly sessionDir: string;
+	private readonly policy: SessionPolicy;
 	private readonly cwd: string;
 	private sessionFile: string | null = null;
 	private entries: SessionEntry[] = [];
 	private leafId: string | null = null;
 
-	constructor(adapter: DataAdapter, sessionDir: string, cwd: string) {
+	/**
+	 * A bare folder is a fixed location with no cap — the shape a caller wants
+	 * when the directory is its own decision rather than the user's setting.
+	 */
+	constructor(adapter: DataAdapter, location: string | SessionPolicy, cwd: string) {
 		this.adapter = adapter;
-		this.sessionDir = normalizeFolderPath(sessionDir, { allowPluginInternals: true });
+		this.policy = typeof location === "string" ? fixedSessionPolicy(location) : location;
 		this.cwd = cwd;
 	}
 
-	static forPlugin(app: App, plugin: Plugin): ObsidianSessionManager {
-		return new ObsidianSessionManager(app.vault.adapter, getPluginSessionDir(app, plugin), `obsidian-vault:${app.vault.getName()}`);
+	static forPlugin(app: App, plugin: Plugin, getSettings: () => SessionSettings): ObsidianSessionManager {
+		// The settings are already coerced by `normalizeSettings`, so they are read
+		// straight through: a second `readRetentionLimit` here would put the same
+		// rule in two places, and `selectSessionsToEvict` treats an unreadable limit
+		// as unlimited anyway — the direction that cannot cost anyone a chat.
+		const policy: SessionPolicy = {
+			sessionDir: () => getSettings().sessionDir,
+			retentionLimit: () => getSettings().sessionRetention,
+		};
+		return new ObsidianSessionManager(app.vault.adapter, policy, `obsidian-vault:${app.vault.getName()}`);
 	}
 
 	async createSession(defaults: SessionDefaults): Promise<ActiveSessionInfo> {
-		await this.ensureSessionDirectory();
+		// Resolved once and reused: the folder is read from live settings, and a
+		// change landing between these awaits would otherwise create the directory
+		// in one place and write the chat to another.
+		const sessionDir = this.resolveSessionDir();
+		await this.ensureSessionDirectory(sessionDir);
 		const sessionId = createSessionId();
 		const timestamp = new Date().toISOString();
 		const fileTimestamp = timestamp.replace(/[:.]/g, "-");
-		this.sessionFile = `${this.sessionDir}/${fileTimestamp}_${sessionId}.jsonl`;
+		this.sessionFile = `${sessionDir}/${fileTimestamp}_${sessionId}.jsonl`;
 		this.entries = [createSessionHeader(sessionId, this.cwd, timestamp)];
 		this.leafId = null;
 		await this.adapter.write(this.sessionFile, serializeSessionEntries(this.entries));
 		await this.appendModelChange(defaults.provider, defaults.modelId);
 		await this.appendThinkingLevelChange(defaults.thinkingLevel);
+		await this.evictSurplusSessions(sessionDir);
 		return this.getActiveSessionInfo();
 	}
 
@@ -115,15 +159,50 @@ export class ObsidianSessionManager {
 		}
 	}
 
+	/**
+	 * Stored chats, newest first.
+	 *
+	 * Reads without creating the folder. It used to ensure the directory first,
+	 * which was invisible while chats lived inside the plugin; now that they live
+	 * in the vault, that would put an empty folder in the file explorer of every
+	 * user who installs the plugin and never chats. {@link createSession} creates
+	 * it when there is something to write.
+	 */
 	async listSessions(): Promise<ActiveSessionInfo[]> {
-		await this.ensureSessionDirectory();
-		const listing = await this.adapter.list(this.sessionDir);
-		const sessionFiles = listing.files.filter((path) => path.endsWith(".jsonl"));
-		const sessions = await Promise.all(sessionFiles.map((path) => this.readSessionInfo(path)));
-		return sessions
-			.filter((session): session is SessionFileInfo => session !== null)
-			.sort((left, right) => right.modifiedTime - left.modifiedTime)
-			.map(({ modifiedTime: _modifiedTime, ...session }) => session);
+		const sessions = await this.readSessionFiles(this.resolveSessionDir());
+		return sessions.map(({ modifiedTime: _modifiedTime, ...session }) => session);
+	}
+
+	/** The folder chat logs are being written to right now. */
+	getSessionDir(): string {
+		return this.resolveSessionDir();
+	}
+
+	/**
+	 * Chat logs in the active folder.
+	 *
+	 * Counts files rather than parsing them: this answers a settings row, and
+	 * reading every conversation to size a directory is not a cost a dialog should
+	 * pay. Zero when the folder does not exist yet.
+	 */
+	async countStoredSessions(): Promise<number> {
+		return (await this.listSessionFiles(this.resolveSessionDir())).length;
+	}
+
+	/**
+	 * Chat logs in a folder this manager does not write to.
+	 *
+	 * Exists for the folder earlier releases used: nothing is migrated, so the
+	 * Sessions tab has to be able to say how many chats were left behind there.
+	 */
+	async countSessionsIn(dir: string): Promise<number> {
+		let normalized: string;
+		try {
+			normalized = normalizeFolderPath(dir, { allowPluginInternals: true });
+		} catch {
+			return 0;
+		}
+		return (await this.listSessionFiles(normalized)).length;
 	}
 
 	async appendMessage(message: AgentMessage): Promise<string> {
@@ -248,13 +327,79 @@ export class ObsidianSessionManager {
 		return entry.id;
 	}
 
-	private async ensureSessionDirectory(): Promise<void> {
+	/**
+	 * The configured folder, coerced.
+	 *
+	 * `allowPluginInternals` is what keeps a vault pointed at the folder earlier
+	 * releases used working. `normalizeSessionDir` refuses that path for a folder
+	 * the user *types* — hiding chats inside the plugin is what the move exists to
+	 * undo — and `normalizeSettings` therefore resolves a stored legacy folder to
+	 * the vault default. So nothing is migrated and nothing throws: new chats go to
+	 * the default folder, the old ones stay on disk, and the Sessions tab names
+	 * where. A manager handed the legacy folder directly still serves it.
+	 */
+	private resolveSessionDir(): string {
+		return normalizeFolderPath(this.policy.sessionDir(), { allowPluginInternals: true });
+	}
+
+	private async ensureSessionDirectory(sessionDir: string): Promise<void> {
 		let current = "";
-		for (const segment of this.sessionDir.split("/")) {
+		for (const segment of sessionDir.split("/")) {
 			current = current ? `${current}/${segment}` : segment;
 			if (!(await this.adapter.exists(current))) {
 				await this.adapter.mkdir(current);
 			}
+		}
+	}
+
+	/**
+	 * Trims the folder to the retention limit, oldest first.
+	 *
+	 * Runs after the new chat is written and adopted so it counts against the cap,
+	 * which is what the Sessions tab promises: a limit of N leaves N chats, not N
+	 * plus the one just created. Eviction goes through {@link deleteSession}, so
+	 * what falls outside the cap lands in trash and stays recoverable.
+	 *
+	 * A trash that fails is swallowed. The cost is a folder holding more chats than
+	 * the user asked for; refusing to open the new chat over it would trade a
+	 * harmless overrun for a broken feature.
+	 */
+	private async evictSurplusSessions(sessionDir: string): Promise<void> {
+		const limit = this.policy.retentionLimit();
+		// Checked before the read, not just inside `selectSessionsToEvict`: an
+		// unlimited cap is the old behaviour and should not pay for a scan of every
+		// chat on every new one.
+		if (limit <= UNLIMITED_SESSION_RETENTION) {
+			return;
+		}
+		const sessions = await this.readSessionFiles(sessionDir);
+		for (const session of selectSessionsToEvict({ sessions, limit, activePath: this.sessionFile })) {
+			try {
+				await this.deleteSession(session.path);
+			} catch {
+				// See above: an overrun beats blocking the chat that triggered it.
+			}
+		}
+	}
+
+	/** Parsed chat logs in `sessionDir`, newest first. Malformed files are dropped. */
+	private async readSessionFiles(sessionDir: string): Promise<SessionFileInfo[]> {
+		const sessionFiles = await this.listSessionFiles(sessionDir);
+		const sessions = await Promise.all(sessionFiles.map((path) => this.readSessionInfo(path)));
+		return sessions
+			.filter((session): session is SessionFileInfo => session !== null)
+			.sort((left, right) => right.modifiedTime - left.modifiedTime);
+	}
+
+	private async listSessionFiles(sessionDir: string): Promise<string[]> {
+		try {
+			const listing = await this.adapter.list(sessionDir);
+			return listing.files.filter((path) => path.endsWith(".jsonl"));
+		} catch {
+			// A folder that does not exist is the ordinary state of a vault that has
+			// not chatted yet, not a failure worth reporting: callers read it as
+			// empty, and `createSession` creates it when there is something to write.
+			return [];
 		}
 	}
 
@@ -274,6 +419,10 @@ export class ObsidianSessionManager {
 			return null;
 		}
 	}
+}
+
+function fixedSessionPolicy(sessionDir: string): SessionPolicy {
+	return { sessionDir: () => sessionDir, retentionLimit: () => UNLIMITED_SESSION_RETENTION };
 }
 
 export function getPluginSessionDir(app: App, plugin: Plugin): string {
