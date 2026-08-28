@@ -1,4 +1,5 @@
 import { ISSUES_URL, LICENSE_URL, REPOSITORY_URL } from "../../constants";
+import type { Translator } from "../../i18n";
 
 /**
  * The About tab's outbound links, as data.
@@ -6,7 +7,20 @@ import { ISSUES_URL, LICENSE_URL, REPOSITORY_URL } from "../../constants";
  * Kept apart from the panel so the wording and the destinations can be pinned
  * by a test: a typo in an href fails silently — the row still renders, the link
  * still looks right, and it lands on a 404 the panel never learns about.
+ *
+ * The rows hold copy *keys*, not copy: the destinations are the same in every
+ * language, the words are not. `aboutLinks` resolves them through the caller's
+ * {@link Translator} so the language stays the caller's decision and a test can
+ * assert both languages through one entry point.
  */
+
+/** One row's fixed parts: where it points, and which leaves name it. */
+interface AboutLinkSpec {
+	nameKey: "about.sourceName" | "about.issuesName" | "about.licenseName";
+	descKey: "about.sourceDesc" | "about.issuesDesc" | "about.licenseDesc";
+	labelKey: "about.sourceLabel" | "about.issuesLabel" | "about.licenseLabel";
+	href: string;
+}
 
 export interface AboutLink {
 	/** Row name. Sentence case, per Obsidian's style guide. */
@@ -23,30 +37,40 @@ export interface AboutLink {
 	href: string;
 }
 
-export const ABOUT_LINKS: readonly AboutLink[] = [
+const ABOUT_LINK_SPECS: readonly AboutLinkSpec[] = [
 	{
-		name: "Source code",
-		description: "The plugin's repository on GitHub.",
-		label: "Open repository",
+		nameKey: "about.sourceName",
+		descKey: "about.sourceDesc",
+		labelKey: "about.sourceLabel",
 		href: REPOSITORY_URL,
 	},
 	{
-		name: "Report a problem",
-		description: "Bugs and feature requests go to the issue tracker.",
-		label: "Open issues",
+		nameKey: "about.issuesName",
+		descKey: "about.issuesDesc",
+		labelKey: "about.issuesLabel",
 		href: ISSUES_URL,
 	},
 	{
 		// The licence file is the authority on its own terms, so this row points at
 		// it instead of naming a licence the panel would then have to keep in sync.
-		name: "License",
-		description: "The terms this plugin is distributed under.",
-		label: "Read the license",
+		nameKey: "about.licenseName",
+		descKey: "about.licenseDesc",
+		labelKey: "about.licenseLabel",
 		href: LICENSE_URL,
 	},
 ];
 
+/** The About tab's rows, worded in the caller's language. */
+export function aboutLinks(t: Translator): readonly AboutLink[] {
+	return ABOUT_LINK_SPECS.map((spec) => ({
+		name: t.t(spec.nameKey),
+		description: t.t(spec.descKey),
+		label: t.t(spec.labelKey),
+		href: spec.href,
+	}));
+}
+
 /** Version line for the About tab's heading. */
-export function describeVersion(version: string): string {
-	return `Version ${version}`;
+export function describeVersion(version: string, t: Translator): string {
+	return t.t("about.version", { version });
 }

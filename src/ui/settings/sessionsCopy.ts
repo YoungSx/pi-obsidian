@@ -1,3 +1,4 @@
+import type { Translator } from "../../i18n";
 import {
 	DEFAULT_SESSION_RETENTION,
 	MIN_SESSION_RETENTION,
@@ -6,16 +7,22 @@ import {
 import { DEFAULT_SESSION_DIR, normalizeSessionDir } from "../../session/sessionDir";
 
 /**
- * Wording for the Sessions tab.
+ * Wording for the History tab.
  *
  * Separate from the panel so the copy can be tested, and because these are the
  * only settings in the plugin that decide the fate of a user's own writing. The
  * rule the wording follows: never describe a limit without saying what happens
  * to what falls outside it, and always name trash, because "removed" and
  * "recoverable from trash" are different promises.
+ *
+ * Every function here takes the {@link Translator} rather than reaching for a
+ * table itself, so the language stays the caller's decision and the tests can
+ * assert both languages through the same entry points.
  */
 
-export const RETENTION_NAME = "Chats to keep";
+export function retentionName(t: Translator): string {
+	return t.t("sessions.retentionName");
+}
 
 /**
  * Row description.
@@ -23,8 +30,9 @@ export const RETENTION_NAME = "Chats to keep";
  * Says trash in the same words the delete confirmation uses
  * (`sessionDialogs.ts`), so a reader who has seen one recognises the other.
  */
-export const RETENTION_DESCRIPTION =
-	"Older chats move to trash when a new one is created, so they can still be restored from there. Set to 0 to keep every chat.";
+export function retentionDescription(t: Translator): string {
+	return t.t("sessions.retentionDesc");
+}
 
 /** Placeholder showing the default, since an emptied field falls back to it. */
 export const RETENTION_PLACEHOLDER = String(DEFAULT_SESSION_RETENTION);
@@ -36,31 +44,43 @@ export const RETENTION_PLACEHOLDER = String(DEFAULT_SESSION_RETENTION);
  * user who lowers it from 100 to 10 with 60 chats stored deserves to know before
  * the next chat quietly trashes 50 of them.
  */
-export function describeRetention(limit: number, storedCount: number): string {
+export function describeRetention(limit: number, storedCount: number, t: Translator): string {
+	const stored = describeStored(storedCount, t);
 	if (limit <= UNLIMITED_SESSION_RETENTION) {
-		return `Every chat is kept. ${describeStored(storedCount)}`;
+		return t.t("sessions.retentionUnlimited", { stored });
 	}
 	if (storedCount > limit) {
-		const excess = storedCount - limit;
-		const chats = excess === 1 ? "1 chat" : `${excess} chats`;
-		return `${describeStored(storedCount)} The next new chat moves the oldest ${chats} to trash.`;
+		return t.t("sessions.retentionWillTrash", { stored, chats: countChats(storedCount - limit, t) });
 	}
-	return `${describeStored(storedCount)} Nothing is trashed until the limit is reached.`;
+	return t.t("sessions.retentionSafe", { stored });
 }
 
 /** Floor advice, matching how the field actually coerces a small number. */
-export function describeRetentionFloor(): string {
-	return `Values below ${MIN_SESSION_RETENTION} are raised to it.`;
+export function describeRetentionFloor(t: Translator): string {
+	return t.t("sessions.retentionFloor", { min: MIN_SESSION_RETENTION });
 }
 
-function describeStored(storedCount: number): string {
+function describeStored(storedCount: number, t: Translator): string {
 	if (storedCount === 0) {
-		return "No chats stored yet.";
+		return t.t("sessions.storedNone");
 	}
-	return storedCount === 1 ? "1 chat stored." : `${storedCount} chats stored.`;
+	return storedCount === 1 ? t.t("sessions.storedOne") : t.t("sessions.storedMany", { count: storedCount });
 }
 
-export const SESSION_DIR_NAME = "Chat folder";
+/**
+ * `n chats`, with the singular spelled out rather than assembled.
+ *
+ * A separate leaf per plural form instead of `{count} chat(s)`: languages do not
+ * agree on where the plural boundary falls, and a translator handed a template
+ * with an English suffix cannot fix it.
+ */
+function countChats(count: number, t: Translator): string {
+	return count === 1 ? t.t("sessions.chatOne") : t.t("sessions.chatMany", { count });
+}
+
+export function sessionDirName(t: Translator): string {
+	return t.t("sessions.dirName");
+}
 
 /**
  * Row description.
@@ -69,8 +89,9 @@ export const SESSION_DIR_NAME = "Chat folder";
  * things a reader would otherwise discover by surprise: the agent's own search
  * tools can reach the logs, and the logs travel with whatever syncs the vault.
  */
-export const SESSION_DIR_DESCRIPTION =
-	"Folder inside this vault where chat logs are written. Logs there sync and back up with your notes, and Piem's own search tools can read them.";
+export function sessionDirDescription(t: Translator): string {
+	return t.t("sessions.dirDesc");
+}
 
 /** Placeholder showing the default, since an emptied field falls back to it. */
 export const SESSION_DIR_PLACEHOLDER = DEFAULT_SESSION_DIR;
@@ -85,15 +106,41 @@ export const SESSION_DIR_PLACEHOLDER = DEFAULT_SESSION_DIR;
  * conversations. So the line says both halves — where new chats go, and that the
  * old ones drop out of the list until moved.
  */
-export function describeSessionDirChange(current: string, next: string): string {
+export function describeSessionDirChange(current: string, next: string, t: Translator): string {
 	if (normalizeSessionDir(current) === normalizeSessionDir(next)) {
-		return `New chats are written to ${current}.`;
+		return t.t("sessions.dirUnchanged", { dir: current });
 	}
-	return `New chats will be written to ${next}. Nothing is moved: chats in ${current} stay on disk but drop out of the chat list until you move the files across.`;
+	return t.t("sessions.dirChanged", { next, current });
+}
+
+/**
+ * Why a typed folder was rejected, or `undefined` when it is usable.
+ *
+ * Lives here rather than beside {@link normalizeSessionDir}: the path rules are
+ * pure logic with no language, and pulling a copy table into `sessionDir.ts`
+ * would make every consumer of those rules — the session manager among them —
+ * depend on the UI's translations. The two stay in step because this is the only
+ * caller that reports a reason, and it asks `normalizeSessionDir` for the final
+ * verdict rather than re-deriving it.
+ */
+export function describeSessionDirProblem(input: string, t: Translator): string | undefined {
+	const trimmed = input.trim();
+	if (!trimmed) {
+		return t.t("sessions.dirProblemEmpty");
+	}
+	if (trimmed.startsWith("/") || /^[A-Za-z]:/.test(trimmed)) {
+		return t.t("sessions.dirProblemAbsolute");
+	}
+	if (trimmed.split(/[/\\]/).includes("..")) {
+		return t.t("sessions.dirProblemEscape");
+	}
+	return normalizeSessionDir(trimmed) ? undefined : t.t("sessions.dirProblemUnusable");
 }
 
 /** Where the change takes effect, since the open chat keeps writing to its own file. */
-export const SESSION_DIR_RESTART_HINT = "Takes effect for the next chat you create.";
+export function sessionDirRestartHint(t: Translator): string {
+	return t.t("sessions.dirRestartHint");
+}
 
 /**
  * Notice for chats left behind in the folder earlier releases used.
@@ -103,7 +150,9 @@ export const SESSION_DIR_RESTART_HINT = "Takes effect for the next chat you crea
  * the whole value: it is inside the config directory, which the file explorer
  * does not show, so a user who does not know where to look cannot recover them.
  */
-export function describeLegacyChats(count: number, legacyDir: string): string {
-	const chats = count === 1 ? "1 chat" : `${count} chats`;
-	return `${chats} from an earlier version are still in ${legacyDir}. Move the .jsonl files into the folder above to see them in the chat list again.`;
+export function describeLegacyChats(count: number, legacyDir: string, t: Translator): string {
+	if (count === 1) {
+		return t.t("sessions.legacyOne", { dir: legacyDir });
+	}
+	return t.t("sessions.legacyMany", { count, dir: legacyDir });
 }
