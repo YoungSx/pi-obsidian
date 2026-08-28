@@ -215,7 +215,6 @@ export const en = {
 	connectionTest: {
 		noKey: "No API key for this provider yet.",
 		noModelId: "This model has no model ID yet.",
-		needModelFirst: "Add a model under this provider first — a request needs one.",
 		/**
 		 * One sentence per stop reason rather than a `{reason}` template: the
 		 * reason is the provider library's enum, so interpolating it would drop a
@@ -226,6 +225,17 @@ export const en = {
 		reached: "Reached {target}{served}.",
 		servedSuffix: " — served {model}",
 		unknownError: "Unknown error",
+		/** Names the model a provider test borrowed, so a model-specific failure is attributable. */
+		probedWith: " (probed with {model})",
+		/** Listing-probe verdicts, used when no model is configured to borrow. */
+		listingNoModels: "Reached {target}, but it lists no models.",
+		listingOneModel: "Reached {target} — it lists 1 model.",
+		listingModels: "Reached {target} — it lists {count} models.",
+		listingNeedsKey: "{target} requires an API key ({status}).{relayed}",
+		listingRejectedKey: "{target} rejected the API key ({status}).{relayed}",
+		listingUnsupported:
+			"Reached {target}, but it does not list models, so the key could not be checked. Add a model under this provider to test a real request.",
+		listingStatus: "{target} answered {status}.{relayed}",
 	},
 
 	/** How the active target is named in status lines and errors. */
@@ -283,7 +293,8 @@ export const en = {
 		apiKey: "API key",
 		apiKeyPlaceholder: "Enter API key",
 		connection: "Connection",
-		connectionDesc: "Sends one minimal request to confirm the URL, protocol, and key work together.",
+		connectionDesc:
+			"Checks the URL, protocol, and key. Uses one of this provider's models when there is one, and otherwise asks the endpoint which models it serves.",
 		cancel: "Cancel",
 		add: "Add",
 		save: "Save",

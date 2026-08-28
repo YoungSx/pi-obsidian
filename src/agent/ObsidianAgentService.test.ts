@@ -375,6 +375,35 @@ describe("ObsidianAgentService", () => {
 		expect(service.getSnapshot().pendingToolCalls).toEqual([]);
 	});
 
+	it("ends the run after a tool fails and accepts the next prompt", async () => {
+		let requestCount = 0;
+		const scriptedStream = createToolCallingStreamFn("ls", "toolu_failed", { path: "Missing" });
+		const streamFn: StreamFn = (model, context, options) => {
+			requestCount += 1;
+			return scriptedStream(model, context, options);
+		};
+		const service = createService(new MemoryAdapter(), { streamFn });
+
+		expect(await service.sendPrompt("List the missing folder")).toBe(true);
+
+		const failed = service.getSnapshot();
+		expect(requestCount).toBe(1);
+		expect(failed.isStreaming).toBe(false);
+		expect(failed.pendingToolCalls).toEqual([]);
+		const toolResult = failed.messages.at(-1);
+		expect(toolResult?.role).toBe("toolResult");
+		if (toolResult?.role !== "toolResult") {
+			throw new Error("Expected the failed tool result to end the turn.");
+		}
+		expect(toolResult.isError).toBe(true);
+		expect(JSON.stringify(toolResult.content)).toContain("Folder not found: Missing");
+
+		expect(await service.sendPrompt("Continue with something else")).toBe(true);
+		expect(requestCount).toBe(2);
+		expect(service.getSnapshot().isStreaming).toBe(false);
+		expect(service.getSnapshot().messages.at(-1)?.role).toBe("assistant");
+	});
+
 	it("declines a retry when nothing precedes the reply", async () => {
 		const service = createService();
 		await service.initialize();
@@ -447,6 +476,187 @@ describe("ObsidianAgentService", () => {
 		expect(JSON.stringify(snapshot.messages)).toContain("EARLIER HISTORY SUMMARIZED");
 		// The retained tail keeps the recent exchange so the agent can still see it.
 		expect(snapshot.messages.some((message) => message.role === "user")).toBe(true);
+	});
+
+	it("names the active note in the request without touching the transcript", async () => {
+		const contexts: Context[] = [];
+		const service = createService(new MemoryAdapter(), { streamFn: createCapturingStreamFn(contexts) });
+		service.setActiveNotePath("Projects/weekly-0827.md");
+
+		await service.sendPrompt("Rewrite this note");
+
+		// The whole point of the issue: the path reaches the model unasked.
+		expect(JSON.stringify(contexts[0]?.messages)).toContain("Active note: Projects/weekly-0827.md");
+		// And it stays out of the transcript, so it is neither persisted to the
+		// session log nor rendered in the panel nor re-sent as history next turn.
+		expect(JSON.stringify(service.getSnapshot().messages)).not.toContain("<context>");
+	});
+
+	it("injects nothing when no Markdown note is active", async () => {
+		const contexts: Context[] = [];
+		const service = createService(new MemoryAdapter(), { streamFn: createCapturingStreamFn(contexts) });
+
+		await service.sendPrompt("Hello");
+
+		// A canvas, a PDF, or an empty workspace must not produce "no note open":
+		// that is a negative fact the model has no use for, and stating it would
+		// churn the prompt every time the user clicked away.
+		expect(JSON.stringify(contexts[0]?.messages)).not.toContain("<context>");
+	});
+
+	it("re-derives the injected block per turn rather than freezing it", async () => {
+		const contexts: Context[] = [];
+		const service = createService(new MemoryAdapter(), { streamFn: createCapturingStreamFn(contexts) });
+		service.setActiveNotePath("Notes/first.md");
+		await service.sendPrompt("About this one");
+
+		service.setActiveNotePath("Notes/second.md");
+		await service.sendPrompt("Now this one");
+
+		expect(JSON.stringify(contexts[0]?.messages)).toContain("Notes/first.md");
+		// The second request must not still be naming the first note, and must not
+		// name both — the block is rebuilt, not accumulated.
+		const second = JSON.stringify(contexts[1]?.messages);
+		expect(second).toContain("Notes/second.md");
+		expect(second).not.toContain("Notes/first.md");
+	});
+
+	it("stops naming the active note once following is dismissed", async () => {
+		const contexts: Context[] = [];
+		const service = createService(new MemoryAdapter(), { streamFn: createCapturingStreamFn(contexts) });
+		service.setActiveNotePath("Notes/today.md");
+
+		service.setFollowActiveNote(false);
+		await service.sendPrompt("Hello");
+
+		expect(JSON.stringify(contexts[0]?.messages)).not.toContain("<context>");
+	});
+
+	it("keeps naming a pinned note after the user navigates away", async () => {
+		const contexts: Context[] = [];
+		const service = createService(new MemoryAdapter(), { streamFn: createCapturingStreamFn(contexts) });
+		service.setActiveNotePath("Notes/pinned.md");
+		service.pinContextRef("Notes/pinned.md");
+
+		service.setActiveNotePath("Notes/elsewhere.md");
+		await service.sendPrompt("Compare these");
+
+		const sent = JSON.stringify(contexts[0]?.messages);
+		expect(sent).toContain("Active note: Notes/elsewhere.md");
+		expect(sent).toContain("Pinned note: Notes/pinned.md");
+	});
+
+	it("publishes the same refs the injection sends", async () => {
+		const service = createService();
+		service.setActiveNotePath("Notes/today.md");
+		service.pinContextRef("Notes/other.md");
+
+		// One source of truth: the chip row renders this, so it cannot advertise
+		// context the model was not given.
+		expect(service.getSnapshot().contextRefs).toEqual([
+			{ kind: "active", path: "Notes/today.md", isPinned: false },
+			{ kind: "pinned", path: "Notes/other.md", isPinned: true },
+		]);
+	});
+
+	it("notifies only when the active note actually changed", async () => {
+		const service = createService();
+		let notifications = 0;
+		service.subscribe(() => notifications++);
+		const baseline = notifications;
+
+		service.setActiveNotePath("Notes/today.md");
+		expect(notifications).toBe(baseline + 1);
+
+		// `active-leaf-change` also fires for the chat panel's own leaf, which
+		// resolves to the same note; `notify` rebuilds the whole snapshot and React
+		// cannot bail out on a fresh object, so a no-op must stay silent.
+		service.setActiveNotePath("Notes/today.md");
+		expect(notifications).toBe(baseline + 1);
+	});
+
+	it("drops pins and restores following on a new chat", async () => {
+		const service = createService();
+		await service.sendPrompt("First conversation");
+		service.setActiveNotePath("Notes/today.md");
+		service.pinContextRef("Notes/pinned.md");
+		service.setFollowActiveNote(false);
+
+		await service.newSession();
+
+		const snapshot = service.getSnapshot();
+		// Pins and a dismissed follow belong to the conversation that collected
+		// them; inheriting either would shape a fresh chat the user never set up.
+		expect(snapshot.isFollowingActiveNote).toBe(true);
+		// The active note survives because it describes the workspace, which did
+		// not change when the conversation did.
+		expect(snapshot.contextRefs).toEqual([{ kind: "active", path: "Notes/today.md", isPinned: false }]);
+	});
+
+	it("keeps the injected block out of the session log on disk", async () => {
+		const adapter = new MemoryAdapter();
+		const service = createService(adapter);
+		service.setActiveNotePath("Notes/today.md");
+
+		await service.sendPrompt("Rewrite this note");
+
+		// The in-memory assertion elsewhere could pass while the block still reached
+		// the file. A path recorded here would be replayed into a future
+		// conversation, long after it went stale.
+		const content = await adapter.read(service.getSnapshot().session?.path ?? "");
+		expect(content).not.toContain("<context>");
+		expect(content).not.toContain("Notes/today.md");
+	});
+
+	it("keeps the injected block out of the compaction summary", async () => {
+		requestUrlMock.mockImplementation(async () => sseResponse([summaryChunk("SUMMARY OF EARLIER TURNS"), usageChunk()]));
+		const adapter = new MemoryAdapter();
+		const service = createService(adapter);
+		service.setActiveNotePath("Notes/today.md");
+		await service.sendPrompt("Long conversation");
+
+		await service.compactNow();
+
+		// Compaction summarizes `agent.state.messages`, which the injection never
+		// enters, and the summary *is* persisted. A leak here would defeat the whole
+		// no-persistence argument for using transformContext.
+		const content = await adapter.read(service.getSnapshot().session?.path ?? "");
+		expect(content).toContain('"type":"compaction"');
+		expect(content).not.toContain("<context>");
+		expect(JSON.stringify(service.getSnapshot().messages)).not.toContain("<context>");
+	});
+
+	it("stops pinning at the cap", async () => {
+		const service = createService();
+		for (let index = 0; index < 8; index++) {
+			service.pinContextRef(`Notes/${index}.md`);
+		}
+
+		service.pinContextRef("Notes/overflow.md");
+
+		// Every pin is billed on every turn, so the ceiling is explicit rather than
+		// however many times the user managed to click.
+		const paths = service.getSnapshot().contextRefs.map((ref) => ref.path);
+		expect(paths).toHaveLength(8);
+		expect(paths).not.toContain("Notes/overflow.md");
+	});
+
+	it("drops pins and restores following when an earlier chat is reopened", async () => {
+		const service = createService();
+		await service.sendPrompt("First conversation");
+		const firstSession = service.getSnapshot().session;
+		await service.newSession();
+		await service.sendPrompt("Second conversation");
+
+		service.setActiveNotePath("Notes/today.md");
+		service.pinContextRef("Notes/pinned.md");
+		service.setFollowActiveNote(false);
+
+		await service.openSession(firstSession?.path ?? "");
+
+		const snapshot = service.getSnapshot();
+		expect(snapshot.isFollowingActiveNote).toBe(true);
+		expect(snapshot.contextRefs).toEqual([{ kind: "active", path: "Notes/today.md", isPinned: false }]);
 	});
 });
 
@@ -573,7 +783,11 @@ function createFakeStreamFn(): StreamFn {
  * The call id is deliberately provider-shaped: it is the string the panel used
  * to show before pending calls were resolved to names.
  */
-function createToolCallingStreamFn(toolName: string, toolCallId: string): StreamFn {
+function createToolCallingStreamFn(
+	toolName: string,
+	toolCallId: string,
+	toolArguments: Record<string, unknown> = { path: "/" },
+): StreamFn {
 	let requests = 0;
 	return (model: Model<Api>, _context: Context, _options?: SimpleStreamOptions) => {
 		requests += 1;
@@ -597,7 +811,7 @@ function createToolCallingStreamFn(toolName: string, toolCallId: string): Stream
 		if (requests === 1) {
 			const message: AssistantMessage = {
 				...base,
-				content: [{ type: "toolCall", id: toolCallId, name: toolName, arguments: { path: "/" } }],
+				content: [{ type: "toolCall", id: toolCallId, name: toolName, arguments: toolArguments }],
 				stopReason: "toolUse",
 			};
 			stream.push({ type: "done", reason: "toolUse", message });
@@ -609,6 +823,18 @@ function createToolCallingStreamFn(toolName: string, toolCallId: string): Stream
 		stream.push({ type: "done", reason: "stop", message });
 		stream.end(message);
 		return stream;
+	};
+}
+
+/**
+ * Records the context of each request so a test can assert on what the model was
+ * actually sent, rather than on whether a hook happened to run.
+ */
+function createCapturingStreamFn(contexts: Context[]): StreamFn {
+	const inner = createFakeStreamFn();
+	return (model: Model<Api>, context: Context, options?: SimpleStreamOptions) => {
+		contexts.push(context);
+		return inner(model, context, options);
 	};
 }
 

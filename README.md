@@ -42,7 +42,7 @@ input**, **Ask about selection**, and **Ask about this note**. Press
 
 For manual installation, copy `main.js`, `manifest.json`, and `styles.css`
 into `<vault>/.obsidian/plugins/piem/`. The repository is
-[`lhr0909/pi-obsidian`](https://github.com/lhr0909/pi-obsidian).
+[`YoungSx/pi-obsidian`](https://github.com/YoungSx/pi-obsidian).
 
 ## Tools
 
@@ -99,5 +99,6 @@ plugin root.
 
 ## Acknowledgements
 
-Piem grew far beyond its starting point, but it stands on
-[Pi](https://github.com/earendil-works/pi-mono) — thank you.
+Piem grew from the original
+[`lhr0909/pi-obsidian`](https://github.com/lhr0909/pi-obsidian) project.
+Thank you to the original authors for that starting point.

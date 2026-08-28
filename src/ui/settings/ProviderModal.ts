@@ -105,8 +105,9 @@ export class ProviderModal extends Modal {
 			});
 
 		// Placed before the save row so a failing verdict is read before
-		// committing. The check needs a model id, which lives on ModelConfig, so
-		// the caller resolves one of this provider's own models to probe with.
+		// committing. The check needs no model id of its own: the caller probes with
+		// one of this provider's own models when the user has configured one, and
+		// otherwise asks the endpoint which models it serves.
 		const testSetting = new Setting(contentEl)
 			.setName(t.t("providerModal.connection"))
 			.setDesc(t.t("providerModal.connectionDesc"));

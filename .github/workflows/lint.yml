@@ -5,8 +5,7 @@ on:
         branches: ["**"]
     pull_request:
         branches: ["**"]
-    # Lets the gate be run on demand, which is also the only way to trigger it
-    # on a fork until Actions is enabled once in the repository UI.
+    # Lets the gate be run on demand from the Actions tab.
     workflow_dispatch:
 
 jobs:
