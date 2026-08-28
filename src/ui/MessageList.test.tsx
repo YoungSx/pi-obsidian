@@ -252,15 +252,15 @@ describe("MessageList reply actions", () => {
 		const group = host.querySelector(".piem-chat__message-actions");
 		expect(group?.getAttribute("role")).toBe("group");
 		const labels = Array.from(group?.querySelectorAll("button") ?? [], (button) => button.getAttribute("aria-label"));
-		expect(labels).toEqual(["Copy reply", "Insert at cursor", "Append to note", "Ask again"]);
+		expect(labels).toEqual(["Copy reply", "Insert at cursor", "Append to note", "Regenerate reply"]);
 	});
 
-	it("hides retry while a turn is in flight, rather than queueing a second run", async () => {
+	it("hides regenerate while a turn is in flight, rather than queueing a second run", async () => {
 		const host = renderMessages([assistantMessage("the answer")]);
 		await flushRender();
 
 		const labels = Array.from(host.querySelectorAll(".piem-chat__message-actions button"), (button) => button.getAttribute("aria-label"));
-		expect(labels).not.toContain("Ask again");
+		expect(labels).not.toContain("Regenerate reply");
 	});
 
 	it("shows no actions while the reply is still streaming", async () => {
@@ -284,14 +284,51 @@ describe("MessageList reply actions", () => {
 		expect(host.querySelector(".piem-chat__message-actions")).toBeNull();
 	});
 
-	it("reports the message index so the retry re-asks the right question", async () => {
+	it("reports the message index so the regeneration re-asks the right question", async () => {
 		const retried: number[] = [];
 		const host = renderMessages([userMessage("q"), assistantMessage("a")], { onRetry: (index) => retried.push(index) });
 		await flushRender();
 
-		host.querySelector<HTMLButtonElement>('[aria-label="Ask again"]')?.click();
+		host.querySelector<HTMLButtonElement>('[aria-label="Regenerate reply"]')?.click();
 		await flushRender();
 		expect(retried).toEqual([1]);
+	});
+
+	it("offers regenerate on the newest reply only, since rewinding an older one discards the turns after it", async () => {
+		const host = renderMessages(
+			[userMessage("q1"), assistantMessage("a1"), userMessage("q2"), assistantMessage("a2")],
+			{ onRetry: () => undefined },
+		);
+		await flushRender();
+
+		// One button, and it is the one attached to the last reply — not merely
+		// inert on the earlier one. An older reply that only ignored the click
+		// would still invite it.
+		const buttons = Array.from(host.querySelectorAll<HTMLButtonElement>('[aria-label="Regenerate reply"]'));
+		expect(buttons).toHaveLength(1);
+		const replies = Array.from(host.querySelectorAll(".piem-chat__message--assistant"));
+		expect(replies).toHaveLength(2);
+		expect(replies[1]?.contains(buttons[0] ?? null)).toBe(true);
+	});
+
+	it("keeps regenerate on a reply that trailing tool output follows, which is the turn worth retrying", async () => {
+		// A failed tool call settles the turn with its result last. Anchoring on
+		// the final entry would hide the action exactly when the reply is broken.
+		const host = renderMessages([userMessage("q"), assistantMessage("a"), toolResult({ ok: false })], {
+			onRetry: () => undefined,
+		});
+		await flushRender();
+
+		expect(host.querySelectorAll('[aria-label="Regenerate reply"]')).toHaveLength(1);
+	});
+
+	it("withdraws regenerate once a newer question is unanswered, which rewinding would discard", async () => {
+		const host = renderMessages([userMessage("q1"), assistantMessage("a1"), userMessage("q2")], {
+			onRetry: () => undefined,
+		});
+		await flushRender();
+
+		expect(host.querySelectorAll('[aria-label="Regenerate reply"]')).toHaveLength(0);
 	});
 });
 

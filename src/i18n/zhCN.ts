@@ -102,7 +102,7 @@ export const zhCN: DeepPartial<EnCopy> = {
 		copy: "复制回复",
 		insert: "在光标处插入",
 		append: "追加到笔记",
-		askAgain: "再次询问",
+		regenerate: "重新回答",
 		couldNotCopy: "无法复制到剪贴板。",
 		needOpenNoteToInsert: "打开一个笔记以插入此回复。",
 		needOpenNoteToAppend: "打开一个笔记以追加此回复。",
