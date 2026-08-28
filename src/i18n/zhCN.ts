@@ -98,6 +98,16 @@ export const zhCN: DeepPartial<EnCopy> = {
 		meterNoCompaction: "提供方报告的上下文占用。自动整理已关闭，占满前请使用「整理较早的消息」命令。",
 	},
 
+	contextRow: {
+		rowAria: "共享给 Piem 的笔记",
+		followActive: "跟随当前笔记",
+		openFollowed: "打开 {path}，自动跟随中",
+		openPinned: "打开 {path}，已固定",
+		pinToChat: "把 {name} 固定到此对话",
+		stopFollowing: "停止跟随当前笔记",
+		removeFromContext: "从上下文中移除 {name}",
+	},
+
 	replyActions: {
 		label: "回复操作",
 		copy: "复制回复",

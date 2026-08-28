@@ -126,6 +126,36 @@ export const en = {
 			"Context use reported by the provider. Automatic tidying is off, so use the Tidy up earlier messages command before it fills.",
 	},
 
+	/**
+	 * The chip row above the composer, naming what the next turn will be told about.
+	 *
+	 * Every leaf here is an accessible name and nothing else. Visually a chip
+	 * carries a file name plus a dashed-or-solid border; the rest of what it means
+	 * — which of the two kinds it is, and what its controls will do — exists only
+	 * in these strings, because the icons are `aria-hidden`. Leaving them in
+	 * English did not degrade the row for a Chinese screen reader user, it removed
+	 * the row's only information channel.
+	 */
+	contextRow: {
+		rowAria: "Notes shared with Piem",
+		followActive: "Follow the active note",
+		/**
+		 * Two leaves rather than one template with the kind substituted in. The
+		 * kind word has to agree with the sentence around it, and a language that
+		 * inflects could not fix that from a shared template.
+		 */
+		openFollowed: "Open {path}, followed automatically",
+		openPinned: "Open {path}, pinned",
+		pinToChat: "Pin {name} to this chat",
+		/**
+		 * Names the behaviour, not the note. Dismissing the followed chip turns
+		 * following off; "remove this note" would promise something the control
+		 * cannot deliver, since opening another file would bring it straight back.
+		 */
+		stopFollowing: "Stop following the active note",
+		removeFromContext: "Remove {name} from context",
+	},
+
 	/** Reply action buttons and their failure notices. */
 	replyActions: {
 		label: "Reply actions",
