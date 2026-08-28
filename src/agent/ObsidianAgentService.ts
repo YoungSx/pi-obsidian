@@ -13,6 +13,7 @@ import {
 import { createObsidianModels, withRequestDefaults, type ObsidianModelsBundle } from "../net/streamFn";
 import { compactIfNeeded, needsCompaction, type CompactResult } from "./compaction";
 import { measureContextFill, sumUsage, type ContextFill, type UsageTotals } from "./usage";
+import { resolveCompactionSettings, type CompactionSettings } from "./compactionSettings";
 import { createObsidianTools } from "../tools/obsidianTools";
 import {
 	describeModelTarget,
@@ -536,6 +537,9 @@ export class ObsidianAgentService {
 		const agent = this.agent;
 		const messages = agent?.state.messages ?? [];
 		const model = getSelectedModel(settings);
+		// Falls back to the selected model so the indicator exists before the agent
+		// is built; the window is a static field of the model spec.
+		const contextWindow = agent?.state.model.contextWindow ?? model.contextWindow;
 		return {
 			messages,
 			streamingMessage: agent?.state.streamingMessage,
@@ -554,12 +558,7 @@ export class ObsidianAgentService {
 			session: this.sessionInfo,
 			sessionRevision: this.sessionRevision,
 			usage: sumUsage(messages, this.compactionUsage),
-			contextFill: measureContextFill(
-				messages,
-				// Falls back to the selected model so the indicator exists before the
-				// agent is built; the window is a static field of the model spec.
-				agent?.state.model.contextWindow ?? getSelectedModel(settings).contextWindow,
-			),
+			contextFill: measureContextFill(messages, contextWindow, this.resolveCompaction(contextWindow)),
 			isCompacting: this.isCompacting,
 			isConfigured: this.hasApiKey(),
 			showAgentDetails: settings.showAgentDetails,
@@ -905,12 +904,16 @@ export class ObsidianAgentService {
 	}
 
 	private async performCompaction(agent: Agent, signal: AbortSignal, force: boolean): Promise<boolean> {
+		const model = getSelectedModel(this.getSettings());
 		const outcome = await compactIfNeeded({
 			messages: agent.state.messages,
-			model: getSelectedModel(this.getSettings()),
+			model,
 			models: withRequestDefaults(this.requireModelsBundle(), (provider) => this.getApiKey(provider)),
 			thinkingLevel: agent.state.thinkingLevel,
 			previous: this.lastCompaction,
+			// The same resolved settings the context meter reads, so the bar and the
+			// trigger cannot disagree about where the line is.
+			settings: this.resolveCompaction(agent.state.model.contextWindow ?? model.contextWindow),
 			signal,
 			force,
 		});
@@ -949,6 +952,18 @@ export class ObsidianAgentService {
 		this.refreshSessionInfo();
 		this.notify();
 		return true;
+	}
+
+	/**
+	 * Compaction settings for one context window.
+	 *
+	 * The single place the user's configuration is turned into what pi acts on.
+	 * Both readers go through it — the meter in {@link getSnapshot} and the
+	 * trigger in {@link performCompaction} — because a second resolution site is
+	 * how the bar and the threshold drift apart.
+	 */
+	private resolveCompaction(contextWindow: number): CompactionSettings {
+		return resolveCompactionSettings(this.getSettings().compaction, contextWindow);
 	}
 
 	private requireModelsBundle(): ObsidianModelsBundle {

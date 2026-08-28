@@ -109,6 +109,15 @@ export const en = {
 		reasoning: "Reasoning",
 		meterHeuristic: "Estimated from message sizes; updates after the first reply.",
 		meterMeasured: "Context use reported by the provider. Compaction starts near {percent}%.",
+		/**
+		 * Tooltip when automatic compaction is switched off.
+		 *
+		 * Separate from {@link meterMeasured} because that string names a threshold,
+		 * and naming a threshold nothing acts on is the one claim this tooltip must
+		 * not make. Points at the manual command instead, which is what is left.
+		 */
+		meterNoCompaction:
+			"Context use reported by the provider. Automatic tidying is off, so use the Tidy up earlier messages command before it fills.",
 	},
 
 	/** Reply action buttons and their failure notices. */

@@ -1,6 +1,6 @@
 import { calculateContextTokens, estimateContextTokens, type AgentMessage } from "@earendil-works/pi-agent-core";
 import type { Usage } from "@earendil-works/pi-ai";
-import { DEFAULT_COMPACTION_SETTINGS } from "./compaction";
+import type { CompactionSettings } from "./compactionSettings";
 
 /** Token and cost totals for a conversation. */
 export interface UsageTotals {
@@ -66,10 +66,16 @@ export interface ContextFill {
 	ratio: number;
 	/**
 	 * Occupancy fraction at which automatic compaction fires
-	 * (`window - reserveTokens`, from {@link DEFAULT_COMPACTION_SETTINGS}), so
-	 * the indicator can colour itself against the same line pi acts on.
+	 * (`window - reserveTokens`, from the resolved {@link CompactionSettings}),
+	 * so the indicator can colour itself against the same line pi acts on.
 	 */
 	compactionRatio: number;
+	/**
+	 * False when the user turned automatic compaction off, so the meter can stop
+	 * promising a threshold that will never fire. The bar still fills — the
+	 * context still runs out — but nothing steps in at the line.
+	 */
+	compactionEnabled: boolean;
 	/**
 	 * True while no assistant turn has reported usage, meaning {@link tokens}
 	 * is a per-character heuristic rather than a provider-measured figure and
@@ -87,15 +93,20 @@ export interface ContextFill {
  * `shouldCompact` exactly (`contextWindow - reserveTokens`) — deriving the
  * display's warning colour from anything else would disagree with what actually
  * triggers compaction.
+ *
+ * `settings` is required rather than defaulted: the caller resolves it from the
+ * user's configuration, and a default here would let a caller that forgot to
+ * pass it draw a threshold the compaction path does not use.
  */
-export function measureContextFill(messages: AgentMessage[], contextWindow: number): ContextFill {
+export function measureContextFill(messages: AgentMessage[], contextWindow: number, settings: CompactionSettings): ContextFill {
 	const estimate = estimateContextTokens(messages);
-	const usable = Math.max(contextWindow - DEFAULT_COMPACTION_SETTINGS.reserveTokens, 1);
+	const usable = Math.max(contextWindow - settings.reserveTokens, 1);
 	return {
 		tokens: estimate.tokens,
 		contextWindow,
 		ratio: estimate.tokens / contextWindow,
 		compactionRatio: usable / contextWindow,
+		compactionEnabled: settings.enabled,
 		heuristicOnly: estimate.lastUsageIndex === null,
 	};
 }

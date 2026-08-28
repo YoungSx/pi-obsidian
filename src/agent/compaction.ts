@@ -1,18 +1,17 @@
 import {
 	compact,
 	createCompactionSummaryMessage,
-	DEFAULT_COMPACTION_SETTINGS,
 	estimateContextTokens,
 	prepareCompaction,
 	shouldCompact,
 	type AgentMessage,
-	type CompactionSettings,
 	type CompactResult,
 	type Entry,
 	type MessageEntry,
 	type ThinkingLevel,
 } from "@earendil-works/pi-agent-core";
 import type { Api, Model, Models, RetryPolicy } from "@earendil-works/pi-ai";
+import { DEFAULT_COMPACTION_SETTINGS, type CompactionSettings } from "./compactionSettings";
 
 export { DEFAULT_COMPACTION_SETTINGS, type CompactionSettings, type CompactResult };
 
@@ -49,6 +48,11 @@ export interface CompactionRequest {
 	thinkingLevel: ThinkingLevel;
 	/** Result of the previous compaction, so summaries are updated instead of rebuilt. */
 	previous?: CompactResult;
+	/**
+	 * Resolved compaction configuration. Optional so the tests that only
+	 * exercise the wrapper's plumbing need not build one; every production
+	 * caller passes the same resolved settings the context meter reads.
+	 */
 	settings?: CompactionSettings;
 	signal?: AbortSignal;
 	/** Retry budget for the summarization request; {@link DEFAULT_COMPACTION_RETRY} when unset. */
