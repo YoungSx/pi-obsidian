@@ -1,9 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
-import type { App } from "obsidian";
+import type { App, Component } from "obsidian";
 import { flushRender, installDom } from "../testing/dom";
 import { installObsidianStub } from "../testing/obsidianStub";
 import type { ChatSnapshot } from "../agent/ObsidianAgentService";
 import type { ContextFill, UsageTotals } from "../agent/usage";
+import type { UserMessage } from "@earendil-works/pi-ai";
 
 installObsidianStub();
 const document = installDom();
@@ -11,6 +12,7 @@ const document = installDom();
 // Dynamic imports so the mocked `obsidian` module wins over any cached real one.
 const { ChatComposer } = await import("./ChatComposer");
 const { ChatHeader } = await import("./ChatHeader");
+const { MessageList } = await import("./MessageList");
 const { createRoot: createRootImpl } = await import("react-dom/client");
 
 let createRootSync: typeof createRootImpl;
@@ -25,6 +27,7 @@ let createRootSync: typeof createRootImpl;
  */
 
 const app = {} as App;
+const component = {} as Component;
 
 async function renderHeader(snapshot: ChatSnapshot): Promise<HTMLElement> {
 	const host = document.createElement("div");
@@ -41,6 +44,18 @@ async function renderHeader(snapshot: ChatSnapshot): Promise<HTMLElement> {
 			onRenameSession={() => undefined}
 			onDeleteSession={() => undefined}
 		/>,
+	);
+	await flushRender();
+	return host;
+}
+
+async function renderTranscript(overrides: Partial<Parameters<typeof MessageList>[0]> = {}): Promise<HTMLElement> {
+	const host = document.createElement("div");
+	document.body.appendChild(host);
+	const root = roots.get(host) ?? createRootSync(host);
+	roots.set(host, root);
+	root.render(
+		<MessageList messages={[]} isStreaming={false} pendingToolCalls={[]} app={app} component={component} sourcePath="" {...overrides} />,
 	);
 	await flushRender();
 	return host;
@@ -205,6 +220,64 @@ describe("ChatComposer accessibility", () => {
 		expect(host.querySelector(".piem-chat__composer-hint")).toBeNull();
 	});
 });
+
+describe("transcript keyboard bypass", () => {
+	beforeEach(() => {
+		createRootSync = createRootImpl;
+		document.body.replaceChildren();
+	});
+
+	afterEach(() => {
+		document.body.replaceChildren();
+	});
+
+	it("offers a way past the transcript, since a long one buries the composer", async () => {
+		const host = await renderTranscript({ messages: [userMessage("q")], composerAnchorId: "composer-1" });
+
+		const skip = host.querySelector(".piem-chat__skip-link");
+		expect(skip?.getAttribute("href")).toBe("#composer-1");
+		expect(skip?.textContent).toBe("Skip to message box");
+		// Ahead of the log it skips, or Tab would reach it only after the tab stops
+		// it exists to bypass.
+		const log = host.querySelector(".piem-chat__messages")!;
+		expect(skip!.compareDocumentPosition(log) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+	});
+
+	it("omits it when there is nothing to skip", async () => {
+		const host = await renderTranscript({ messages: [], composerAnchorId: "composer-1" });
+
+		expect(host.querySelector(".piem-chat__skip-link")).toBeNull();
+	});
+
+	it("omits it before the composer has reported an anchor, rather than linking nowhere", async () => {
+		const host = await renderTranscript({ messages: [userMessage("q")] });
+
+		expect(host.querySelector(".piem-chat__skip-link")).toBeNull();
+	});
+
+	it("lands focus on the composer, not merely scrolls to it", async () => {
+		// The `href` alone would scroll the target into view without focusing it,
+		// which leaves a keyboard user exactly where they were — looking at the box
+		// they asked to be moved to, still tabbing through the transcript.
+		const transcript = await renderTranscript({ messages: [userMessage("q")], composerAnchorId: "composer-focus-target" });
+		const composerHost = document.createElement("div");
+		document.body.appendChild(composerHost);
+		const textarea = document.createElement("textarea");
+		textarea.id = "composer-focus-target";
+		composerHost.appendChild(textarea);
+
+		const skip = transcript.querySelector<HTMLAnchorElement>(".piem-chat__skip-link")!;
+		skip.click();
+		await flushRender();
+
+		expect(document.activeElement).toBe(textarea);
+	});
+});
+
+/** Shaped like the helper in `MessageList.test.tsx`, so both files model a turn the same way. */
+function userMessage(text: string): UserMessage {
+	return { role: "user", content: text, timestamp: Date.now() };
+}
 
 function snapshot(overrides: Partial<ChatSnapshot> = {}): ChatSnapshot {
 	return {

@@ -35,6 +35,10 @@ export function ChatApp({ service, inputController, component, draftStore }: Cha
 	const [isInitializing, setIsInitializing] = useState(true);
 	const [initializationError, setInitializationError] = useState<string>();
 	const [dismissedInitError, setDismissedInitError] = useState(false);
+	// Reported upward by the composer, then handed to the transcript so its skip
+	// link has something to point at. It travels through state rather than a ref
+	// because the link only renders once the id exists.
+	const [composerAnchorId, setComposerAnchorId] = useState<string>();
 	const sendPromptRef = useRef<() => void>(() => undefined);
 	// Read inside the prefill handler, which is registered once and must not
 	// re-register on every keystroke just to see the current draft.
@@ -109,6 +113,8 @@ export function ChatApp({ service, inputController, component, draftStore }: Cha
 		void sendPrompt();
 	};
 
+	const handleAnchorIdChange = useCallback((id: string) => setComposerAnchorId(id), []);
+
 	const handleFocusRequested = useCallback(
 		(focus: (() => void) | null) => {
 			inputController?.setFocusHandler(focus);
@@ -180,6 +186,7 @@ export function ChatApp({ service, inputController, component, draftStore }: Cha
 					app={app}
 					component={component}
 					sourcePath={sourcePath}
+					composerAnchorId={composerAnchorId}
 				/>
 
 				<ChatComposer
@@ -193,6 +200,7 @@ export function ChatApp({ service, inputController, component, draftStore }: Cha
 					onSend={() => void sendPrompt()}
 					onAbort={() => service.abort()}
 					onFocusRequested={handleFocusRequested}
+					onAnchorIdChange={handleAnchorIdChange}
 					contextRow={
 						<ContextRow
 							refs={snapshot.contextRefs}

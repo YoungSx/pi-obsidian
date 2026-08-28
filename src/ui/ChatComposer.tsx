@@ -1,4 +1,4 @@
-import React, { useEffect, useRef } from "react";
+import React, { useEffect, useId, useRef } from "react";
 import { Platform } from "obsidian";
 import { IconButton } from "./ObsidianIcon";
 import { sendHintText, transientStatusText } from "./composerStatus";
@@ -28,6 +28,12 @@ interface ChatComposerProps {
 	/** Receives the textarea focus function, so commands outside React can focus it. */
 	onFocusRequested?: (focus: (() => void) | null) => void;
 	/**
+	 * Receives the textarea's element id, so a skip link outside this component can
+	 * point at it. Generated here rather than passed in because the textarea is
+	 * what the id belongs to; the panel only forwards it.
+	 */
+	onAnchorIdChange?: (id: string) => void;
+	/**
 	 * The context chip row, rendered inside the composer shell above the textarea.
 	 *
 	 * Passed in rather than built here so this component keeps knowing only about
@@ -48,12 +54,17 @@ export function ChatComposer({
 	onSend,
 	onAbort,
 	onFocusRequested,
+	onAnchorIdChange,
 	contextRow,
 }: ChatComposerProps): React.JSX.Element {
 	const t = useT();
 	const textareaRef = useRef<HTMLTextAreaElement | null>(null);
 	const onSendRef = useRef<() => void>(onSend);
 	const isBusy = isStreaming || isCompacting;
+	// Per-instance rather than a constant: Obsidian allows several leaves of one
+	// view type, so two open chat panels would otherwise share one id and the
+	// skip link in each would jump to whichever mounted first.
+	const anchorId = useId();
 	const statusInput = { isInitializing, isCompacting, isStreaming, showAgentDetails, isMac: Platform.isMacOS };
 
 	onSendRef.current = onSend;
@@ -99,6 +110,10 @@ export function ChatComposer({
 		};
 	}, [onFocusRequested]);
 
+	useEffect(() => {
+		onAnchorIdChange?.(anchorId);
+	}, [onAnchorIdChange, anchorId]);
+
 	const handleKeyDown = (event: React.KeyboardEvent<HTMLTextAreaElement>): void => {
 		if (!isSendShortcut(event)) {
 			return;
@@ -114,6 +129,7 @@ export function ChatComposer({
 				{contextRow}
 				<textarea
 					ref={textareaRef}
+					id={anchorId}
 					value={input}
 					onChange={(event) => onInputChange(event.currentTarget.value)}
 					onKeyDown={handleKeyDown}
