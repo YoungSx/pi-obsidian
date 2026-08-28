@@ -657,6 +657,175 @@ describe("ObsidianAgentService", () => {
 		expect(snapshot.isFollowingActiveNote).toBe(true);
 		expect(snapshot.contextRefs).toEqual([{ kind: "active", path: "Notes/today.md", isPinned: false }]);
 	});
+
+	describe("mid-run compaction", () => {
+		const WINDOW = 1_000_000;
+		const RESERVE = 16_384;
+		const THRESHOLD = WINDOW - RESERVE;
+
+		async function runMidRunService(
+			totals: number[],
+			options: {
+				requestUrl?: () => Promise<string | { status: number; headers: Record<string, string>; arrayBuffer: ArrayBuffer }>;
+			} = {},
+		) {
+			requestUrlMock.mockClear();
+			const { streamFn, requests } = createRecordingToolCallingStreamFn(totals);
+			const service = createService(new MemoryAdapter(), { streamFn });
+			const snapshots = [service.getSnapshot()];
+			service.subscribe((snapshot) => snapshots.push(snapshot));
+			// The summarization request goes through requestUrl; turns go through
+			// the injected streamFn. A custom responder keeps some tests in flight
+			// until the test cancels.
+			requestUrlMock.mockImplementation(
+				options.requestUrl ?? (async () => sseResponse([summaryChunk("MID-RUN SUMMARY"), usageChunk()])),
+			);
+			await service.sendPrompt("Read the vault");
+			return { service, requests, snapshots };
+		}
+
+		it("T1: compacts before the next request and the summary reaches it", async () => {
+			const { service, requests, snapshots } = await runMidRunService([THRESHOLD + 1_000, 1_010]);
+
+			expect(requests.length).toBe(2);
+			expect(requests[0]?.messages[0]?.role).not.toBe("compactionSummary");
+			expect(requests[1]?.messages[0]?.role).toBe("user");
+			expect(JSON.stringify(requests[1]?.messages[0])).toContain("MID-RUN SUMMARY");
+			expect(service.getSnapshot().messages[0]?.role).toBe("compactionSummary");
+			const last = snapshots[snapshots.length - 1];
+			expect(last?.isStreaming).toBe(false);
+			expect(last?.errorMessage).toBeUndefined();
+		});
+
+		it("T2: does not compact when usage stays under the threshold", async () => {
+			const { service, requests, snapshots } = await runMidRunService([1_010, 1_010]);
+
+			expect(requests.length).toBe(2);
+			// The pre-prompt compaction has always raised `isCompacting` for an
+			// instant before `compactIfNeeded` can skip; that is not the flash this
+			// gate exists to prevent. What must never happen is the banner appearing
+			// at a turn boundary *while the run streams*.
+			expect(snapshots.some((s) => s.isCompacting && s.isStreaming)).toBe(false);
+			expect(requestUrlMock).not.toHaveBeenCalled();
+			expect(service.getSnapshot().messages[0]?.role).not.toBe("compactionSummary");
+		});
+
+		it("T3: raises the flag while the run is still streaming", async () => {
+			const { snapshots } = await runMidRunService([THRESHOLD + 1_000, 1_010]);
+
+			expect(snapshots.some((s) => s.isCompacting && s.isStreaming)).toBe(true);
+			const last = snapshots[snapshots.length - 1];
+			expect(last?.isCompacting).toBe(false);
+			expect(last?.isStreaming).toBe(false);
+		});
+		it("T4: a failed compaction does not kill the run", async () => {
+			// 401 matches none of pi-ai's retryable patterns, so the summarization
+			// request fails on the first attempt instead of backing off for seconds.
+			const { requests, snapshots } = await runMidRunService([THRESHOLD + 1_000, 1_010], {
+				requestUrl: async () => ({ status: 401, headers: {}, arrayBuffer: new ArrayBuffer(0) }),
+			});
+
+			expect(requests.length).toBe(2);
+			expect(JSON.stringify(requests[1]?.messages[0])).not.toContain("MID-RUN SUMMARY");
+			const last = snapshots[snapshots.length - 1];
+			expect(last?.errorMessage).toContain("Could not compact the conversation");
+			// The run still settled with its own reply, and the log has no summary
+			// to replay: a failed compaction must leave the session untouched.
+			expect(last?.messages.at(-1)?.role).toBe("assistant");
+			expect(JSON.stringify(last?.messages)).not.toContain("compactionSummary");
+		});
+
+		it("T5: the compaction entry lands after the turn it summarizes and reloads consistently", async () => {
+			const adapter = new MemoryAdapter();
+			requestUrlMock.mockClear();
+			const { streamFn, requests } = createRecordingToolCallingStreamFn([THRESHOLD + 1_000, 1_010]);
+			const service = createService(adapter, { streamFn });
+			requestUrlMock.mockImplementation(async () => sseResponse([summaryChunk("MID-RUN SUMMARY"), usageChunk()]));
+			await service.sendPrompt("Read the vault");
+
+			const live = service.getSnapshot().messages;
+			expect(live[0]?.role).toBe("compactionSummary");
+
+			// The log must carry exactly one compaction entry, parented on the last
+			// message entry before it — the tool result the boundary sat behind.
+			// Appending from the turn_end subscription without awaiting the persist
+			// would parent it on the assistant entry instead, and a reload would
+			// then replay the tool result twice: once from retainedTail, once as its
+			// own entry.
+			const sessionPath = (await service.listSessions())[0]?.path ?? "";
+			const entries = (await adapter.read(sessionPath))
+				.split("\n")
+				.filter((line) => line.trim() !== "")
+				.map((line) => JSON.parse(line) as { type: string; id?: string; parentId?: string });
+			const compaction = entries.filter((e: { type: string }) => e.type === "compaction");
+			expect(compaction).toHaveLength(1);
+			const entryIndex = entries.findIndex((e: { type: string }) => e.type === "compaction");
+			const precedingMessageIds = entries
+				.slice(0, entryIndex)
+				.filter((e: { type: string }) => e.type === "message")
+				.map((e) => e.id ?? "");
+			expect(compaction[0]?.parentId).toBe(precedingMessageIds.at(-1));
+
+			// Reload in a fresh service: the replayed transcript must equal the
+			// live one — same length, summary first.
+			const reloaded = createService(adapter);
+			await reloaded.openSession((await service.listSessions())[0]?.path ?? "");
+			const replayed = reloaded.getSnapshot().messages;
+			expect(replayed[0]?.role).toBe("compactionSummary");
+			expect(replayed).toHaveLength(live.length);
+			expect(requests.length).toBe(2);
+		});
+
+		it("T6: stopping mid-compaction does not report a compaction failure", async () => {
+			// Gate the summarization request so the compaction is provably in
+			// flight when the stop lands. The service must be held directly rather
+			// than through the helper, because the run cannot settle until the
+			// gate opens and the test must press stop while it is in flight.
+			let release: (() => void) | undefined;
+			let sawCompacting = false;
+			const gated = (): Promise<never> =>
+				new Promise((_, reject) => {
+					// AbortError is terminal: pi-ai never retries it, so the rejection
+					// settles the compaction on the first attempt instead of backing
+					// off through the retry ladder.
+					release = () => reject(new DOMException("The request was aborted.", "AbortError"));
+				});
+			requestUrlMock.mockClear();
+			const { streamFn } = createRecordingToolCallingStreamFn([THRESHOLD + 1_000, 1_010]);
+			const service = createService(new MemoryAdapter(), { streamFn });
+			const snapshots = [service.getSnapshot()];
+			service.subscribe((snapshot) => snapshots.push(snapshot));
+			requestUrlMock.mockImplementation(gated);
+			const settledPrompt = service.sendPrompt("Read the vault");
+
+			// Wait until the compaction is in flight, then press stop.
+			for (let i = 0; i < 200 && !sawCompacting; i += 1) {
+				sawCompacting = service.getSnapshot().isCompacting;
+				if (!sawCompacting) {
+					await new Promise((r) => setTimeout(r, 5));
+				}
+			}
+			expect(sawCompacting).toBe(true);
+
+			// The gated mock pays no attention to its signal; release it and let
+			// the service's own abort path drive the outcome.
+			release?.();
+			service.abort();
+			await settledPrompt;
+
+			// A user who pressed stop is told the run stopped; the aborted
+			// compaction must not surface as "Could not compact the conversation".
+			const last = snapshots[snapshots.length - 1];
+			expect(last?.isCompacting).toBe(false);
+			expect(last?.isStreaming).toBe(false);
+			expect(last?.errorMessage ?? "").not.toContain("Could not compact");
+			// The hook returns `undefined` on cancel, leaving pi's loop in charge:
+			// it keeps going until a streaming call observes the aborted signal and
+			// settles the run with stopReason "aborted". The summary must not have
+			// been applied either way.
+			expect(service.getSnapshot().messages[0]?.role).not.toBe("compactionSummary");
+		});
+	});
 });
 
 /** Wraps SSE frames in the buffered body Obsidian's `requestUrl` returns. */
@@ -800,6 +969,66 @@ function createCapturingStreamFn(contexts: Context[]): StreamFn {
 	};
 }
 
+/**
+ * Streams one tool call and then a plain reply, recording each request's context
+ * and reporting the given context totals.
+ *
+ * The first total is what makes the between-turns threshold fire:
+ * `estimateContextTokens` trusts the newest assistant usage, so one reported
+ * total near the window crosses `shouldCompact` deterministically — the trick
+ * `compaction.test.ts`'s `buildOverflowingHistory` already uses. Turns never
+ * reach `requestUrl` because the stream function is injected; the summarization
+ * request does, which is the separation these tests assert on.
+ */
+function createRecordingToolCallingStreamFn(
+	totals: number[],
+	toolName = "ls",
+): { streamFn: StreamFn; requests: Context[] } {
+	const requests: Context[] = [];
+	let call = 0;
+	const streamFn: StreamFn = (model: Model<Api>, context: Context, _options?: SimpleStreamOptions) => {
+		requests.push({ ...context, messages: [...context.messages] });
+		const total = totals[call] ?? totals[totals.length - 1] ?? 1_010;
+		const isFirst = call === 0;
+		call += 1;
+		const stream = createAssistantMessageEventStream();
+		const base = {
+			role: "assistant" as const,
+			api: model.api,
+			provider: model.provider,
+			model: model.id,
+			usage: {
+				input: total - 10,
+				output: 10,
+				cacheRead: 0,
+				cacheWrite: 0,
+				totalTokens: total,
+				cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+			},
+			timestamp: Date.now(),
+		};
+
+		if (isFirst) {
+			const message: AssistantMessage = {
+				...base,
+				// The arguments must actually succeed: `shouldStopAfterTurn` ends the run
+				// after a failed tool result, which would swallow the second request
+				// these tests are about. `""` normalizes to the vault root.
+				content: [{ type: "toolCall", id: "call-1", name: toolName, arguments: { path: "" } }],
+				stopReason: "toolUse",
+			};
+			stream.push({ type: "done", reason: "toolUse", message });
+			stream.end(message);
+			return stream;
+		}
+		const message: AssistantMessage = { ...base, content: [{ type: "text", text: "Done" }], stopReason: "stop" };
+		stream.push({ type: "done", reason: "stop", message });
+		stream.end(message);
+		return stream;
+	};
+	return { streamFn, requests };
+}
+
 function createFakeApp(adapter: DataAdapter): App {
 	return {
 		vault: {
@@ -825,3 +1054,4 @@ function getParent(path: string): string {
 	const index = path.lastIndexOf("/");
 	return index === -1 ? "" : path.slice(0, index);
 }
+
