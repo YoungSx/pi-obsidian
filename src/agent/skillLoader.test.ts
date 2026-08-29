@@ -126,6 +126,18 @@ describe("skill lookup and invocation", () => {
 		expect(findSkill(merged, "summarize")).toBe(vault);
 	});
 
+	it("resolves three layers with later layers outranking earlier ones", () => {
+		// User-level sits between builtins and vault: it shadows a builtin yet
+		// still loses to a vault skill that claims the same command.
+		const user = { name: "summarize", description: "User", content: "User body", filePath: "~/.pi/agent/skills/summarize/SKILL.md" };
+		const userOnly = { name: "portable", description: "User-only", content: "Portable body", filePath: "~/.pi/agent/skills/portable/SKILL.md" };
+
+		const merged = mergeSkills([builtin], [user, userOnly], [vault, extra]);
+
+		expect(merged.map((skill) => skill.name)).toEqual(["portable", "summarize", "custom"]);
+		expect(findSkill(merged, "summarize")).toBe(vault);
+	});
+
 	it("uses pi's complete skill block and appends extra instructions verbatim", () => {
 		const invocation = expandSkill(vault, 'Focus on decisions "since Monday".');
 

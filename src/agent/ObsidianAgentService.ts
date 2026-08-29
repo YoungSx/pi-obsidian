@@ -36,6 +36,7 @@ import { injectContext, type InjectedNote } from "./contextInjection";
 import { ContextRefs, type ContextRef } from "./contextRefs";
 import { OBSIDIAN_AGENT_SYSTEM_PROMPT } from "./systemPrompt";
 import { composeSystemPrompt, expandSkill, findSkill, formatSkillDiagnostics, loadVaultSkills, mergeSkills } from "./skillLoader";
+import { loadUserSkills } from "../skills/userSkills";
 import type { Skill } from "@earendil-works/pi-agent-core";
 import { getT, resolveLanguage, type Language, type LanguageHost, type Translator } from "../i18n";
 import type { SendShortcut } from "../ui/keyboard";
@@ -1033,7 +1034,11 @@ export class ObsidianAgentService {
 	 */
 	private async reloadSkills(): Promise<void> {
 		const { skills: vaultSkills, diagnostics } = await loadVaultSkills(this.env);
-		const skills = mergeSkills(createBuiltinSkills(this.t()), vaultSkills);
+		// User-level skills ride between builtins and vault: pi itself reads
+		// those directories, so a vault inherits them by default, but a vault
+		// skill of the same name still wins and a user can opt out entirely.
+		const userSkills = this.getSettings().skillsInheritUser ? (await loadUserSkills()).skills : [];
+		const skills = mergeSkills(createBuiltinSkills(this.t()), userSkills, vaultSkills);
 		this.skills = skills;
 		const problems = formatSkillDiagnostics(diagnostics);
 		if (problems) {

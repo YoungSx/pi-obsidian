@@ -37,14 +37,41 @@ export async function loadVaultSkills(
 }
 
 /**
- * Combines bundled defaults with vault-authored skills.
+ * Combines skill layers, the last layer winning per name.
  *
- * A user file with the same name replaces the builtin instead of creating two
- * ambiguous commands. Other vault skills follow the bundled set in load order.
+ * Layers are passed in ascending precedence — builtins, then user-level, then
+ * vault — so a user file can replace a builtin and a vault skill can replace
+ * either. This keeps the two-layer contract the plugin already had (vault
+ * beats builtin) and slots user-level between them. The winner is emitted at
+ * its own layer's position, matching the old behavior where a vault skill that
+ * overrode a builtin appeared with the vault set; skills with fresh names keep
+ * layer order, so the prompt listing stays stable as layers are added.
  */
-export function mergeSkills(builtins: Skill[], vaultSkills: Skill[]): Skill[] {
-	const vaultNames = new Set(vaultSkills.map((skill) => skill.name));
-	return [...builtins.filter((skill) => !vaultNames.has(skill.name)), ...vaultSkills];
+export function mergeSkills(...layers: Skill[][]): Skill[] {
+	const emitted = new Set<string>();
+	const merged: Skill[] = [];
+	for (let i = 0; i < layers.length; i++) {
+		const layer = layers[i];
+		if (!layer) {
+			continue;
+		}
+		// Names any later layer claims: this layer's copies are shadowed.
+		const overridden = new Set<string>();
+		for (let j = i + 1; j < layers.length; j++) {
+			const later = layers[j] ?? [];
+			for (const skill of later) {
+				overridden.add(skill.name);
+			}
+		}
+		for (const skill of layer) {
+			if (overridden.has(skill.name) || emitted.has(skill.name)) {
+				continue;
+			}
+			emitted.add(skill.name);
+			merged.push(skill);
+		}
+	}
+	return merged;
 }
 
 /** Exact, case-sensitive lookup, matching prompt-template command routing. */

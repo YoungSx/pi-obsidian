@@ -1439,6 +1439,9 @@ function createServiceWithMultimodalModel(
 		language: "en",
 		sessionRetention: DEFAULT_SESSION_RETENTION,
 		sessionDir: DEFAULT_SESSION_DIR,
+		// Explicitly off: the real home directory may hold user-level skills, and
+		// a test that asserts on the composed prompt has to be hermetic.
+		skillsInheritUser: false,
 	};
 	const sessionManager = new ObsidianSessionManager(adapter, SESSION_DIR, "obsidian-vault:Test");
 	const service = new ObsidianAgentService(
