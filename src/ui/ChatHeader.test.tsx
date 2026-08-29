@@ -116,7 +116,7 @@ describe("ChatHeader vocabulary tiers", () => {
 		const host = await renderHeader(snapshot());
 
 		const labels = Array.from(host.querySelectorAll(".piem-chat__header-actions button"), (button) => button.getAttribute("aria-label"));
-		expect(labels).toEqual(["Open chats", "New chat", "More chat actions"]);
+		expect(labels).toEqual(["View chat history", "New chat", "More chat actions"]);
 	});
 });
 

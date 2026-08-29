@@ -38,7 +38,7 @@ export const zhCN: DeepPartial<EnCopy> = {
 		sendNeedsKey: "填写 API 密钥后才能发送",
 		renameChat: "重命名对话",
 		deleteChat: "删除对话",
-		openChats: "打开对话列表",
+		openChatHistory: "查看历史对话",
 		newChat: "新建对话",
 		moreActions: "更多对话操作",
 		compacting: "正在整理上下文…",

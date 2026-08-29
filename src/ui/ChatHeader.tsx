@@ -125,7 +125,7 @@ export function ChatHeader({
 			<div className="piem-chat__header-actions" role="toolbar" aria-label={t.t("chat.actionsAria")}>
 				{/* Always mounted so the button positions never shift as the vault
 				    accumulates chats; disabled until there is a second one to pick. */}
-				<IconButton icon="messages-square" label={t.t("chat.openChats")} onClick={openPicker} disabled={isBusy || sessions.length < 2} />
+				<IconButton icon="history" label={t.t("chat.openChatHistory")} onClick={openPicker} disabled={isBusy || sessions.length < 2} />
 				<IconButton icon="square-pen" label={t.t("chat.newChat")} onClick={onNewSession} disabled={isBusy} />
 				{/* Disabled only when the menu would open empty — see `openMenu`. */}
 				<IconButton
