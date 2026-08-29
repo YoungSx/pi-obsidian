@@ -1989,6 +1989,14 @@ button.piem-chat__latest {
 	 *
 	 * `display` rather than `visibility`/`opacity`: the row must actually give
 	 * its height back, or nothing above moves.
+	 *
+	 * The switch has a guard in `ChatComposer`, not here: a tap on a button
+	 * does not move focus on iOS, so the tap that opens a control in this row
+	 * would also blur the textarea and take the row with it before the click
+	 * could land. The composer cancels a non-mouse `pointerdown` inside the
+	 * shell — focus stays with the draft, and the row stays up to receive the
+	 * click. CSS cannot express "keep the focus you had", so the pairing lives
+	 * half here and half there.
 	 */
 	.piem-chat__composer-bar {
 		display: none;
