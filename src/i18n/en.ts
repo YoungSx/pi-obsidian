@@ -326,6 +326,18 @@ export const en = {
 		truncated: "The selected text was long; only its beginning was quoted.",
 	},
 
+	/** The agent's structured question dialog, behind the ask_user tool. */
+	askUser: {
+		/** Title of the modal frame; the questions themselves come from the model. */
+		title: "Piem asks",
+		/** Confirms an answer once every question has one. */
+		confirm: "Confirm",
+		/** Placeholder of the free-text input under the options. */
+		other: "Other…",
+		/** Hint under a multi-select question. */
+		multiHint: "Select one or more, then confirm.",
+	},
+
 	/** Session dialogs: titles, search, and chat actions. */
 	session: {
 		newChat: "New chat",
