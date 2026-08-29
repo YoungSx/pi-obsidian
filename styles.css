@@ -36,7 +36,31 @@
 
 /* --- shell --- */
 
+/*
+ * Also the query container for the narrow-panel rules at the bottom of this
+ * file. It has to be this element rather than `.piem-chat-view`: that class is
+ * added to Obsidian's own `.view-content`, and declaring containment on a node a
+ * theme also styles is a fight over a property neither side can see.
+ *
+ * `inline-size` containment is safe here, and provably so: `app.css` already
+ * gives the enclosing `.workspace-leaf` `contain: strict` and
+ * `isolation: isolate`, so this panel has always rendered inside a containment
+ * and stacking boundary — this declaration narrows nothing that was not narrowed
+ * already. On its own terms it makes the element's inline size independent of its
+ * contents, which it already was (the width comes from
+ * `.view-content { width: 100% }`), and makes it a containing block for
+ * absolutely positioned descendants, which changes nothing: every `absolute` in
+ * this file resolves against a nearer `position: relative` ancestor
+ * (`__transcript`, `__composer-shell`, `__pending-image`), and the file has no
+ * `position: fixed` at all.
+ *
+ * Named, so the query below cannot bind to one of Obsidian's own anonymous
+ * containers — `app.css` declares four, one of them on `.vertical-tab-content`,
+ * which is an ancestor of the settings half of this file.
+ */
 .piem-chat {
+	container-name: piem-chat;
+	container-type: inline-size;
 	display: flex;
 	flex-direction: column;
 	height: 100%;
@@ -1718,8 +1742,21 @@
  * The context readout used to need a clause here too — the bar gave up a third of
  * its width so the row still fit. The ring has no width to give up, which is one
  * breakpoint's worth of rules this stylesheet no longer carries.
+ *
+ * Keyed on the panel, not the window. As an `@media` query this measured the
+ * viewport, and this view opens in a side leaf (`getRightLeaf`): a 300px sidebar
+ * on a 1920px display never matched, so the narrow layout was unreachable on
+ * every desktop no matter how far in the reader dragged the divider. It fired
+ * only on a phone, where the sidebar is `100vw` and the two measurements
+ * coincide — which is why the threshold carries over unchanged, and why mobile
+ * renders exactly as it did.
+ *
+ * Obsidian solves the same problem the same way, in four `@container` blocks in
+ * `app.css` (`.setting-item` at 340px, metadata at 250px, bases at 320px). Its
+ * own reliance on them is also what puts the feature safely under
+ * `minAppVersion`.
  */
-@media (max-width: 32rem) {
+@container piem-chat (max-width: 32rem) {
 
 	.piem-chat__header {
 		flex-wrap: wrap;
