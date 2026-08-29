@@ -1,6 +1,5 @@
 import { anthropicProvider } from "@earendil-works/pi-ai/providers/anthropic";
 import { deepseekProvider } from "@earendil-works/pi-ai/providers/deepseek";
-import { googleProvider } from "@earendil-works/pi-ai/providers/google";
 import { groqProvider } from "@earendil-works/pi-ai/providers/groq";
 import { mistralProvider } from "@earendil-works/pi-ai/providers/mistral";
 import { moonshotaiProvider } from "@earendil-works/pi-ai/providers/moonshotai";
@@ -10,7 +9,6 @@ import { xaiProvider } from "@earendil-works/pi-ai/providers/xai";
 import { zaiProvider } from "@earendil-works/pi-ai/providers/zai";
 import { ANTHROPIC_MODELS } from "@earendil-works/pi-ai/providers/anthropic.models";
 import { DEEPSEEK_MODELS } from "@earendil-works/pi-ai/providers/deepseek.models";
-import { GOOGLE_MODELS } from "@earendil-works/pi-ai/providers/google.models";
 import { GROQ_MODELS } from "@earendil-works/pi-ai/providers/groq.models";
 import { MISTRAL_MODELS } from "@earendil-works/pi-ai/providers/mistral.models";
 import { MOONSHOTAI_MODELS } from "@earendil-works/pi-ai/providers/moonshotai.models";
@@ -42,18 +40,28 @@ import type { Model, Provider } from "@earendil-works/pi-ai";
  * an unconfigured plugin into a load-time throw.
  *
  * The two lists below must name the same providers. Shipping a catalog without
- * its factory looked tempting — Google's models are 8 KiB of data behind a
- * 270 KiB SDK — but it produces a provider whose models resolve and then fail to
- * dispatch with "Unknown provider" at send time, which is exactly the silent
- * broken configuration this trimming was meant to avoid. A provider is either
- * fully carried or absent; `catalogConsistency.test.ts` enforces that.
+ * its factory looks tempting whenever the data is cheap and the SDK is not, but
+ * it produces a provider whose models resolve and then fail to dispatch with
+ * "Unknown provider" at send time, which is exactly the silent broken
+ * configuration this trimming was meant to avoid. A provider is either fully
+ * carried or absent; `catalogConsistency.test.ts` enforces that.
+ *
+ * `google` was carried until that invariant was applied to it. Its 8 KiB of
+ * model data sat behind `@google/genai`, 270 KiB and 16% of the bundle, and the
+ * adapter behind it throws on any `fetch` that is not `globalThis.fetch` — which
+ * every request here is, because reaching Obsidian's `requestUrl` is the only
+ * way past CORS from the `app://obsidian.md` origin. Nor is
+ * `google-generative-ai` a {@link WireProtocol}, so a configured endpoint could
+ * not select it either. Both halves went. Gemini is still reachable the way it
+ * always actually worked: a user-configured endpoint on Gemini's
+ * OpenAI-compatible path (`/v1beta/openai/`) speaking `openai-completions`,
+ * which supplies its own model ids through {@link probeModelListing}.
  */
 
 /** Model catalogs, keyed the way pi-ai's own `MODELS` map is. */
 const MODELS: Record<string, Record<string, Model<string>>> = {
 	anthropic: ANTHROPIC_MODELS,
 	deepseek: DEEPSEEK_MODELS,
-	google: GOOGLE_MODELS,
 	groq: GROQ_MODELS,
 	mistral: MISTRAL_MODELS,
 	moonshotai: MOONSHOTAI_MODELS,
@@ -74,7 +82,6 @@ const MODELS: Record<string, Record<string, Model<string>>> = {
 const PROVIDER_FACTORIES: Array<() => Provider> = [
 	anthropicProvider,
 	deepseekProvider,
-	googleProvider,
 	groqProvider,
 	mistralProvider,
 	moonshotaiProvider,
