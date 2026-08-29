@@ -135,7 +135,7 @@ export function createOpenSidePanelTool(app: App): AgentTool<typeof SidePanelPar
 			throwIfAborted(signal);
 			const viewType = SIDE_PANEL_TYPES[params.panel];
 			const side = params.side ?? DEFAULT_SIDE[params.panel];
-			const leaf = app.workspace.ensureSideLeaf(viewType, side, { active: true });
+			void app.workspace.ensureSideLeaf(viewType, side, { active: true });
 			return textResult(`Opened the ${params.panel} panel on the ${side} sidebar.`, {
 				panel: params.panel,
 				side,

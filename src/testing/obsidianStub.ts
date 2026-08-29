@@ -449,7 +449,7 @@ const obsidianStub = {
 	Setting: class Setting {},
 	Notice: class Notice {
 		constructor(message: string | DocumentFragment, timeout?: number) {
-			shownNotices.push({ message: typeof message === "string" ? message : String(message), timeout });
+			shownNotices.push({ message: typeof message === "string" ? message : message.textContent ?? "", timeout });
 		}
 		setMessage(message: string): this {
 			const last = shownNotices.at(-1);
