@@ -27,6 +27,17 @@ function ruleBody(selector: string): string {
 	return body;
 }
 
+/**
+ * A rule body with its comments stripped.
+ *
+ * Every "not present" assertion below has to go through this: the rules in
+ * `styles.css` name the property they deliberately omit in order to record why,
+ * and a raw substring check reads that mention as the property itself.
+ */
+function declarations(body: string): string {
+	return body.replace(/\/\*[\s\S]*?\*\//g, "");
+}
+
 describe("icon contrast in the resting state (WCAG 1.4.11)", () => {
 	/*
 	 * `opacity` cannot express "muted" on an icon button in this codebase.
@@ -40,7 +51,7 @@ describe("icon contrast in the resting state (WCAG 1.4.11)", () => {
 		it(`mutes ${selector} with a colour token, not opacity`, () => {
 			const body = ruleBody(selector);
 
-			expect(body).not.toMatch(/(^|[^-])opacity\s*:/);
+			expect(declarations(body)).not.toMatch(/(^|[^-])opacity\s*:/);
 			expect(body).toContain("--icon-color: var(--text-muted)");
 		});
 
@@ -96,7 +107,7 @@ describe("touch targets (WCAG 2.5.5 / 2.5.8)", () => {
 		expect(rule).not.toBeNull();
 		expect(rule?.[1]).toContain("min-height: var(--size-4-12)");
 		// A min-width would stretch a labelled button and fight translateX(-50%).
-		expect(rule?.[1]).not.toContain("min-width");
+		expect(declarations(rule?.[1] ?? "")).not.toContain("min-width");
 	});
 
 	it("leaves the in-chip buttons at 32px, which is a reasoned trade-off", () => {
@@ -122,5 +133,55 @@ describe("typing dots (issue #86)", () => {
 		const body = ruleBody(".piem-chat__typing-dot");
 
 		expect(body).toContain("background: currentColor");
+	});
+});
+
+describe("transcript text selection", () => {
+	/*
+	 * Obsidian's `app.css` sets `user-select: none` on `body` and hands it back
+	 * only to its own surfaces, so a plugin view inherits `none` unless it says
+	 * otherwise. Verified over CDP against the real `app.css`: before this rule
+	 * every text block in the transcript came back unselectable and a drag
+	 * produced an empty selection; after it, all eight blocks select, a
+	 * double-click picks a word, and a sweep spanning two messages returns both.
+	 */
+	it("hands selection back to the transcript", () => {
+		const body = ruleBody(".piem-chat__messages");
+
+		expect(body).toMatch(/(^|[^-])user-select:\s*text/);
+		// Obsidian ships the prefixed form on its own selectable surfaces; the
+		// mobile app runs WKWebView builds that honour only that one.
+		expect(body).toContain("-webkit-user-select: text");
+	});
+
+	/*
+	 * Selection inherits, so the scroll container is the only place that has to
+	 * state it — and stating it there keeps a two-message sweep a single range.
+	 * Repeating it per text block would fragment that and invite drift.
+	 */
+	it("states it once on the container, not per text block", () => {
+		for (const selector of [".piem-chat__text", ".piem-chat__text--prose", ".piem-chat__markdown pre"]) {
+			expect(declarations(ruleBody(selector))).not.toContain("user-select");
+		}
+	});
+
+	/*
+	 * A declaration always beats an inherited value, so the disclosure rows keep
+	 * their own `none`: double-clicking one opens it, and selecting the label
+	 * under the cursor at the same time is not what that gesture means.
+	 */
+	it("leaves the disclosure rows drag-free", () => {
+		expect(ruleBody(".piem-chat__trace-summary")).toContain("user-select: none");
+	});
+
+	/*
+	 * Obsidian's reading view sets `user-select` alone. The transcript is a mixed
+	 * surface — prose, disclosure rows, icon buttons — so an I-beam across all of
+	 * it would misdescribe the parts that are not text.
+	 */
+	it("does not claim an I-beam over the whole surface", () => {
+		// Declarations only: the rule's own comment names `cursor: text` to record
+		// why it is absent, and a raw substring check would read that as present.
+		expect(declarations(ruleBody(".piem-chat__messages"))).not.toContain("cursor:");
 	});
 });
