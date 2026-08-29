@@ -203,6 +203,33 @@ export function ChatComposer({
 	};
 
 	/*
+	 * A touch press anywhere in the shell must not end the composing session.
+	 *
+	 * On a phone the send row only exists while the shell holds focus
+	 * (`:focus-within` in the stylesheet), and a tap on a button does not move
+	 * focus on iOS — the textarea blurs, nothing inside the shell takes focus
+	 * back, and the row collapses under the finger before the tap can land: the
+	 * tap that opens the model menu, the ring popover, or Send itself would hit
+	 * a row that is already gone. Cancelling the `pointerdown` stops the
+	 * browser's default action — moving focus — so the draft keeps the caret and
+	 * the keyboard. The press still activates what was pressed: a cancelled
+	 * `pointerdown` suppresses the compatibility mouse events, but `click` is
+	 * exempt and fires as normal.
+	 *
+	 * Two exemptions. A press on the textarea passes through, because focusing
+	 * it — and placing the caret — is precisely what that press is for. A mouse
+	 * press passes through because the row never hides behind a fine pointer
+	 * (the stylesheet keys the hiding on `pointer: coarse`), and native focus
+	 * movement is what a desktop keyboard user's tab order expects.
+	 */
+	const keepFocusOnPress = (event: React.PointerEvent<HTMLDivElement>): void => {
+		if (event.pointerType === "mouse" || event.target === textareaRef.current) {
+			return;
+		}
+		event.preventDefault();
+	};
+
+	/*
 	 * The only keydown path.
 	 *
 	 * A native listener rather than React's `onKeyDown`, and *instead* of it: the
@@ -259,7 +286,7 @@ export function ChatComposer({
 
 	return (
 		<footer className="piem-chat__composer">
-			<div className="piem-chat__composer-shell">
+			<div className="piem-chat__composer-shell" onPointerDown={keepFocusOnPress}>
 				{contextRow}
 				{pendingImages && pendingImages.length > 0 ? (
 					<ul className="piem-chat__pending-images">

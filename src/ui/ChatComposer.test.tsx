@@ -196,6 +196,67 @@ describe("ChatComposer keyboard contract", () => {
 });
 
 /**
+ * The composer's touch focus contract.
+ *
+ * The stylesheet only shows the send row while the shell holds focus, and a tap
+ * does not move focus on iOS — so an unguarded tap on any control in the shell
+ * would blur the textarea and collapse the row under the finger. The composer
+ * cancels that press; these pin which presses are cancelled and which are left
+ * to the browser.
+ */
+describe("ChatComposer touch focus contract", () => {
+	beforeEach(() => {
+		platformMock.isMobile = false;
+		platformMock.isMacOS = false;
+		document.body.replaceChildren();
+	});
+
+	afterEach(() => {
+		platformMock.isMobile = false;
+		platformMock.isMacOS = false;
+		document.body.replaceChildren();
+	});
+
+	it("keeps a touch press on a send-row control from stealing focus", async () => {
+		const host = await renderComposer();
+
+		// `defaultPrevented` is the assertion: preventing the pointerdown's
+		// default action is what stops the browser from moving focus, while the
+		// click on the pressed control still fires afterwards.
+		expect(press(host, sendButton(host)!, "touch")).toBe(true);
+	});
+
+	it("leaves the textarea's own press alone so a first tap can still focus it", async () => {
+		const host = await renderComposer();
+
+		const textarea = host.querySelector("textarea");
+		if (!textarea) {
+			throw new Error("composer rendered without a textarea");
+		}
+		expect(press(host, textarea, "touch")).toBe(false);
+	});
+
+	it("leaves a mouse press alone, where the row never hides anyway", async () => {
+		const host = await renderComposer();
+
+		// The stylesheet keys the row's hiding on `pointer: coarse`, so a fine
+		// pointer has no collapse to defend against — and native focus movement
+		// is what a desktop keyboard user's tab order expects.
+		expect(press(host, sendButton(host)!, "mouse")).toBe(false);
+	});
+});
+
+/**
+ * Presses `target` with a pointer of the given type, returning whether the
+ * composer cancelled the press.
+ */
+function press(host: HTMLElement, target: HTMLElement, pointerType: string): boolean {
+	const event = new window.PointerEvent("pointerdown", { bubbles: true, cancelable: true, pointerType });
+	target.dispatchEvent(event);
+	return event.defaultPrevented;
+}
+
+/**
  * Presses Enter in the composer, returning whether the keypress was consumed.
  *
  * `defaultPrevented` is the assertion that matters: a chord that sends must also
