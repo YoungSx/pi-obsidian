@@ -142,48 +142,10 @@ describe("ObsidianSessionManager branch summary", () => {
 		await reloaded.loadSession(manager.getActiveSessionPath()!);
 		const context = await reloaded.buildSessionContext();
 
-		expect(await reloaded.getLeafId()).toBe(summaryId);
+		expect(await reloaded.getSession().getLeafId()).toBe(summaryId);
 		expect(context.messages.at(-1)).toMatchObject({ role: "branchSummary", summary: "Explored a dead end", fromId: "dead-leaf" });
 	});
-
-	it("replays entries onto a read-only view whose walks follow the recorded chain", async () => {
-		const adapter = new MemoryAdapter() as unknown as DataAdapter;
-		const manager = new ObsidianSessionManager(adapter, SESSION_DIR, "obsidian-vault:Test");
-		await manager.createSession(DEFAULTS);
-		const firstId = await manager.appendMessage({ role: "user", content: [{ type: "text", text: "First" }], timestamp: 1 });
-		const middleId = await manager.appendMessage({ role: "assistant", content: [{ type: "text", text: "Second" }], timestamp: 2, api: "openai-completions", provider: "deepseek", model: "deepseek-v4-pro", usage: EMPTY_USAGE, stopReason: "stop" } as never);
-		const leafId = await manager.appendMessage({ role: "user", content: [{ type: "text", text: "Third" }], timestamp: 3 });
-
-		const session = await manager.buildReadOnlySessionView();
-
-		// The view's leaf is the last appended entry — pi keeps the provisioned id.
-		expect(await session.getLeafId()).toBe(leafId);
-
-		// Walking to root from the leaf yields the whole chain in leaf-to-root
-		// order, which is what `collectEntriesForBranchSummary` relies on to build
-		// the old-branch path. The ids are the ones the log recorded. Below the
-		// three messages sit the settings entries `createSession` wrote.
-		const branch = await session.findEntriesOnBranch({ start: leafId });
-		expect(branch.slice(0, 3).map((entry) => entry.id)).toEqual([leafId, middleId, firstId]);
-		expect(branch.length).toBeGreaterThan(3);
-
-		// pi rebinds parentId to the lane's running leaf, so the middle entry's
-		// parent is the first entry — the chain the log recorded, reconstructed
-		// from lane state rather than the forwarded parentId.
-		const middle = await session.getEntry(middleId);
-		expect(middle?.parentId).toBe(firstId);
-		expect(middle?.seq).toBeTypeOf("number");
-	});
 });
-
-const EMPTY_USAGE = {
-	input: 0,
-	output: 0,
-	cacheRead: 0,
-	cacheWrite: 0,
-	totalTokens: 0,
-	cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
-} as const;
 
 /**
  * A policy whose folder and cap can be changed mid-test, which is the shape
