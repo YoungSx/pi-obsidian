@@ -36,8 +36,8 @@ import { injectContext, type InjectedNote } from "./contextInjection";
 import { ContextRefs, type ContextRef } from "./contextRefs";
 import { OBSIDIAN_AGENT_SYSTEM_PROMPT } from "./systemPrompt";
 import { composeSystemPrompt, expandSkill, findSkill, formatSkillDiagnostics, loadVaultSkills, mergeSkills } from "./skillLoader";
-import { loadUserSkills } from "../skills/userSkills";
-import type { Skill } from "@earendil-works/pi-agent-core";
+import { loadUserSkills, type UserSkill } from "../skills/userSkills";
+import type { Skill, SkillDiagnostic } from "@earendil-works/pi-agent-core";
 import { getT, resolveLanguage, type Language, type LanguageHost, type Translator } from "../i18n";
 import type { SendShortcut } from "../ui/keyboard";
 import { VaultExecutionEnv } from "../vault/VaultExecutionEnv";
@@ -196,6 +196,11 @@ function extractUserText(message: AgentMessage | undefined): string {
 
 export interface ObsidianAgentServiceOptions {
 	streamFn?: StreamFn;
+	/**
+	 * User-level skill loader, overridable so tests stay out of the real home
+	 * directory; defaults to {@link loadUserSkills}.
+	 */
+	loadUserSkills?: () => Promise<{ skills: UserSkill[]; diagnostics: SkillDiagnostic[] }>;
 }
 
 interface CompactionRunOptions {
@@ -210,6 +215,7 @@ export class ObsidianAgentService {
 	private readonly getSettings: () => PiemSettings;
 	private readonly sessionManager: ObsidianSessionManager;
 	private readonly streamFn: StreamFn | undefined;
+	private readonly loadUserSkillsFn: () => Promise<{ skills: UserSkill[]; diagnostics: SkillDiagnostic[] }>;
 	private readonly listeners = new Set<SnapshotListener>();
 	/**
 	 * Single vault execution env shared by the file tools and the prompt-template
@@ -325,6 +331,7 @@ export class ObsidianAgentService {
 		this.getSettings = getSettings;
 		this.sessionManager = sessionManager;
 		this.streamFn = options.streamFn;
+		this.loadUserSkillsFn = options.loadUserSkills ?? loadUserSkills;
 		this.env = new VaultExecutionEnv(app);
 	}
 
@@ -1048,10 +1055,11 @@ export class ObsidianAgentService {
 	 */
 	private async reloadSkills(): Promise<void> {
 		const { skills: vaultSkills, diagnostics } = await loadVaultSkills(this.env);
-		// User-level skills ride between builtins and vault: pi itself reads
-		// those directories, so a vault inherits them by default, but a vault
-		// skill of the same name still wins and a user can opt out entirely.
-		const userSkills = this.getSettings().skillsInheritUser ? (await loadUserSkills()).skills : [];
+		// User-level skills ride between builtins and vault unconditionally:
+		// pi itself reads those directories, so a vault that already uses pi
+		// picks up the skills it wrote there, and a vault skill of the same
+		// name still wins.
+		const { skills: userSkills } = await this.loadUserSkillsFn();
 		const skills = mergeSkills(createBuiltinSkills(this.t()), userSkills, vaultSkills);
 		this.skills = skills;
 		const problems = formatSkillDiagnostics(diagnostics);

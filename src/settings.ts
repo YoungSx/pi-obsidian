@@ -102,17 +102,6 @@ export interface PiemSettings {
 	 */
 	sessionDir: string;
 	/**
-	 * Whether skills installed outside the vault — the directories pi itself
-	 * reads (`~/.pi/agent/skills`, `~/.agents/skills`) — participate alongside
-	 * vault skills.
-	 *
-	 * On by default: the whole point of a user-level skill directory is that it
-	 * follows the user across projects, so a vault that already uses pi picks up
-	 * the skills it already wrote there. Vault skills still outrank them, and a
-	 * user who wants this vault self-contained can switch the inheritance off.
-	 */
-	skillsInheritUser: boolean;
-	/**
 	 * Legacy single-endpoint form, superseded by {@link providers}/{@link models}.
 	 *
 	 * Retained after migration rather than cleared: a user who rolls back to an
@@ -135,7 +124,6 @@ export const DEFAULT_SETTINGS: PiemSettings = {
 	sendShortcut: DEFAULT_SEND_SHORTCUT,
 	sessionRetention: DEFAULT_SESSION_RETENTION,
 	sessionDir: DEFAULT_SESSION_DIR,
-	skillsInheritUser: true,
 };
 
 /**
@@ -211,10 +199,6 @@ export function normalizeSettings(data: Partial<PiemSettings> | null | undefined
 		// they can be opened, searched, and backed up. Nothing is moved — chats in
 		// the old plugin folder stay on disk, and the Sessions tab says where.
 		sessionDir: normalizeSessionDir(data?.sessionDir) ?? DEFAULT_SESSION_DIR,
-		// Absent in vaults written before the setting existed. Inheritance is the
-		// default because pi itself reads those directories anyway — defaulting
-		// off would silently drop skills the user already wrote there.
-		skillsInheritUser: data?.skillsInheritUser !== false,
 		customEndpoint,
 	};
 	if (activeModelId) {

@@ -28,16 +28,6 @@ function builtinSettings(overrides: Partial<PiemSettings> = {}): PiemSettings {
 }
 
 describe("normalizeSettings with customEndpoint", () => {
-	it("defaults skillsInheritUser to on for vaults written before the setting existed", () => {
-		// pi reads the user-level directories anyway, so an upgrade that defaulted
-		// off would silently drop skills the user already wrote there.
-		expect(normalizeSettings({}).skillsInheritUser).toBe(true);
-		expect(normalizeSettings(null).skillsInheritUser).toBe(true);
-	});
-
-	it("keeps an explicit opt-out of user-level inheritance", () => {
-		expect(normalizeSettings({ skillsInheritUser: false }).skillsInheritUser).toBe(false);
-	});
 	it("leaves the field undefined for legacy data.json without one", () => {
 		const settings = normalizeSettings({ provider: "deepseek", modelId: "deepseek-v4-pro" });
 		expect(settings.customEndpoint).toBeUndefined();
