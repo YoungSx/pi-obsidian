@@ -4,7 +4,8 @@ import { installObsidianStub } from "../testing/obsidianStub";
 
 installObsidianStub();
 
-const { composeSystemPrompt, DEFAULT_SKILLS_DIR, formatSkillDiagnostics, loadVaultSkills } = await import("./skillLoader");
+const { composeSystemPrompt, DEFAULT_SKILLS_DIR, expandSkill, findSkill, formatSkillDiagnostics, loadVaultSkills, mergeSkills } =
+	await import("./skillLoader");
 
 /** Minimal ExecutionEnv over a fixed path→content map, matching pi's skill walk. */
 function fakeEnv(files: Record<string, string>): ExecutionEnv {
@@ -113,6 +114,27 @@ describe("formatSkillDiagnostics", () => {
 	});
 });
 
+describe("skill lookup and invocation", () => {
+	const builtin = { name: "summarize", description: "Builtin", content: "Builtin body", filePath: "/builtin/SKILL.md" };
+	const vault = { name: "summarize", description: "Vault", content: "Vault body", filePath: "/Piem/skills/summarize/SKILL.md" };
+	const extra = { name: "custom", description: "Custom", content: "Custom body", filePath: "/Piem/skills/custom/SKILL.md" };
+
+	it("lets a vault skill replace a builtin with the same name", () => {
+		const merged = mergeSkills([builtin], [vault, extra]);
+
+		expect(merged).toEqual([vault, extra]);
+		expect(findSkill(merged, "summarize")).toBe(vault);
+	});
+
+	it("uses pi's complete skill block and appends extra instructions verbatim", () => {
+		const invocation = expandSkill(vault, 'Focus on decisions "since Monday".');
+
+		expect(invocation).toContain('<skill name="summarize" location="/Piem/skills/summarize/SKILL.md">');
+		expect(invocation).toContain("Vault body");
+		expect(invocation.endsWith('Focus on decisions "since Monday".')).toBe(true);
+	});
+});
+
 describe("composeSystemPrompt", () => {
 	it("passes the base prompt through untouched when there are no skills", () => {
 		// `formatSkillsForSystemPrompt` renders an empty set as "", so the guard
@@ -129,5 +151,6 @@ describe("composeSystemPrompt", () => {
 		expect(composed).toContain("<available_skills>");
 		expect(composed).toContain("summarize");
 		expect(composed).toContain("/Piem/skills/summarize/SKILL.md");
+		expect(composed).toContain("use the read_skill tool");
 	});
 });

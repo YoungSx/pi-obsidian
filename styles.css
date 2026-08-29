@@ -1230,6 +1230,15 @@
 	width: 100%;
 }
 
+.piem-chat__command-menu-heading {
+	align-items: baseline;
+	display: flex;
+	gap: var(--size-4-2);
+	justify-content: space-between;
+	min-width: 0;
+	width: 100%;
+}
+
 /*
  * The highlighted (keyboard-active) row. `aria-selected` is set on the `<li>` and
  * mirrors the focus the keyboard created, so the visual matches the a11y state.
@@ -1243,6 +1252,13 @@
 	font-family: var(--font-interface);
 	font-size: var(--font-ui-small);
 	font-weight: var(--font-medium);
+}
+
+.piem-chat__command-menu-kind {
+	color: var(--text-faint);
+	flex-shrink: 0;
+	font-family: var(--font-interface);
+	font-size: var(--font-ui-smaller);
 }
 
 .piem-chat__command-menu-desc {

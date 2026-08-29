@@ -35,12 +35,13 @@ import { arrayBufferToBase64, extractImageRefs, mimeTypeForPath, sanitizeMessage
 import { injectContext } from "./contextInjection";
 import { ContextRefs, type ContextRef } from "./contextRefs";
 import { OBSIDIAN_AGENT_SYSTEM_PROMPT } from "./systemPrompt";
-import { composeSystemPrompt, formatSkillDiagnostics, loadVaultSkills } from "./skillLoader";
+import { composeSystemPrompt, expandSkill, findSkill, formatSkillDiagnostics, loadVaultSkills, mergeSkills } from "./skillLoader";
 import type { Skill } from "@earendil-works/pi-agent-core";
 import { getT, resolveLanguage, type Language, type LanguageHost, type Translator } from "../i18n";
 import type { SendShortcut } from "../ui/keyboard";
 import { VaultExecutionEnv } from "../vault/VaultExecutionEnv";
 import { BUILTIN_PROMPT_TEMPLATES } from "./builtinTemplates";
+import { createBuiltinSkills } from "./builtinSkills";
 import {
 	expandPromptTemplate,
 	findPromptTemplate,
@@ -133,14 +134,18 @@ export interface ChatSnapshot {
 	 */
 	isFollowingActiveNote: boolean;
 	/**
-	 * Prompt templates available as `/name` commands, for autocomplete.
+	 * Prompt templates and skills available as `/name` commands, for autocomplete.
 	 *
-	 * Name and description only — the template body never reaches the UI. Builtins
-	 * are listed first, then the vault's own `.piem/prompts` templates, in load
-	 * order. Empty when the vault has none and nothing ships, which renders no
-	 * autocomplete list.
+	 * Full instruction bodies never reach the UI. Templates are listed first, then
+	 * skills; `kind` supplies the source label, and `invocation` carries the
+	 * disambiguated `/skill:name` form when a template owns the short name.
 	 */
-	availableCommands: { name: string; description: string }[];
+	availableCommands: {
+		name: string;
+		description: string;
+		kind: "template" | "skill";
+		invocation: string;
+	}[];
 }
 
 /**
@@ -305,7 +310,7 @@ export class ObsidianAgentService {
 	/** Prevents two retries from racing while the branch pointer is being persisted. */
 	private retryInFlight = false;
 	/**
-	 * Vault skills, reloaded whenever the agent is (re)built.
+	 * Bundled and vault skills, reloaded whenever the agent is (re)built.
 	 *
 	 * Kept here rather than folded straight into the prompt so the diagnostics
 	 * can be reported once per load and the prompt composition stays
@@ -357,33 +362,11 @@ export class ObsidianAgentService {
 		// session would report every `/name` as unknown.
 		await this.initialize();
 
-		// A `/name args` invocation expands the named template into its model-facing
-		// text and sends that instead. The expansion is a real user message: it
-		// persists to the session log and shows in the transcript, unlike the
-		// ephemeral context injection in `transformContext`. Recursing once is safe
-		// because the expanded body does not start with `/`.
-		const command = parsePromptCommand(trimmedPrompt);
-		if (command) {
-			const template = findPromptTemplate(this.promptTemplates, command.name);
-			if (!template) {
-				const t = this.t();
-				this.setNotice(t.t("chat.unknownCommand", { name: command.name }));
-				return false;
-			}
-			return this.sendPrompt(expandPromptTemplate(template, command.args));
-		}
-
 		const agent = this.requireAgent();
 		if (agent.state.isStreaming) {
 			this.setError("The agent is already responding.");
 			return false;
 		}
-		if (!this.hasApiKey()) {
-			const t = this.t();
-			this.setError(t.t("target.needsKeyToSend", { target: describeModelTarget(this.getSettings(), t) }));
-			return false;
-		}
-
 		// Stale banners are cleared exactly once, and before
 		// `refreshConfiguration` rather than after it. Two things depend on this
 		// single point: the reload inside `refreshConfiguration` surfaces fresh
@@ -395,13 +378,51 @@ export class ObsidianAgentService {
 		this.noticeMessage = undefined;
 		await this.refreshConfiguration();
 
+		// Resolve slash commands only after the refresh above: skills are reloaded
+		// from the vault on every turn, so a SKILL.md saved moments ago is callable
+		// immediately. Templates keep the short name when both kinds collide; the
+		// skill remains explicitly reachable through `/skill:name`.
+		let modelPrompt = trimmedPrompt;
+		const command = parsePromptCommand(trimmedPrompt);
+		if (command) {
+			const explicitSkillName = command.name.startsWith("skill:") ? command.name.slice("skill:".length) : undefined;
+			if (explicitSkillName !== undefined) {
+				const skill = findSkill(this.skills, explicitSkillName);
+				if (!skill) {
+					this.setNotice(this.t().t("chat.unknownCommand", { name: command.name }));
+					return false;
+				}
+				modelPrompt = expandSkill(skill, command.additionalInstructions);
+			} else {
+				const template = findPromptTemplate(this.promptTemplates, command.name);
+				const skill = findSkill(this.skills, command.name);
+				if (template) {
+					modelPrompt = expandPromptTemplate(template, command.args);
+					if (skill) {
+						this.appendNotice(this.t().t("chat.commandConflict", { name: command.name }));
+					}
+				} else if (skill) {
+					modelPrompt = expandSkill(skill, command.additionalInstructions);
+				} else {
+					this.setNotice(this.t().t("chat.unknownCommand", { name: command.name }));
+					return false;
+				}
+			}
+		}
+
+		if (!this.hasApiKey()) {
+			const t = this.t();
+			this.setError(t.t("target.needsKeyToSend", { target: describeModelTarget(this.getSettings(), t) }));
+			return false;
+		}
+
 		// Phase 2: resolve `![[cat.png]]` embeds into ImageContent read from the
 		// vault. The bytes travel alongside the text, so the embed syntax is
 		// stripped from the prompt — leaving `![[cat.png]]` in would hand the
 		// model a broken reference to a picture it has already been given.
-		const refs = extractImageRefs(trimmedPrompt);
+		const refs = extractImageRefs(modelPrompt);
 		const vaultImages = await this.readVaultImages(refs);
-		const promptText = vaultImages.length > 0 ? stripImageRefs(trimmedPrompt) : trimmedPrompt;
+		const promptText = vaultImages.length > 0 ? stripImageRefs(modelPrompt) : modelPrompt;
 		const allImages = images.length > 0 ? [...images, ...vaultImages] : vaultImages;
 
 		// Phase 3: gate multimodal send on the active model's declared capability.
@@ -723,7 +744,7 @@ export class ObsidianAgentService {
 		const defaults = this.getSessionDefaults();
 		this.agent.state.model = getSelectedModel(this.getSettings());
 		this.agent.state.thinkingLevel = defaults.thinkingLevel;
-		this.agent.state.tools = createObsidianTools(this.app, this.env, this.getSettings());
+		this.agent.state.tools = createObsidianTools(this.app, this.env, this.getSettings(), () => this.skills);
 		// Skills are read from the vault here too: `saveSettings` calls this after
 		// every settings change, and the panel re-reads the folder with it, so a
 		// newly saved skill reaches the running conversation without a reload.
@@ -794,10 +815,20 @@ export class ObsidianAgentService {
 			sendShortcut: settings.sendShortcut,
 			contextRefs: this.contextRefs.list(),
 			isFollowingActiveNote: this.contextRefs.isFollowingActive(),
-			availableCommands: this.promptTemplates.map((template) => ({
-				name: template.name,
-				description: template.description ?? "",
-			})),
+			availableCommands: [
+				...this.promptTemplates.map((template) => ({
+					name: template.name,
+					description: template.description ?? "",
+					kind: "template" as const,
+					invocation: template.name,
+				})),
+				...this.skills.map((skill) => ({
+					name: skill.name,
+					description: skill.description,
+					kind: "skill" as const,
+					invocation: findPromptTemplate(this.promptTemplates, skill.name) ? `skill:${skill.name}` : skill.name,
+				})),
+			],
 		};
 	}
 
@@ -935,7 +966,7 @@ export class ObsidianAgentService {
 				systemPrompt: composeSystemPrompt(OBSIDIAN_AGENT_SYSTEM_PROMPT, this.skills),
 				model,
 				thinkingLevel: getPreferredThinkingLevel(settings),
-				tools: createObsidianTools(this.app, this.env, settings),
+				tools: createObsidianTools(this.app, this.env, settings, () => this.skills),
 				messages,
 			},
 			getApiKey: (provider) => this.getApiKey(provider),
@@ -961,7 +992,7 @@ export class ObsidianAgentService {
 	}
 
 	/**
-	 * Reloads vault skills and pushes them into the live agent's system prompt.
+	 * Reloads bundled and vault skills and pushes them into the live agent's system prompt.
 	 *
 	 * Runs before a new agent is built and again whenever configuration
 	 * refreshes, so a skill the user just saved in the vault reaches the next
@@ -971,7 +1002,8 @@ export class ObsidianAgentService {
 	 * assertive error banner.
 	 */
 	private async reloadSkills(): Promise<void> {
-		const { skills, diagnostics } = await loadVaultSkills(this.env);
+		const { skills: vaultSkills, diagnostics } = await loadVaultSkills(this.env);
+		const skills = mergeSkills(createBuiltinSkills(this.t()), vaultSkills);
 		this.skills = skills;
 		const problems = formatSkillDiagnostics(diagnostics);
 		if (problems) {
@@ -1378,6 +1410,12 @@ export class ObsidianAgentService {
 	/** Reports a non-failure outcome without raising the error banner's alert. */
 	private setNotice(message: string): void {
 		this.noticeMessage = message;
+		this.notify();
+	}
+
+	/** Adds a second non-failure message without hiding an earlier loader warning. */
+	private appendNotice(message: string): void {
+		this.noticeMessage = this.noticeMessage ? `${this.noticeMessage}\n${message}` : message;
 		this.notify();
 	}
 

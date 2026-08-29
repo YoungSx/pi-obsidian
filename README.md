@@ -64,9 +64,14 @@ is blocked by default.
 
 ## Skills
 
-Skills are reusable instructions you author as Markdown files in the vault.
-Create a folder `Piem/skills/` and drop a `SKILL.md` inside a named
-subfolder — for example `Piem/skills/summarize/SKILL.md`:
+Skills are reusable instructions. Piem includes `summarize`, `link-graph`,
+`tag-organize`, and `find-skills` out of the box. Type `/` in the composer to
+see skills and prompt templates together, with their source labelled. Invoke a
+skill with `/skill-name`, followed by any extra instruction.
+
+You can override a bundled skill or add your own by creating `Piem/skills/`
+and placing a `SKILL.md` inside a named subfolder — for example
+`Piem/skills/summarize/SKILL.md`:
 
 ```markdown
 ---
@@ -85,6 +90,10 @@ finds in the system prompt — so the model knows your skills exist and can
 follow them when a request matches. Skills are not persisted into the session:
 they are read fresh from the vault every turn, so editing or adding one takes
 effect on your next message without reloading the plugin.
+
+Prompt templates keep priority if a template and skill have the same name.
+Piem shows a notice and keeps the skill reachable as `/skill:name`; selecting
+that skill in autocomplete inserts the disambiguated form automatically.
 
 A skill whose frontmatter is malformed still loads but produces a warning in
 the chat banner; the warning clears on your next message. The folder is

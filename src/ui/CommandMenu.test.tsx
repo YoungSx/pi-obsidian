@@ -20,9 +20,9 @@ const { window: domWindow } = globalThis as unknown as {
 };
 
 const COMMANDS: CommandEntry[] = [
-	{ name: "summarize", description: "Summarize the active note" },
-	{ name: "echo", description: "Echo the arguments" },
-	{ name: "translate", description: "Translate the active note" },
+	{ name: "summarize", description: "Summarize the active note", kind: "skill", invocation: "summarize" },
+	{ name: "echo", description: "Echo the arguments", kind: "template", invocation: "echo" },
+	{ name: "translate", description: "Translate the active note", kind: "template", invocation: "translate" },
 ];
 
 /** Every root created this test, so afterEach can unmount and free the document listener. */
@@ -51,7 +51,7 @@ async function renderMenu(query: string, commands: CommandEntry[] = COMMANDS): P
 			<CommandMenu
 				commands={commands}
 				query={q}
-				onSelect={(name) => onSelectCalls.push(name)}
+					onSelect={(command) => onSelectCalls.push(command.invocation)}
 				onClose={() => {
 					onCloseCalls += 1;
 				}}
@@ -102,6 +102,23 @@ describe("CommandMenu", () => {
 		expect(items).toHaveLength(3);
 		expect(items[0]?.querySelector(".piem-chat__command-menu-name")?.textContent).toBe("/summarize");
 		expect(items[0]?.querySelector(".piem-chat__command-menu-desc")?.textContent).toBe("Summarize the active note");
+		expect(items[0]?.querySelector(".piem-chat__command-menu-kind")?.textContent).toBe("Skill");
+	});
+
+	it("keeps duplicate names distinct by source and selects the skill's disambiguated invocation", async () => {
+		const commands: CommandEntry[] = [
+			{ name: "summarize", description: "Prompt version", kind: "template", invocation: "summarize" },
+			{ name: "summarize", description: "Skill version", kind: "skill", invocation: "skill:summarize" },
+		];
+		const { host, onSelectCalls } = await renderMenu("sum", commands);
+
+		expect(Array.from(host.querySelectorAll(".piem-chat__command-menu-kind"), (el) => el.textContent)).toEqual(["Prompt", "Skill"]);
+		pressKey("ArrowDown");
+		await flushRender();
+		pressKey("Enter");
+		await flushRender();
+
+		expect(onSelectCalls).toEqual(["skill:summarize"]);
 	});
 
 	it("narrows the list to prefix matches as the query grows", async () => {
