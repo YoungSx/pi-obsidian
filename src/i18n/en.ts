@@ -119,7 +119,6 @@ export const en = {
 		statusAria: "Chat status",
 		tokensSuffix: "tokens",
 		contextAria: "Context window use",
-		contextLabel: "Context",
 		contextValueText: "{estimated}{tokens} of {window} {unit} used, {percent} percent, {state}",
 		contextEstimatedPrefix: "Estimated ",
 		/** Accessible name for the `/`-command autocomplete list. */
@@ -235,6 +234,15 @@ export const en = {
 		 */
 		meterNoCompaction:
 			"Context use reported by the provider. Automatic tidying is off, so use the Tidy up earlier messages command before it fills.",
+		/**
+		 * Names for the tidy control while it cannot act.
+		 *
+		 * The button stays rendered in both states so it never moves, and a disabled
+		 * control has no channel but its own name to say why it is inert. Both are
+		 * accessible names, not sentences in the panel.
+		 */
+		tidyWhileCompacting: "Tidying up earlier messages…",
+		tidyWhileStreaming: "Tidy up earlier messages once the reply finishes",
 	},
 
 	/**
@@ -375,7 +383,7 @@ export const en = {
 		thinkingLevel: "Thinking level",
 		thinkingLevelDesc: "How much reasoning to request. Levels the active model does not support are hidden.",
 		showAgentDetails: "Show agent details",
-		showAgentDetailsDesc: "Show token counts, spend, context-window use, and raw tool arguments in the chat panel.",
+		showAgentDetailsDesc: "Show token counts, spend, and raw tool arguments in the chat panel.",
 		sendShortcut: "Send with",
 		/**
 		 * Names what the other key does under each option, because that is the

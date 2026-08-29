@@ -44,6 +44,16 @@ interface ChatComposerProps {
 	 */
 	contextRow?: React.ReactNode;
 	/**
+	 * The context-occupancy ring, rendered at the leading edge of the send bar.
+	 *
+	 * Passed in for the same reason as {@link contextRow}: this component knows
+	 * about the draft and the send controls, not about token accounting. It sits in
+	 * the send bar rather than a row of its own because it costs no height there,
+	 * and next to Send is where it answers the question it is asked — whether
+	 * there is room for the thing about to be sent.
+	 */
+	contextGauge?: React.ReactNode;
+	/**
 	 * `/name` prompt templates and skills available to autocomplete. Empty when
 	 * nothing loaded; the menu simply never opens, and `/`-prefixed drafts behave
 	 * like any other text until the user sends them.
@@ -85,6 +95,7 @@ export function ChatComposer({
 	onFocusRequested,
 	onAnchorIdChange,
 	contextRow,
+	contextGauge,
 	commands,
 	pendingImages,
 	onAddImages,
@@ -278,6 +289,15 @@ export function ChatComposer({
 					/>
 					) : null}
 					<div className="piem-chat__composer-bar">
+						{/*
+						 * Leading edge, ahead of the send control. Its own rule pushes Send
+						 * to the trailing edge with `margin-inline-end: auto` rather than the
+						 * bar switching to `space-between`: the bar holds one child whenever
+						 * the ring has nothing measured yet, and `space-between` would then
+						 * park a lone Send against the left edge — the bug the current
+						 * `flex-end` was chosen to fix.
+						 */}
+						{contextGauge}
 						{isBusy ? (
 						<IconButton
 							icon="square"

@@ -1,27 +1,17 @@
 import React from "react";
-import { formatCost, formatTokens } from "../agent/usage";
-import type { ContextFill } from "../agent/usage";
 import { ObsidianIcon } from "./ObsidianIcon";
 import { chatStatusText } from "./chatStatus";
-import { contextLevel, contextStateText, meterTitle } from "./headerCopy";
 import { useT } from "./TranslatorContext";
 
 export interface ChatStatusBarProps {
 	isInitializing: boolean;
 	isCompacting: boolean;
-	/**
-	 * Context-window occupancy, or null before it can be measured. Rendered only
-	 * in the agent-details tier.
-	 */
-	contextFill: ContextFill | null;
-	/** Cumulative tokens and spend for this chat; shown with agent details on. */
-	usage: { tokens: number; cost: number; requests: number };
 	/** Whether the panel may show agent-internal readouts at all. */
 	showAgentDetails: boolean;
 }
 
 /**
- * What the panel is doing, and — with agent details on — how full the context is.
+ * What the panel is doing — and nothing else.
  *
  * Sits directly above the composer, below the transcript. It used to be two
  * separate surfaces: a status line inside the composer shell, and a metrics row
@@ -37,21 +27,19 @@ export interface ChatStatusBarProps {
  * controls whose state it explains — Stop, and the composer that is disabled
  * while a turn is in flight.
  *
+ * The occupancy meter and the spend counter used to live here too, on the same
+ * row as the status line. Both moved into {@link ContextGauge}'s popover, beside
+ * Send: they answer one question ("is there room, and what has it cost") and
+ * splitting them across a bar and a ring said it twice. What is left is a single
+ * live line, which is a job this element can hold alone.
+ *
  * Never unmounts: when there is nothing to report it collapses to the
- * screen-reader-only treatment, so an idle chat in the default tier spends no
- * height on an empty row while its live region stays in the DOM. See `isQuiet`.
+ * screen-reader-only treatment, so an idle chat spends no height on an empty row
+ * while its live region stays in the DOM. See `isQuiet`.
  */
-export function ChatStatusBar({
-	isInitializing,
-	isCompacting,
-	contextFill,
-	usage,
-	showAgentDetails,
-}: ChatStatusBarProps): React.JSX.Element | null {
+export function ChatStatusBar({ isInitializing, isCompacting, showAgentDetails }: ChatStatusBarProps): React.JSX.Element {
 	const t = useT();
 	const status = chatStatusText({ isInitializing, isCompacting, showAgentDetails }, t);
-	const showMeter = showAgentDetails && contextFill !== null;
-	const showUsage = showAgentDetails && usage.requests > 0;
 	/*
 	 * Nothing to show, but still something to keep: the bar collapses to the
 	 * screen-reader-only treatment rather than unmounting.
@@ -63,7 +51,7 @@ export function ChatStatusBar({
 	 * announce at all. Hiding it visually costs no height and keeps the region
 	 * discovered.
 	 */
-	const isQuiet = !status && !showMeter && !showUsage;
+	const isQuiet = !status;
 
 	return (
 		<div
@@ -83,58 +71,6 @@ export function ChatStatusBar({
 						{status}
 					</>
 				) : null}
-			</span>
-			{showMeter ? <ContextMeter fill={contextFill} /> : null}
-			{showUsage ? (
-				<span className="piem-chat__usage">
-					{formatTokens(usage.tokens)} {t.t("chat.tokensSuffix")} <span aria-hidden="true">·</span> {formatCost(usage.cost)}
-				</span>
-			) : null}
-		</div>
-	);
-}
-
-/**
- * Context-window occupancy.
- *
- * Moved here from the header with its markup unchanged: the classes, the
- * `progressbar` role and the ok/warn/near banding are the same, so themes and the
- * a11y contract both survive the relocation.
- */
-function ContextMeter({ fill }: { fill: ContextFill }): React.JSX.Element {
-	const t = useT();
-	const percent = Math.round(fill.ratio * 100);
-	const level = contextLevel(fill);
-	const stateText = contextStateText(level, t);
-	const valueText = t.t("chat.contextValueText", {
-		estimated: fill.heuristicOnly ? t.t("chat.contextEstimatedPrefix") : "",
-		tokens: formatTokens(fill.tokens),
-		window: formatTokens(fill.contextWindow),
-		unit: t.t("chat.tokensSuffix"),
-		percent,
-		state: stateText,
-	});
-	const meterStyle = { "--pi-context-ratio": Math.min(fill.ratio, 1) } as React.CSSProperties;
-	const tokenSummary = `${fill.heuristicOnly ? "~" : ""}${formatTokens(fill.tokens)} / ${formatTokens(fill.contextWindow)}`;
-
-	return (
-		<div
-			className={`piem-chat__context piem-chat__context--${level}`}
-			role="progressbar"
-			aria-label={t.t("chat.contextAria")}
-			aria-valuemin={0}
-			aria-valuemax={100}
-			aria-valuenow={Math.min(percent, 100)}
-			aria-valuetext={valueText}
-			title={meterTitle(fill, t)}
-		>
-			<span className="piem-chat__context-label">{t.t("chat.contextLabel")}</span>
-			<span className="piem-chat__context-bar" aria-hidden="true">
-				<span className="piem-chat__context-bar-fill" style={meterStyle} />
-			</span>
-			<span className="piem-chat__context-value">
-				{tokenSummary}
-				<span className="piem-chat__context-state" aria-hidden="true">, {stateText}</span>
 			</span>
 		</div>
 	);
