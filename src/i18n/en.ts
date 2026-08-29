@@ -362,6 +362,63 @@ export const en = {
 		needOpenNoteToAppend: "Open a note to append this reply.",
 	},
 
+	/**
+	 * One-tap prompts: the empty screen's first moves and a settled reply's
+	 * follow-ups. `label` names the chip on screen; `prompt` is the full text a
+	 * tap sends, written as a message to the model rather than a button title.
+	 */
+	quickActions: {
+		label: "Suggested prompts",
+		empty: {
+			summarizeNote: {
+				label: "Summarize this note",
+				prompt: "Summarize the main points of the active note.",
+			},
+			improveNote: {
+				label: "Improve this note",
+				prompt: "Review the active note and suggest concrete improvements.",
+			},
+			brainstorm: {
+				label: "Brainstorm next ideas",
+				prompt: "Based on the active note, suggest five ideas to extend it.",
+			},
+			draftNote: {
+				label: "Draft a new note",
+				prompt: "Help me draft a new note: ask me for the topic, then outline it before writing.",
+			},
+			mapVault: {
+				label: "Map my vault",
+				prompt: "List the folders in my vault and describe how it is organized.",
+			},
+			capabilities: {
+				label: "What can you do?",
+				prompt: "What can you help me with in my vault? Give three concrete examples.",
+			},
+		},
+		reply: {
+			continue: {
+				label: "Continue",
+				prompt: "Continue your reply from where it stopped.",
+			},
+			explainCode: {
+				label: "Explain the code",
+				prompt: "Explain the code above in plain language.",
+			},
+			elaborate: {
+				label: "Go deeper",
+				prompt: "Expand on the key points above in more depth.",
+			},
+			keyPoints: {
+				label: "Key points",
+				prompt: "Summarize your reply as a short bullet list.",
+			},
+			example: {
+				label: "Give an example",
+				prompt: "Give a concrete example of what you described.",
+			},
+		},
+	},
+
 	/** Note-reference command. */
 	noteReference: {
 		truncated: "The selected text was long; only its beginning was quoted.",

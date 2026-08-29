@@ -1121,6 +1121,67 @@ button.piem-chat__latest {
 	min-height: var(--size-4-8);
 }
 
+/* --- quick actions --- */
+
+/*
+ * One-tap suggested prompts: the empty screen's first moves and a settled
+ * reply's follow-ups. Plain labelled chips rather than icon buttons, so the
+ * label carries the whole affordance and the row wraps instead of scrolling.
+ *
+ * Muted at rest like the reply actions, but with no hover-dimming dance to
+ * undo — these are opaque pills, and their resting colour already passes
+ * contrast on both themes. Focus and hover strengthen the text the same way
+ * `:focus-within` does above, gated on `hover: hover` for the pointer half so
+ * a touch tap cannot latch a permanent "active" look.
+ */
+.piem-chat__quick-actions {
+	display: flex;
+	flex-wrap: wrap;
+	gap: var(--size-4-2);
+	justify-content: center;
+	margin-top: var(--size-4-2);
+}
+
+/*
+ * Inside the transcript the row hangs under the newest reply, so it left-aligns
+ * with the message column rather than centering like the empty screen's row.
+ */
+.piem-chat__messages .piem-chat__quick-actions {
+	justify-content: flex-start;
+	padding: 0 var(--size-4-3) var(--size-4-2);
+}
+
+.piem-chat__quick-action {
+	background: var(--background-secondary);
+	border: 1px solid var(--background-modifier-border);
+	border-radius: var(--radius-m);
+	color: var(--text-muted);
+	cursor: pointer;
+	font-size: var(--font-ui-smaller);
+	min-height: var(--size-4-7);
+	padding: 0 var(--size-4-3);
+}
+
+.piem-chat__quick-action:focus-visible {
+	box-shadow: 0 0 0 2px var(--background-modifier-border-focus);
+	outline: none;
+}
+
+/*
+ * The hover half is pointer-gated, the same convention the reply-actions row
+ * follows and `panelA11y.test.ts` enforces: a touch tap leaves `:hover` latched
+ * on the tapped element until the next tap lands elsewhere, so an ungated rule
+ * renders as a permanently "active" chip on a phone.
+ */
+@media (hover: hover) {
+
+	.piem-chat__quick-action:hover {
+		background: var(--background-modifier-hover);
+		border-color: var(--background-modifier-border-hover);
+		color: var(--text-normal);
+	}
+}
+
 /* --- loading skeleton --- */
 
 /*

@@ -138,6 +138,29 @@ export function ChatApp({ service, inputController, component, draftStore }: Cha
 
 	const handleAnchorIdChange = useCallback((id: string) => setComposerAnchorId(id), []);
 
+	/**
+	 * Sends a tapped quick-action prompt as the user's own message.
+	 *
+	 * The tap is the send — that is what makes the suggestion "quick" — but the
+	 * composer draft is deliberately untouched: the user may have half a thought
+	 * typed that a suggestion must not overwrite. A send the service declined
+	 * (a gate the user can still satisfy, a race with a just-started run) lands
+	 * the prompt in the draft instead, so the tap never loses its words.
+	 */
+	const handleQuickAction = useCallback(
+		(prompt: string): void => {
+			if (snapshot.isStreaming || snapshot.isCompacting || isInitializing) {
+				return;
+			}
+			void service.sendPrompt(prompt).then((sent) => {
+				if (!sent) {
+					setInput(prompt);
+				}
+			});
+		},
+		[service, setInput, snapshot.isStreaming, snapshot.isCompacting, isInitializing],
+	);
+
 	const handleFocusRequested = useCallback(
 		(focus: (() => void) | null) => {
 			inputController?.setFocusHandler(focus);
@@ -211,6 +234,9 @@ export function ChatApp({ service, inputController, component, draftStore }: Cha
 					component={component}
 					sourcePath={sourcePath}
 					composerAnchorId={composerAnchorId}
+					hasActiveNote={snapshot.contextRefs.some((ref) => ref.kind === "active")}
+					isCompacting={snapshot.isCompacting}
+					onQuickAction={handleQuickAction}
 				/>
 
 				{/*
