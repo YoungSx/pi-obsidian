@@ -95,7 +95,7 @@ describe("CommandMenu", () => {
 		document.body.replaceChildren();
 	});
 
-	it("lists every command whose name starts with the query, each as /name — description", async () => {
+	it("with an empty query lists every command in service order, each as /name — description", async () => {
 		const { host } = await renderMenu("");
 
 		const items = host.querySelectorAll(".piem-chat__command-menu-item");
@@ -121,11 +121,33 @@ describe("CommandMenu", () => {
 		expect(onSelectCalls).toEqual(["skill:summarize"]);
 	});
 
-	it("narrows the list to prefix matches as the query grows", async () => {
-		const { host } = await renderMenu("su");
+	it("matches subsequences, not just prefixes, so /sm finds summarize", async () => {
+		// `sm` is no prefix of any name, but `summarize` contains both letters in
+		// order; the prefix-only filter this test replaces returned nothing here.
+		const { host } = await renderMenu("sm");
 
 		const names = Array.from(host.querySelectorAll(".piem-chat__command-menu-name"), (el) => el.textContent);
 		expect(names).toEqual(["/summarize"]);
+	});
+
+	it("reaches into hyphenated skill names, so /org finds tag-organize", async () => {
+		const commands: CommandEntry[] = [
+			{ name: "tag-organize", description: "Organize tags", kind: "skill", invocation: "tag-organize" },
+			{ name: "find-skills", description: "Find skills", kind: "skill", invocation: "find-skills" },
+		];
+		const { host } = await renderMenu("org", commands);
+
+		const names = Array.from(host.querySelectorAll(".piem-chat__command-menu-name"), (el) => el.textContent);
+		expect(names).toEqual(["/tag-organize"]);
+	});
+
+	it("ranks tighter matches first, keeping every hit in the list", async () => {
+		// All three names contain `e`. The stub (like real Obsidian) scores the
+		// shortest, tightest candidate highest, so `echo` leads the ranking.
+		const { host } = await renderMenu("e");
+
+		const names = Array.from(host.querySelectorAll(".piem-chat__command-menu-name"), (el) => el.textContent);
+		expect(names).toEqual(["/echo", "/summarize", "/translate"]);
 	});
 
 	it("renders nothing when no command matches, so an unknown /name stays a plain draft", async () => {
