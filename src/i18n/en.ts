@@ -322,9 +322,8 @@ export const en = {
 		tabModels: "Models",
 		tabChat: "Chat",
 		tabSessions: "History",
-		tabNetwork: "Network",
-		tabAbout: "About",
-		tabLanguage: "Language",
+		tabSkills: "Skills",
+		tabGeneral: "General",
 
 		languageHeading: "Language",
 		languageDesc: "What language the interface speaks. “Auto” follows the vault’s language.",
@@ -374,6 +373,9 @@ export const en = {
 		sendShortcutModEnter: "Ctrl+Enter or ⌘+Enter (Enter makes a new line)",
 		/** Shown under the row on a phone, where a soft keyboard has no Shift+Enter. */
 		sendShortcutMobileNote: "On a phone, Enter always makes a new line — a soft keyboard has no Shift+Enter — so use the Send button.",
+		/** Summary line of the network section folded under the Models tab. */
+		networkHeading: "Network",
+		networkHeadingDesc: "How requests leave the vault.",
 		networkTransport: "Network transport",
 		networkTransportDesc:
 			"Request URL bypasses browser restrictions everywhere but buffers responses — tokens appear all at once. Fetch streams incrementally but may be blocked.",
@@ -397,6 +399,53 @@ export const en = {
 			"Chat logs are files in your vault, so they sync and back up with your notes. They hold the conversation and whatever note text was read while answering it.",
 		apiKeysHeading: "API keys",
 		restrictedKeyHint: "Use a restricted, low-limit key: a vault is a plain folder, and a key inside it travels with every backup and sync of that folder.",
+	},
+
+	/**
+	 * The Skills tab.
+	 *
+	 * The copy keeps the two lists honest about ownership: vault skills are
+	 * this plugin's files and can be managed here; user-level skills belong to
+	 * the machine and are shown, not managed.
+	 */
+	skills: {
+		heading: "Skills",
+		desc: "Instructions the agent can load on request. They are files in your vault — edit them like any note, and the next message picks up the change.",
+		import: "Import from URL",
+		empty: "No skills yet. Import one from a URL, or create a folder in Piem/skills with a SKILL.md inside.",
+		importedFrom: "Imported from {url}",
+		handAuthored: "Written in this vault. Updates come from editing the files.",
+		rootFile: "A single note acting as a skill. Edit it like any note; it cannot be updated or deleted from here.",
+		open: "Open",
+		update: "Check for updates",
+		delete: "Delete",
+		upToDate: "{name} is already up to date.",
+		updatedOne: "{name} updated: 1 file changed.",
+		updatedMany: "{name} updated: {count} files changed.",
+		/** Names the files it refused to touch, so the refusal is actionable. */
+		conflict: "{name} has local edits, so nothing was overwritten. Conflicting files: {files}.",
+		couldNotUpdate: "Could not update {name}: {message}",
+		couldNotDelete: "Could not delete {name}: {message}",
+		userHeading: "User-level skills",
+		userDesc: "Loaded automatically from ~/.pi/agent/skills and ~/.agents/skills, outside this vault.",
+		userEmpty: "No user-level skills found on this computer.",
+	},
+
+	/** The import-skills modal. */
+	skillImport: {
+		title: "Import skills",
+		urlName: "Skill URL",
+		urlDesc: "A GitHub folder or file, or any public .md page.",
+		urlPlaceholder: "https://github.com/owner/repo/tree/main/skills",
+		preview: "Preview",
+		fetching: "Fetching…",
+		importOne: "Import 1 skill",
+		importMany: "Import {count} skills",
+		invalidUrl: "That does not look like a skill URL. Use a GitHub folder, a GitHub file, or a public .md link.",
+		fetchFailed: "Could not fetch: {message}",
+		installFailed: "Could not import: {message}",
+		noneFound: "No skills found there. A skill is a folder with a SKILL.md, or a .md file with a name and description.",
+		installed: "Imported {count}.",
 	},
 
 	/**
@@ -550,6 +599,7 @@ export const en = {
 		delete: "Delete",
 		providerSubject: 'provider "{name}"',
 		modelSubject: 'model "{name}"',
+		skillSubject: 'skill "{name}"',
 	},
 
 	/** Consequences stated before a delete is confirmed. */
@@ -559,6 +609,7 @@ export const en = {
 		providerManyModels: "The {count} models served by it are removed too: {names}.",
 		modelProviderStays: "The provider and its key stay, so other models keep working.",
 		modelWasActive: "It is the active model, so another one is selected after it goes.",
+		skillFiles: "The skill's files move to the trash and stop being available to the agent.",
 	},
 
 	/** Connection-test row. */
