@@ -271,8 +271,6 @@ export const zhCN: DeepPartial<EnCopy> = {
 		modelsCount: "{count} 个模型",
 		providerMissing: "提供方缺失",
 		activeSuffix: " · 当前",
-		thinkingLevel: "思考级别",
-		thinkingLevelDesc: "请求多少推理。当前模型不支持的级别会被隐藏。",
 		showAgentDetails: "显示代理详情",
 		showAgentDetailsDesc: "在对话面板中显示 token 数、花费和原始工具参数。",
 		sendShortcut: "发送方式",

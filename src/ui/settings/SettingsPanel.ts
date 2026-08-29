@@ -1,5 +1,4 @@
 import { ButtonComponent, Notice, Platform, Setting, TFile, type App } from "obsidian";
-import type { ModelThinkingLevel } from "@earendil-works/pi-ai";
 import type { ConnectionTestResult } from "../../connectionTest";
 import { testModelConnection, testProviderConnection } from "../../connectionTest";
 import {
@@ -85,10 +84,6 @@ export interface SettingsPanelHost {
 	save(): Promise<void>;
 	/** Whether this device can encrypt secrets at rest. */
 	secretStorage: SecretStorageState;
-	/** Thinking levels the active model supports, for the Chat tab. */
-	thinkingLevels(): readonly ModelThinkingLevel[];
-	/** The level to show as selected, which may differ from the stored one. */
-	preferredThinkingLevel(): ModelThinkingLevel;
 	/** Names whatever requests currently target, for the status line. */
 	describeTarget(): string;
 	/** Copy for the whole panel, resolved from {@link SettingsPanelSettings.language}. */
@@ -178,7 +173,6 @@ export interface SettingsPanelSettings {
 	activeModelId?: string;
 	providers: ProviderConfig[];
 	models: ModelConfig[];
-	thinkingLevel: ModelThinkingLevel;
 	networkTransport: NetworkTransport;
 	showAgentDetails: boolean;
 	sendShortcut: SendShortcut;
@@ -444,31 +438,22 @@ function renderModelList(containerEl: HTMLElement, host: SettingsPanelHost, refr
 }
 
 function renderChatTab(containerEl: HTMLElement, host: SettingsPanelHost): void {
-	const { settings, t } = host;
+	const { t } = host;
 
-	new Setting(containerEl)
-		.setName(t.t("settings.thinkingLevel"))
-		.setDesc(t.t("settings.thinkingLevelDesc"))
-		.addDropdown((dropdown) => {
-			for (const level of host.thinkingLevels()) {
-				dropdown.addOption(level, level);
-			}
-			dropdown.setValue(host.preferredThinkingLevel());
-			dropdown.onChange(async (thinkingLevel) => {
-				settings.thinkingLevel = thinkingLevel as ModelThinkingLevel;
-				await host.save();
-			});
-		});
-
+	/*
+	 * No thinking-level row here: the level belongs to the conversation, picked
+	 * beside the model switcher in the chat panel itself, so a global dropdown
+	 * would only masquerade as a default while every session overrides it.
+	 */
 	renderSendShortcutRow(containerEl, host);
 
 	new Setting(containerEl)
 		.setName(t.t("settings.showAgentDetails"))
 		.setDesc(t.t("settings.showAgentDetailsDesc"))
 		.addToggle((toggle) => {
-			toggle.setValue(settings.showAgentDetails);
+			toggle.setValue(host.settings.showAgentDetails);
 			toggle.onChange(async (showAgentDetails) => {
-				settings.showAgentDetails = showAgentDetails;
+				host.settings.showAgentDetails = showAgentDetails;
 				await host.save();
 			});
 		});

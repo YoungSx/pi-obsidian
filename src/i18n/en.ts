@@ -408,8 +408,6 @@ export const en = {
 		modelsCount: "{count} models",
 		providerMissing: "provider missing",
 		activeSuffix: " · active",
-		thinkingLevel: "Thinking level",
-		thinkingLevelDesc: "How much reasoning to request. Levels the active model does not support are hidden.",
 		showAgentDetails: "Show agent details",
 		showAgentDetailsDesc: "Show token counts, spend, and raw tool arguments in the chat panel.",
 		sendShortcut: "Send with",

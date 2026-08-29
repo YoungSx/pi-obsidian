@@ -3,7 +3,13 @@ export const VIEW_TYPE_PIEM_CHAT = `${PLUGIN_ID}-chat-view`;
 export const VIEW_TYPE_PIEM_LOGS = `${PLUGIN_ID}-logs-view`;
 export const DEFAULT_PROVIDER = "deepseek";
 export const DEFAULT_MODEL_ID = "deepseek-v4-pro";
-export const DEFAULT_THINKING_LEVEL = "high";
+/**
+ * The thinking level a brand-new session starts on when nothing better is
+ * known. The level belongs to the conversation (the composer's thinking
+ * selector writes it into the session file); this only covers a first-ever
+ * session and a vault whose previous session recorded none.
+ */
+export const DEFAULT_THINKING_LEVEL = "off";
 /**
  * Synthetic provider id behind user-configured OpenAI-compatible endpoints.
  * It is not part of the builtin catalog; API keys are looked up under it.

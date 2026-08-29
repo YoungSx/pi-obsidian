@@ -210,6 +210,7 @@ function snapshot(overrides: Partial<ChatSnapshot> = {}): ChatSnapshot {
 		provider: "deepseek",
 		modelId: "deepseek-v4-pro",
 		thinkingLevel: "high",
+		thinkingLevels: ["off", "low", "high"],
 		modelChoices: [],
 		sessionRevision: 0,
 		usage: usageTotals(),
