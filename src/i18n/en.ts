@@ -338,6 +338,9 @@ export const en = {
 		licenseName: "License",
 		licenseDesc: "The terms this plugin is distributed under.",
 		licenseLabel: "Read the license",
+		sponsorName: "Support the project",
+		sponsorDesc: "Fuel the plugin's development on Ko-fi.",
+		sponsorLabel: "Support on Ko-fi",
 	},
 
 	/**

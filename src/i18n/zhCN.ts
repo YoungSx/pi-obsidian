@@ -233,6 +233,9 @@ export const zhCN: DeepPartial<EnCopy> = {
 		licenseName: "许可协议",
 		licenseDesc: "本插件的分发条款。",
 		licenseLabel: "阅读许可协议",
+		sponsorName: "赞助我",
+		sponsorDesc: "请我在 Ko-fi 上喝杯咖啡。",
+		sponsorLabel: "疯狂星期四 V 我 50",
 	},
 
 	compaction: {

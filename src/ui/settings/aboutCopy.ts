@@ -1,4 +1,4 @@
-import { ISSUES_URL, LICENSE_URL, REPOSITORY_URL } from "../../constants";
+import { ISSUES_URL, KO_FI_URL, LICENSE_URL, REPOSITORY_URL } from "../../constants";
 import type { Translator } from "../../i18n";
 
 /**
@@ -16,9 +16,9 @@ import type { Translator } from "../../i18n";
 
 /** One row's fixed parts: where it points, and which leaves name it. */
 interface AboutLinkSpec {
-	nameKey: "about.sourceName" | "about.issuesName" | "about.licenseName";
-	descKey: "about.sourceDesc" | "about.issuesDesc" | "about.licenseDesc";
-	labelKey: "about.sourceLabel" | "about.issuesLabel" | "about.licenseLabel";
+	nameKey: "about.sourceName" | "about.issuesName" | "about.licenseName" | "about.sponsorName";
+	descKey: "about.sourceDesc" | "about.issuesDesc" | "about.licenseDesc" | "about.sponsorDesc";
+	labelKey: "about.sourceLabel" | "about.issuesLabel" | "about.licenseLabel" | "about.sponsorLabel";
 	href: string;
 }
 
@@ -57,6 +57,14 @@ const ABOUT_LINK_SPECS: readonly AboutLinkSpec[] = [
 		descKey: "about.licenseDesc",
 		labelKey: "about.licenseLabel",
 		href: LICENSE_URL,
+	},
+	{
+		// Donations leave the repository, so this row is the odd one out: it is the
+		// one About link that does not point back at the project's own pages.
+		nameKey: "about.sponsorName",
+		descKey: "about.sponsorDesc",
+		labelKey: "about.sponsorLabel",
+		href: KO_FI_URL,
 	},
 ];
 
