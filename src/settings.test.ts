@@ -15,6 +15,7 @@ installObsidianStub();
 
 const {
 	describeModelTarget,
+	listModelChoices,
 	getActiveConfiguration,
 	getApiKeyForProvider,
 	getConfiguredApiKey,
@@ -22,6 +23,18 @@ const {
 	normalizeSettings,
 	DEFAULT_SETTINGS,
 } = await import("./settings");
+
+/** Two models behind one named provider, as the switcher tests read them. */
+function configured(): PiemSettings {
+	return normalizeSettings({
+		providers: [{ id: "p1", name: "My gateway", baseUrl: "https://gw/v1", protocol: "openai-completions", apiKey: "", source: "user" }],
+		models: [
+			{ id: "m1", providerId: "p1", modelApiId: "qwen-token-plan-individual", displayName: "Qwen Plus", reasoning: false },
+			{ id: "m2", providerId: "p1", modelApiId: "raw-id", displayName: "", reasoning: false },
+		],
+		activeModelId: "m1",
+	});
+}
 
 function builtinSettings(overrides: Partial<PiemSettings> = {}): PiemSettings {
 	return { ...DEFAULT_SETTINGS, providerApiKeys: {}, ...overrides };
@@ -123,6 +136,50 @@ describe("describeModelTarget", () => {
 
 	it("names provider and model for builtin configurations", () => {
 		expect(describeModelTarget(builtinSettings(), t)).toBe("Deepseek/deepseek-v4-pro");
+	});
+});
+
+/**
+ * What the chat panel's model switcher renders from.
+ *
+ * The join lives here rather than in the component so the panel and the Models
+ * tab cannot disagree about what a model is called — and so the orphan rule is
+ * covered by a test, since an orphan is the one entry whose selection would
+ * silently send requests somewhere else.
+ */
+describe("listModelChoices", () => {
+	it("names each model and its endpoint the way the settings tab does", () => {
+		const choices = listModelChoices(configured());
+
+		expect(choices).toEqual([
+			{ id: "m1", name: "Qwen Plus", provider: "My gateway" },
+			{ id: "m2", name: "raw-id", provider: "My gateway" },
+		]);
+	});
+
+	it("keeps stored order, so the menu matches the list the user arranged", () => {
+		expect(listModelChoices(configured()).map((choice) => choice.id)).toEqual(["m1", "m2"]);
+	});
+
+	it("falls back to the base URL for an unnamed provider, never to a bare uuid", () => {
+		const settings = configured();
+		settings.providers[0]!.name = "";
+
+		expect(listModelChoices(settings)[0]?.provider).toBe("https://gw/v1");
+	});
+
+	it("omits a model whose provider is gone rather than offering a dead choice", () => {
+		// It has no base URL and no credential, so selecting it would hand the next
+		// request to the builtin catalog — a different endpoint than the user
+		// believes they picked.
+		const settings = configured();
+		settings.providers = [];
+
+		expect(listModelChoices(settings)).toEqual([]);
+	});
+
+	it("returns nothing when no model is configured, which the switcher reads as a state", () => {
+		expect(listModelChoices(builtinSettings())).toEqual([]);
 	});
 });
 

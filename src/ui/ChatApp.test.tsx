@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import type { App, Component } from "obsidian";
 import { flushRender, installDom } from "../testing/dom";
-import { installObsidianStub } from "../testing/obsidianStub";
+import { installObsidianStub, lastMenu, resetMenus } from "../testing/obsidianStub";
 import type { ChatSnapshot, ObsidianAgentService } from "../agent/ObsidianAgentService";
 import type { DraftStore } from "../session/DraftStore";
 import type { ActiveSessionInfo } from "../session/ObsidianSessionManager";
@@ -126,6 +126,12 @@ class FakeAgentService {
 	pinContextRef(): void {}
 	unpinContextRef(): void {}
 	setFollowActiveNote(): void {}
+	/** Model ids the switcher asked for, so a menu that reaches nothing shows up. */
+	readonly switchedModels: string[] = [];
+
+	async setActiveModel(modelId: string): Promise<void> {
+		this.switchedModels.push(modelId);
+	}
 
 	private notify(): void {
 		for (const listener of this.listeners) {
@@ -370,6 +376,56 @@ describe("ChatApp keyboard submit without an API key", () => {
 	});
 });
 
+/**
+ * The model switcher's route from the composer to the service.
+ *
+ * `ModelSwitcher.test.tsx` covers what the menu offers and what it forwards; the
+ * gap this closes is the wiring between them — that the panel mounts the switcher
+ * *inside the send row* and hands its selection to the service. Both halves have
+ * been silently absent before: a switcher rendered in the header would pass every
+ * one of its own tests, and so would one whose `onSelect` went nowhere.
+ */
+describe("ChatApp model switcher", () => {
+	let mounted: Mounted | undefined;
+
+	beforeEach(() => {
+		resetMenus();
+		document.body.replaceChildren();
+	});
+
+	afterEach(async () => {
+		await mounted?.unmount();
+		mounted = undefined;
+		document.body.replaceChildren();
+	});
+
+	it("sits in the send row, left of Send", async () => {
+		mounted = await mountChat();
+
+		const bar = mounted.host.querySelector(".piem-chat__composer-bar");
+		const controls = Array.from(bar?.children ?? [], (child) => child.className);
+		expect(controls[0]).toContain("piem-chat__model-switcher");
+		expect(controls[1]).toContain("piem-chat__send-button");
+	});
+
+	it("names the active model, which the header no longer does", async () => {
+		mounted = await mountChat();
+
+		expect(mounted.host.querySelector(".piem-chat__model-switcher-name")?.textContent).toBe("Opus 5");
+		expect(mounted.host.querySelector(".piem-chat__model")).toBeNull();
+	});
+
+	it("hands a selection to the service, which is what repoints the next request", async () => {
+		mounted = await mountChat();
+
+		mounted.host.querySelector<HTMLButtonElement>(".piem-chat__model-switcher")?.click();
+		await flushRender();
+		lastMenu().click("Sonnet 5 · Anthropic");
+
+		expect(mounted.service.switchedModels).toEqual(["m-sonnet"]);
+	});
+});
+
 function baseSnapshot(): ChatSnapshot {
 	return {
 		messages: [],
@@ -378,6 +434,11 @@ function baseSnapshot(): ChatSnapshot {
 		provider: DEFAULT_SETTINGS.provider,
 		modelId: DEFAULT_SETTINGS.modelId,
 		thinkingLevel: DEFAULT_SETTINGS.thinkingLevel,
+		modelChoices: [
+			{ id: "m-opus", name: "Opus 5", provider: "OpenRouter" },
+			{ id: "m-sonnet", name: "Sonnet 5", provider: "Anthropic" },
+		],
+		activeModelId: "m-opus",
 		// A session is needed for the draft store to be keyed at all; the store-less
 		// tests do not read it.
 		session: sessionInfo(),

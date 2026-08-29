@@ -130,6 +130,10 @@ export default class PiemPlugin extends Plugin {
 		this.sessionManager = sessionManager;
 		this.agentService = new ObsidianAgentService(this.app, () => this.settings, sessionManager, {
 			logger: this.requirePluginLogger().logger,
+			// The chat panel's model switcher writes `activeModelId`; this is what
+			// makes that write survive a reload, and it reconfigures the running
+			// agent on the way back.
+			persistSettings: () => this.saveSettings(),
 		});
 		this.draftStore = DraftStore.forPlugin(this.app, this, this.requirePluginLogger().logger);
 

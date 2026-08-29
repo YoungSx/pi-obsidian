@@ -63,6 +63,17 @@ export interface MenuItemRecording {
 	icon?: string;
 	warning?: boolean;
 	separator?: boolean;
+	/**
+	 * The check mark a picker uses to mark its current value.
+	 *
+	 * Recorded rather than ignored because for a selector it *is* the state: the
+	 * model switcher deliberately omits an "active" word from its row labels on
+	 * the grounds that the check says it, so a test that only read titles could
+	 * not tell a working switcher from one that marks nothing.
+	 */
+	checked?: boolean | null;
+	/** Whether the row is inert copy rather than an action. */
+	isLabel?: boolean;
 	click?: () => void;
 }
 
@@ -79,6 +90,15 @@ export interface MenuRecording {
 	items: MenuItemRecording[];
 	/** Whether the menu was actually shown, rather than merely built. */
 	shown: boolean;
+	/**
+	 * Where the menu was anchored, when it was opened by position.
+	 *
+	 * Undefined for a menu shown at the pointer. The distinction matters: a
+	 * button activated from the keyboard dispatches a click at `0, 0`, so a menu
+	 * that anchors to the event lands in the window's corner, and only the
+	 * position argument can show that a control anchored to itself instead.
+	 */
+	position?: { x: number; y: number };
 	/** Titles of the non-separator items, for the common ordering assertion. */
 	titles(): string[];
 	/** Invokes the handler of the item with this title. Throws if absent. */
@@ -92,7 +112,8 @@ interface MenuItemLike {
 	setWarning(warning: boolean): MenuItemLike;
 	setSection(section: string): MenuItemLike;
 	setDisabled(disabled: boolean): MenuItemLike;
-	setChecked(checked: boolean): MenuItemLike;
+	setChecked(checked: boolean | null): MenuItemLike;
+	setIsLabel(isLabel: boolean): MenuItemLike;
 	onClick(handler: () => void): MenuItemLike;
 }
 
@@ -317,7 +338,14 @@ const obsidianStub = {
 				},
 				setSection: () => item,
 				setDisabled: () => item,
-				setChecked: () => item,
+				setChecked: (checked: boolean | null) => {
+					entry.checked = checked;
+					return item;
+				},
+				setIsLabel: (isLabel: boolean) => {
+					entry.isLabel = isLabel;
+					return item;
+				},
 				onClick: (handler: () => void) => {
 					entry.click = handler;
 					return item;
@@ -336,8 +364,9 @@ const obsidianStub = {
 			this.recording.shown = true;
 		}
 
-		showAtPosition(): void {
+		showAtPosition(position: { x: number; y: number }): void {
 			this.recording.shown = true;
+			this.recording.position = position;
 		}
 	},
 	FuzzySuggestModal: class FuzzySuggestModal {},

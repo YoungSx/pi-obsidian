@@ -55,13 +55,14 @@ async function openOverflow(host: HTMLElement): Promise<ReturnType<typeof lastMe
 }
 
 /**
- * The header carries identity and session controls, and nothing else.
+ * The header carries the chat's name and its session controls, and nothing else.
  *
- * The context meter, the spend counter and the compaction notice used to live in
- * a second row here; their assertions moved to `ChatStatusBar.test.tsx` with the
- * markup. What is pinned here is that they do *not* come back: a strip of live
- * numbers between the reader and the first message of their own conversation is
- * the layout bug that move fixed.
+ * Two evictions are pinned here, both against the same defect — anything parked
+ * in this row is read before the conversation the reader opened the panel for.
+ * The context meter, the spend counter and the compaction notice went to
+ * `ChatStatusBar.test.tsx` with their markup. The model line went to
+ * `ModelSwitcher.test.tsx`, which is where the control that changes it now lives.
+ * What is asserted here is that none of them come back.
  */
 describe("ChatHeader scope", () => {
 	beforeEach(() => {
@@ -87,6 +88,17 @@ describe("ChatHeader scope", () => {
 		expect(host.querySelector(".piem-chat__compacting")).toBeNull();
 	});
 
+	it("does not name the model, which the composer's switcher owns", async () => {
+		// The line lived here and could only be read: the control that changes the
+		// model was two tabs deep in settings. It is now the switcher's label, so a
+		// header that printed it again would be stating a value beside a copy of
+		// itself — and spending a row above the transcript to do it.
+		const host = await renderHeader(snapshot({ showAgentDetails: true }));
+
+		expect(host.querySelector(".piem-chat__model")).toBeNull();
+		expect(host.textContent).not.toContain("deepseek-v4-pro");
+	});
+
 	it("is a single labelled row, not a stacked chrome block", async () => {
 		const host = await renderHeader(snapshot());
 
@@ -96,7 +108,7 @@ describe("ChatHeader scope", () => {
 	});
 });
 
-describe("ChatHeader vocabulary tiers", () => {
+describe("ChatHeader action row", () => {
 	beforeEach(() => {
 		createRootSync = createRootImpl;
 		document.body.replaceChildren();
@@ -104,12 +116,6 @@ describe("ChatHeader vocabulary tiers", () => {
 
 	afterEach(() => {
 		document.body.replaceChildren();
-	});
-
-	it("names the model without its provider path in the default tier", async () => {
-		const host = await renderHeader(snapshot({ showAgentDetails: false }));
-
-		expect(host.querySelector(".piem-chat__model")?.textContent).toBe("deepseek-v4-pro");
 	});
 
 	it("keeps every action button mounted so their positions never shift", async () => {
@@ -204,6 +210,7 @@ function snapshot(overrides: Partial<ChatSnapshot> = {}): ChatSnapshot {
 		provider: "deepseek",
 		modelId: "deepseek-v4-pro",
 		thinkingLevel: "high",
+		modelChoices: [],
 		sessionRevision: 0,
 		usage: usageTotals(),
 		contextFill: fill(),

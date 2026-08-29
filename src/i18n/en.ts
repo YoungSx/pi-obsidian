@@ -208,6 +208,36 @@ export const en = {
 	 * send looks at Send. The glyphs are keycaps, not words, so translations keep
 	 * them as they are.
 	 */
+	/**
+	 * The model switcher at the left of the composer's send row.
+	 *
+	 * Replaces the model line the header used to print. That line could be read
+	 * and not acted on; these strings name the same target on the control that
+	 * changes it.
+	 */
+	modelSwitcher: {
+		/** The verb, which leads the button's accessible name. */
+		switchModel: "Switch model",
+		/** Accessible name and tooltip, e.g. "Switch model · Opus 5 · OpenRouter". */
+		buttonTitle: "{action} · {model}",
+		/**
+		 * A model and the endpoint serving it — the menu rows and the tooltip.
+		 * Matches the Models tab's own row format, so a user meets one string
+		 * where they configured the model and where they select it.
+		 */
+		modelWithProvider: "{model} · {provider}",
+		/**
+		 * Reasoning suffix, appended only in the agent-details tier. Owns the
+		 * whole pattern rather than composing a bare "Reasoning" label, so a
+		 * translation controls the word order and the punctuation together.
+		 */
+		withReasoning: "{model} · Reasoning: {level}",
+		/** Menu row shown when nothing is configured yet, above the settings door. */
+		noModels: "No models configured",
+		/** Menu row that opens the Models tab; the switcher's only escape hatch. */
+		manageModels: "Manage models…",
+	},
+
 	sendShortcut: {
 		enter: "↵",
 		modMac: "⌘↵",
@@ -221,8 +251,6 @@ export const en = {
 		nearlyFull: "context nearly full",
 		filling: "filling",
 		ok: "ok",
-		/** Prefix for the reasoning level in the agent-details model line. */
-		reasoning: "Reasoning",
 		meterHeuristic: "Estimated from message sizes; updates after the first reply.",
 		meterMeasured: "Context use reported by the provider. Compaction starts near {percent}%.",
 		/**

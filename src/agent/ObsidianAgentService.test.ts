@@ -1120,6 +1120,109 @@ function usageChunk(): object {
 	};
 }
 
+/**
+ * The model the chat panel's switcher writes.
+ *
+ * This is the one setting a chat-panel control changes, so the service is where
+ * the write has to be safe: the panel offers a list of ids and the service is
+ * what decides whether one of them may become the endpoint every subsequent
+ * request goes to.
+ */
+describe("switching the active model", () => {
+	it("offers the configured models to the panel, named rather than as ids", () => {
+		const { service, settings } = createServiceWithSettings();
+		configureTwoModels(settings);
+
+		expect(service.getSnapshot().modelChoices).toEqual([
+			{ id: "m1", name: "Qwen Plus", provider: "My gateway" },
+			{ id: "m2", name: "Llama 4", provider: "My gateway" },
+		]);
+		expect(service.getSnapshot().activeModelId).toBe("m1");
+	});
+
+	it("repoints requests, and says so in the next snapshot", async () => {
+		const { service, settings } = createServiceWithSettings();
+		configureTwoModels(settings);
+
+		await service.setActiveModel("m2");
+
+		expect(settings.activeModelId).toBe("m2");
+		expect(service.getSnapshot().activeModelId).toBe("m2");
+		// The resolved model is what a request is actually built from, so this is
+		// the assertion that the switch reached the wire and not just the label.
+		expect(service.getSnapshot().modelId).toBe("llama-4-maverick");
+	});
+
+	it("persists through the host, which is what survives a reload", async () => {
+		// The plugin's own `saveSettings` seals secrets, writes data.json, and
+		// reconfigures the running agent on the way back. A switch that only
+		// mutated the in-memory object would be lost on the next launch.
+		const saves: number[] = [];
+		const { service, settings } = createServiceWithSettings(new MemoryAdapter(), {
+			persistSettings: async () => {
+				saves.push(1);
+			},
+		});
+		configureTwoModels(settings);
+
+		await service.setActiveModel("m2");
+
+		expect(saves).toHaveLength(1);
+	});
+
+	it("ignores an id that names no configured model, rather than storing it", async () => {
+		// A dangling `activeModelId` does not fail loudly: `getSelectedModel`
+		// answers the next request from the builtin catalog instead, so the user
+		// talks to a different endpoint than the one they selected.
+		const { service, settings } = createServiceWithSettings();
+		configureTwoModels(settings);
+
+		await service.setActiveModel("deleted");
+
+		expect(settings.activeModelId).toBe("m1");
+	});
+
+	it("does no work when the model is already active", async () => {
+		// Persisting reconfigures the agent and appends to the session log, so a
+		// no-op selection must not spend either.
+		const saves: number[] = [];
+		const { service, settings } = createServiceWithSettings(new MemoryAdapter(), {
+			persistSettings: async () => {
+				saves.push(1);
+			},
+		});
+		configureTwoModels(settings);
+
+		await service.setActiveModel("m1");
+
+		expect(saves).toEqual([]);
+	});
+
+	it("reconfigures the live agent, so a switch mid-conversation takes effect", async () => {
+		const { service, settings } = createServiceWithSettings();
+		await service.initialize();
+		configureTwoModels(settings);
+
+		await service.setActiveModel("m2");
+
+		// No `persistSettings` was supplied, so the default path reconfigures in
+		// memory alone — which is the half that has to reach `agent.state.model`.
+		expect(service.getSnapshot().modelId).toBe("llama-4-maverick");
+	});
+});
+
+/** Two models behind one named provider, with the first selected. */
+function configureTwoModels(settings: PiemSettings): void {
+	settings.providers = [
+		{ id: "p1", name: "My gateway", baseUrl: "https://gw/v1", protocol: "openai-completions", apiKey: "gw-key", source: "user" },
+	];
+	settings.models = [
+		{ id: "m1", providerId: "p1", modelApiId: "qwen-plus", displayName: "Qwen Plus", reasoning: false },
+		{ id: "m2", providerId: "p1", modelApiId: "llama-4-maverick", displayName: "Llama 4", reasoning: false },
+	];
+	settings.activeModelId = "m1";
+}
+
 describe("language in the snapshot", () => {
 	it("resolves the user's setting so the panel never re-resolves it", () => {
 		const { service, settings } = createServiceWithSettings();
@@ -1491,7 +1594,13 @@ function defaultTestSettings(): PiemSettings {
 /** Same, but hands back the live settings object so a test can mutate it. */
 function createServiceWithSettings(
 	memoryAdapter: MemoryAdapter = new MemoryAdapter(),
-	overrides: { streamFn?: StreamFn; vaultFiles?: Record<string, string>; loadUserSkills?: typeof NO_USER_SKILLS } = {},
+	overrides: {
+		streamFn?: StreamFn;
+		vaultFiles?: Record<string, string>;
+		loadUserSkills?: typeof NO_USER_SKILLS;
+		/** Stands in for the plugin's `saveSettings`; omitted reconfigures in memory. */
+		persistSettings?: () => Promise<void>;
+	} = {},
 ): { service: ObsidianAgentServiceType; settings: PiemSettings } {
 	const adapter = asDataAdapter(memoryAdapter);
 	const settings = defaultTestSettings();
@@ -1499,6 +1608,7 @@ function createServiceWithSettings(
 	const service = new ObsidianAgentService(createFakeApp(adapter, overrides.vaultFiles), () => settings, sessionManager, {
 		streamFn: overrides.streamFn ?? createFakeStreamFn(),
 		loadUserSkills: NO_USER_SKILLS,
+		...(overrides.persistSettings ? { persistSettings: overrides.persistSettings } : {}),
 	});
 	return { service, settings };
 }
