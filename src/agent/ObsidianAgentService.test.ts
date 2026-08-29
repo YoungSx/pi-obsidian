@@ -23,6 +23,10 @@ const { MAX_ACTIVE_NOTE_CHARS } = await import("./contextInjection");
 // rather than derived from a Vault; `Vault#configDir` is used in production code.
 const SESSION_DIR = `.${"obsidian"}/plugins/piem/sessions`;
 
+// The real home directory may hold user-level skills, and a test that asserts
+// on the composed prompt has to be hermetic — every service gets an empty loader.
+const NO_USER_SKILLS = async () => ({ skills: [], diagnostics: [] });
+
 class MemoryAdapter {
 	private readonly files = new Map<string, { content: string; mtime: number }>();
 	private readonly folders = new Set<string>();
@@ -146,6 +150,7 @@ describe("ObsidianAgentService", () => {
 			createFakeApp(asDataAdapter(adapter)),
 			() => settings,
 			new ObsidianSessionManager(asDataAdapter(adapter), SESSION_DIR, "obsidian-vault:Test"),
+			{ loadUserSkills: NO_USER_SKILLS },
 		);
 		requestUrlMock.mockResolvedValue(sseResponse(replyChunks("hello")));
 
@@ -490,7 +495,7 @@ describe("ObsidianAgentService", () => {
 
 	it("names the active note in the request without touching the transcript", async () => {
 		const contexts: Context[] = [];
-		const service = createService(new MemoryAdapter(), { streamFn: createCapturingStreamFn(contexts) });
+		const service = createService(new MemoryAdapter(), { streamFn: createCapturingStreamFn(contexts), loadUserSkills: NO_USER_SKILLS });
 		service.setActiveNotePath("Projects/weekly-0827.md");
 
 		await service.sendPrompt("Rewrite this note");
@@ -556,7 +561,7 @@ describe("ObsidianAgentService", () => {
 
 	it("injects nothing when no Markdown note is active", async () => {
 		const contexts: Context[] = [];
-		const service = createService(new MemoryAdapter(), { streamFn: createCapturingStreamFn(contexts) });
+		const service = createService(new MemoryAdapter(), { streamFn: createCapturingStreamFn(contexts), loadUserSkills: NO_USER_SKILLS });
 
 		await service.sendPrompt("Hello");
 
@@ -568,7 +573,7 @@ describe("ObsidianAgentService", () => {
 
 	it("re-derives the injected block per turn rather than freezing it", async () => {
 		const contexts: Context[] = [];
-		const service = createService(new MemoryAdapter(), { streamFn: createCapturingStreamFn(contexts) });
+		const service = createService(new MemoryAdapter(), { streamFn: createCapturingStreamFn(contexts), loadUserSkills: NO_USER_SKILLS });
 		service.setActiveNotePath("Notes/first.md");
 		await service.sendPrompt("About this one");
 
@@ -585,7 +590,7 @@ describe("ObsidianAgentService", () => {
 
 	it("stops naming the active note once following is dismissed", async () => {
 		const contexts: Context[] = [];
-		const service = createService(new MemoryAdapter(), { streamFn: createCapturingStreamFn(contexts) });
+		const service = createService(new MemoryAdapter(), { streamFn: createCapturingStreamFn(contexts), loadUserSkills: NO_USER_SKILLS });
 		service.setActiveNotePath("Notes/today.md");
 
 		service.setFollowActiveNote(false);
@@ -596,7 +601,7 @@ describe("ObsidianAgentService", () => {
 
 	it("keeps naming a pinned note after the user navigates away", async () => {
 		const contexts: Context[] = [];
-		const service = createService(new MemoryAdapter(), { streamFn: createCapturingStreamFn(contexts) });
+		const service = createService(new MemoryAdapter(), { streamFn: createCapturingStreamFn(contexts), loadUserSkills: NO_USER_SKILLS });
 		service.setActiveNotePath("Notes/pinned.md");
 		service.pinContextRef("Notes/pinned.md");
 
@@ -895,7 +900,7 @@ describe("ObsidianAgentService multimodal send", () => {
 	it("blocks image send when the active model is text-only", async () => {
 		// Default service selects deepseek-v4-pro, whose `input` is ["text"].
 		const contexts: Context[] = [];
-		const service = createService(new MemoryAdapter(), { streamFn: createCapturingStreamFn(contexts) });
+		const service = createService(new MemoryAdapter(), { streamFn: createCapturingStreamFn(contexts), loadUserSkills: NO_USER_SKILLS });
 
 		const sent = await service.sendPrompt("describe this", [
 			{ type: "image", data: "AAAA", mimeType: "image/png" },
@@ -910,7 +915,7 @@ describe("ObsidianAgentService multimodal send", () => {
 
 	it("sends staged images alongside text to a multimodal model", async () => {
 		const contexts: Context[] = [];
-		const { service } = createServiceWithMultimodalModel({ streamFn: createCapturingStreamFn(contexts) });
+		const { service } = createServiceWithMultimodalModel({ streamFn: createCapturingStreamFn(contexts), loadUserSkills: NO_USER_SKILLS });
 
 		const sent = await service.sendPrompt("what is this", [
 			{ type: "image", data: "AAAA", mimeType: "image/png" },
@@ -935,7 +940,7 @@ describe("ObsidianAgentService multimodal send", () => {
 		// image bytes on a fake vault that resolves `cat.png`.
 		const imageBytes = new TextEncoder().encode("fake-png-bytes").buffer as ArrayBuffer;
 		const { service } = createServiceWithMultimodalModel(
-			{ streamFn: createCapturingStreamFn(contexts) },
+			{ streamFn: createCapturingStreamFn(contexts), loadUserSkills: NO_USER_SKILLS },
 			{ imageFiles: new Map([["cat.png", imageBytes]]) },
 		);
 
@@ -960,7 +965,7 @@ describe("ObsidianAgentService multimodal send", () => {
 
 	it("notifies but still sends when an embed cannot be found", async () => {
 		const contexts: Context[] = [];
-		const { service } = createServiceWithMultimodalModel({ streamFn: createCapturingStreamFn(contexts) });
+		const { service } = createServiceWithMultimodalModel({ streamFn: createCapturingStreamFn(contexts), loadUserSkills: NO_USER_SKILLS });
 
 		const sent = await service.sendPrompt("Look at ![[missing.png]] please");
 
@@ -1089,7 +1094,7 @@ describe("prompt commands", () => {
 
 	it("refuses an unknown /name with a notice instead of sending it as prose", async () => {
 		const contexts: Context[] = [];
-		const service = createService(new MemoryAdapter(), { streamFn: createCapturingStreamFn(contexts) });
+		const service = createService(new MemoryAdapter(), { streamFn: createCapturingStreamFn(contexts), loadUserSkills: NO_USER_SKILLS });
 
 		expect(await service.sendPrompt("/nope")).toBe(false);
 
@@ -1104,7 +1109,7 @@ describe("prompt commands", () => {
 		// what loads the templates, so the first `/summarize` of a session was
 		// reported as unknown.
 		const contexts: Context[] = [];
-		const service = createService(new MemoryAdapter(), { streamFn: createCapturingStreamFn(contexts) });
+		const service = createService(new MemoryAdapter(), { streamFn: createCapturingStreamFn(contexts), loadUserSkills: NO_USER_SKILLS });
 
 		expect(await service.sendPrompt("/summarize")).toBe(true);
 		expect(JSON.stringify(contexts.at(-1)?.messages.at(-1)?.content)).toContain("Summarize the active note concisely.");
@@ -1150,7 +1155,7 @@ describe("prompt commands", () => {
 
 	it("leaves an ordinary message that merely contains a slash alone", async () => {
 		const contexts: Context[] = [];
-		const service = createService(new MemoryAdapter(), { streamFn: createCapturingStreamFn(contexts) });
+		const service = createService(new MemoryAdapter(), { streamFn: createCapturingStreamFn(contexts), loadUserSkills: NO_USER_SKILLS });
 
 		expect(await service.sendPrompt("what does src/main.ts do?")).toBe(true);
 		expect(JSON.stringify(contexts.at(-1)?.messages.at(-1)?.content)).toContain("what does src/main.ts do?");
@@ -1173,7 +1178,7 @@ describe("vault skills", () => {
 			app,
 			() => defaultTestSettings(),
 			new ObsidianSessionManager(asDataAdapter(new MemoryAdapter()), SESSION_DIR, "obsidian-vault:Test"),
-			{ streamFn: createPromptCapturingStreamFn(prompts) },
+			{ streamFn: createPromptCapturingStreamFn(prompts), loadUserSkills: NO_USER_SKILLS },
 		);
 	}
 
@@ -1215,7 +1220,7 @@ describe("vault skills", () => {
 			createFakeApp(asDataAdapter(new MemoryAdapter())),
 			() => defaultTestSettings(),
 			new ObsidianSessionManager(asDataAdapter(new MemoryAdapter()), SESSION_DIR, "obsidian-vault:Test"),
-			{ streamFn: createCapturingStreamFn(contexts) },
+			{ streamFn: createCapturingStreamFn(contexts), loadUserSkills: NO_USER_SKILLS },
 		);
 
 		expect(await service.sendPrompt("/link-graph focus on unresolved links")).toBe(true);
@@ -1235,7 +1240,7 @@ describe("vault skills", () => {
 			app,
 			() => defaultTestSettings(),
 			new ObsidianSessionManager(asDataAdapter(new MemoryAdapter()), SESSION_DIR, "obsidian-vault:Test"),
-			{ streamFn: createCapturingStreamFn(contexts) },
+			{ streamFn: createCapturingStreamFn(contexts), loadUserSkills: NO_USER_SKILLS },
 		);
 
 		expect(await service.sendPrompt("/skill:summarize")).toBe(true);
@@ -1290,7 +1295,7 @@ describe("vault skills", () => {
 			createVaultAppWithSkills(skillFiles),
 			() => defaultTestSettings(),
 			new ObsidianSessionManager(asDataAdapter(new MemoryAdapter()), SESSION_DIR, "obsidian-vault:Test"),
-			{ streamFn: createCapturingStreamFn(contexts) },
+			{ streamFn: createCapturingStreamFn(contexts), loadUserSkills: NO_USER_SKILLS },
 		);
 
 		await service.sendPrompt("Hello");
@@ -1305,7 +1310,7 @@ describe("vault skills", () => {
 
 function createService(
 	memoryAdapter: MemoryAdapter = new MemoryAdapter(),
-	overrides: { streamFn?: StreamFn; vaultFiles?: Record<string, string> } = {},
+	overrides: { streamFn?: StreamFn; vaultFiles?: Record<string, string>; loadUserSkills?: typeof NO_USER_SKILLS } = {},
 ): ObsidianAgentServiceType {
 	return createServiceWithSettings(memoryAdapter, overrides).service;
 }
@@ -1400,13 +1405,14 @@ function defaultTestSettings(): PiemSettings {
 /** Same, but hands back the live settings object so a test can mutate it. */
 function createServiceWithSettings(
 	memoryAdapter: MemoryAdapter = new MemoryAdapter(),
-	overrides: { streamFn?: StreamFn; vaultFiles?: Record<string, string> } = {},
+	overrides: { streamFn?: StreamFn; vaultFiles?: Record<string, string>; loadUserSkills?: typeof NO_USER_SKILLS } = {},
 ): { service: ObsidianAgentServiceType; settings: PiemSettings } {
 	const adapter = asDataAdapter(memoryAdapter);
 	const settings = defaultTestSettings();
 	const sessionManager = new ObsidianSessionManager(adapter, SESSION_DIR, "obsidian-vault:Test");
 	const service = new ObsidianAgentService(createFakeApp(adapter, overrides.vaultFiles), () => settings, sessionManager, {
 		streamFn: overrides.streamFn ?? createFakeStreamFn(),
+		loadUserSkills: NO_USER_SKILLS,
 	});
 	return { service, settings };
 }
@@ -1421,7 +1427,7 @@ function createServiceWithSettings(
  * `![[...]]` embed resolution (which reads `app.vault`, not the adapter).
  */
 function createServiceWithMultimodalModel(
-	overrides: { streamFn?: StreamFn } = {},
+	overrides: { streamFn?: StreamFn; loadUserSkills?: typeof NO_USER_SKILLS } = {},
 	vault: { imageFiles?: Map<string, ArrayBuffer> } = {},
 	memoryAdapter: MemoryAdapter = new MemoryAdapter(),
 ): { service: ObsidianAgentServiceType; settings: PiemSettings } {
@@ -1439,9 +1445,6 @@ function createServiceWithMultimodalModel(
 		language: "en",
 		sessionRetention: DEFAULT_SESSION_RETENTION,
 		sessionDir: DEFAULT_SESSION_DIR,
-		// Explicitly off: the real home directory may hold user-level skills, and
-		// a test that asserts on the composed prompt has to be hermetic.
-		skillsInheritUser: false,
 	};
 	const sessionManager = new ObsidianSessionManager(adapter, SESSION_DIR, "obsidian-vault:Test");
 	const service = new ObsidianAgentService(
@@ -1450,6 +1453,7 @@ function createServiceWithMultimodalModel(
 		sessionManager,
 		{
 			streamFn: overrides.streamFn ?? createFakeStreamFn(),
+			loadUserSkills: NO_USER_SKILLS,
 		},
 	);
 	return { service, settings };
