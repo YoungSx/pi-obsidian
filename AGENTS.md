@@ -92,6 +92,17 @@ bun test
   ```
 - Reload Obsidian and enable the plugin in **Settings → Community plugins**.
 
+## Pull requests
+
+- A PR must be **mergeable without conflicts** against the default branch. If
+  the target branch has moved, rebase onto it and resolve before the PR is
+  opened or marked ready.
+- A PR must have **CI fully green** before being considered done. Do not
+  hand the PR back while checks are failing or still running; fix and push
+  until every check passes.
+- Verify locally first (`npm run build`, `npm run lint`, `bun test`) so CI is
+  a confirmation, not a discovery.
+
 ## Commands & settings
 
 - Any user-facing commands should be added via `this.addCommand(...)`.
