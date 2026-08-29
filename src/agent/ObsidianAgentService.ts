@@ -2,7 +2,10 @@ import type { App } from "obsidian";
 import type { Usage } from "@earendil-works/pi-ai";
 import {
 	Agent,
+	collectEntriesForBranchSummary,
 	convertToLlm,
+	createBranchSummaryMessage,
+	generateBranchSummary,
 	type AgentEvent,
 	type AgentLoopTurnUpdate,
 	type AgentMessage,
@@ -11,7 +14,7 @@ import {
 	type ThinkingLevel,
 } from "@earendil-works/pi-agent-core";
 import { createObsidianModels, withRequestDefaults, type ObsidianModelsBundle } from "../net/streamFn";
-import { compactIfNeeded, needsCompaction, type CompactResult } from "./compaction";
+import { compactIfNeeded, needsCompaction, DEFAULT_COMPACTION_RETRY, type CompactResult } from "./compaction";
 import { measureContextFill, sumUsage, type ContextFill, type UsageTotals } from "./usage";
 import { resolveCompactionSettings, type CompactionSettings } from "./compactionSettings";
 import { createObsidianTools } from "../tools/obsidianTools";
@@ -232,6 +235,17 @@ export class ObsidianAgentService {
 	/** Mirrors `compaction` for the snapshot: true from launch until it settles. */
 	private isCompacting = false;
 	private compactionController: AbortController | null = null;
+	/**
+	 * Abort controller for a branch-summary request in flight, separate from
+	 * {@link compactionController} so cancelling one never cancels the other.
+	 *
+	 * A branch summary is not a compaction: it runs once, on a rewind, and its
+	 * banner would be wrong ("Compacting context…") on an operation the user
+	 * initiated explicitly. The two share only that both are background LLM
+	 * requests this service should cancel on abort/dispose/session-switch, so
+	 * they share those exit paths but not a controller.
+	 */
+	private branchSummaryController: AbortController | null = null;
 	/** Frozen for one user turn so a mid-loop note switch cannot retarget a write. */
 	private activeRunContext: ContextRef[] | null = null;
 	/**
@@ -344,6 +358,12 @@ export class ObsidianAgentService {
 	 * would leave the log's leaf on the abandoned reply, the replacement would be
 	 * appended below it, and reloading the session would show both.
 	 *
+	 * Before the rewind, {@link summarizeAbandonedBranch} generates a summary of
+	 * the fork being abandoned and persists it on the new main line, so the model
+	 * — and a reload — remember what was explored down it. A summary failure never
+	 * blocks the rewind: the user asked to retry, not to summarize, so the worst
+	 * case is a fork forgotten, not a retry that never happens.
+	 *
 	 * A turn the log cannot name is refused rather than retried in memory alone.
 	 * That covers messages a compaction absorbed, whose text survives only inside
 	 * the summary — rewinding to before the compaction would discard the summary
@@ -352,7 +372,7 @@ export class ObsidianAgentService {
 	async retryFrom(index: number): Promise<boolean> {
 		await this.initialize();
 		const agent = this.requireAgent();
-		if (agent.state.isStreaming || this.isCompacting) {
+		if (agent.state.isStreaming || this.isCompacting || this.branchSummaryController) {
 			return false;
 		}
 
@@ -370,15 +390,97 @@ export class ObsidianAgentService {
 			return false;
 		}
 
+		// `summarizeAbandonedBranch` performs the rewind itself, after collecting
+		// the branch off the pre-rewind log, and returns the summary message (if
+		// one was generated) to splice into the in-memory transcript so the panel
+		// shows it before the retried prompt.
+		let summaryMessage: AgentMessage | null;
 		try {
-			this.sessionManager.rewindTo(entryId);
+			summaryMessage = await this.summarizeAbandonedBranch(entryId);
 		} catch (error) {
 			this.setError(error instanceof Error ? error.message : String(error));
 			return false;
 		}
 		agent.state.messages = agent.state.messages.slice(0, promptIndex);
+		if (summaryMessage) {
+			agent.state.messages = [...agent.state.messages.slice(0, promptIndex), summaryMessage];
+		}
 		this.notify();
 		return await this.sendPrompt(prompt);
+	}
+
+	/**
+	 * Summarizes the branch a rewind is about to abandon, then rewinds.
+	 *
+	 * The summary is generated from a throwaway pi {@link Session} view built over
+	 * the current log — before the rewind moves the leaf — because
+	 * {@link collectEntriesForBranchSummary} walks the parent chain from the old
+	 * leaf to the fork point, and that chain only exists while the abandoned
+	 * branch is still the live one. Once the summary lands (or fails), the rewind
+	 * proceeds and the summary entry is appended on the new main line, where
+	 * {@link buildSessionContext} projects it into context on the next reload.
+	 *
+	 * Returns the branch-summary message to splice into the live transcript, or
+	 * `null` when no summary was generated (no abandoned branch, a compaction was
+	 * already running, or the request was aborted). Never throws on a summary
+	 * failure — only on an unknown rewind target, which surfaces as a user error.
+	 */
+	private async summarizeAbandonedBranch(entryId: string): Promise<AgentMessage | null> {
+		const oldLeafId = this.sessionManager.getLeafId();
+		// No leaf means a fresh log with nothing to abandon; `oldLeafId === entryId`
+		// means the rewind targets the current tip, so there is no fork below it.
+		if (!oldLeafId || oldLeafId === entryId) {
+			this.sessionManager.rewindTo(entryId);
+			return null;
+		}
+		// A compaction in flight owns the log's summarization budget; a second
+		// concurrent summarization request would race it for the same provider
+		// keys and muddy the usage accounting, so the branch summary is skipped.
+		// The rewind still happens — the user's intent is the retry, not the
+		// summary.
+		if (this.isCompacting) {
+			this.sessionManager.rewindTo(entryId);
+			return null;
+		}
+
+		const controller = new AbortController();
+		this.branchSummaryController = controller;
+		try {
+			const session = await this.sessionManager.buildReadOnlySessionView();
+			const collected = await collectEntriesForBranchSummary(session, oldLeafId, entryId);
+			if (collected.entries.length === 0) {
+				this.sessionManager.rewindTo(entryId);
+				return null;
+			}
+
+			const model = getSelectedModel(this.getSettings());
+			const result = await generateBranchSummary(collected.entries, {
+				models: withRequestDefaults(this.requireModelsBundle(), (provider) => this.getApiKey(provider)),
+				model,
+				signal: controller.signal,
+				retry: DEFAULT_COMPACTION_RETRY,
+			});
+
+			// The rewind is deferred until after the summary so the view walked a
+			// still-live branch; it is unconditional because the retry was the
+			// user's actual request. A failed or aborted summary simply means the
+			// fork is forgotten, not that the retry is blocked.
+			this.sessionManager.rewindTo(entryId);
+
+			if (!result.ok) {
+				if (!controller.signal.aborted) {
+					this.setError(`Could not summarize the abandoned branch: ${result.error.message}`);
+				}
+				return null;
+			}
+
+			await this.sessionManager.appendBranchSummary(result.value, oldLeafId);
+			return createBranchSummaryMessage(result.value.summary, oldLeafId, Date.now());
+		} finally {
+			if (this.branchSummaryController === controller) {
+				this.branchSummaryController = null;
+			}
+		}
 	}
 
 	abort(): void {
@@ -387,6 +489,7 @@ export class ObsidianAgentService {
 		// both ways — `runExclusiveCompaction` links the run's signal into this
 		// controller — so aborting both is right and idempotent.
 		this.compactionController?.abort();
+		this.branchSummaryController?.abort();
 		const agent = this.agent;
 		if (!agent) {
 			return;
@@ -427,6 +530,7 @@ export class ObsidianAgentService {
 
 		this.agent?.abort();
 		this.compactionController?.abort();
+		this.branchSummaryController?.abort();
 		try {
 			this.sessionInfo = await this.sessionManager.loadSession(path);
 		} catch (error) {
@@ -475,6 +579,7 @@ export class ObsidianAgentService {
 		if (wasActive) {
 			this.agent?.abort();
 			this.compactionController?.abort();
+			this.branchSummaryController?.abort();
 		}
 
 		try {
@@ -523,6 +628,7 @@ export class ObsidianAgentService {
 		this.unsubscribeAgent?.();
 		this.unsubscribeAgent = null;
 		this.compactionController?.abort();
+		this.branchSummaryController?.abort();
 		this.agent?.abort();
 		this.listeners.clear();
 	}

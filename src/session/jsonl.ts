@@ -1,4 +1,4 @@
-import { createCompactionSummaryMessage, type AgentMessage, type ThinkingLevel } from "@earendil-works/pi-agent-core";
+import { createBranchSummaryMessage, createCompactionSummaryMessage, type AgentMessage, type ThinkingLevel } from "@earendil-works/pi-agent-core";
 import type { Usage } from "@earendil-works/pi-ai";
 
 // Version 4 adds `compaction` entries. Older files stay readable: v3 had no
@@ -50,6 +50,24 @@ export interface CompactionSessionEntry {
 	usage?: Usage;
 }
 
+/**
+ * A summary of a branch the conversation abandoned when it rewound to an
+ * earlier entry, persisted so a reload keeps the memory of what was explored
+ * down that fork. Mirrors pi's `BranchSummaryEntry`: `fromId` names the leaf
+ * the abandoned branch ended on, and `details` carries the file operations the
+ * summary extracted so a later compaction can fold them in.
+ */
+export interface BranchSummarySessionEntry {
+	type: "branch_summary";
+	id: string;
+	parentId: string | null;
+	timestamp: string;
+	fromId: string;
+	summary: string;
+	details?: { readFiles: string[]; modifiedFiles: string[] };
+	usage?: Usage;
+}
+
 export interface SessionInfoEntry {
 	type: "session_info";
 	id: string;
@@ -64,6 +82,7 @@ export type SessionEntry =
 	| ModelChangeSessionEntry
 	| ThinkingLevelChangeSessionEntry
 	| CompactionSessionEntry
+	| BranchSummarySessionEntry
 	| SessionInfoEntry;
 
 export interface SessionContext {
@@ -138,6 +157,8 @@ function isSessionEntry(value: unknown): value is SessionEntry {
 			return typeof entry.thinkingLevel === "string";
 		case "compaction":
 			return typeof entry.summary === "string" && Array.isArray(entry.retainedTail);
+		case "branch_summary":
+			return typeof entry.fromId === "string" && typeof entry.summary === "string";
 		case "session_info":
 			return true;
 		default:
@@ -193,6 +214,15 @@ export function buildSessionContext(entries: SessionEntry[], leafId?: string | n
 			// the summary along with the turn it meant to discard, so these
 			// messages are marked unbranchable instead.
 			messageOrigins.push(...expanded.map(() => null));
+			continue;
+		}
+		if (entry.type === "branch_summary") {
+			messages.push(createBranchSummaryMessage(entry.summary, entry.fromId, entry.timestamp));
+			// Like a compaction, a branch summary is not a point a retry can
+			// rewind to: it records a fork that was already abandoned, and
+			// rewinding past it would drop the memory it preserved. Mark it
+			// unbranchable so a retry never names it as the entry to discard.
+			messageOrigins.push(null);
 		}
 	}
 

@@ -1,5 +1,13 @@
 import type { App, DataAdapter, Plugin } from "obsidian";
-import type { AgentMessage, CompactResult, ThinkingLevel } from "@earendil-works/pi-agent-core";
+import {
+	type AgentMessage,
+	type BranchSummaryResult,
+	type CompactResult,
+	InMemorySessionStorage,
+	type ProvisionedEntry,
+	Session,
+	type ThinkingLevel,
+} from "@earendil-works/pi-agent-core";
 import { normalizeFolderPath } from "../vault/path";
 import {
 	buildSessionContext,
@@ -9,11 +17,13 @@ import {
 	getLastLeafId,
 	parseSessionEntries,
 	serializeSessionEntries,
+	type BranchSummarySessionEntry,
 	type CompactionSessionEntry,
 	type MessageSessionEntry,
 	type ModelChangeSessionEntry,
 	type SessionContext,
 	type SessionEntry,
+	type SessionHeaderEntry,
 	type SessionInfoEntry,
 	type ThinkingLevelChangeSessionEntry,
 } from "./jsonl";
@@ -249,6 +259,26 @@ export class ObsidianSessionManager {
 		});
 	}
 
+	/**
+	 * Persists a summary of the branch a rewind abandoned. Appended with the
+	 * current leaf as its parent — which, after {@link rewindTo} has moved the
+	 * leaf back to the fork point, is the new main line — so a reload projects
+	 * it into context as a memory of the fork rather than leaving it stranded
+	 * on the dead branch. `fromId` names the leaf the abandoned branch ended on.
+	 */
+	async appendBranchSummary(result: BranchSummaryResult, fromId: string): Promise<string> {
+		return this.appendEntry<BranchSummarySessionEntry>({
+			type: "branch_summary",
+			id: createEntryId(this.entries),
+			parentId: this.leafId,
+			timestamp: new Date().toISOString(),
+			fromId,
+			summary: result.summary,
+			details: { readFiles: result.readFiles, modifiedFiles: result.modifiedFiles },
+			usage: result.usage,
+		});
+	}
+
 	async appendSessionInfo(name: string | undefined): Promise<string> {
 		return this.appendEntry<SessionInfoEntry>({
 			type: "session_info",
@@ -280,6 +310,52 @@ export class ObsidianSessionManager {
 			throw new Error(`Unknown session entry: ${entryId}`);
 		}
 		this.leafId = target.parentId;
+	}
+
+	/** The entry the active branch currently ends on, or null for a fresh log. */
+	getLeafId(): string | null {
+		return this.leafId;
+	}
+
+	/**
+	 * Builds a throwaway pi {@link Session} over the current entries so the
+	 * branch-summary functions — which take a `Session` but only read through
+	 * `findEntriesOnBranch` and `getEntry` — can walk the branch tree without a
+	 * full migration to pi's `JsonlSessionRepo` (#42).
+	 *
+	 * Entries are replayed in file order onto a single "main" lane. pi's storage
+	 * supplies `seq` (which this plugin's entries never carry) and rebinds each
+	 * entry's `parentId` to the lane's running leaf, so the replay order has to
+	 * match the parent chain — which file order does, because the log is
+	 * append-only and every entry's parent was the leaf at append time. The
+	 * rebind is what makes this work on an append-only log that still carries a
+	 * dead branch: walking to root from the dead leaf follows the same chain the
+	 * file recorded, and the live branch's walk diverges at the fork because its
+	 * entries' parents point back up it, not down the dead spur.
+	 *
+	 * Retire this shim once #42 lands and the manager itself holds a pi `Session`.
+	 */
+	async buildReadOnlySessionView(): Promise<Session> {
+		const storage = new InMemorySessionStorage({ id: "branch-summary-view", createdAt: Date.now() });
+		// The constructor creates the "main" lane, which is the one pi's walks
+		// default to — so appends can start right away.
+		const session = new Session(storage);
+		for (const entry of this.entries) {
+			if (entry.type === "session") {
+				continue;
+			}
+			// `appendEntry` takes a provisioned entry (no parentId/seq/timestamp)
+			// and fills those in from the lane state, so the fields that identify
+			// *what* the entry is are all that need forwarding. `session_info`
+			// entries have no pi counterpart and are skipped — see
+			// `toProvisionedFields`.
+			const provisioned = toProvisionedFields(entry);
+			if (!provisioned) {
+				continue;
+			}
+			await session.appendEntry(provisioned, "main");
+		}
+		return session;
 	}
 
 	/**
@@ -418,6 +494,55 @@ export class ObsidianSessionManager {
 		} catch {
 			return null;
 		}
+	}
+}
+
+/**
+ * Strips the chain/admin fields a pi provisioned entry must not carry, so
+ * {@link ObsidianSessionManager.buildReadOnlySessionView} can replay a plugin
+ * entry onto an `InMemorySessionStorage` lane and let the storage supply
+ * `parentId`/`seq`/`timestamp` itself.
+ *
+ * `session_info` entries have no pi `Entry` counterpart — they are name labels
+ * this plugin layers on top of the transcript — so they are returned as `null`
+ * for the caller to skip. Skipping does not break the replayed chain: the
+ * storage rebinds every entry's `parentId` to the lane's running leaf, so a
+ * dropped entry simply never advances the leaf, and the next real entry chains
+ * to the one before it as if the label had never been written.
+ *
+ * The fields that identify *what* an entry is — `type`, `id`, and the
+ * type-specific payload (`message`, `provider`/`modelId`, `thinkingLevel`,
+ * `summary`/`tokensBefore`/`retainedTail`, `fromId`/`details`, …) — are all that
+ * the branch-summary functions read, so those are all that need forwarding.
+ */
+function toProvisionedFields(entry: Exclude<SessionEntry, SessionHeaderEntry>): ProvisionedEntry | null {
+	switch (entry.type) {
+		case "message":
+			return { type: "message", id: entry.id, message: entry.message };
+		case "model_change":
+			return { type: "model_change", id: entry.id, provider: entry.provider, modelId: entry.modelId };
+		case "thinking_level_change":
+			return { type: "thinking_level_change", id: entry.id, thinkingLevel: entry.thinkingLevel };
+		case "compaction":
+			return {
+				type: "compaction",
+				id: entry.id,
+				summary: entry.summary,
+				tokensBefore: entry.tokensBefore,
+				retainedTail: entry.retainedTail,
+				usage: entry.usage,
+			};
+		case "branch_summary":
+			return {
+				type: "branch_summary",
+				id: entry.id,
+				fromId: entry.fromId,
+				summary: entry.summary,
+				details: entry.details,
+				usage: entry.usage,
+			};
+		case "session_info":
+			return null;
 	}
 }
 
