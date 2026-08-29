@@ -152,8 +152,12 @@
 	flex-wrap: wrap;
 	font-size: var(--font-ui-smaller);
 	gap: var(--size-4-2);
-	/* Nudged in to sit under the transcript's text rather than its scroll gutter. */
-	padding: var(--size-4-1) var(--size-4-1) 0;
+	/*
+	 * Sits on the transcript's text column: container padding + message padding
+	 * put assistant text at 2 × --size-4-2, and this padding matches it, so the
+	 * status line reads as the same column of words rather than a stray edge.
+	 */
+	padding: var(--size-4-1) var(--size-4-2) 0;
 }
 
 /*
@@ -922,6 +926,10 @@
  *    turn on.
  */
 .piem-chat__spinner {
+	/* Sized to the chip icons, not the button icons: it sits beside 12px status
+	 * text, the same context the chips' 14px glyph serves, and the 18px button
+	 * default outweighed the words it was spinning for. */
+	--icon-size: var(--icon-xs);
 	align-items: center;
 	display: inline-flex;
 	justify-content: center;
@@ -1054,6 +1062,10 @@
  * inherited one — so a chip's own colour never reached the only text it has.
  */
 .piem-chat__context-chip-label {
+	/* Tight box, same reason as the send chord: a 12px label in an inherited
+	 * ~1.5 line box rides high against the 14px file icon in the centred flex
+	 * row. `1` puts the glyphs on the icon's optical centre. */
+	line-height: 1;
 	min-width: 0;
 	overflow: hidden;
 	text-overflow: ellipsis;
@@ -1148,6 +1160,10 @@
  *
  * The focus ring is the only line the shell ever draws, so resting-state chrome
  * stays at zero: nothing hard-split between the reader and their draft.
+ *
+ * Padding keeps the text column honest — see the note on the rule itself: the
+ * draft joins the transcript's text column, and the fill is the only breathing
+ * room between the draft and the surface's rim.
  */
 .piem-chat__composer-shell {
 	background: var(--background-secondary);
@@ -1155,6 +1171,11 @@
 	display: flex;
 	flex-direction: column;
 	gap: var(--size-4-2);
+	/* `--size-4-2`, not a roomier `--size-4-3`: container padding + this padding
+	 * must land the draft, the chips and the send bar on the transcript's text
+	 * column (assistant text sits 2 × --size-4-2 from the panel edge). A shell
+	 * inset deeper than the messages made three left edges where the eye
+	 * expects one. */
 	padding: var(--size-4-2);
 	/* The command menu floats above the shell; it needs a positioning context. */
 	position: relative;
@@ -1376,6 +1397,11 @@
  */
 .piem-chat__send-chord {
 	font-size: var(--font-ui-smaller);
+	/* `1`, not the inherited ~1.5: the chord sits beside the send glyph in a
+	 * centred flex row, and the inflated default line box put the keycaps'
+	 * glyphs off the icon's optical centre. A tight box centres the text itself.
+	 */
+	line-height: 1;
 	white-space: nowrap;
 }
 
