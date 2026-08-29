@@ -1,4 +1,5 @@
 import esbuild from "esbuild";
+import { writeFileSync } from "node:fs";
 import process from "process";
 import { builtinModules } from 'node:module';
 
@@ -10,6 +11,15 @@ if you want to view the source, please visit the github repository of this plugi
 `;
 
 const prod = (process.argv[2] === "production");
+
+/**
+ * Where the production build records its module breakdown.
+ *
+ * Build output, not source: gitignored alongside `main.js`, and written only by
+ * a production build so `check:bundle` either reads a breakdown of the artifact
+ * it is checking or none at all.
+ */
+const METAFILE = "main.js.meta.json";
 
 const context = await esbuild.context({
 	banner: {
@@ -39,10 +49,16 @@ const context = await esbuild.context({
 	treeShaking: true,
 	outfile: "main.js",
 	minify: prod,
+	// Records which module contributed which bytes. `check:bundle` reads it to
+	// assert that dependencies we removed on purpose have not crept back in
+	// through a transitive import, which the byte count alone cannot see: a
+	// 270 KiB SDK returning while something else shrinks reads as no change.
+	metafile: prod,
 });
 
 if (prod) {
-	await context.rebuild();
+	const result = await context.rebuild();
+	writeFileSync(METAFILE, JSON.stringify(result.metafile));
 	process.exit(0);
 } else {
 	await context.watch();

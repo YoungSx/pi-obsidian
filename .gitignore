@@ -12,6 +12,9 @@ node_modules
 # They should be uploaded to GitHub releases instead.
 main.js
 
+# esbuild's module breakdown of the production build, read by check:bundle.
+main.js.meta.json
+
 # Exclude sourcemaps
 *.map
 

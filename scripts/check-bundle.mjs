@@ -14,12 +14,19 @@
  * bundle is minified third-party-heavy output, and dependencies embed strings
  * like "set globalThis.File to `import('node:buffer').File`" in error messages.
  * A regex flags those; a parser sees them for what they are, plain text.
+ *
+ * Composition is checked separately, against the build's metafile, because the
+ * byte count cannot see it: a large dependency creeping back in while something
+ * else shrinks reads as no change at all.
  */
 import { readFileSync, statSync } from "node:fs";
 import process from "node:process";
 import esbuild from "esbuild";
 
 const BUNDLE = process.argv[2] ?? "main.js";
+
+/** Module breakdown esbuild wrote beside the bundle. */
+const METAFILE = `${BUNDLE}.meta.json`;
 
 /**
  * Hard ceiling on the shipped bundle, in bytes.
@@ -41,8 +48,38 @@ const BUNDLE = process.argv[2] ?? "main.js";
  */
 const MAX_BUNDLE_BYTES = Math.round(1.75 * 1024 * 1024);
 
+/**
+ * Dependencies removed on purpose, which no import may bring back.
+ *
+ * Each of these was reachable only transitively, so nothing in `src/` names it
+ * and no test notices its return — the sole symptom is a bundle that quietly
+ * grew again. Keyed by the `node_modules` path segment esbuild records, matched
+ * as a substring so a nested or pnpm-style layout is caught too.
+ */
+const BANNED_MODULES = new Map([
+	[
+		"node_modules/@google/genai/",
+		"270 KiB of unreachable code: the adapter behind it throws on any fetch that is not globalThis.fetch, and every request here passes one to reach Obsidian's requestUrl. It returns through a provider factory in src/net/builtinCatalog.ts — import neither googleProvider nor GOOGLE_MODELS (see issue #91).",
+	],
+]);
+
 function formatSize(bytes) {
 	return `${(bytes / 1024 / 1024).toFixed(2)} MiB`;
+}
+
+/**
+ * Every module that contributed bytes to the bundle, as `node_modules`-relative
+ * paths, or undefined when no metafile sits beside it.
+ */
+function readBundleInputs() {
+	let meta;
+	try {
+		meta = JSON.parse(readFileSync(METAFILE, "utf8"));
+	} catch {
+		return undefined;
+	}
+	const output = meta.outputs?.[BUNDLE];
+	return output?.inputs ? Object.keys(output.inputs) : undefined;
 }
 
 /**
@@ -155,6 +192,18 @@ if (!/module\.exports\b/.test(source)) {
 		why: "Obsidian instantiates module.exports as the plugin class; without it the plugin cannot load.",
 		at: "-",
 	});
+}
+
+// Composition, from the metafile. Absent for a dev build, where the size and
+// import checks above still apply; a production build always writes one.
+const bundleInputs = readBundleInputs();
+if (bundleInputs) {
+	for (const [segment, why] of BANNED_MODULES) {
+		const offenders = bundleInputs.filter((input) => input.includes(segment));
+		if (offenders.length > 0) {
+			failures.push({ name: `banned module in bundle: ${segment} (${offenders.length} file(s))`, why, at: "-" });
+		}
+	}
 }
 
 if (sizeInBytes > MAX_BUNDLE_BYTES) {
