@@ -1,9 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import type { App } from "obsidian";
 import { flushRender, installDom } from "../testing/dom";
-import { installObsidianStub } from "../testing/obsidianStub";
+import { installObsidianStub, lastMenu, resetMenus } from "../testing/obsidianStub";
 import type { ChatSnapshot } from "../agent/ObsidianAgentService";
 import type { ContextFill, UsageTotals } from "../agent/usage";
+import type { ActiveSessionInfo } from "../session/ObsidianSessionManager";
 
 installObsidianStub();
 const document = installDom();
@@ -16,7 +17,12 @@ let createRootSync: typeof createRootImpl;
 
 const app = {} as App;
 
-async function renderHeader(snapshot: ChatSnapshot): Promise<HTMLElement> {
+interface RenderOptions {
+	/** Passed through as the header's `onOpenSettings`; omitted means unreachable. */
+	onOpenSettings?: () => void;
+}
+
+async function renderHeader(snapshot: ChatSnapshot, options: RenderOptions = {}): Promise<HTMLElement> {
 	const host = document.createElement("div");
 	document.body.appendChild(host);
 	const root = roots.get(host) ?? createRootSync(host);
@@ -30,10 +36,22 @@ async function renderHeader(snapshot: ChatSnapshot): Promise<HTMLElement> {
 			onNewSession={() => undefined}
 			onRenameSession={() => undefined}
 			onDeleteSession={() => undefined}
+			onOpenSettings={options.onOpenSettings}
 		/>,
 	);
 	await flushRender();
 	return host;
+}
+
+/** Presses the overflow button and returns the menu production code built. */
+async function openOverflow(host: HTMLElement): Promise<ReturnType<typeof lastMenu>> {
+	const button = host.querySelector<HTMLButtonElement>('.piem-chat__header-actions button[aria-label="More chat actions"]');
+	if (!button) {
+		throw new Error("no overflow button");
+	}
+	button.click();
+	await flushRender();
+	return lastMenu();
 }
 
 /**
@@ -102,6 +120,82 @@ describe("ChatHeader vocabulary tiers", () => {
 	});
 });
 
+/**
+ * The overflow menu is the panel's only always-reachable door to settings.
+ *
+ * Every other route is conditional on a failure: the banner offers a button when
+ * a request already errored, the empty state offers one when no key is
+ * configured. A user who simply wants to change model has to leave the panel and
+ * find **Settings → Piem** by hand. So the assertions here are mostly about the
+ * states where the *session* actions are unavailable — before the first message,
+ * and mid-turn — because those are exactly the states the button used to be
+ * greyed out in, and a wrong model mid-turn is when a user reaches for it.
+ */
+describe("ChatHeader overflow menu", () => {
+	beforeEach(() => {
+		createRootSync = createRootImpl;
+		resetMenus();
+		document.body.replaceChildren();
+	});
+
+	afterEach(() => {
+		document.body.replaceChildren();
+	});
+
+	it("offers settings between the session actions, with the destructive one last", async () => {
+		const host = await renderHeader(snapshot({ session: sessionInfo() }), { onOpenSettings: () => undefined });
+
+		expect((await openOverflow(host)).titles()).toEqual(["Rename chat", "Open settings", "Delete chat"]);
+	});
+
+	it("stays open on settings alone before the first message", async () => {
+		const host = await renderHeader(snapshot({ session: undefined }), { onOpenSettings: () => undefined });
+
+		const button = host.querySelector<HTMLButtonElement>('.piem-chat__header-actions button[aria-label="More chat actions"]');
+		expect(button?.disabled).toBe(false);
+		expect((await openOverflow(host)).titles()).toEqual(["Open settings"]);
+	});
+
+	it("stays open on settings alone mid-turn, when the model is what the user wants to change", async () => {
+		const host = await renderHeader(snapshot({ session: sessionInfo(), isStreaming: true }), { onOpenSettings: () => undefined });
+
+		expect((await openOverflow(host)).titles()).toEqual(["Open settings"]);
+	});
+
+	it("routes the settings item to the host callback", async () => {
+		let opened = 0;
+		const host = await renderHeader(snapshot({ session: undefined }), { onOpenSettings: () => (opened += 1) });
+
+		(await openOverflow(host)).click("Open settings");
+
+		expect(opened).toBe(1);
+	});
+
+	/*
+	 * A menu whose every block is absent would open as an empty popover — the one
+	 * outcome worse than a greyed-out button, since it looks like a bug rather
+	 * than a state.
+	 */
+	it("disables the button when the host cannot reach settings and there is no session", async () => {
+		const host = await renderHeader(snapshot({ session: undefined }));
+
+		const button = host.querySelector<HTMLButtonElement>('.piem-chat__header-actions button[aria-label="More chat actions"]');
+		expect(button?.disabled).toBe(true);
+	});
+
+	it("emits no separator when only one block survives", async () => {
+		const host = await renderHeader(snapshot({ session: undefined }), { onOpenSettings: () => undefined });
+
+		expect((await openOverflow(host)).items.some((item) => item.separator)).toBe(false);
+	});
+
+	it("keeps the session actions when the host cannot reach settings", async () => {
+		const host = await renderHeader(snapshot({ session: sessionInfo() }));
+
+		expect((await openOverflow(host)).titles()).toEqual(["Rename chat", "Delete chat"]);
+	});
+});
+
 function snapshot(overrides: Partial<ChatSnapshot> = {}): ChatSnapshot {
 	return {
 		messages: [],
@@ -134,6 +228,22 @@ function fill(overrides: Partial<ContextFill> = {}): ContextFill {
 		compactionEnabled: true,
 		heuristicOnly: true,
 		...overrides,
+	};
+}
+
+/**
+ * A stored session, as the header reads one. Only the fields the header and its
+ * dialogs touch are populated; the type is structural on purpose so this does
+ * not have to track unrelated additions to `ActiveSessionInfo`.
+ */
+function sessionInfo(id = "session-1"): ActiveSessionInfo {
+	return {
+		id,
+		path: `/tmp/${id}.jsonl`,
+		createdAt: "2026-01-01T00:00:00.000Z",
+		updatedAt: "2026-01-02T00:00:00.000Z",
+		messageCount: 2,
+		firstMessage: "Hello there",
 	};
 }
 

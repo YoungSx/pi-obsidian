@@ -21,6 +21,12 @@ interface ChatHeaderProps {
 	onNewSession: () => void;
 	onRenameSession: (name: string) => void;
 	onDeleteSession: (path: string) => void;
+	/**
+	 * Opens the plugin's settings tab. Absent when the host cannot reach it, in
+	 * which case the overflow menu simply does not offer the item — the same
+	 * treatment {@link ChatBanner} gives its settings button.
+	 */
+	onOpenSettings?: () => void;
 }
 
 /**
@@ -41,10 +47,15 @@ export function ChatHeader({
 	onNewSession,
 	onRenameSession,
 	onDeleteSession,
+	onOpenSettings,
 }: ChatHeaderProps): React.JSX.Element {
 	const t = useT();
 	const activeSession = snapshot.session;
 	const isBusy = snapshot.isStreaming || snapshot.isCompacting;
+	// Narrowed to a single binding so the menu's three conditional blocks agree on
+	// one answer, and so TypeScript carries the non-undefined session into the
+	// click handlers without a second check inside each one.
+	const editableSession = isBusy ? undefined : activeSession;
 	const openPicker = (): void => {
 		openSessionPicker(
 			app,
@@ -56,25 +67,46 @@ export function ChatHeader({
 			t,
 		);
 	};
-	const openSessionMenu = (event: React.MouseEvent<HTMLButtonElement>): void => {
-		if (!activeSession) {
-			return;
-		}
+	/**
+	 * The overflow menu.
+	 *
+	 * Session actions are conditional: there is nothing to rename or delete
+	 * before the first message, and doing either mid-turn would pull the
+	 * transcript out from under a running request. Settings is neither, so it
+	 * keeps the button alive in states where the session actions alone would have
+	 * greyed it out — which is precisely when a user goes looking for settings,
+	 * since a wrong model or a missing key is what they are trying to fix.
+	 *
+	 * Separators are emitted by the block that follows them rather than the one
+	 * that precedes them, so no combination of absent blocks can produce a pair
+	 * of adjacent rules or a rule against the menu's own edge.
+	 */
+	const openMenu = (event: React.MouseEvent<HTMLButtonElement>): void => {
 		const menu = new Menu();
-		menu.addItem((item) =>
-			item
-				.setTitle(t.t("chat.renameChat"))
-				.setIcon("pencil")
-				.onClick(() => openSessionRename(app, activeSession, onRenameSession, t)),
-		);
-		menu.addSeparator();
-		menu.addItem((item) =>
-			item
-				.setTitle(t.t("chat.deleteChat"))
-				.setIcon("trash-2")
-				.setWarning(true)
-				.onClick(() => openSessionDeleteConfirm(app, activeSession, () => onDeleteSession(activeSession.path), t)),
-		);
+		if (editableSession) {
+			menu.addItem((item) =>
+				item
+					.setTitle(t.t("chat.renameChat"))
+					.setIcon("pencil")
+					.onClick(() => openSessionRename(app, editableSession, onRenameSession, t)),
+			);
+		}
+		if (onOpenSettings) {
+			if (editableSession) {
+				menu.addSeparator();
+			}
+			menu.addItem((item) => item.setTitle(t.t("chat.openSettings")).setIcon("settings").onClick(onOpenSettings));
+		}
+		if (editableSession) {
+			menu.addSeparator();
+			menu.addItem((item) =>
+				item
+					.setTitle(t.t("chat.deleteChat"))
+					.setIcon("trash-2")
+					.setWarning(true)
+					.onClick(() => openSessionDeleteConfirm(app, editableSession, () => onDeleteSession(editableSession.path), t)),
+			);
+		}
 		menu.showAtMouseEvent(event.nativeEvent);
 	};
 
@@ -95,7 +127,13 @@ export function ChatHeader({
 				    accumulates chats; disabled until there is a second one to pick. */}
 				<IconButton icon="messages-square" label={t.t("chat.openChats")} onClick={openPicker} disabled={isBusy || sessions.length < 2} />
 				<IconButton icon="square-pen" label={t.t("chat.newChat")} onClick={onNewSession} disabled={isBusy} />
-				<IconButton icon="ellipsis" label={t.t("chat.moreActions")} onClick={openSessionMenu} disabled={isBusy || !activeSession} />
+				{/* Disabled only when the menu would open empty — see `openMenu`. */}
+				<IconButton
+					icon="ellipsis"
+					label={t.t("chat.moreActions")}
+					onClick={openMenu}
+					disabled={!editableSession && !onOpenSettings}
+				/>
 			</div>
 		</header>
 	);

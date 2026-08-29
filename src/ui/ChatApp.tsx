@@ -180,6 +180,7 @@ export function ChatApp({ service, inputController, component, draftStore }: Cha
 					onNewSession={() => void service.newSession()}
 					onRenameSession={(name) => void service.renameSession(name)}
 					onDeleteSession={(path) => void service.deleteSession(path)}
+					onOpenSettings={canOpenSettings ? () => openPluginSettings(app) : undefined}
 				/>
 
 				<ChatBanner
