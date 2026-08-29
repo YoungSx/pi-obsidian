@@ -684,7 +684,7 @@ export class ObsidianAgentService {
 		const defaults = this.getSessionDefaults();
 		this.agent.state.model = getSelectedModel(this.getSettings());
 		this.agent.state.thinkingLevel = defaults.thinkingLevel;
-		this.agent.state.tools = createObsidianTools(this.app, this.env);
+		this.agent.state.tools = createObsidianTools(this.app, this.env, this.getSettings());
 		await this.sessionManager.ensureConfiguration(defaults);
 		await this.refreshSessionInfo();
 		this.notify();
@@ -887,7 +887,7 @@ export class ObsidianAgentService {
 				systemPrompt: OBSIDIAN_AGENT_SYSTEM_PROMPT,
 				model,
 				thinkingLevel: getPreferredThinkingLevel(settings),
-				tools: createObsidianTools(this.app, this.env),
+				tools: createObsidianTools(this.app, this.env, settings),
 				messages,
 			},
 			getApiKey: (provider) => this.getApiKey(provider),

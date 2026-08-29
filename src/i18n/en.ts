@@ -317,6 +317,14 @@ export const en = {
 			"Request URL bypasses browser restrictions everywhere but buffers responses — tokens appear all at once. Fetch streams incrementally but may be blocked.",
 		transportRequestUrl: "Request URL (buffered, works everywhere)",
 		transportFetch: "Fetch (streams, may be blocked)",
+		/**
+		 * Toggle for the agent's outbound HTTP tool. Named for what it opens — a
+		 * channel out of the vault — not for the tool's internal name, because a
+		 * reader flipping this has never seen `web_fetch` and should not have to.
+		 */
+		webFetchEnabled: "Allow the agent to fetch web pages",
+		webFetchEnabledDesc:
+			"Adds a tool the agent can use to request external URLs. The request and any data in it leave the vault and Obsidian. Off by default; the transport above decides how it travels.",
 		whatLeavesVault: "What leaves this vault",
 		whatLeavesVaultDesc:
 			"Prompts, vault content read by tools, and tool results are sent to the provider serving the active model. Nothing is sent anywhere else.",

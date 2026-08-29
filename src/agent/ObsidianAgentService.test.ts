@@ -8,6 +8,7 @@ import { ObsidianSessionManager } from "../session/ObsidianSessionManager";
 import { DEFAULT_SESSION_RETENTION } from "../session/retention";
 import { DEFAULT_SESSION_DIR } from "../session/sessionDir";
 import type { PiemSettings } from "../settings";
+import { DEFAULT_SETTINGS } from "../settings";
 import type { ObsidianAgentService as ObsidianAgentServiceType } from "./ObsidianAgentService";
 
 installObsidianStub();
@@ -124,6 +125,7 @@ describe("ObsidianAgentService", () => {
 		// had never registered `custom`, so every send failed with
 		// "Unknown provider: custom". The streamFn must resolve per request.
 		const settings: PiemSettings = {
+			...DEFAULT_SETTINGS,
 			providers: [],
 			models: [],
 			provider: "deepseek",
@@ -983,6 +985,7 @@ function createServiceWithSettings(
 ): { service: ObsidianAgentServiceType; settings: PiemSettings } {
 	const adapter = asDataAdapter(memoryAdapter);
 	const settings: PiemSettings = {
+		...DEFAULT_SETTINGS,
 		providers: [],
 		models: [],
 		provider: "deepseek",
