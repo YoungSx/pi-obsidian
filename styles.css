@@ -1065,6 +1065,8 @@
 	flex-direction: column;
 	gap: var(--size-4-2);
 	padding: var(--size-4-2);
+	/* The command menu floats above the shell; it needs a positioning context. */
+	position: relative;
 }
 
 /*
@@ -1106,6 +1108,77 @@
 
 .piem-chat__composer textarea:focus {
 	outline: none;
+}
+
+/*
+ * `/name` command autocomplete, floated above the textarea.
+ *
+ * Pinned to the shell's top edge and lifted above it, so it reads as an overlay
+ * on the composer rather than a row that pushes the textarea down while the user
+ * is still typing into it. It borrows the dropdown surface and border tokens
+ * Obsidian's own menus use, so it matches the theme without re-deriving them.
+ */
+.piem-chat__command-menu {
+	background: var(--background-primary);
+	border: 1px solid var(--background-modifier-border);
+	border-radius: var(--radius-m);
+	box-shadow: var(--shadow-s);
+	display: flex;
+	flex-direction: column;
+	left: 0;
+	list-style: none;
+	margin: 0;
+	max-height: 40vh;
+	overflow-y: auto;
+	padding: var(--size-4-1);
+	position: absolute;
+	right: 0;
+	/*
+	 * Sit just above the shell. A hair of gap keeps the shadow from kissing the
+	 * border, and `bottom: 100%` anchors to the shell's top regardless of how tall
+	 * the textarea has grown.
+	 */
+	bottom: calc(100% + var(--size-4-1));
+	z-index: var(--layer-menu, 10);
+}
+
+.piem-chat__command-menu-item {
+	margin: 0;
+}
+
+.piem-chat__command-menu-button {
+	align-items: baseline;
+	background: transparent;
+	border: none;
+	border-radius: var(--radius-s);
+	color: var(--text-normal);
+	display: flex;
+	flex-direction: column;
+	gap: var(--size-4-1);
+	padding: var(--size-4-1) var(--size-4-2);
+	text-align: left;
+	width: 100%;
+}
+
+/*
+ * The highlighted (keyboard-active) row. `aria-selected` is set on the `<li>` and
+ * mirrors the focus the keyboard created, so the visual matches the a11y state.
+ */
+.piem-chat__command-menu-item[aria-selected="true"] .piem-chat__command-menu-button {
+	background: var(--background-modifier-hover);
+}
+
+.piem-chat__command-menu-name {
+	color: var(--text-normal);
+	font-family: var(--font-interface);
+	font-size: var(--font-ui-small);
+	font-weight: var(--font-medium);
+}
+
+.piem-chat__command-menu-desc {
+	color: var(--text-muted);
+	font-family: var(--font-interface);
+	font-size: var(--font-ui-smaller);
 }
 
 /*

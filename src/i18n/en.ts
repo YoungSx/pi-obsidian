@@ -34,7 +34,11 @@ export const en = {
 
 	/** Chat panel — header, banner, composer, message list, and trace rows. */
 	chat: {
-		placeholder: "Ask Piem…",
+		/**
+		 * Doubles as the only advert for slash commands: the composer has no other
+		 * affordance saying they exist, and a user who never types `/` never learns.
+		 */
+		placeholder: "Ask Piem, or / for commands…",
 		composerAria: "Message Piem",
 		stopCompaction: "Stop compaction",
 		stopResponse: "Stop response",
@@ -105,6 +109,12 @@ export const en = {
 		contextLabel: "Context",
 		contextValueText: "{estimated}{tokens} of {window} {unit} used, {percent} percent, {state}",
 		contextEstimatedPrefix: "Estimated ",
+		/** Accessible name for the `/`-command autocomplete list. */
+		commandMenuAria: "Prompt commands",
+		/** Notice shown when a `/name` matches no loaded template. */
+		unknownCommand: "Unknown command: /{name}",
+		/** Notice summarizing non-fatal warnings from loading prompt templates. */
+		templatesLoadedWithWarnings: "Loaded prompt commands with {count} warning(s).",
 	},
 
 	/**

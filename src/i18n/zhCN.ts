@@ -28,7 +28,7 @@ export const zhCN: DeepPartial<EnCopy> = {
 	},
 
 	chat: {
-		placeholder: "询问 Piem…",
+		placeholder: "询问 Piem，或输入 / 使用命令…",
 		composerAria: "给 Piem 发消息",
 		stopCompaction: "停止整理",
 		stopResponse: "停止回复",
@@ -79,6 +79,9 @@ export const zhCN: DeepPartial<EnCopy> = {
 		contextLabel: "上下文",
 		contextValueText: "已使用 {estimated}{tokens} / {window} {unit}，{percent}%，{state}",
 		contextEstimatedPrefix: "约 ",
+		commandMenuAria: "提示命令",
+		unknownCommand: "未知命令：/{name}",
+		templatesLoadedWithWarnings: "已加载提示命令，但有 {count} 条警告。",
 	},
 
 	chatStatus: {

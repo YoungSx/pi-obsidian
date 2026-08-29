@@ -1,10 +1,11 @@
-import React, { useEffect, useId, useRef } from "react";
+import React, { useEffect, useId, useMemo, useRef, useState } from "react";
 import { Platform } from "obsidian";
 import { IconButton, ObsidianIcon } from "./ObsidianIcon";
 import { isSendShortcut, resolveSendShortcut, sendShortcutAria, type SendShortcut } from "./keyboard";
 import { sendButtonTitle, sendShortcutLabel } from "./chatStatus";
 import { useT } from "./TranslatorContext";
 import { useAutosize } from "./useAutosize";
+import { CommandMenu, type CommandEntry } from "./CommandMenu";
 
 interface ChatComposerProps {
 	input: string;
@@ -41,6 +42,12 @@ interface ChatComposerProps {
 	 * ring — it is part of what you are about to send, not chrome above it.
 	 */
 	contextRow?: React.ReactNode;
+	/**
+	 * `/name` prompt commands available to autocomplete. Empty when no templates
+	 * loaded; the menu simply never opens, and `/`-prefixed drafts behave like any
+	 * other text until the user sends them.
+	 */
+	commands: CommandEntry[];
 }
 
 /**
@@ -67,11 +74,13 @@ export function ChatComposer({
 	onFocusRequested,
 	onAnchorIdChange,
 	contextRow,
+	commands,
 }: ChatComposerProps): React.JSX.Element {
 	const t = useT();
 	const textareaRef = useRef<HTMLTextAreaElement | null>(null);
 	const onSendRef = useRef<() => void>(onSend);
 	const isBusy = isStreaming || isCompacting;
+	const [menuOpen, setMenuOpen] = useState(false);
 	// Per-instance rather than a constant: Obsidian allows several leaves of one
 	// view type, so two open chat panels would otherwise share one id and the
 	// skip link in each would jump to whichever mounted first.
@@ -84,6 +93,28 @@ export function ChatComposer({
 
 	onSendRef.current = onSend;
 	shortcutRef.current = shortcut;
+
+	/*
+	 * The menu opens only while the draft is a bare command name — starts with
+	 * `/` and has no space yet. Once the user types a space they are into the
+	 * arguments and the name is fixed, so a floating list would only distract.
+	 * Multiline drafts never open it: a `/` on the second line is prose.
+	 */
+	const commandQuery = useMemo(() => {
+		if (!input.startsWith("/") || input.includes(" ") || input.includes("\n")) {
+			return null;
+		}
+		return input.slice(1).toLowerCase();
+	}, [input]);
+	const showMenu = menuOpen && commandQuery !== null && commands.length > 0;
+
+	const selectCommand = (name: string): void => {
+		onInputChange(`/${name} `);
+		setMenuOpen(false);
+		// Keep the caret after the trailing space so the user types arguments next,
+		// not back into the name.
+		textareaRef.current?.focus();
+	};
 
 	useAutosize(textareaRef, input);
 
@@ -151,12 +182,31 @@ export function ChatComposer({
 					ref={textareaRef}
 					id={anchorId}
 					value={input}
-					onChange={(event) => onInputChange(event.currentTarget.value)}
+					onChange={(event) => {
+						const value = event.currentTarget.value;
+						onInputChange(value);
+						// Open the command menu the moment the draft becomes a lone `/`,
+						// close it the moment it stops being one. Kept here rather than in an
+						// effect so the menu tracks the keystroke, not a render behind it.
+						setMenuOpen(value.startsWith("/"));
+					}}
+					onBlur={() => {
+						// Defer so a click on a menu item fires before the menu unmounts.
+						window.setTimeout(() => setMenuOpen(false), 0);
+					}}
 					placeholder={t.t("chat.placeholder")}
 					aria-label={t.t("chat.composerAria")}
 					aria-keyshortcuts={sendShortcutAria(shortcut)}
 					rows={2}
 				/>
+				{showMenu ? (
+					<CommandMenu
+						commands={commands}
+						query={commandQuery ?? ""}
+						onSelect={selectCommand}
+						onClose={() => setMenuOpen(false)}
+					/>
+				) : null}
 				<div className="piem-chat__composer-bar">
 
 					{isBusy ? (

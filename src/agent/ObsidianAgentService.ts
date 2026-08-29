@@ -9,7 +9,10 @@ import {
 	type AgentEvent,
 	type AgentLoopTurnUpdate,
 	type AgentMessage,
+	type ExecutionEnv,
 	type PrepareNextTurnContext,
+	type PromptTemplate,
+	type PromptTemplateDiagnostic,
 	type StreamFn,
 	type ThinkingLevel,
 } from "@earendil-works/pi-agent-core";
@@ -33,6 +36,14 @@ import { ContextRefs, type ContextRef } from "./contextRefs";
 import { OBSIDIAN_AGENT_SYSTEM_PROMPT } from "./systemPrompt";
 import { getT, resolveLanguage, type Language, type LanguageHost, type Translator } from "../i18n";
 import type { SendShortcut } from "../ui/keyboard";
+import { VaultExecutionEnv } from "../vault/VaultExecutionEnv";
+import { BUILTIN_PROMPT_TEMPLATES } from "./builtinTemplates";
+import {
+	expandPromptTemplate,
+	findPromptTemplate,
+	loadVaultPromptTemplates,
+	parsePromptCommand,
+} from "./promptTemplates";
 
 export interface ChatSnapshot {
 	messages: AgentMessage[];
@@ -118,6 +129,15 @@ export interface ChatSnapshot {
 	 * nothing to re-enable.
 	 */
 	isFollowingActiveNote: boolean;
+	/**
+	 * Prompt templates available as `/name` commands, for autocomplete.
+	 *
+	 * Name and description only — the template body never reaches the UI. Builtins
+	 * are listed first, then the vault's own `.piem/prompts` templates, in load
+	 * order. Empty when the vault has none and nothing ships, which renders no
+	 * autocomplete list.
+	 */
+	availableCommands: { name: string; description: string }[];
 }
 
 /**
@@ -182,6 +202,17 @@ export class ObsidianAgentService {
 	private readonly sessionManager: ObsidianSessionManager;
 	private readonly streamFn: StreamFn | undefined;
 	private readonly listeners = new Set<SnapshotListener>();
+	/**
+	 * Single vault execution env shared by the file tools and the prompt-template
+	 * loader.
+	 *
+	 * Reused across `refreshConfiguration` and `initializeAgent` rather than
+	 * rebuilt each time: pi's file mutation queue keys per-path locks off env
+	 * object identity, and the template list survives a tool refresh only if the
+	 * env it was read through is not replaced underneath it. Stateless by design
+	 * — every call routes through the vault API — so one instance is safe to hold.
+	 */
+	private readonly env: ExecutionEnv;
 	private agent: Agent | null = null;
 	private unsubscribeAgent: (() => void) | null = null;
 	private initialization: Promise<void> | null = null;
@@ -258,12 +289,23 @@ export class ObsidianAgentService {
 	private readonly contextRefs = new ContextRefs();
 	/** Mid-run compactions spent on the active run; the budget is per run. */
 	private midRunCompactions = 0;
+	/**
+	 * Loaded prompt templates: builtins first, then the vault's `.piem/prompts`.
+	 *
+	 * Reloaded each `initializeAgent` so a template file added mid-session is
+	 * picked up on the next panel open. A `/name` that matches nothing here is
+	 * reported as unknown rather than sent.
+	 */
+	private promptTemplates: PromptTemplate[] = [];
+	/** Non-fatal warnings from the last vault template load, surfaced as a notice. */
+	private templateDiagnostics: PromptTemplateDiagnostic[] = [];
 
 	constructor(app: App, getSettings: () => PiemSettings, sessionManager: ObsidianSessionManager, options: ObsidianAgentServiceOptions = {}) {
 		this.app = app;
 		this.getSettings = getSettings;
 		this.sessionManager = sessionManager;
 		this.streamFn = options.streamFn;
+		this.env = new VaultExecutionEnv(app);
 	}
 
 	subscribe(listener: SnapshotListener): () => void {
@@ -296,7 +338,27 @@ export class ObsidianAgentService {
 			return false;
 		}
 
+		// Initialization is what populates `promptTemplates`, so it has to run
+		// before the command lookup below — otherwise the very first message of a
+		// session would report every `/name` as unknown.
 		await this.initialize();
+
+		// A `/name args` invocation expands the named template into its model-facing
+		// text and sends that instead. The expansion is a real user message: it
+		// persists to the session log and shows in the transcript, unlike the
+		// ephemeral context injection in `transformContext`. Recursing once is safe
+		// because the expanded body does not start with `/`.
+		const command = parsePromptCommand(trimmedPrompt);
+		if (command) {
+			const template = findPromptTemplate(this.promptTemplates, command.name);
+			if (!template) {
+				const t = this.t();
+				this.setNotice(t.t("chat.unknownCommand", { name: command.name }));
+				return false;
+			}
+			return this.sendPrompt(expandPromptTemplate(template, command.args));
+		}
+
 		const agent = this.requireAgent();
 		if (agent.state.isStreaming) {
 			this.setError("The agent is already responding.");
@@ -618,7 +680,7 @@ export class ObsidianAgentService {
 		const defaults = this.getSessionDefaults();
 		this.agent.state.model = getSelectedModel(this.getSettings());
 		this.agent.state.thinkingLevel = defaults.thinkingLevel;
-		this.agent.state.tools = createObsidianTools(this.app);
+		this.agent.state.tools = createObsidianTools(this.app, this.env);
 		await this.sessionManager.ensureConfiguration(defaults);
 		this.refreshSessionInfo();
 		this.notify();
@@ -685,6 +747,10 @@ export class ObsidianAgentService {
 			sendShortcut: settings.sendShortcut,
 			contextRefs: this.contextRefs.list(),
 			isFollowingActiveNote: this.contextRefs.isFollowingActive(),
+			availableCommands: this.promptTemplates.map((template) => ({
+				name: template.name,
+				description: template.description ?? "",
+			})),
 		};
 	}
 
@@ -744,7 +810,26 @@ export class ObsidianAgentService {
 		const context = this.sessionManager.buildSessionContext();
 		this.lastCompaction = this.sessionManager.getLastCompaction();
 		this.adoptSessionContext(context);
+		await this.refreshPromptTemplates();
 		this.notify();
+	}
+
+	/**
+	 * Reloads prompt templates from the vault and merges them with the builtins.
+	 *
+	 * Non-fatal diagnostics are surfaced as a notice rather than blocking init: a
+	 * malformed `.md` in `.piem/prompts` should not stop the panel from opening,
+	 * and every well-formed sibling still loads. Builtins are constant, so only
+	 * the vault half can produce warnings.
+	 */
+	private async refreshPromptTemplates(): Promise<void> {
+		const loaded = await loadVaultPromptTemplates(this.env);
+		this.promptTemplates = [...BUILTIN_PROMPT_TEMPLATES, ...loaded.templates];
+		this.templateDiagnostics = loaded.diagnostics;
+		if (loaded.diagnostics.length > 0) {
+			const t = this.t();
+			this.setNotice(t.t("chat.templatesLoadedWithWarnings", { count: loaded.diagnostics.length }));
+		}
 	}
 
 	/**
@@ -798,7 +883,7 @@ export class ObsidianAgentService {
 				systemPrompt: OBSIDIAN_AGENT_SYSTEM_PROMPT,
 				model,
 				thinkingLevel: getPreferredThinkingLevel(settings),
-				tools: createObsidianTools(this.app),
+				tools: createObsidianTools(this.app, this.env),
 				messages,
 			},
 			getApiKey: (provider) => this.getApiKey(provider),

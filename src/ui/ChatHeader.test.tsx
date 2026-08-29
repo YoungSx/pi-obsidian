@@ -120,6 +120,7 @@ function snapshot(overrides: Partial<ChatSnapshot> = {}): ChatSnapshot {
 		sendShortcut: "enter",
 		contextRefs: [],
 		isFollowingActiveNote: true,
+		availableCommands: [],
 		...overrides,
 	};
 }

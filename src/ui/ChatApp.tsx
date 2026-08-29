@@ -217,6 +217,7 @@ export function ChatApp({ service, inputController, component, draftStore }: Cha
 					onAbort={() => service.abort()}
 					onFocusRequested={handleFocusRequested}
 					onAnchorIdChange={handleAnchorIdChange}
+					commands={snapshot.availableCommands}
 					contextRow={
 						<ContextRow
 							refs={snapshot.contextRefs}

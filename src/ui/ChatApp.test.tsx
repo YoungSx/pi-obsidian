@@ -392,6 +392,7 @@ function baseSnapshot(): ChatSnapshot {
 		language: "en",
 		contextRefs: [],
 		isFollowingActiveNote: true,
+		availableCommands: [],
 	} as ChatSnapshot;
 }
 
