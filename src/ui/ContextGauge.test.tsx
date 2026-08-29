@@ -152,12 +152,16 @@ describe("ContextGauge ring", () => {
 		expect(host.querySelector("[role='progressbar']")).toBeNull();
 	});
 
-	it("keeps Obsidian's clickable-icon off the ring, whose opacity would dim the band colour", async () => {
-		// `.clickable-icon` applies `opacity: var(--icon-opacity)` (0.85), which
-		// multiplies with whatever ok/warn/near colour the ring is carrying.
+	it("wears Obsidian's clickable-icon, without which the theme re-chromes the ring", async () => {
+		// The load-bearing class. Obsidian styles every `button:not(.clickable-icon)`
+		// as a filled form control at a specificity a plain class cannot outrank, so
+		// opting out of the class is what wrapped the ring in a container. The 0.85
+		// opacity the class carries is answered in `styles.css` by pinning
+		// `--icon-opacity: 1` — answered there, not here, because happy-dom applies
+		// neither `app.css` nor the plugin stylesheet.
 		const host = await renderGauge();
 
-		expect(host.querySelector(".piem-chat__context-gauge")?.className).not.toContain("clickable-icon");
+		expect(host.querySelector(".piem-chat__context-gauge")?.className).toContain("clickable-icon");
 	});
 });
 

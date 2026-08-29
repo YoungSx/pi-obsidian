@@ -134,6 +134,60 @@ describe("icon contrast in the resting state (WCAG 1.4.11)", () => {
 	});
 });
 
+describe("bare-button cascade against Obsidian's control chrome", () => {
+	/*
+	 * `app.css` styles every `button:not(.clickable-icon)` as a filled form
+	 * control at (0,1,1). A plain class reset at (0,1,0) silently loses to it —
+	 * which is how a 16px ring and a chip's file name both shipped inside filled,
+	 * rounded boxes — and the loss is invisible under `bun test`, which loads
+	 * neither `app.css` nor the plugin stylesheet. Only the shape of the selector
+	 * proves the fix, so that is what is pinned here.
+	 */
+	const RESET = "button.piem-chat__command-menu-button,\nbutton.piem-chat__context-open,\nbutton.piem-settings-tab";
+
+	it("resets the bare buttons with an element-qualified selector, not a bare class", () => {
+		// `ruleBody` matching at all proves the selector carries the element: a
+		// `.piem-chat__context-open` rule would not be found under this key.
+		const body = declarations(ruleBody(RESET));
+
+		expect(body).toContain("background: transparent");
+		expect(body).toContain("box-shadow: none");
+	});
+
+	it("wins the tie on source order, not by force or by surrendering specificity", () => {
+		// `!important` would also silence the hover and selected states below the
+		// reset; `:where()` contributes nothing and leaves the (0,1,1) tie unbroken.
+		// Anchored at line start so the rule's own comment — which names both —
+		// stays out of the match.
+		const rule = styles.match(/(?:^|\n)button\.piem-chat__command-menu-button[\s\S]*?\{[^}]*\}/)?.[0] ?? "";
+
+		expect(rule).not.toContain("!important");
+		expect(rule).not.toContain(":where(");
+	});
+
+	it("pins the ring's icon opacity through the token, not by opting out of clickable-icon", () => {
+		// The ring wears `clickable-icon` (see ContextGauge.tsx), whose 0.85
+		// opacity would dilute the warn and near band colours. The class stays —
+		// dropping it is what re-chromed the ring — and this pair answers the
+		// opacity; both tokens, because `.clickable-icon:hover` re-declares
+		// `--icon-opacity-hover` and Obsidian's mobile block drops it to 0.65.
+		const body = ruleBody(".piem-chat__context-gauge");
+
+		expect(body).toContain("--icon-opacity: 1");
+		expect(body).toContain("--icon-opacity-hover: 1");
+	});
+
+	it("element-qualifies the one bare button that wants a fill, so it outranks the reset", () => {
+		// `.piem-chat__latest` at (0,1,0) was losing its own `--background-secondary`
+		// to both Obsidian's control rule and the reset, and silently wearing
+		// `--interactive-normal` instead.
+		const body = ruleBody("button.piem-chat__latest");
+
+		expect(body).toContain("background: var(--background-secondary)");
+		expect(declarations(body)).not.toContain("background: transparent");
+	});
+});
+
 describe("touch targets (WCAG 2.5.5 / 2.5.8)", () => {
 	/*
 	 * `pointer` reports only the *primary* input, so an iPad with a keyboard — a

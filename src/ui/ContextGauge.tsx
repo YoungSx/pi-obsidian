@@ -79,11 +79,15 @@ export interface ContextGaugeProps {
  * Click, Tab and hover all open it, and the button's accessible name carries the
  * full readout so the value survives without the progressbar role.
  *
- * Deliberately not an {@link IconButton} for the ring itself: that hardcodes
- * Obsidian's `clickable-icon`, which applies `opacity: var(--icon-opacity)`
- * (0.85) and would multiply with the ok/warn/near colour. This codebase has
- * already shipped that bug once, in the other direction, when a `color`
- * override left the warn band grey.
+ * Not an {@link IconButton}, but it wears the same two classes by hand. The
+ * component is the wrong shape here — it renders a Lucide glyph via `setIcon`,
+ * and this button's content is an inline `<svg>` whose arc is driven by a custom
+ * property — yet `clickable-icon` is not optional. Obsidian styles every
+ * `button:not(.clickable-icon)` as a filled form control at a specificity a
+ * plain class cannot outrank, so dropping the class does not free the glyph from
+ * the theme's button chrome; it hands the glyph to it. The 0.85 icon opacity that
+ * comes with the class, which would otherwise dilute the warn and near bands, is
+ * pinned back to 1 through `--icon-opacity` in `styles.css`.
  */
 export function ContextGauge({
 	fill,
@@ -227,7 +231,14 @@ export function ContextGauge({
 		>
 			<button
 				type="button"
-				className="piem-chat__context-gauge"
+				/*
+				 * `clickable-icon` is load-bearing, not cosmetic: without it Obsidian's
+				 * `button:not(.clickable-icon)` rule wins over anything this stylesheet
+				 * says and wraps the ring in a filled, rounded control box. See the rule
+				 * in `styles.css` for the specificity arithmetic and for why the opacity
+				 * that class carries is answered with a token rather than by opting out.
+				 */
+				className="clickable-icon piem-chat__icon-button piem-chat__context-gauge"
 				aria-expanded={isOpen}
 				aria-label={contextGaugeName(fill, t)}
 				onClick={togglePress}
