@@ -108,3 +108,19 @@ describe("touch targets (WCAG 2.5.5 / 2.5.8)", () => {
 		expect(body).toContain("min-width: var(--size-4-8)");
 	});
 });
+
+describe("typing dots (issue #86)", () => {
+	/*
+	 * The pending-reply indicator is three empty spans whose only signal is a
+	 * bouncing animation. Without a fill they are transparent, so the animation
+	 * animated nothing and the placeholder vanished from the transcript — a
+	 * rendering test under `bun test` cannot catch this, because happy-dom does
+	 * not paint either. The fill rides `currentColor`, so the pending card's
+	 * `color: var(--text-muted)` tints it and theme switches retint it for free.
+	 */
+	it("gives the dots a fill, tracked to the card's text colour", () => {
+		const body = ruleBody(".piem-chat__typing-dot");
+
+		expect(body).toContain("background: currentColor");
+	});
+});
