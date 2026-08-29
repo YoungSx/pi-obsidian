@@ -224,9 +224,8 @@ export const zhCN: DeepPartial<EnCopy> = {
 		tabModels: "模型",
 		tabChat: "对话",
 		tabSessions: "历史",
-		tabNetwork: "网络",
-		tabAbout: "关于",
-		tabLanguage: "语言",
+		tabSkills: "技能",
+		tabGeneral: "通用",
 
 		languageHeading: "语言",
 		languageDesc: "界面使用的语言。“自动”会跟随笔记库的语言。",
@@ -264,6 +263,8 @@ export const zhCN: DeepPartial<EnCopy> = {
 		sendShortcutEnter: "回车（Shift+回车 换行）",
 		sendShortcutModEnter: "Ctrl+回车 或 ⌘+回车（回车用于换行）",
 		sendShortcutMobileNote: "在手机上回车一律换行——软键盘没有 Shift+回车——请用发送按钮。",
+		networkHeading: "网络",
+		networkHeadingDesc: "请求如何离开笔记库。",
 		networkTransport: "网络传输",
 		networkTransportDesc:
 			"请求 URL 可在各处绕过浏览器限制，但会缓冲响应——token 会一次性出现。Fetch 会增量流式返回，但可能被拦截。",
@@ -279,6 +280,44 @@ export const zhCN: DeepPartial<EnCopy> = {
 			"聊天记录是笔记库里的文件，会随你的笔记一起同步和备份。它们包含对话内容，以及回答过程中读取的笔记原文。",
 		apiKeysHeading: "API 密钥",
 		restrictedKeyHint: "请使用受限、低限额的密钥：笔记库是一个普通文件夹，里面的密钥会随着该文件夹的每次备份和同步一起传播。",
+	},
+
+	skills: {
+		heading: "技能",
+		desc: "代理可以按需加载的指令。它们是笔记库里的文件——像普通笔记一样编辑，下一条消息就会生效。",
+		import: "从 URL 导入",
+		empty: "还没有技能。从 URL 导入一个，或在 Piem/skills 里建一个包含 SKILL.md 的文件夹。",
+		importedFrom: "导入自 {url}",
+		handAuthored: "在笔记库中手写。更新请直接修改文件。",
+		rootFile: "单篇笔记充当的技能。像普通笔记一样编辑；无法从这里更新或删除。",
+		open: "打开",
+		update: "检查更新",
+		delete: "删除",
+		upToDate: "{name} 已经是最新版本。",
+		updatedOne: "{name} 已更新：更改了 1 个文件。",
+		updatedMany: "{name} 已更新：更改了 {count} 个文件。",
+		conflict: "{name} 有本地修改，未覆盖任何内容。冲突的文件：{files}。",
+		couldNotUpdate: "无法更新 {name}：{message}",
+		couldNotDelete: "无法删除 {name}：{message}",
+		userHeading: "用户级技能",
+		userDesc: "自动从 ~/.pi/agent/skills 和 ~/.agents/skills 加载，位于笔记库之外。",
+		userEmpty: "这台电脑上没有用户级技能。",
+	},
+
+	skillImport: {
+		title: "导入技能",
+		urlName: "技能 URL",
+		urlDesc: "GitHub 的文件夹或文件，或任何公开的 .md 页面。",
+		urlPlaceholder: "https://github.com/owner/repo/tree/main/skills",
+		preview: "预览",
+		fetching: "正在获取…",
+		importOne: "导入 1 个技能",
+		importMany: "导入 {count} 个技能",
+		invalidUrl: "这看起来不像技能 URL。请使用 GitHub 文件夹、GitHub 文件或公开的 .md 链接。",
+		fetchFailed: "获取失败：{message}",
+		installFailed: "导入失败：{message}",
+		noneFound: "那里没有找到技能。技能是一个包含 SKILL.md 的文件夹，或一篇带名称和描述的 .md 文件。",
+		installed: "已导入 {count} 个。",
 	},
 
 	about: {
@@ -364,6 +403,7 @@ export const zhCN: DeepPartial<EnCopy> = {
 		delete: "删除",
 		providerSubject: "提供方“{name}”",
 		modelSubject: "模型“{name}”",
+		skillSubject: "技能“{name}”",
 	},
 
 	deletion: {
@@ -372,6 +412,7 @@ export const zhCN: DeepPartial<EnCopy> = {
 		providerManyModels: "由它提供服务的 {count} 个模型也会被移除：{names}。",
 		modelProviderStays: "提供方及其密钥会保留，其他模型仍可正常使用。",
 		modelWasActive: "它是当前模型，移除后会自动选择另一个。",
+		skillFiles: "技能的文件会移入回收站，并不再对代理可用。",
 	},
 
 	test: {

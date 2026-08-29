@@ -1,4 +1,4 @@
-import { Platform, Setting, type App } from "obsidian";
+import { ButtonComponent, Notice, Platform, Setting, TFile, type App } from "obsidian";
 import type { ModelThinkingLevel } from "@earendil-works/pi-ai";
 import type { ConnectionTestResult } from "../../connectionTest";
 import { testModelConnection, testProviderConnection } from "../../connectionTest";
@@ -55,6 +55,10 @@ import {
 	SESSION_DIR_PLACEHOLDER,
 } from "./sessionsCopy";
 import { DEFAULT_SESSION_DIR, normalizeSessionDir } from "../../session/sessionDir";
+import type { FetchedSkill, FetchedSource, UpdatePlan } from "../../skills/skillImport";
+import type { SkillInventory, SkillRow } from "../../skills/skillManager";
+import type { UserSkill } from "../../skills/userSkills";
+import { ImportSkillModal } from "./ImportSkillModal";
 
 /**
  * Renders the settings panel.
@@ -123,12 +127,46 @@ export interface SettingsPanelHost {
 	 */
 	countLegacySessions(): Promise<{ count: number; dir: string }>;
 	/**
-	 * Plugin metadata shown on the About tab.
+	 * Plugin metadata shown on the General tab.
 	 *
 	 * A narrow field rather than the plugin itself: this interface declares only
-	 * what the panel reads, and one version string is all the About tab needs.
+	 * what the panel reads, and one version string is all that section needs.
 	 */
 	manifest: { version: string };
+	/** Vault skill operations for the Skills tab. */
+	skills: SkillsHost;
+}
+
+/**
+ * What the Skills tab needs from the plugin: vault skill operations.
+ *
+ * Implemented over {@link SkillManager} plus the agent's reload path. Every
+ * mutation here lands in the vault as files — not through
+ * {@link SettingsPanelHost.save} — so the host carries the one call that tells
+ * the running agent its prompt changed.
+ */
+export interface SkillsHost {
+	/** Lists the skills installed under the vault's skills folder. */
+	list(): Promise<SkillInventory>;
+	/** Fetches a pasted URL for preview, writing nothing. */
+	fetchSource(url: string): Promise<FetchedSource>;
+	/** Writes one previewed skill into the vault. */
+	install(source: FetchedSource, skill: FetchedSkill): Promise<void>;
+	/** Checks upstream and applies a clean update; returns the plan either way. */
+	update(dirName: string): Promise<UpdatePlan>;
+	/** Deletes a skill directory, provenance sidecar included. */
+	remove(dirName: string): Promise<void>;
+	/** Re-reads skill files into the running agent after a change on disk. */
+	refreshAgent(): Promise<void>;
+	/** User-level skills on this machine, read-only in the panel. */
+	listUserSkills(): Promise<UserSkill[]>;
+	/**
+	 * Whether user-level skills can be read on this device.
+	 *
+	 * Desktop only: the node filesystem they live in does not exist on mobile,
+	 * and a section promising skills that can never load is noise.
+	 */
+	userSkillsAvailable: boolean;
 }
 
 /** The slice of settings this panel reads and writes. */
@@ -164,9 +202,11 @@ export function renderSettingsPanel(containerEl: HTMLElement, host: SettingsPane
 		// a chat, and the tab strip is the wrong place to teach a reader a second word
 		// for their own conversations.
 		{ id: "sessions", label: t.t("settings.tabSessions"), render: (el) => renderSessionsTab(el, host) },
-		{ id: "language", label: t.t("settings.tabLanguage"), render: (el) => renderLanguageTab(el, host) },
-		{ id: "network", label: t.t("settings.tabNetwork"), render: (el) => renderNetworkTab(el, host) },
-		{ id: "about", label: t.t("settings.tabAbout"), render: (el) => renderAboutTab(el, host) },
+		{ id: "skills", label: t.t("settings.tabSkills"), render: (el) => renderSkillsTab(el, host) },
+		// Language and About each held one or two rows and no control that changed
+		// behaviour; merged because a reader reaching for either is doing the same
+		// thing — adjusting the plugin rather than configuring it.
+		{ id: "general", label: t.t("settings.tabGeneral"), render: (el) => renderGeneralTab(el, host) },
 	];
 
 	renderSettingsTabs(containerEl, {
@@ -214,6 +254,7 @@ function renderModelsTab(containerEl: HTMLElement, host: SettingsPanelHost): voi
 
 	renderProviderList(containerEl, host, refresh);
 	renderModelList(containerEl, host, refresh);
+	renderNetworkGroup(containerEl, host);
 }
 
 function renderProviderList(containerEl: HTMLElement, host: SettingsPanelHost, refresh: () => void): void {
@@ -694,10 +735,24 @@ function renderRetentionRow(containerEl: HTMLElement, host: SettingsPanelHost): 
 	});
 }
 
-function renderNetworkTab(containerEl: HTMLElement, host: SettingsPanelHost): void {
+/**
+ * Network rows, folded to the bottom of the Models tab.
+ *
+ * Demoted from its own tab because both rows are about how a request leaves
+ * the vault — a concern of the endpoint configuration above them, and one most
+ * users set once and never touch. The section starts open only when the
+ * transport has been moved off its default, since that is the reader for whom
+ * the contents actually matter; everyone else gets two collapsed lines.
+ */
+function renderNetworkGroup(containerEl: HTMLElement, host: SettingsPanelHost): void {
+	const body = createCollapsibleSection(containerEl, {
+		label: host.t.t("settings.networkHeading"),
+		description: host.t.t("settings.networkHeadingDesc"),
+		open: host.settings.networkTransport !== "requestUrl",
+	});
 	const { settings, t } = host;
 
-	new Setting(containerEl)
+	new Setting(body)
 		.setName(t.t("settings.networkTransport"))
 		.setDesc(t.t("settings.networkTransportDesc"))
 		.addDropdown((dropdown) => {
@@ -713,8 +768,20 @@ function renderNetworkTab(containerEl: HTMLElement, host: SettingsPanelHost): vo
 	// States what the transport above actually carries. `web_fetch` sat here as an
 	// off-by-default toggle until #52; it is now always available, so this row is
 	// disclosure rather than a control — the reader learns in one place that the
-	// agent can fetch pages, and which transport those requests ride.
-	new Setting(containerEl).setName(t.t("settings.webFetchName")).setDesc(t.t("settings.webFetchDesc"));
+	// agent can fetch pages, and which transport those requests ride. It stays
+	// inside the collapsible so both network rows read as one group.
+	new Setting(body).setName(t.t("settings.webFetchName")).setDesc(t.t("settings.webFetchDesc"));
+}
+
+/**
+ * The General tab: interface language, then the About material.
+ *
+ * Language stays first because it is the one row with a control; everything
+ * under it is prose and links.
+ */
+function renderGeneralTab(containerEl: HTMLElement, host: SettingsPanelHost): void {
+	renderLanguageRows(containerEl, host);
+	renderAboutRows(containerEl, host);
 }
 
 /**
@@ -725,7 +792,7 @@ function renderNetworkTab(containerEl: HTMLElement, host: SettingsPanelHost): vo
  * blob of links reads as one sentence to a screen reader and gives a keyboard
  * user nothing to land on but the links themselves.
  */
-function renderAboutTab(containerEl: HTMLElement, host: SettingsPanelHost): void {
+function renderAboutRows(containerEl: HTMLElement, host: SettingsPanelHost): void {
 	const { t } = host;
 	new Setting(containerEl).setName("Piem").setHeading().setDesc(describeVersion(host.manifest.version, t));
 
@@ -747,13 +814,13 @@ function renderAboutTab(containerEl: HTMLElement, host: SettingsPanelHost): void
 }
 
 /**
- * Language tab.
+ * The language row.
  *
  * Changing the language re-renders the whole panel rather than this one tab: the
  * tab strip's own labels are copy too, so redrawing only the pane would leave
  * the strip in the previous language.
  */
-function renderLanguageTab(containerEl: HTMLElement, host: SettingsPanelHost): void {
+function renderLanguageRows(containerEl: HTMLElement, host: SettingsPanelHost): void {
 	const { settings, t } = host;
 
 	new Setting(containerEl)
@@ -770,6 +837,198 @@ function renderLanguageTab(containerEl: HTMLElement, host: SettingsPanelHost): v
 				await host.save();
 			});
 		});
+}
+
+/**
+ * The Skills tab: what the agent can load on request.
+ *
+ * Two lists, kept apart because they behave differently. Vault skills are this
+ * plugin's own content — they can be imported, updated from their source, and
+ * deleted. User-level skills belong to the machine; the panel only shows them
+ * so inheritance is visible rather than mysterious. There is no toggle for
+ * that second list on purpose: pi reads those directories, and a switch that
+ * only half-owns its subject would lie about where the truth lives.
+ */
+function renderSkillsTab(containerEl: HTMLElement, host: SettingsPanelHost): void {
+	const { t } = host;
+
+	// Every async fill below targets a container created synchronously, in
+	// final order: the diagnostics banner never jumps below the rows when it
+	// arrives late, and the user-level section never lands between the heading
+	// and the vault rows.
+	const diagnosticsEl = containerEl.createEl("p", { cls: "piem-settings-warning" });
+	diagnosticsEl.hidden = true;
+
+	new Setting(containerEl)
+		.setName(t.t("skills.heading"))
+		.setHeading()
+		.setDesc(t.t("skills.desc"))
+		.addButton((button) => {
+			button.setButtonText(t.t("skills.import"));
+			button.setCta();
+			button.onClick(() => {
+				new ImportSkillModal({
+					app: host.app,
+					t,
+					fetchSource: (url) => host.skills.fetchSource(url),
+					install: (source, skill) => host.skills.install(source, skill),
+					onImported: () => void afterMutation(),
+				}).open();
+			});
+		});
+
+	const vaultEl = containerEl.createDiv();
+	const userEl = containerEl.createDiv();
+
+	const reload = async (): Promise<void> => {
+		const inventory = await host.skills.list();
+		diagnosticsEl.hidden = inventory.diagnostics.length === 0;
+		diagnosticsEl.setText(inventory.diagnostics.join("\n"));
+		vaultEl.empty();
+		if (inventory.rows.length === 0) {
+			vaultEl.createEl("p", { cls: "piem-settings-empty", text: t.t("skills.empty") });
+		}
+		for (const row of inventory.rows) {
+			renderSkillRow(vaultEl, host, row, afterMutation);
+		}
+		await renderUserSkillsGroup(userEl, host);
+	};
+
+	// Mutations rewrite vault files the running agent has already read, so the
+	// agent reloads before the panel redraws. Plain reads never go through this.
+	const afterMutation = async (): Promise<void> => {
+		await host.skills.refreshAgent();
+		await reload();
+	};
+
+	void reload();
+}
+
+function renderSkillRow(containerEl: HTMLElement, host: SettingsPanelHost, row: SkillRow, afterMutation: () => Promise<void>): void {
+	const { t } = host;
+	const setting = new Setting(containerEl).setName(row.name).setDesc(describeSkillRow(row, t));
+
+	// The path always names a real file: pi only reports skills it actually
+	// loaded, so opening it needs no existence check beyond TFile's own.
+	setting.addButton((button) => {
+		button.setButtonText(t.t("skills.open"));
+		button.onClick(() => void openVaultPath(host.app, row.path));
+	});
+
+	if (row.provenance) {
+		setting.addButton((button) => {
+			button.setButtonText(t.t("skills.update"));
+			button.onClick(() => void runSkillUpdate(host, row, button, afterMutation));
+		});
+	}
+
+	// Deletion is directory-only: a root-level skill file is an ordinary note
+	// the user owns, and the panel does not trash notes from a settings row.
+	if (row.dirName !== "") {
+		setting.addButton((button) => {
+			button.setButtonText(t.t("skills.delete"));
+			button.onClick(() => {
+				openConfirmDelete(host.app, {
+					subject: t.t("confirmDelete.skillSubject", { name: row.name }),
+					consequences: [t.t("deletion.skillFiles")],
+					t,
+					onConfirm: () => runSkillRemove(host, row, afterMutation),
+				});
+			});
+		});
+	}
+}
+
+/** Row description: where an imported skill came from, or what a local one is. */
+function describeSkillRow(row: SkillRow, t: Translator): string {
+	if (row.provenance) {
+		return t.t("skills.importedFrom", { url: row.provenance.url });
+	}
+	return row.dirName === "" ? t.t("skills.rootFile") : t.t("skills.handAuthored");
+}
+
+/**
+ * Checks upstream and reports the outcome, applying clean changes.
+ *
+ * All three verdicts are Notices rather than inline state: the row is
+ * re-rendered by `afterMutation` before the message could be shown on it, and
+ * a verdict the user has just waited a network round trip for survives a
+ * re-render better as a toast than as a line that the next click erases.
+ */
+async function runSkillUpdate(host: SettingsPanelHost, row: SkillRow, button: ButtonComponent, afterMutation: () => Promise<void>): Promise<void> {
+	const { t } = host;
+	button.setDisabled(true);
+	try {
+		const plan = await host.skills.update(row.dirName);
+		if (plan.status === "up-to-date") {
+			new Notice(t.t("skills.upToDate", { name: row.name }));
+		} else if (!plan.hasConflicts) {
+			new Notice(
+				plan.entries.length === 1
+					? t.t("skills.updatedOne", { name: row.name })
+					: t.t("skills.updatedMany", { name: row.name, count: plan.entries.length }),
+			);
+		} else {
+			// Naming the files is what makes the refusal actionable: the user can
+			// open exactly those, keep or revert their edits, and try again.
+			const files = plan.entries.filter((entry) => entry.action === "conflict").map((entry) => entry.path).join(", ");
+			new Notice(t.t("skills.conflict", { name: row.name, files }));
+		}
+		await afterMutation();
+	} catch (cause) {
+		new Notice(t.t("skills.couldNotUpdate", { name: row.name, message: cause instanceof Error ? cause.message : String(cause) }));
+	} finally {
+		// Harmless when the row has been re-rendered away; the fresh row's
+		// buttons start enabled regardless.
+		button.setDisabled(false);
+	}
+}
+
+async function runSkillRemove(host: SettingsPanelHost, row: SkillRow, afterMutation: () => Promise<void>): Promise<void> {
+	const { t } = host;
+	try {
+		await host.skills.remove(row.dirName);
+		await afterMutation();
+	} catch (cause) {
+		new Notice(t.t("skills.couldNotDelete", { name: row.name, message: cause instanceof Error ? cause.message : String(cause) }));
+	}
+}
+
+/**
+ * The user-level skills section, read-only.
+ *
+ * These live in the home directory by definition, so there is nothing this
+ * panel can write to — their management belongs to pi and the user's editor.
+ */
+async function renderUserSkillsGroup(containerEl: HTMLElement, host: SettingsPanelHost): Promise<void> {
+	containerEl.empty();
+	const { t } = host;
+	if (!host.skills.userSkillsAvailable) {
+		return;
+	}
+	new Setting(containerEl).setName(t.t("skills.userHeading")).setHeading().setDesc(t.t("skills.userDesc"));
+	const skills = await host.skills.listUserSkills();
+	if (skills.length === 0) {
+		containerEl.createEl("p", { cls: "piem-settings-empty", text: t.t("skills.userEmpty") });
+		return;
+	}
+	for (const skill of skills) {
+		new Setting(containerEl).setName(skill.name).setDesc(skill.description);
+	}
+}
+
+/**
+ * Opens a skill file in a workspace tab.
+ *
+ * A tab leaf rather than the active one: the settings dialog stays where the
+ * user left it, and a skill is reference material to glance at, not work to
+ * switch into.
+ */
+async function openVaultPath(app: App, path: string): Promise<void> {
+	const file = app.vault.getAbstractFileByPath(path);
+	if (file instanceof TFile) {
+		await app.workspace.getLeaf("tab").openFile(file);
+	}
 }
 
 /**

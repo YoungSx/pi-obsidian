@@ -1,4 +1,4 @@
-import { App, PluginSettingTab } from "obsidian";
+import { App, Platform, PluginSettingTab } from "obsidian";
 import { getSupportedThinkingLevels } from "@earendil-works/pi-ai";
 import { getBuiltinModels } from "./net/builtinCatalog";
 import type { Model, ModelThinkingLevel } from "@earendil-works/pi-ai";
@@ -26,6 +26,10 @@ import {
 import { renderSettingsPanel } from "./ui/settings/SettingsPanel";
 import { getT, isLanguageSetting, resolveLanguage, type LanguageHost, type LanguageSetting, type Translator } from "./i18n";
 import { DEFAULT_SEND_SHORTCUT, isSendShortcutSetting, type SendShortcut } from "./ui/keyboard";
+import { SkillManager } from "./skills/skillManager";
+import { loadUserSkills } from "./skills/userSkills";
+import { VaultExecutionEnv } from "./vault/VaultExecutionEnv";
+import { createFetchForTransport } from "./net/obsidianFetch";
 
 const OFF_THINKING_LEVEL: ModelThinkingLevel = "off";
 
@@ -442,6 +446,24 @@ export class PiemSettingTab extends PluginSettingTab {
 			countLegacySessions: () => this.plugin.countLegacySessions(),
 			missingBuiltinModel: () => findMissingBuiltinModel(this.plugin.settings),
 			manifest: { version: this.plugin.manifest.version },
+			skills: (() => {
+				// Built fresh per call, not cached on the tab: the manager carries the
+				// network transport, which the user can change while the panel is
+				// open, and an import must travel the way the next chat request will.
+				// The manager is stateless over the vault, so nothing is lost between
+				// calls.
+				const manager = () => new SkillManager(createFetchForTransport(this.plugin.settings.networkTransport), new VaultExecutionEnv(this.app));
+				return {
+					list: () => manager().listSkills(),
+					fetchSource: (url) => manager().fetchSource(url),
+					install: (source, skill) => manager().install(source, skill),
+					update: (dirName) => manager().update(dirName),
+					remove: (dirName) => manager().remove(dirName),
+					refreshAgent: () => this.plugin.refreshAgentSkills(),
+					listUserSkills: async () => (await loadUserSkills()).skills,
+					userSkillsAvailable: Platform.isDesktop,
+				};
+			})(),
 		});
 	}
 }
