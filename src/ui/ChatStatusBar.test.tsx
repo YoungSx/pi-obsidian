@@ -1,7 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import { flushRender, installDom } from "../testing/dom";
 import { installObsidianStub } from "../testing/obsidianStub";
-import type { ContextFill, UsageTotals } from "../agent/usage";
 
 installObsidianStub();
 const document = installDom();
@@ -15,70 +14,23 @@ type Props = Parameters<typeof ChatStatusBar>[0];
 /**
  * The status bar between the transcript and the composer.
  *
- * Most of these assertions moved here from `ChatHeader.test.tsx` along with the
- * readouts themselves: the context meter, the spend counter and the compaction
- * notice used to sit under the header. The contract they pin is unchanged — the
- * ok/warn/near banding, the tilde on a heuristic estimate, the state named in
- * text rather than carried by colour alone, and the metrics staying behind the
- * agent-details tier.
+ * It carries one live line and nothing else. It used to hold the context meter
+ * and the spend counter on the same row; both moved into `ContextGauge`'s
+ * popover beside Send, and their assertions moved with them to
+ * `ContextGauge.test.tsx`. What is pinned here is that they do not come back —
+ * a ring below and a matching row of numbers above would say one thing twice —
+ * and that the live region survives an idle spell, which is the bug the
+ * screen-reader-only collapse fixed.
  */
 async function renderBar(overrides: Partial<Props> = {}): Promise<HTMLElement> {
 	const host = document.createElement("div");
 	document.body.appendChild(host);
 	const root = roots.get(host) ?? createRoot(host);
 	roots.set(host, root);
-	root.render(
-		<ChatStatusBar
-			isInitializing={false}
-			isCompacting={false}
-			contextFill={fill()}
-			usage={usageTotals()}
-			showAgentDetails={true}
-			{...overrides}
-		/>,
-	);
+	root.render(<ChatStatusBar isInitializing={false} isCompacting={false} showAgentDetails={true} {...overrides} />);
 	await flushRender();
 	return host;
 }
-
-describe("ChatStatusBar context meter", () => {
-	beforeEach(() => {
-		document.body.replaceChildren();
-	});
-
-	afterEach(() => {
-		document.body.replaceChildren();
-	});
-
-	it("renders a heuristic estimate with a tilde and a bar, never an exact count", async () => {
-		const host = await renderBar({ contextFill: fill({ tokens: 12_400, ratio: 0.0124, heuristicOnly: true }) });
-
-		const meter = host.querySelector(".piem-chat__context");
-		expect(meter?.textContent).toContain("~12.4k / 1.00M");
-		expect(meter?.textContent).not.toContain("12,400");
-		expect(host.querySelector(".piem-chat__context-bar")).not.toBeNull();
-		expect(meter?.className).toContain("piem-chat__context--ok");
-	});
-
-	it("turns warn in the last quarter of the runway and near once the threshold is crossed", async () => {
-		// Threshold sits at ~98.4%; its 75% mark is ~73.8%, so 85% is "warn".
-		const warnHost = await renderBar({ contextFill: fill({ tokens: 850_000, ratio: 0.85, heuristicOnly: false }) });
-		expect(warnHost.querySelector(".piem-chat__context")?.className).toContain("--warn");
-
-		document.body.replaceChildren();
-		const nearHost = await renderBar({ contextFill: fill({ tokens: 990_000, ratio: 0.99, heuristicOnly: false }) });
-		expect(nearHost.querySelector(".piem-chat__context")?.className).toContain("--near");
-	});
-
-	it("names the context state in text instead of relying on colour alone", async () => {
-		const nearHost = await renderBar({ contextFill: fill({ tokens: 990_000, ratio: 0.99 }) });
-		expect(nearHost.querySelector(".piem-chat__context")?.textContent).toContain("context nearly full");
-
-		document.body.replaceChildren();
-		const okHost = await renderBar();
-		expect(okHost.querySelector(".piem-chat__context")?.textContent).toContain(", ok");
-	});
-});
 
 describe("ChatStatusBar status line", () => {
 	beforeEach(() => {
@@ -94,7 +46,7 @@ describe("ChatStatusBar status line", () => {
 		// position in the message list. The bar used to repeat it as "Piem is
 		// replying…", which said one thing two ways; it now stays silent, so the
 		// status line carries no text while a turn streams.
-		const host = await renderBar({ showAgentDetails: false, contextFill: null });
+		const host = await renderBar({ showAgentDetails: false });
 
 		expect(host.querySelector(".piem-chat__status")?.textContent).toBe("");
 	});
@@ -117,7 +69,7 @@ describe("ChatStatusBar status line", () => {
 	it("keeps the live region mounted while idle, so the next state change is announced", async () => {
 		// A region that unmounts when the panel goes quiet is one a screen reader
 		// has to re-discover, and the change that follows can go unannounced.
-		const host = await renderBar({ showAgentDetails: false, contextFill: null });
+		const host = await renderBar({ showAgentDetails: false });
 
 		const live = host.querySelector(".piem-chat__status");
 		expect(live?.getAttribute("role")).toBe("status");
@@ -132,7 +84,7 @@ describe("ChatStatusBar status line", () => {
 	});
 });
 
-describe("ChatStatusBar vocabulary tiers", () => {
+describe("ChatStatusBar scope", () => {
 	beforeEach(() => {
 		document.body.replaceChildren();
 	});
@@ -141,31 +93,29 @@ describe("ChatStatusBar vocabulary tiers", () => {
 		document.body.replaceChildren();
 	});
 
-	it("keeps agent metrics out of the default panel", async () => {
-		const host = await renderBar({ showAgentDetails: false, usage: { tokens: 4_200, cost: 0.02, requests: 3 } });
+	it("carries no occupancy readout, which is the ring's job beside Send", async () => {
+		// Keeping a bar here as well as the ring would state the same value twice,
+		// in two shapes, a row apart.
+		const host = await renderBar();
 
 		expect(host.querySelector(".piem-chat__context")).toBeNull();
-		expect(host.querySelector(".piem-chat__usage")).toBeNull();
+		expect(host.querySelector(".piem-chat__context-ring")).toBeNull();
 	});
 
-	it("shows tokens and spend once details are on and a request has landed", async () => {
-		const host = await renderBar({ usage: { tokens: 4_200, cost: 0.02, requests: 3 } });
-
-		expect(host.querySelector(".piem-chat__usage")?.textContent).toContain("4.2k tokens");
-	});
-
-	it("hides the spend counter before the first request, since there is nothing to total", async () => {
-		const host = await renderBar({ usage: usageTotals() });
+	it("carries no spend counter, which moved into the ring's popover", async () => {
+		// Spend answers "what has this cost", which belongs with "how much room is
+		// left" rather than beside a line about what the panel is doing.
+		const host = await renderBar();
 
 		expect(host.querySelector(".piem-chat__usage")).toBeNull();
 	});
 
 	it("spends no height when there is nothing to report, without unmounting", async () => {
-		// An idle chat in the default tier must not push the composer down for an
-		// empty row — but the live region has to stay in the DOM, or the first
-		// state change after a quiet spell lands in a region a screen reader has
-		// not discovered and may never announce.
-		const host = await renderBar({ showAgentDetails: false, contextFill: null });
+		// An idle chat must not push the composer down for an empty row — but the
+		// live region has to stay in the DOM, or the first state change after a
+		// quiet spell lands in a region a screen reader has not discovered and may
+		// never announce.
+		const host = await renderBar({ showAgentDetails: false });
 
 		const bar = host.querySelector(".piem-chat__statusbar");
 		expect(bar).not.toBeNull();
@@ -174,35 +124,21 @@ describe("ChatStatusBar vocabulary tiers", () => {
 	});
 
 	it("becomes visible again once it has something to say", async () => {
-		const host = await renderBar({ showAgentDetails: false, contextFill: null, isCompacting: true });
+		const host = await renderBar({ showAgentDetails: false, isCompacting: true });
 
 		const bar = host.querySelector(".piem-chat__statusbar");
 		expect(bar?.className).not.toContain("piem-chat__visually-hidden");
 		expect(bar?.textContent).toContain("Tidying up earlier messages");
 	});
 
-	it("still renders while idle when the meter has something to say", async () => {
+	it("goes quiet with agent details on, since the tier no longer adds a readout", async () => {
+		// It used to stay visible while idle because the meter had something to say
+		// in this tier. With the meter gone, an idle detailed panel is as quiet as
+		// an idle plain one.
 		const host = await renderBar();
 
-		expect(host.querySelector(".piem-chat__statusbar")).not.toBeNull();
-		expect(host.querySelector(".piem-chat__context")).not.toBeNull();
+		expect(host.querySelector(".piem-chat__statusbar")?.className).toContain("piem-chat__visually-hidden");
 	});
 });
-
-function fill(overrides: Partial<ContextFill> = {}): ContextFill {
-	return {
-		tokens: 12_400,
-		contextWindow: 1_000_000,
-		ratio: 0.0124,
-		compactionRatio: (1_000_000 - 16_384) / 1_000_000,
-		compactionEnabled: true,
-		heuristicOnly: true,
-		...overrides,
-	};
-}
-
-function usageTotals(): UsageTotals {
-	return { tokens: 0, cost: 0, requests: 0 };
-}
 
 const roots = new WeakMap<HTMLElement, import("react-dom/client").Root>();

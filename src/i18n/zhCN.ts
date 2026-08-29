@@ -86,7 +86,6 @@ export const zhCN: DeepPartial<EnCopy> = {
 		statusAria: "对话状态",
 		tokensSuffix: "token",
 		contextAria: "上下文窗口占用",
-		contextLabel: "上下文",
 		contextValueText: "已使用 {estimated}{tokens} / {window} {unit}，{percent}%，{state}",
 		contextEstimatedPrefix: "约 ",
 		commandMenuAria: "提示命令和技能",
@@ -162,6 +161,8 @@ export const zhCN: DeepPartial<EnCopy> = {
 		meterHeuristic: "根据消息大小估算；首次回复后会更新。",
 		meterMeasured: "提供方报告的上下文占用。接近 {percent}% 时开始整理。",
 		meterNoCompaction: "提供方报告的上下文占用。自动整理已关闭，占满前请使用「整理较早的消息」命令。",
+		tidyWhileCompacting: "正在整理较早的消息…",
+		tidyWhileStreaming: "回复结束后可整理较早的消息",
 	},
 
 	contextRow: {
@@ -265,7 +266,7 @@ export const zhCN: DeepPartial<EnCopy> = {
 		thinkingLevel: "思考级别",
 		thinkingLevelDesc: "请求多少推理。当前模型不支持的级别会被隐藏。",
 		showAgentDetails: "显示代理详情",
-		showAgentDetailsDesc: "在对话面板中显示 token 数、花费、上下文窗口占用和原始工具参数。",
+		showAgentDetailsDesc: "在对话面板中显示 token 数、花费和原始工具参数。",
 		sendShortcut: "发送方式",
 		sendShortcutDesc: "用哪个键发送消息。无论选哪项，Ctrl+回车 和 ⌘+回车 都能发送。",
 		sendShortcutEnter: "回车（Shift+回车 换行）",

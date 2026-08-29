@@ -1,3 +1,4 @@
+import { formatTokens } from "../agent/usage";
 import type { ContextFill } from "../agent/usage";
 import type { Translator } from "../i18n";
 
@@ -77,6 +78,71 @@ export function meterTitle(fill: ContextFill, t: Translator): string {
 		return t.t("context.meterNoCompaction");
 	}
 	return t.t("context.meterMeasured", { percent: Math.round(fill.compactionRatio * 100) });
+}
+
+/**
+ * Occupancy as "~12.4k / 1.00M".
+ *
+ * The tilde is load-bearing: before the first reply the count comes from a
+ * characters/4 heuristic, so printing it bare would present a guess as a
+ * measurement. See {@link ContextFill.heuristicOnly}.
+ */
+export function contextTokenSummary(fill: ContextFill): string {
+	return `${fill.heuristicOnly ? "~" : ""}${formatTokens(fill.tokens)} / ${formatTokens(fill.contextWindow)}`;
+}
+
+/** Occupancy as a whole percent, clamped so a heuristic overshoot cannot read past 100. */
+export function contextPercent(fill: ContextFill): number {
+	return Math.min(Math.round(fill.ratio * 100), 100);
+}
+
+/**
+ * The whole readout as one sentence: tokens, window, percent, state.
+ *
+ * Was assembled inline in the status bar while the meter was a bar with a
+ * visible label beside it. The gauge is a 16px ring with no text, so this string
+ * is the only channel the numbers have for a screen reader — which is why it
+ * lives here, under test, rather than in the markup.
+ */
+export function contextValueText(fill: ContextFill, t: Translator): string {
+	return t.t("chat.contextValueText", {
+		estimated: fill.heuristicOnly ? t.t("chat.contextEstimatedPrefix") : "",
+		tokens: formatTokens(fill.tokens),
+		window: formatTokens(fill.contextWindow),
+		unit: t.t("chat.tokensSuffix"),
+		percent: contextPercent(fill),
+		state: contextStateText(contextLevel(fill), t),
+	});
+}
+
+/**
+ * Accessible name for the gauge button: what the control is, then what it reads.
+ *
+ * The numbers are in the name rather than only inside the popover, so a screen
+ * reader user learns the occupancy without having to open a disclosure to hear
+ * it. Opening it adds the explanation and the tidy control, not the figures.
+ */
+export function contextGaugeName(fill: ContextFill, t: Translator): string {
+	return `${t.t("chat.contextAria")}: ${contextValueText(fill, t)}`;
+}
+
+/**
+ * What the tidy control says — which is also why it cannot be pressed.
+ *
+ * The button is always rendered, never hidden: a control that comes and goes
+ * teaches nobody where it lives. But `compactNow` returns early while a turn
+ * streams, and `runExclusiveCompaction` single-flights, so pressing it in either
+ * state genuinely does nothing. A disabled button has no channel other than its
+ * own name to explain itself, so the name carries the reason.
+ */
+export function tidyLabel(state: { isStreaming: boolean; isCompacting: boolean }, t: Translator): string {
+	if (state.isCompacting) {
+		return t.t("context.tidyWhileCompacting");
+	}
+	if (state.isStreaming) {
+		return t.t("context.tidyWhileStreaming");
+	}
+	return t.t("commands.tidyUp");
 }
 
 export function formatThinkingLevel(level: string): string {

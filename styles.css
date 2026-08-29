@@ -177,82 +177,184 @@
 
 /* --- context-window indicator --- */
 
+/*
+ * The occupancy ring at the leading edge of the send bar, and the popover it
+ * opens.
+ *
+ * This replaces a full-width readout — the word "Context", a 4.5rem bar and
+ * "~12.4k / 1.00M, ok" — that spent a whole row of a 300px sidebar on a value
+ * that is consulted rather than read. A ring reads a proportion worse than a bar
+ * does; the trade is deliberate, and it is paid for by moving the figures into
+ * the popover and leaving the glyph one job: fine, filling, or about to cost the
+ * reader their turn. That is a colour's job, not a length's.
+ */
 .piem-chat__context {
 	align-items: center;
-	display: flex;
-	gap: var(--size-4-1);
-}
-
-.piem-chat__context-label {
-	color: var(--text-muted);
-}
-
-/* Thin occupancy bar; the fill colour carries the ok/warn/near state. */
-.piem-chat__context-bar {
-	background: var(--background-modifier-border);
-	border-radius: var(--radius-s);
+	display: inline-flex;
 	flex-shrink: 0;
-	height: 4px;
-	overflow: hidden;
-	width: 4.5rem;
+	/*
+	 * Pushes Send to the trailing edge without the bar switching to
+	 * `space-between`. The bar holds a lone Send whenever nothing is measured yet,
+	 * and `space-between` would then park it against the leading edge — the bug
+	 * the bar's `flex-end` was chosen to fix.
+	 */
+	margin-inline-end: auto;
+	/* Anchors the popover to the ring rather than to the composer shell, which is
+	 * also positioned (for the command menu) and sits a textarea away. */
+	position: relative;
 }
 
 /*
- * The fill paints with `background`, so each state band must override
- * `background` on the fill element specifically — a `color` override here is
- * invisible (that bug shipped once: the warn band rendered grey).
+ * Deliberately not Obsidian's `.clickable-icon`: that applies
+ * `opacity: var(--icon-opacity)` (0.85), which would multiply with whichever
+ * band colour the ring is carrying. This codebase has shipped that class of bug
+ * once already, when a `color` override left the warn band grey.
  */
-.piem-chat__context-bar-fill {
-	background: var(--text-muted);
+.piem-chat__context-gauge {
+	background: transparent;
+	border: none;
+	box-shadow: none;
+	cursor: pointer;
+	display: inline-flex;
+	padding: 0;
+}
+
+.piem-chat__context-gauge:focus-visible {
+	outline: 2px solid var(--background-modifier-border-focus);
+	outline-offset: 2px;
+}
+
+.piem-chat__context-ring {
 	display: block;
-	height: 100%;
-	/* Scaled rather than resized: `width` is a layout property, so animating it
-	 * reflows. The inline --pi-context-ratio drives the transform instead, which
-	 * composites. Skipped entirely under reduced-motion. */
-	transform: scaleX(var(--pi-context-ratio, 0));
-	transform-origin: left center;
-	transition: transform 0.2s ease-out;
-	width: 100%;
+	height: var(--icon-s, 16px);
+	/*
+	 * Rotated so the arc starts at 12 o'clock. The whole <svg> turns, not the
+	 * <circle>: percentage `transform-origin` on an SVG child resolves against
+	 * the view box rather than the shape unless `transform-box` says otherwise,
+	 * while an inline <svg> is a replaced element that rotates about its own
+	 * centre like any other box. The track is a circle, so turning it costs
+	 * nothing.
+	 */
+	transform: rotate(-90deg);
+	width: var(--icon-s, 16px);
 }
 
-.piem-chat__context--warn .piem-chat__context-bar-fill {
-	background: var(--text-warning);
+.piem-chat__context-ring-track {
+	fill: none;
+	stroke: var(--background-modifier-border);
+	stroke-width: 2.5;
 }
 
-.piem-chat__context--near .piem-chat__context-bar-fill {
-	background: var(--text-error);
+/*
+ * The arc paints with `stroke`, so each band must override `stroke` on the fill
+ * element specifically — the same lesson the bar taught with `background`, where
+ * a `color` override on the container rendered the warn band grey. It also keeps
+ * the band out of `color`, which would otherwise cascade into the popover and
+ * turn the whole readout red at the top band.
+ */
+.piem-chat__context-ring-fill {
+	fill: none;
+	stroke: var(--text-muted);
+	/* Dashed to the full circumference and offset by the unused share, so the
+	 * visible run is the ratio. `stroke-dashoffset` paints without reflowing, the
+	 * way the bar it replaces animated a transform rather than a width. The
+	 * circumference comes from the component, which owns the radius. */
+	stroke-dasharray: var(--pi-context-circumference, 37.699);
+	stroke-dashoffset: calc(var(--pi-context-circumference, 37.699) * (1 - var(--pi-context-ratio, 0)));
+	/* Leaves a dot rather than nothing at 1%, which reads as "just started"
+	 * instead of "empty circle, probably broken". */
+	stroke-linecap: round;
+	stroke-width: 2.5;
+	transition: stroke-dashoffset 0.2s ease-out;
+}
+
+.piem-chat__context--warn .piem-chat__context-ring-fill {
+	stroke: var(--text-warning);
+}
+
+.piem-chat__context--near .piem-chat__context-ring-fill {
+	stroke: var(--text-error);
+}
+
+/*
+ * The figures the ring cannot carry, plus the one action they imply.
+ *
+ * Opens upward from the ring and overlays the draft, which is where a control's
+ * own disclosure belongs — close enough that the pointer can cross into it. Held
+ * to 16rem so it clears the panel edge in a 300px sidebar, where `left: 0` puts
+ * it on the transcript's text column.
+ */
+.piem-chat__context-popover {
+	background: var(--background-primary);
+	border: 1px solid var(--background-modifier-border);
+	border-radius: var(--radius-m);
+	bottom: calc(100% + var(--size-4-2));
+	box-shadow: var(--shadow-s);
+	display: flex;
+	flex-direction: column;
+	gap: var(--size-4-1);
+	left: 0;
+	max-width: 16rem;
+	min-width: 11rem;
+	padding: var(--size-4-2);
+	position: absolute;
+	text-align: start;
+	white-space: normal;
+	width: max-content;
+	z-index: var(--layer-menu, 10);
 }
 
 .piem-chat__context-value {
 	font-variant-numeric: tabular-nums;
 }
 
-/* State word is mirrored from the bar colour so the level is legible without
- * sight — required by the a11y contract, not cosmetic. */
+/* The level named in words, not only in the ring's colour — required by the a11y
+ * contract, not cosmetic. */
 .piem-chat__context-state {
 	color: var(--text-muted);
-}
-
-.piem-chat__context--warn {
-	color: var(--text-warning);
 }
 
 .piem-chat__context--warn .piem-chat__context-state {
 	color: var(--text-warning);
 }
 
-.piem-chat__context--near {
+.piem-chat__context--near .piem-chat__context-state {
 	color: var(--text-error);
 	font-weight: var(--font-semibold);
 }
 
-.piem-chat__context--near .piem-chat__context-state {
-	color: var(--text-error);
+/* Estimate caveat, or what happens at the threshold — including the case where
+ * nothing does, because automatic tidying is off. */
+.piem-chat__context-note {
+	color: var(--text-muted);
+	font-size: var(--font-ui-smaller);
 }
 
-.piem-chat__usage {
+.piem-chat__context-spend {
 	color: var(--text-faint);
+	font-size: var(--font-ui-smaller);
 	font-variant-numeric: tabular-nums;
+}
+
+/*
+ * A labelled row, not a bare glyph: it is the only action in the popover, and an
+ * icon alone would need a tooltip inside a popover to explain itself. The icon
+ * tokens are pinned to full strength because this is the popover's primary
+ * action — `.clickable-icon` resting colour is the muted `--icon-color`, which is
+ * the treatment for an affordance you are meant to overlook.
+ */
+.piem-chat__context-tidy {
+	--icon-color: var(--text-normal);
+	--icon-color-hover: var(--text-normal);
+	justify-content: flex-start;
+	/* Sets the action apart from the three lines of readout above it without
+	 * spending a divider on a five-element popover. */
+	margin-block-start: var(--size-4-1);
+	width: 100%;
+}
+
+.piem-chat__context-tidy-label {
+	font-size: var(--font-ui-small);
 }
 
 /*
@@ -286,7 +388,7 @@
 		animation: none;
 	}
 
-	.piem-chat__context-bar-fill {
+	.piem-chat__context-ring-fill {
 		transition: none;
 	}
 
@@ -1504,6 +1606,21 @@
 		min-height: var(--size-4-12);
 	}
 
+	/*
+	 * The ring is a 16px glyph, and it is a bare <button> like `.piem-chat__latest`
+	 * — so the selector above never reached it either. The hit area grows to the
+	 * full 48px while the drawn ring stays 16px, which is the point: a thumb aims
+	 * at the target, not at the paint.
+	 */
+	.piem-chat__context-gauge {
+		min-height: var(--size-4-12);
+		min-width: var(--size-4-12);
+		/* Keeps the glyph on the composer bar's optical centre once the box grows
+		 * around it, rather than in the corner the flex default would leave it. */
+		align-items: center;
+		justify-content: center;
+	}
+
 	.piem-chat__trace-summary,
 	.piem-chat__trace--flat {
 		min-height: var(--size-4-9);
@@ -1515,8 +1632,11 @@
 /*
  * Below ~32rem the title and the action toolbar stop fitting on one row, so the
  * toolbar wraps beneath the title. User messages stop being held to 90% here as
- * well, or a phone clips them, and the context bar gives up a third of its width
- * — it is a proportion, and it reads as one at 3rem.
+ * well, or a phone clips them.
+ *
+ * The context readout used to need a clause here too — the bar gave up a third of
+ * its width so the row still fit. The ring has no width to give up, which is one
+ * breakpoint's worth of rules this stylesheet no longer carries.
  */
 @media (max-width: 32rem) {
 
@@ -1531,10 +1651,6 @@
 
 	.piem-chat__message--user {
 		max-width: 100%;
-	}
-
-	.piem-chat__context-bar {
-		width: 3rem;
 	}
 }
 

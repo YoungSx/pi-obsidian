@@ -10,6 +10,7 @@ import { ChatBanner } from "./ChatBanner";
 import { ChatComposer } from "./ChatComposer";
 import { ChatHeader } from "./ChatHeader";
 import { ChatStatusBar } from "./ChatStatusBar";
+import { ContextGauge } from "./ContextGauge";
 import { ContextRow } from "./ContextRow";
 import { MessageList } from "./MessageList";
 import { appendToDraft } from "./noteReference";
@@ -219,8 +220,6 @@ export function ChatApp({ service, inputController, component, draftStore }: Cha
 				<ChatStatusBar
 					isInitializing={isInitializing}
 					isCompacting={snapshot.isCompacting}
-					contextFill={snapshot.contextFill}
-					usage={snapshot.usage}
 					showAgentDetails={snapshot.showAgentDetails}
 				/>
 
@@ -240,6 +239,16 @@ export function ChatApp({ service, inputController, component, draftStore }: Cha
 					pendingImages={pendingImages}
 					onAddImages={(files) => void handleAddImages(files)}
 					onRemoveImage={handleRemoveImage}
+					contextGauge={
+						<ContextGauge
+							fill={snapshot.contextFill}
+							usage={snapshot.usage}
+							showAgentDetails={snapshot.showAgentDetails}
+							isStreaming={snapshot.isStreaming}
+							isCompacting={snapshot.isCompacting}
+							onTidy={() => void service.compactNow()}
+						/>
+					}
 					contextRow={
 						<ContextRow
 							refs={snapshot.contextRefs}
