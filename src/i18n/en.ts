@@ -720,6 +720,8 @@ export const en = {
 		contextWindowPlaceholder: "128000",
 		supportsThinking: "Supports thinking",
 		supportsThinkingDesc: "Enable only if this model accepts reasoning parameters. Strict servers reject them outright.",
+		thinkingHintSupported: "Built-in catalog ({source}): this model supports thinking. Recommended on.",
+		thinkingHintUnsupported: "Built-in catalog ({source}): this model does not support thinking. Recommended off.",
 		connection: "Connection",
 		connectionDesc: "Sends one minimal request to confirm the provider, key, and model ID work together.",
 		cancel: "Cancel",

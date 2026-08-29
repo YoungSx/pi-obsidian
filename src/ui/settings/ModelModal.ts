@@ -1,4 +1,5 @@
 import { App, Modal, Notice, Setting } from "obsidian";
+import type { ToggleComponent } from "obsidian";
 import type { ConnectionTestResult } from "../../connectionTest";
 import {
 	describeProviderConfig,
@@ -102,6 +103,60 @@ export function buildModelSuggestions(listings: readonly ProviderListing[] = [])
 }
 
 /**
+ * What the builtin catalog says about one model id's thinking support.
+ */
+export interface ThinkingSupportHint {
+	/** Whether the catalog entry advertises reasoning parameters. */
+	supports: boolean;
+	/** Which builtin provider's catalog supplied the answer, e.g. `anthropic`. */
+	source: string;
+}
+
+/**
+ * Looks one model id up in the builtin catalog and reports its thinking support.
+ *
+ * A *recommendation*, not a probe — and deliberately so. A listing response
+ * carries no capability data, and the only live way to learn thinking support is
+ * to send a real thinking request and read the server's error, which is
+ * provider-specific, costs tokens, and is wrong more often than the shipped
+ * snapshot is right. So detection runs offline against the same catalog that
+ * powers the suggestions, and the toggle stays editable for the gateways where
+ * that snapshot is stale.
+ *
+ * Matching is exact first. Ids are commonly namespaced by the gateway in front —
+ * an OpenRouter-style endpoint serves `anthropic/claude-…` — so the final path
+ * segment matches too, and the hint names the catalog section that knew the tail,
+ * since that is where the claim came from.
+ */
+export function findThinkingSupportHint(modelApiId: string): ThinkingSupportHint | undefined {
+	const id = modelApiId.trim().toLowerCase();
+	if (!id) {
+		return undefined;
+	}
+	const exact = findCatalogModel(id);
+	if (exact) {
+		return { supports: exact.reasoning, source: exact.provider };
+	}
+	const tail = id.slice(id.lastIndexOf("/") + 1);
+	if (tail === id) {
+		return undefined;
+	}
+	const namespaced = findCatalogModel(tail);
+	return namespaced ? { supports: namespaced.reasoning, source: namespaced.provider } : undefined;
+}
+
+/** First catalog entry whose id matches, case-insensitively, in shipped order. */
+function findCatalogModel(id: string): { reasoning: boolean; provider: string } | undefined {
+	for (const provider of getBuiltinProviders()) {
+		const match = getBuiltinModels(provider).find((model) => model.id.toLowerCase() === id);
+		if (match) {
+			return { reasoning: match.reasoning, provider };
+		}
+	}
+	return undefined;
+}
+
+/**
  * Validates a draft, returning a message or undefined.
  *
  * Exported and DOM-free so the rules are unit-testable: this is the panel's only
@@ -133,6 +188,15 @@ export class ModelModal extends Modal {
 	private probes = new AbortController();
 	/** Listings this form has collected, seeded from the session's existing ones. */
 	private listings: readonly ProviderListing[] = [];
+	/**
+	 * Whether the user has set the thinking toggle by hand this session. Once
+	 * true, catalog recommendations stop being applied — see
+	 * {@link refreshThinkingRecommendation}.
+	 */
+	private reasoningTouched = false;
+	private reasoningToggle: ToggleComponent | null = null;
+	/** Rewritable note under the toggle's description; empty renders as nothing. */
+	private thinkingHint: HTMLElement | null = null;
 
 	constructor(options: ModelModalOptions) {
 		super(options.app);
@@ -155,6 +219,10 @@ export class ModelModal extends Modal {
 		// configured one. Nothing waits on it: suggestions render from what is
 		// already known, and the answer joins the list when it arrives.
 		this.probeSelectedProvider();
+		// Editing starts from a stored choice, so the catalog's answer is reported
+		// but never applied over it; a form opened to add starts with an empty id,
+		// which has no recommendation to show either way.
+		this.refreshThinkingRecommendation(false);
 
 		new Setting(contentEl)
 			.setName(t.t("modelModal.provider"))
@@ -184,6 +252,9 @@ export class ModelModal extends Modal {
 				text.onChange((value) => {
 					this.draft.modelApiId = value;
 					this.testRow?.reset();
+					// The id decides what the catalog can recommend; a changed id is a
+					// changed question, so the stale answer must not survive it.
+					this.refreshThinkingRecommendation(true);
 				});
 					// Read through a closure rather than passed as a snapshot, so a probe
 				// that lands after this field was built still shows up: the suggest
@@ -191,6 +262,7 @@ export class ModelModal extends Modal {
 				new CatalogSuggest(this.app, text.inputEl, () => buildModelSuggestions(this.listings), (value) => {
 					this.draft.modelApiId = value;
 					this.testRow?.reset();
+					this.refreshThinkingRecommendation(true);
 				});
 			});
 
@@ -218,16 +290,24 @@ export class ModelModal extends Modal {
 				});
 			});
 
-		new Setting(contentEl)
+		const thinkingSetting = new Setting(contentEl)
 			.setName(t.t("modelModal.supportsThinking"))
-			.setDesc(t.t("modelModal.supportsThinkingDesc"))
-			.addToggle((toggle) => {
-				toggle.setValue(this.draft.reasoning);
-				toggle.onChange((reasoning) => {
-					this.draft.reasoning = reasoning;
-					this.testRow?.reset();
-				});
+			.setDesc(t.t("modelModal.supportsThinkingDesc"));
+		// Appended after `setDesc`, which replaces the description's contents. Its
+		// own element so the line can be rewritten as the id changes without
+		// re-rendering the form, which would throw focus out of the field.
+		this.thinkingHint = thinkingSetting.descEl.createDiv({ cls: "piem-settings-effect" });
+		thinkingSetting.addToggle((toggle) => {
+			this.reasoningToggle = toggle;
+			toggle.setValue(this.draft.reasoning);
+			toggle.onChange((reasoning) => {
+				// An explicit choice outranks every later recommendation, so it is
+				// recorded rather than recomputed on the next id edit.
+				this.reasoningTouched = true;
+				this.draft.reasoning = reasoning;
+				this.testRow?.reset();
 			});
+		});
 
 		// Placed above the save row so a failing verdict is read before committing.
 		const testSetting = new Setting(contentEl)
@@ -253,6 +333,32 @@ export class ModelModal extends Modal {
 		// the answer instead of starting over.
 		this.probes.abort();
 		this.contentEl.empty();
+	}
+
+	/**
+	 * Re-reads the catalog for the current model id.
+	 *
+	 * Two effects, deliberately separable. The hint line always follows the id: it
+	 * is a report, and reports do not wait for permission. The toggle value only
+	 * follows it while the user has not set the toggle by hand — a recommendation
+	 * that overwrites an explicit choice is not a recommendation, so once flipped
+	 * manually the form keeps applying nothing and the line stays as the record of
+	 * what the catalog thought.
+	 */
+	private refreshThinkingRecommendation(apply: boolean): void {
+		const hint = findThinkingSupportHint(this.draft.modelApiId);
+		this.thinkingHint?.setText(
+			hint
+				? this.options.t.t(
+						hint.supports ? "modelModal.thinkingHintSupported" : "modelModal.thinkingHintUnsupported",
+						{ source: hint.source },
+					)
+				: "",
+		);
+		if (hint && apply && !this.reasoningTouched) {
+			this.draft.reasoning = hint.supports;
+			this.reasoningToggle?.setValue(hint.supports);
+		}
 	}
 
 	/**

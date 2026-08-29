@@ -486,6 +486,8 @@ export const zhCN: DeepPartial<EnCopy> = {
 		contextWindowPlaceholder: "128000",
 		supportsThinking: "支持思考",
 		supportsThinkingDesc: "仅当该模型接受推理参数时启用。严格的服务器会直接拒绝它们。",
+		thinkingHintSupported: "内置目录（{source}）：该模型支持思考，建议开启。",
+		thinkingHintUnsupported: "内置目录（{source}）：该模型不支持思考，建议关闭。",
 		connection: "连接",
 		connectionDesc: "发送一个最小请求，以确认提供方、密钥和模型 ID 能协同工作。",
 		cancel: "取消",
