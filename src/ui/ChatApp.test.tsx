@@ -331,10 +331,10 @@ describe("ChatApp keyboard submit without an API key", () => {
 
 		const button = sendButton(mounted.host);
 		expect(button.disabled).toBe(true);
-		// `IconButton` writes the label into aria-label and title, the only channel a
-		// disabled button has left to explain itself.
+		// The accessible name explains the disabled state; the native Obsidian
+		// tooltip mirrors it without adding a second browser tooltip.
 		expect(button.getAttribute("aria-label")).toBe(t.t("chat.sendNeedsKey"));
-		expect(button.getAttribute("title")).toBe(t.t("chat.sendNeedsKey"));
+		expect(button.getAttribute("title")).toBeNull();
 	});
 
 	it("routes the submit command down the same path, since it also never sees the button", async () => {

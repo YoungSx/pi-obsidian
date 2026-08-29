@@ -47,6 +47,9 @@ export interface MarkdownRenderCall {
 /** Mutable handle so a test can inspect or reconfigure `MarkdownRenderer.render`. */
 export const markdownRenderMock = mock<(call: MarkdownRenderCall) => Promise<void>>();
 
+/** Mutable handle so UI tests can verify use of Obsidian's native tooltip. */
+export const setTooltipMock = mock<(element: HTMLElement, tooltip: string) => void>();
+
 /**
  * Records the call and, by default, appends a marker element so tests can
  * observe that something was rendered into `el`. Reconfigure via
@@ -93,6 +96,7 @@ const obsidianStub = {
 	Platform: platformMock,
 	requestUrl: async (params: unknown): Promise<unknown> => await requestUrlMock(params),
 	setIcon: () => undefined,
+	setTooltip: (element: HTMLElement, tooltip: string): void => setTooltipMock(element, tooltip),
 };
 
 /**

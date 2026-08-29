@@ -1,6 +1,6 @@
 import React, { useEffect, useId, useMemo, useRef, useState } from "react";
 import { Platform } from "obsidian";
-import { IconButton, ObsidianIcon } from "./ObsidianIcon";
+import { IconButton } from "./ObsidianIcon";
 import { isSendShortcut, resolveSendShortcut, sendShortcutAria, type SendShortcut } from "./keyboard";
 import { sendButtonTitle, sendShortcutLabel } from "./chatStatus";
 import { useT } from "./TranslatorContext";
@@ -330,15 +330,13 @@ function SendButton({ shortcut, isConfigured, disabled, onSend }: SendButtonProp
 	const name = isConfigured ? sendButtonTitle(shortcut, Platform.isMacOS, t) : t.t("chat.sendNeedsKey");
 
 	return (
-		<button
-			type="button"
-			className="clickable-icon piem-chat__icon-button piem-chat__send-button mod-cta"
-			aria-label={name}
-			title={name}
+		<IconButton
+			icon="send"
+			label={name}
+			className="piem-chat__send-button mod-cta"
 			disabled={disabled}
 			onClick={onSend}
 		>
-			<ObsidianIcon name="send" />
 			{/*
 			 * Keycaps, hidden from assistive tech: the accessible name above already
 			 * carries the chord, and reading the glyphs would repeat it as symbols.
@@ -348,6 +346,6 @@ function SendButton({ shortcut, isConfigured, disabled, onSend }: SendButtonProp
 					{sendShortcutLabel(shortcut, Platform.isMacOS, t)}
 				</span>
 			) : null}
-		</button>
+		</IconButton>
 	);
 }

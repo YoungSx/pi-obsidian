@@ -138,7 +138,7 @@ describe("ChatComposer accessibility", () => {
 		// has to live in the accessible name — and the tooltip has to agree, since
 		// the button is unreachable by keyboard once disabled.
 		expect(send?.getAttribute("aria-label")).toBe("Add an API key to send");
-		expect(send?.getAttribute("title")).toBe("Add an API key to send");
+		expect(send?.getAttribute("title")).toBeNull();
 	});
 
 	it("returns to naming the action, with its chord, once a key is configured", async () => {

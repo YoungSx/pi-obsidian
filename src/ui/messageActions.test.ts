@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from "bun:test";
-import type { App } from "obsidian";
+import type { App, WorkspaceLeaf } from "obsidian";
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import type { AssistantMessage } from "@earendil-works/pi-ai";
 import { installObsidianStub } from "../testing/obsidianStub";
@@ -41,15 +41,21 @@ class FakeEditor {
 	}
 }
 
-/**
- * `getActiveViewOfType` is asked for `MarkdownView` specifically, so the fake
- * answers only for that class — mirroring what happens when the active pane
- * holds something else.
- */
-function appWithEditor(editor: FakeEditor | null): App {
+function appWithEditor(
+	editor: FakeEditor | null,
+	options: { chatFocused?: boolean; chatInMainArea?: boolean; extension?: string } = {},
+): App {
+	const file = editor ? { path: `Notes/open.${options.extension ?? "md"}`, extension: options.extension ?? "md" } : null;
+	const view = editor ? Object.assign(new MarkdownView({} as WorkspaceLeaf), { editor, file }) : null;
+	const leaf = view ? ({ view } as unknown as WorkspaceLeaf) : null;
+	const chatLeaf = { view: {} } as unknown as WorkspaceLeaf;
+
 	return {
 		workspace: {
-			getActiveViewOfType: (type: unknown) => (editor && type === MarkdownView ? { editor } : null),
+			getActiveFile: () => file,
+			activeEditor: options.chatFocused || !view ? null : view,
+			getMostRecentLeaf: () => (options.chatInMainArea ? chatLeaf : options.chatFocused ? leaf : null),
+			getLeavesOfType: (type: string) => (type === "markdown" && leaf ? [leaf] : []),
 		},
 	} as unknown as App;
 }
@@ -107,8 +113,26 @@ describe("insertAtCursor", () => {
 		expect(editor.inserted).toEqual(["inserted"]);
 	});
 
+	it("keeps writing after the chat sidebar takes focus", () => {
+		const editor = new FakeEditor("existing");
+
+		expect(insertAtCursor(appWithEditor(editor, { chatFocused: true }), "inserted")).toBe(true);
+		expect(editor.inserted).toEqual(["inserted"]);
+	});
+
+	it("finds the open note when the chat occupies the main area on mobile", () => {
+		const editor = new FakeEditor("existing");
+
+		expect(insertAtCursor(appWithEditor(editor, { chatFocused: true, chatInMainArea: true }), "inserted")).toBe(true);
+		expect(editor.inserted).toEqual(["inserted"]);
+	});
+
 	it("reports failure when no note is open, so the caller can say why", () => {
 		expect(insertAtCursor(appWithEditor(null), "inserted")).toBe(false);
+	});
+
+	it("reports failure when the most recent file is not Markdown", () => {
+		expect(insertAtCursor(appWithEditor(new FakeEditor(), { chatFocused: true, extension: "pdf" }), "inserted")).toBe(false);
 	});
 });
 
@@ -123,6 +147,13 @@ describe("appendToActiveNote", () => {
 		const editor = new FakeEditor("   ");
 		appendToActiveNote(appWithEditor(editor), "appended");
 		expect(editor.inserted).toEqual(["appended"]);
+	});
+
+	it("keeps appending after the chat sidebar takes focus", () => {
+		const editor = new FakeEditor("first line");
+
+		expect(appendToActiveNote(appWithEditor(editor, { chatFocused: true }), "appended")).toBe(true);
+		expect(editor.inserted).toEqual(["\n\nappended"]);
 	});
 
 	it("reports failure when no note is open", () => {
