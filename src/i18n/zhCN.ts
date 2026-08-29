@@ -318,8 +318,25 @@ export const zhCN: DeepPartial<EnCopy> = {
 		couldNotUpdate: "无法更新 {name}：{message}",
 		couldNotDelete: "无法删除 {name}：{message}",
 		userHeading: "用户级技能",
-		userDesc: "自动从 ~/.pi/agent/skills 和 ~/.agents/skills 加载，位于笔记库之外。",
+		userDesc: "自动从这台电脑上、笔记库之外的文件夹加载。下面列出了实际读取的文件夹。",
 		userEmpty: "这台电脑上没有用户级技能。",
+		userDirName: "额外的技能文件夹",
+		userDirDesc:
+			"除内置文件夹之外，再从这台电脑上的一个文件夹加载技能。请填写完整路径，或以 ~ 开头表示你的主目录。留空则只读取内置文件夹。",
+		userDirProblemRelative:
+			"请填写完整路径——以 / 或盘符开头，或用 ~ 表示你的主目录。像 'skills' 这样的普通名称不会被读取，因此不会加载任何额外文件夹。",
+		userSearchedHeading: "已搜索的文件夹",
+		userSearchedDesc:
+			"上次加载技能时查找过的位置。你没有创建过的文件夹本来就不存在，这不是故障。你确实创建过的文件夹应当显示它包含多少个技能——如果没有，说明实际读取的路径不是你想要的那个。",
+		userSearchedMissing: "此路径上没有文件夹。",
+		userSearchedEmpty: "已读取，其中没有技能。",
+		userSearchedFound: "已读取，加载了 {skills}。",
+		// 检查本身失败了——文件夹既没有确认存在，也没有确认不存在。不并入「没有
+		// 文件夹」：权限问题挡住了我们的读取时，说「这里没有文件夹」会把人引去
+		// 完全错误的方向。
+		userSearchedUnknown: "无法检查该文件夹。",
+		userSkillOne: "1 个技能",
+		userSkillMany: "{count} 个技能",
 	},
 
 	skillImport: {

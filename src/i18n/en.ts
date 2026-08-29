@@ -477,8 +477,55 @@ export const en = {
 		couldNotUpdate: "Could not update {name}: {message}",
 		couldNotDelete: "Could not delete {name}: {message}",
 		userHeading: "User-level skills",
-		userDesc: "Loaded automatically from ~/.pi/agent/skills and ~/.agents/skills, outside this vault.",
+		/**
+		 * Deliberately no longer names the folders.
+		 *
+		 * It used to list the two pi reads, which was the complete story until a
+		 * third became configurable — and an enumeration that can go stale is
+		 * worse than none, because a reader who trusts it stops looking. The
+		 * searched list below states the actual set, refreshed from what was
+		 * really read, so this line only has to say the kind of place they are.
+		 */
+		userDesc: "Loaded automatically from folders on this computer, outside this vault. The list below shows which folders were read.",
 		userEmpty: "No user-level skills found on this computer.",
+		userDirName: "Extra skills folder",
+		/**
+		 * Names both accepted spellings, so they are not discovered from a
+		 * rejection, and says what an empty field does — here that is a valid
+		 * answer rather than an omission, since nothing falls back to a default.
+		 */
+		userDirDesc:
+			"One more folder on this computer to load skills from, on top of the built-in ones. Enter a full path, or one starting with ~ for your home folder. Leave it empty and only the built-in folders are read.",
+		/**
+		 * The only rejection the rules produce. States the consequence rather
+		 * than the rule alone: a reader who types 'skills' and is told a path
+		 * must be absolute still does not know that nothing extra is now loaded.
+		 */
+		userDirProblemRelative:
+			"Enter a full path — one starting with / or a drive letter, or with ~ for your home folder. A plain name like 'skills' is not read, so no extra folder is loaded.",
+		userSearchedHeading: "Folders searched",
+		/**
+		 * Carries the whole framing for the list, so the per-folder lines below
+		 * can stay factual. Both halves are needed: an absent folder is the
+		 * ordinary state and must not read as breakage, and a folder the user
+		 * did create going unread is the defect this section exists to surface.
+		 */
+		userSearchedDesc:
+			"Where skills were looked for the last time they loaded. A folder you have not created is simply not there, and nothing is wrong. A folder you did create should say how many skills it holds — if it does not, the path being read is not the one you meant.",
+		/** Per-folder outcomes. Each states only what was seen, with no verdict attached. */
+		userSearchedMissing: "No folder at this path.",
+		/** Its own case: reached, and empty. A user with no skills listed needs the difference. */
+		userSearchedEmpty: "Read, and holds no skills.",
+		userSearchedFound: "Read, {skills} loaded.",
+		/**
+		 * The check itself failed — the folder was neither confirmed nor denied.
+		 * Its own line rather than folded into "no folder": telling a reader whose
+		 * permissions hid their skills that the folder is not there sends them
+		 * looking in the wrong place entirely.
+		 */
+		userSearchedUnknown: "Could not be checked.",
+		userSkillOne: "1 skill",
+		userSkillMany: "{count} skills",
 	},
 
 	/** The import-skills modal. */

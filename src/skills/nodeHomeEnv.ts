@@ -19,10 +19,18 @@ import {
  * module top level instead would break the whole bundle on mobile at load
  * time, so every access goes through {@link nodeRequire} and the class degrades
  * to an unavailable environment rather than taking the plugin down.
+ *
+ * `path` is one of them because separator rules belong to the host, not to us.
+ * The POSIX arithmetic this class used to do read `C:\Users\me` as relative —
+ * only a leading `/` counted as absolute — and prefixed the home directory onto
+ * itself, so on Windows every user-level skill directory resolved to a path
+ * that cannot exist. pi's loader treats a missing directory as "no skills
+ * here", which is why the symptom was an empty panel rather than an error.
  */
 interface NodeModules {
 	fs: typeof import("node:fs");
 	os: typeof import("node:os");
+	path: typeof import("node:path");
 }
 
 /**
@@ -45,15 +53,24 @@ export type HostRequire = (id: string) => unknown;
  * then read a truthy object and reach through it, which is how a mobile launch
  * died on `undefined is not an object (evaluating 'this.modules.os.homedir')`
  * instead of degrading. So the guard is the members actually used downstream:
- * `fs.promises` for every filesystem call and `os.homedir` for the cwd. Probing
- * the functions rather than the modules keeps the truthiness of the returned
- * object meaning what its readers assume — that these are safe to call.
+ * `fs.promises` for every filesystem call, `os.homedir` for the cwd, and each
+ * of the four `path` functions the path layer calls. Probing the functions
+ * rather than the modules keeps the truthiness of the returned object meaning
+ * what its readers assume — that these are safe to call.
  */
 function resolveModules(hostRequire: HostRequire): NodeModules | undefined {
 	try {
 		const fs = hostRequire("node:fs") as typeof import("node:fs") | undefined;
 		const os = hostRequire("node:os") as typeof import("node:os") | undefined;
-		return fs?.promises && typeof os?.homedir === "function" ? { fs, os } : undefined;
+		const path = hostRequire("node:path") as typeof import("node:path") | undefined;
+		return fs?.promises &&
+			typeof os?.homedir === "function" &&
+			typeof path?.resolve === "function" &&
+			typeof path.join === "function" &&
+			typeof path.dirname === "function" &&
+			typeof path.basename === "function"
+			? { fs, os, path }
+			: undefined;
 	} catch {
 		return undefined;
 	}
@@ -78,9 +95,11 @@ function hostRequire(id: string): unknown {
  * canonicalize; the write-side methods exist to satisfy the interface and
  * behave like their node counterparts so a future caller is not surprised.
  *
- * Path space: absolute POSIX paths with `cwd` set to the home directory, so a
- * relative path from pi resolves against `~` the way a pi session there would.
- * `~` in inputs is expanded before use.
+ * Path space: absolute host-native paths with `cwd` set to the home directory,
+ * so a relative path from pi resolves against `~` the way a pi session there
+ * would. `~` in inputs is expanded before use. "Host-native" rather than POSIX
+ * because the separator is the platform's call: a Windows home is a drive path,
+ * and treating it as a POSIX one is what hid user skills there.
  *
  * Failure contract: like {@link import("../vault/VaultExecutionEnv").VaultExecutionEnv},
  * operations never throw — every failure returns a {@link Result} carrying a
@@ -121,11 +140,12 @@ export class NodeHomeEnv implements ExecutionEnv {
 	}
 
 	async joinPath(parts: string[]): Promise<Result<string, FileError>> {
-		return this.run(parts.filter((part) => part !== "").join("/"), async () => ok(this.resolve(parts.filter((part) => part !== "").join("/"))));
+		const joined = this.joinParts(parts);
+		return this.run(joined, async () => ok(this.resolve(joined)));
 	}
 
 	async readTextFile(path: string): Promise<Result<string, FileError>> {
-		return this.run(path, async (fs) => ok(await fs.promises.readFile(this.resolve(path), "utf8")));
+		return this.run(path, async ({ fs }) => ok(await fs.promises.readFile(this.resolve(path), "utf8")));
 	}
 
 	async readTextLines(path: string, options?: { maxLines?: number }): Promise<Result<string[], FileError>> {
@@ -139,53 +159,53 @@ export class NodeHomeEnv implements ExecutionEnv {
 	}
 
 	async readBinaryFile(path: string): Promise<Result<Uint8Array, FileError>> {
-		return this.run(path, async (fs) => ok(new Uint8Array(await fs.promises.readFile(this.resolve(path)))));
+		return this.run(path, async ({ fs }) => ok(new Uint8Array(await fs.promises.readFile(this.resolve(path)))));
 	}
 
 	async writeFile(path: string, content: string | Uint8Array): Promise<Result<void, FileError>> {
-		return this.run(path, async (fs) => {
+		return this.run(path, async ({ fs, path: nodePath }) => {
 			const resolved = this.resolve(path);
-			await fs.promises.mkdir(this.dirname(resolved), { recursive: true });
+			await fs.promises.mkdir(nodePath.dirname(resolved), { recursive: true });
 			await fs.promises.writeFile(resolved, content);
 			return ok(undefined);
 		});
 	}
 
 	async appendFile(path: string, content: string | Uint8Array): Promise<Result<void, FileError>> {
-		return this.run(path, async (fs) => {
+		return this.run(path, async ({ fs, path: nodePath }) => {
 			const resolved = this.resolve(path);
-			await fs.promises.mkdir(this.dirname(resolved), { recursive: true });
+			await fs.promises.mkdir(nodePath.dirname(resolved), { recursive: true });
 			await fs.promises.appendFile(resolved, content);
 			return ok(undefined);
 		});
 	}
 
 	async renameFile(sourcePath: string, destinationPath: string): Promise<Result<void, FileError>> {
-		return this.run(sourcePath, async (fs) => {
+		return this.run(sourcePath, async ({ fs, path: nodePath }) => {
 			const resolvedDestination = this.resolve(destinationPath);
-			await fs.promises.mkdir(this.dirname(resolvedDestination), { recursive: true });
+			await fs.promises.mkdir(nodePath.dirname(resolvedDestination), { recursive: true });
 			await fs.promises.rename(this.resolve(sourcePath), resolvedDestination);
 			return ok(undefined);
 		});
 	}
 
 	async fileInfo(path: string): Promise<Result<FileInfo, FileError>> {
-		return this.run(path, async (fs) => {
+		return this.run(path, async ({ fs, path: nodePath }) => {
 			const resolved = this.resolve(path);
 			// Symlinks are not followed, matching the interface contract.
 			const stats = await fs.promises.lstat(resolved);
 			const kind: FileKind = stats.isFile() ? "file" : stats.isDirectory() ? "directory" : "symlink";
-			return ok({ name: this.basename(resolved), path: resolved, kind, size: stats.size, mtimeMs: stats.mtimeMs });
+			return ok({ name: nodePath.basename(resolved), path: resolved, kind, size: stats.size, mtimeMs: stats.mtimeMs });
 		});
 	}
 
 	async listDir(path: string): Promise<Result<FileInfo[], FileError>> {
-		return this.run(path, async (fs) => {
+		return this.run(path, async ({ fs, path: nodePath }) => {
 			const resolved = this.resolve(path);
 			const entries = await fs.promises.readdir(resolved, { withFileTypes: true });
 			const files = await Promise.all(
 				entries.map(async (entry) => {
-					const entryPath = `${resolved}/${entry.name}`;
+					const entryPath = nodePath.join(resolved, entry.name);
 					const kind: FileKind = entry.isFile() ? "file" : entry.isDirectory() ? "directory" : "symlink";
 					try {
 						const stats = await fs.promises.lstat(entryPath);
@@ -200,11 +220,11 @@ export class NodeHomeEnv implements ExecutionEnv {
 	}
 
 	async canonicalPath(path: string): Promise<Result<string, FileError>> {
-		return this.run(path, async (fs) => ok(await fs.promises.realpath(this.resolve(path))));
+		return this.run(path, async ({ fs }) => ok(await fs.promises.realpath(this.resolve(path))));
 	}
 
 	async exists(path: string): Promise<Result<boolean, FileError>> {
-		return this.run(path, async (fs) => {
+		return this.run(path, async ({ fs }) => {
 			try {
 				await fs.promises.lstat(this.resolve(path));
 				return ok(true);
@@ -218,14 +238,14 @@ export class NodeHomeEnv implements ExecutionEnv {
 	}
 
 	async createDir(path: string, options?: { recursive?: boolean }): Promise<Result<void, FileError>> {
-		return this.run(path, async (fs) => {
+		return this.run(path, async ({ fs }) => {
 			await fs.promises.mkdir(this.resolve(path), { recursive: options?.recursive ?? true });
 			return ok(undefined);
 		});
 	}
 
 	async remove(path: string, options?: { recursive?: boolean; force?: boolean }): Promise<Result<void, FileError>> {
-		return this.run(path, async (fs) => {
+		return this.run(path, async ({ fs }) => {
 			await fs.promises.rm(this.resolve(path), {
 				recursive: options?.recursive ?? false,
 				force: options?.force ?? false,
@@ -251,40 +271,76 @@ export class NodeHomeEnv implements ExecutionEnv {
 	}
 
 	/**
-	 * Shared wrapper enforcing the never-throw contract. Hands the fs module to
-	 * the action so method bodies never see an `undefined` module: when node is
-	 * unavailable, `not_supported` answers for all of them.
+	 * Shared wrapper enforcing the never-throw contract. Hands the resolved
+	 * modules to the action so method bodies never see an `undefined` one: when
+	 * node is unavailable, `not_supported` answers for all of them. That is also
+	 * why the `path` calls inside an action carry no fallback — the only path
+	 * work that happens outside this guard is {@link resolve}, called just below
+	 * to fill the error's own path.
 	 */
-	private async run<T>(path: string, action: (fs: NodeModules["fs"]) => Promise<Result<T, FileError>>): Promise<Result<T, FileError>> {
+	private async run<T>(path: string, action: (modules: NodeModules) => Promise<Result<T, FileError>>): Promise<Result<T, FileError>> {
 		const modules = this.modules;
 		const resolved = this.resolve(path);
 		if (!modules) {
 			return err(new FileError("not_supported", "node filesystem is unavailable on this platform", resolved));
 		}
 		try {
-			return await action(modules.fs);
+			return await action(modules);
 		} catch (cause) {
 			return err(toFileError(cause, resolved));
 		}
 	}
 
-	private basename(path: string): string {
-		return path.slice(path.lastIndexOf("/") + 1);
+	/**
+	 * Joins with the host's separator, so what comes back is a path the same
+	 * host's `dirname`/`basename` can take apart again. The `/` fallback is
+	 * there for the same reason {@link resolve}'s is: {@link run} reports this
+	 * string as the failing path, and it must exist before the modules do.
+	 */
+	private joinParts(parts: string[]): string {
+		const kept = parts.filter((part) => part !== "");
+		const nodePath = this.modules?.path;
+		return nodePath ? nodePath.join(...kept) : kept.join("/");
 	}
 
-	private dirname(path: string): string {
-		const index = path.lastIndexOf("/");
-		return index <= 0 ? "/" : path.slice(0, index);
-	}
-
-	/** Absolute, `/`-normalized path; `~` expands to cwd, relative resolves against cwd. */
+	/**
+	 * Absolute path against {@link cwd}: `~` expands to it, and a relative path
+	 * resolves against it.
+	 *
+	 * Defers to node so "absolute" means whatever the host means by it — `C:\…`
+	 * and `\\server\share` count on Windows, where a leading-`/` test calls them
+	 * relative and prefixes the home directory onto a path that already carries
+	 * it. `cwd` is passed explicitly rather than left to `process.cwd()` because
+	 * the home directory is this env's whole address space.
+	 *
+	 * The inline POSIX arithmetic stays as the no-node fallback: {@link run}
+	 * calls this to fill {@link FileError.path} before it knows whether the
+	 * modules resolved, so on mobile there is no `path` module and the error
+	 * still owes its caller a path. `path.resolve` drops a trailing separator
+	 * where the fallback keeps one — harmless, since pi's loader strips it
+	 * itself and no caller here passes one.
+	 */
 	private resolve(path: string): string {
-		let candidate = path === "~" || path.startsWith("~/") ? `${this.cwd}${path.slice(1)}` : path;
-		if (!candidate.startsWith("/")) {
-			candidate = `${this.cwd}/${candidate}`;
+		const expanded = expandHome(path, this.cwd);
+		const nodePath = this.modules?.path;
+		if (nodePath) {
+			return nodePath.resolve(this.cwd, expanded);
 		}
-		return normalizePosix(candidate);
+		return normalizePosix(expanded.startsWith("/") ? expanded : `${this.cwd}/${expanded}`);
 	}
+}
+
+/**
+ * Expands a leading `~` to `home`.
+ *
+ * Both separators are accepted because the tilde comes back from paths this
+ * class builds itself: `path.win32.join("~", ".agents", "skills")` yields
+ * `~\.agents\skills`, which a `~/`-only pattern reads as an ordinary relative
+ * path — so instead of pointing at the home directory it would create a
+ * directory literally named `~` next to the process's own.
+ */
+function expandHome(path: string, home: string): string {
+	return /^~([/\\]|$)/.test(path) ? `${home}${path.slice(1)}` : path;
 }
 
 function isMissing(cause: unknown): boolean {

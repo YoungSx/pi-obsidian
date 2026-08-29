@@ -26,6 +26,15 @@ import { openConfirmDelete } from "./confirmDelete";
 import { ModelModal } from "./ModelModal";
 import { ProviderModal } from "./ProviderModal";
 import { describeSecretStorage, type SecretStorageState } from "./secretStorageCopy";
+import {
+	describeUserSkillsDirProblem,
+	describeUserSkillsDirReading,
+	USER_SKILLS_DIR_PLACEHOLDER,
+	userSkillsDirDescription,
+	userSkillsDirName,
+	userSkillsSearchedDescription,
+	userSkillsSearchedLabel,
+} from "./userSkillsCopy";
 import { renderSettingsTabs, type SettingsTabDefinition } from "./SettingsTabs";
 import { aboutLinks, describeVersion, type AboutLink } from "./aboutCopy";
 import { describeMissingBuiltinModel } from "./modelsCopy";
@@ -59,7 +68,7 @@ import {
 import { DEFAULT_SESSION_DIR, normalizeSessionDir } from "../../session/sessionDir";
 import type { FetchedSkill, FetchedSource, UpdatePlan } from "../../skills/skillImport";
 import type { SkillInventory, SkillRow } from "../../skills/skillManager";
-import type { UserSkill } from "../../skills/userSkills";
+import type { UserSkillsLoad } from "../../skills/userSkills";
 import { ImportSkillModal } from "./ImportSkillModal";
 
 /**
@@ -162,8 +171,16 @@ export interface SkillsHost {
 	remove(dirName: string): Promise<void>;
 	/** Re-reads skill files into the running agent after a change on disk. */
 	refreshAgent(): Promise<void>;
-	/** User-level skills on this machine, read-only in the panel. */
-	listUserSkills(): Promise<UserSkill[]>;
+	/**
+	 * User-level skills on this machine, read-only in the panel.
+	 *
+	 * Returns the whole load rather than the skills alone, because the panel's
+	 * job here is not only to list what arrived: pi's loader treats a missing
+	 * directory as "no skills here" and says nothing, so a path that resolved
+	 * somewhere the user did not mean is indistinguishable from an empty folder
+	 * unless the directories actually consulted are reported too.
+	 */
+	loadUserSkills(): Promise<UserSkillsLoad>;
 	/**
 	 * Whether user-level skills can be read on this device.
 	 *
@@ -186,6 +203,7 @@ export interface SettingsPanelSettings {
 	compaction?: CompactionConfig;
 	sessionRetention: number;
 	sessionDir: string;
+	userSkillsDir: string;
 	logLevel: LogLevelSetting;
 }
 
@@ -1034,10 +1052,15 @@ async function runSkillRemove(host: SettingsPanelHost, row: SkillRow, afterMutat
 }
 
 /**
- * The user-level skills section, read-only.
+ * The user-level skills section: the extra-folder row, then what was loaded.
  *
- * These live in the home directory by definition, so there is nothing this
- * panel can write to — their management belongs to pi and the user's editor.
+ * Skill files themselves are read-only — they live outside the vault by
+ * definition, so their management belongs to pi and the user's editor. The one
+ * thing this panel *does* own is the folder list's extra member, which is a
+ * plugin setting like any other, and the report of what was actually read,
+ * which is the section's whole reason to exist: pi's loader treats a missing
+ * directory as "no skills here" and says nothing, so an unread folder is
+ * indistinguishable from an empty one anywhere else.
  */
 async function renderUserSkillsGroup(containerEl: HTMLElement, host: SettingsPanelHost): Promise<void> {
 	containerEl.empty();
@@ -1046,14 +1069,103 @@ async function renderUserSkillsGroup(containerEl: HTMLElement, host: SettingsPan
 		return;
 	}
 	new Setting(containerEl).setName(t.t("skills.userHeading")).setHeading().setDesc(t.t("skills.userDesc"));
-	const skills = await host.skills.listUserSkills();
+	renderUserSkillsDirRow(containerEl, host);
+	// Created before the first await so a late load never lands above the row,
+	// matching the tab's own containers-in-final-order property.
+	const bodyEl = containerEl.createDiv();
+	await fillUserSkillsBody(bodyEl, host);
+}
+
+/**
+ * The extra-folder field, validated in place on blur.
+ *
+ * Follows the session-folder row's rules with two deliberate differences. An
+ * emptied field is a valid answer here, not a fallback to restore: the
+ * built-in pair simply stays the whole set, so the value clears to "". And a
+ * rejected path reports why without touching the field, because the typed
+ * text is what the message is about — re-normalizing it would tell the user
+ * the panel knows better what they meant than they do.
+ *
+ * An accepted change re-renders this whole group rather than patching rows:
+ * the searched report below describes the *last* load, and the field's own
+ * row is cheap to rebuild on blur, where focus has already left.
+ */
+function renderUserSkillsDirRow(containerEl: HTMLElement, host: SettingsPanelHost): void {
+	const { settings, t } = host;
+	const setting = new Setting(containerEl).setName(userSkillsDirName(t));
+	setting.setDesc(userSkillsDirDescription(t));
+	const effect = setting.descEl.createDiv({ cls: "piem-settings-effect" });
+	const describe = (problem?: string): void => {
+		effect.setText(problem ?? "");
+		effect.toggleClass("piem-settings-effect--error", problem !== undefined);
+	};
+
+	setting.addText((text) => {
+		text.setPlaceholder(USER_SKILLS_DIR_PLACEHOLDER);
+		text.setValue(settings.userSkillsDir);
+		text.inputEl.addEventListener("blur", () => {
+			const typed = text.inputEl.value.trim();
+			const problem = describeUserSkillsDirProblem(typed, t);
+			if (problem) {
+				describe(problem);
+				return;
+			}
+			text.setValue(typed);
+			describe();
+			if (typed === settings.userSkillsDir) {
+				return;
+			}
+			settings.userSkillsDir = typed;
+			void applyUserSkillsDirChange(containerEl, host);
+		});
+	});
+}
+
+/**
+ * Persists an accepted folder change and reloads what depends on it.
+ *
+ * The running agent has already read the old folder list, so its skills are
+ * refreshed through the same path a vault-skill mutation takes before the
+ * group redraws — otherwise the panel would describe a load the agent never
+ * performed.
+ */
+async function applyUserSkillsDirChange(containerEl: HTMLElement, host: SettingsPanelHost): Promise<void> {
+	await host.save();
+	await host.skills.refreshAgent();
+	await renderUserSkillsGroup(containerEl, host);
+}
+
+/**
+ * Fills the section below the folder field.
+ *
+ * Skills first — the list the heading promises — then the searched report,
+ * because a reader's first question is what the agent can do, and only the
+ * second is why something is missing from that answer.
+ */
+async function fillUserSkillsBody(containerEl: HTMLElement, host: SettingsPanelHost): Promise<void> {
+	const { t } = host;
+	const { skills, searched } = await host.skills.loadUserSkills();
+	containerEl.empty();
+
 	if (skills.length === 0) {
 		containerEl.createEl("p", { cls: "piem-settings-empty", text: t.t("skills.userEmpty") });
-		return;
+	} else {
+		for (const skill of skills) {
+			new Setting(containerEl).setName(skill.name).setDesc(skill.description);
+		}
 	}
-	for (const skill of skills) {
-		new Setting(containerEl).setName(skill.name).setDesc(skill.description);
+
+	const heading = containerEl.createEl("p", { cls: "piem-settings-searched-label", text: userSkillsSearchedLabel(t) });
+	const framing = containerEl.createEl("p", { cls: "piem-settings-searched-desc", text: userSkillsSearchedDescription(t) });
+	// The path is the row's name, not interpolated into the sentence: it stays
+	// selectable, and a long path cannot swallow the reading beside it.
+	for (const entry of searched) {
+		new Setting(containerEl).setName(entry.dir).setDesc(describeUserSkillsDirReading({ found: entry.found, loaded: entry.loaded }, t));
 	}
+	// Nothing to frame means no frame: without this guard a zero-folder report
+	// would render the label and its prose over an empty list.
+	heading.hidden = searched.length === 0;
+	framing.hidden = searched.length === 0;
 }
 
 /**

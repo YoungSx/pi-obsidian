@@ -30,6 +30,7 @@ import { getT, isLanguageSetting, resolveLanguage, type LanguageHost, type Langu
 import { DEFAULT_SEND_SHORTCUT, isSendShortcutSetting, type SendShortcut } from "./ui/keyboard";
 import { SkillManager } from "./skills/skillManager";
 import { loadUserSkills } from "./skills/userSkills";
+import { normalizeUserSkillsDir } from "./skills/userSkillsDir";
 import { VaultExecutionEnv } from "./vault/VaultExecutionEnv";
 import { createFetchForTransport } from "./net/obsidianFetch";
 
@@ -104,6 +105,19 @@ export interface PiemSettings {
 	 */
 	sessionDir: string;
 	/**
+	 * One extra directory to load user-level skills from, or `""` for none.
+	 *
+	 * Additive, not a replacement: the two directories pi itself reads are not a
+	 * choice anyone made here, and a user who has skills in both places wants
+	 * both. It outranks them, because a directory the user named is a more
+	 * deliberate statement than a default they inherited.
+	 *
+	 * Empty is the shipped value and a valid answer, so this is `""` rather than
+	 * optional — an absent field and a cleared one mean the same thing, and one
+	 * spelling keeps every reader from having to handle both.
+	 */
+	userSkillsDir: string;
+	/**
 	 * Threshold below which log records are discarded.
 	 *
 	 * Read live by the logger through the settings closure, so a change on the
@@ -133,6 +147,7 @@ export const DEFAULT_SETTINGS: PiemSettings = {
 	sendShortcut: DEFAULT_SEND_SHORTCUT,
 	sessionRetention: DEFAULT_SESSION_RETENTION,
 	sessionDir: DEFAULT_SESSION_DIR,
+	userSkillsDir: "",
 	logLevel: DEFAULT_LOG_LEVEL,
 };
 
@@ -209,6 +224,13 @@ export function normalizeSettings(data: Partial<PiemSettings> | null | undefined
 		// they can be opened, searched, and backed up. Nothing is moved — chats in
 		// the old plugin folder stay on disk, and the Sessions tab says where.
 		sessionDir: normalizeSessionDir(data?.sessionDir) ?? DEFAULT_SESSION_DIR,
+		// Normalised on the way in, so a hand-edited data.json cannot hand the
+		// loader a relative path that would silently resolve against the home
+		// directory. A value the validator cannot judge is kept rather than
+		// dropped: on mobile there is no filesystem for the verdict to matter, and
+		// clearing the field would lose the directory the user's desktop configured
+		// — see `normalizeUserSkillsDir` for why that shapes its return.
+		userSkillsDir: normalizeUserSkillsDir(data?.userSkillsDir) ?? "",
 		// A corrupted or unknown stored value degrades to the default rather than
 		// throwing, matching how every other enum-typed setting is repaired.
 		logLevel: readLogLevel(data?.logLevel),
@@ -502,7 +524,10 @@ export class PiemSettingTab extends PluginSettingTab {
 					update: (dirName) => manager().update(dirName),
 					remove: (dirName) => manager().remove(dirName),
 					refreshAgent: () => this.plugin.refreshAgentSkills(),
-					listUserSkills: async () => (await loadUserSkills()).skills,
+					// The configured directory is read at call time, not captured, so
+					// the panel reports on the folder currently in the field rather
+					// than the one that was set when the tab opened.
+					loadUserSkills: () => loadUserSkills(this.plugin.settings.userSkillsDir),
 					userSkillsAvailable: Platform.isDesktop,
 				};
 			})(),
