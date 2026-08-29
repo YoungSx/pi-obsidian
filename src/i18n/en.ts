@@ -133,6 +133,13 @@ export const en = {
 		commandConflict: "Both a prompt and skill use /{name}. Used the prompt; use /skill:{name} for the skill.",
 		/** Notice summarizing non-fatal warnings from loading prompt templates. */
 		templatesLoadedWithWarnings: "Loaded prompt commands with {count} warning(s).",
+		/**
+		 * Outcome of an on-demand tidy that found nothing worth summarizing.
+		 *
+		 * Not a failure — the chat is simply short enough that compaction would
+		 * discard nothing. It is a notice rather than an error for that reason.
+		 */
+		nothingToCompact: "Nothing to tidy up yet.",
 	},
 
 	builtinSkills: {

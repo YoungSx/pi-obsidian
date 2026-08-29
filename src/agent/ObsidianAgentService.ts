@@ -1328,7 +1328,7 @@ export class ObsidianAgentService {
 			this.noticeMessage = undefined;
 			const compacted = await this.runExclusiveCompaction(agent, { force: true });
 			if (!compacted && !this.errorMessage) {
-				this.setNotice("Nothing to compact yet.");
+				this.setNotice(this.t().t("chat.nothingToCompact"));
 			}
 		} finally {
 			await this.notifySettledState();
