@@ -3,6 +3,7 @@ import type { AgentTool } from "@earendil-works/pi-agent-core";
 import { Type } from "typebox";
 import { normalizeVaultPath } from "../vault/path";
 import { hasFileManager, trashOrDelete } from "../vault/trash";
+import { vaultPathParameter } from "./parameters";
 import { ensureParentFolders, textResult, throwIfAborted } from "./toolResult";
 
 /**
@@ -25,13 +26,19 @@ import { ensureParentFolders, textResult, throwIfAborted } from "./toolResult";
  * the model to anchor `path` to.
  */
 const MoveNoteParameters = Type.Object({
-	from: Type.String(),
-	to: Type.String(),
+	from: vaultPathParameter("Note or folder to move. Must exist."),
+	to: vaultPathParameter("Destination. Must be free."),
 });
 
 const TrashNoteParameters = Type.Object({
-	path: Type.String(),
-	recursive: Type.Optional(Type.Boolean()),
+	path: vaultPathParameter("Note or folder to trash."),
+	recursive: Type.Optional(
+		Type.Boolean({
+			// Names the refusal, not just the flag: a model reading this as an
+			// optimization will omit it and spend a turn on the error.
+			description: "Required to trash a non-empty folder.",
+		}),
+	),
 });
 
 export function createMoveNoteTool(app: App): AgentTool<typeof MoveNoteParameters> {

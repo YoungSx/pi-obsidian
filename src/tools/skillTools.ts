@@ -3,6 +3,10 @@ import { Type } from "typebox";
 import { textResult, throwIfAborted } from "./toolResult";
 
 const ReadSkillParameters = Type.Object({
+	// Deliberately undescribed. Not a path, so no vault-path rule applies, and the
+	// only other constraint — exact name rather than file location — the tool's own
+	// description already states. A second copy here would cost bundle bytes to
+	// repeat what the model reads immediately above it.
 	name: Type.String(),
 });
 

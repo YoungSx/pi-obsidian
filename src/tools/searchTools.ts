@@ -4,23 +4,32 @@ import { Type } from "typebox";
 import { normalizeFolderPath } from "../vault/path";
 import { formatGrepMatches, grepContent, matchesFindPattern, type GrepMatch } from "../vault/search";
 import { truncateToolOutput } from "../vault/truncate";
+import { maxResultsParameter, vaultScopeParameter } from "./parameters";
 import { compareFiles, TEXT_EXTENSIONS, textResult, throwIfAborted } from "./toolResult";
 
 const LsParameters = Type.Object({
-	path: Type.Optional(Type.String()),
+	path: vaultScopeParameter("Folder to list."),
 });
 
 const FindParameters = Type.Object({
-	pattern: Type.String(),
-	maxResults: Type.Optional(Type.Number()),
+	pattern: Type.String({
+		// The one fact the tool description omits: the glob runs over the full path,
+		// so "*.md" matches and "Notes/*" works, while a bare filename glob would
+		// silently return nothing.
+		description: "Matched against the whole vault-relative path.",
+	}),
+	maxResults: maxResultsParameter(100),
 });
 
 const GrepParameters = Type.Object({
+	// `pattern`, `caseSensitive` and `regex` are undescribed: the tool description
+	// already covers literal-vs-regex, and each name states its own effect. Only
+	// the scope carries a constraint the model cannot infer.
 	pattern: Type.String(),
-	path: Type.Optional(Type.String()),
+	path: vaultScopeParameter("Folder or file."),
 	caseSensitive: Type.Optional(Type.Boolean()),
 	regex: Type.Optional(Type.Boolean()),
-	maxMatches: Type.Optional(Type.Number()),
+	maxMatches: maxResultsParameter(100),
 });
 
 export function createLsTool(app: App): AgentTool<typeof LsParameters> {
