@@ -53,7 +53,7 @@ export const en = {
 		sendNeedsKey: "Add an API key to send",
 		renameChat: "Rename chat",
 		deleteChat: "Delete chat",
-		openChats: "Open chats",
+		openChatHistory: "View chat history",
 		newChat: "New chat",
 		moreActions: "More chat actions",
 		compacting: "Compacting context…",
