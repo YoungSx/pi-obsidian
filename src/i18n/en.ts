@@ -238,16 +238,36 @@ export const en = {
 		 * where they configured the model and where they select it.
 		 */
 		modelWithProvider: "{model} · {provider}",
-		/**
-		 * Reasoning suffix, appended only in the agent-details tier. Owns the
-		 * whole pattern rather than composing a bare "Reasoning" label, so a
-		 * translation controls the word order and the punctuation together.
-		 */
-		withReasoning: "{model} · Reasoning: {level}",
 		/** Menu row shown when nothing is configured yet, above the settings door. */
 		noModels: "No models configured",
 		/** Menu row that opens the Models tab; the switcher's only escape hatch. */
 		manageModels: "Manage models…",
+	},
+
+	/**
+	 * The composer's thinking-level selector, which replaced the settings-centre
+	 * dropdown: the level belongs to the conversation, and this is where it is
+	 * both read and changed.
+	 */
+	thinkingLevel: {
+		/** The verb, which leads the button's accessible name. */
+		switchThinking: "Change thinking level",
+		/** Accessible name and tooltip, e.g. "Change thinking level · High". */
+		buttonTitle: "{action} · {level}",
+		/**
+		 * The level words, one per pi's `ThinkingLevel` enum. These replace the
+		 * wire values ("xhigh") a reader should never meet; a translation owns the
+		 * wording outright rather than casing an English token.
+		 */
+		levels: {
+			off: "Off",
+			minimal: "Minimal",
+			low: "Low",
+			medium: "Medium",
+			high: "High",
+			xhigh: "Extra high",
+			max: "Max",
+		},
 	},
 
 	sendShortcut: {

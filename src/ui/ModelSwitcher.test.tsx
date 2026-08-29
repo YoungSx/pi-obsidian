@@ -227,8 +227,6 @@ function target(overrides: Partial<ModelTarget> = {}): ModelTarget {
 		activeModelId: opus.id,
 		provider: "deepseek",
 		modelId: "deepseek-v4-pro",
-		thinkingLevel: "high",
-		showAgentDetails: false,
 		...overrides,
 	};
 }

@@ -107,8 +107,8 @@ export function ModelSwitcher({ target, onSelect, onOpenSettings, isBusy }: Mode
 		>
 			{/*
 			 * Hidden from assistive tech: the accessible name above already carries
-			 * the model, its endpoint, and — with agent details on — the reasoning
-			 * level, so reading this too would repeat the first third of it.
+			 * the model and its endpoint, so reading this too would repeat the
+			 * first third of it.
 			 */}
 			<span className="piem-chat__model-switcher-name" aria-hidden="true">
 				{activeModelName(target)}

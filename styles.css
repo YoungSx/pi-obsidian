@@ -1602,14 +1602,18 @@ button.piem-chat__latest {
 }
 
 /*
- * The send row: which model answers, how full the context is, and Send.
+ * The send row: which model answers, how hard it thinks, how full the context
+ * is, and Send.
  *
- * `flex-end` rather than `space-between`, even though the row now has three
- * occupants. The leading edge is claimed by one `margin-right: auto` on the
- * switcher, which is the only item that always wants it; everything after that
- * margin collects at the trailing edge, so the gauge lands beside Send — where
- * it answers the question it is asked, whether there is room for the thing
- * about to be sent.
+ * `flex-end` rather than `space-between`, even though the row now has four
+ * occupants. The trailing control claims the corner through one `margin-left:
+ * auto` on the bar's last child — the one item that is never absent — so
+ * everything before it collects toward the leading edge and the switcher and
+ * the thinking selector sit together as one cluster: two questions about the
+ * same outgoing message. Anchoring the auto margin on a leading control instead
+ * would let whichever middle control is absent (the thinking selector on a
+ * model without reasoning, the ring before the first measurement) drag Send
+ * away from the corner.
  *
  * `space-between` would distribute instead, and the row is not always full: with
  * no model configured and nothing measured yet it holds a lone Send, which
@@ -1621,6 +1625,10 @@ button.piem-chat__latest {
 	display: flex;
 	gap: var(--size-4-2);
 	justify-content: flex-end;
+}
+
+.piem-chat__composer-bar > :last-child {
+	margin-left: auto;
 }
 
 /*
@@ -1639,11 +1647,6 @@ button.piem-chat__latest {
 	color: var(--text-muted);
 	font-size: var(--font-ui-smaller);
 	gap: var(--size-4-1);
-	/* Claims the bar's leading edge, which is what keeps Send in its corner
-	 * without the bar switching to `space-between` — either this control or the
-	 * context ring can be absent, and `space-between` would then park a lone Send
-	 * against the left edge. */
-	margin-right: auto;
 	/* Overrides the shared icon-button floor: a flex item at `min-width: auto`
 	 * cannot shrink below its content, which would let a long model name push
 	 * Send off the end of a 300px sidebar instead of ellipsizing. */
@@ -1675,6 +1678,42 @@ button.piem-chat__latest {
 	min-width: 0;
 	overflow: hidden;
 	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+/*
+ * The thinking-level selector, right of the model switcher.
+ *
+ * Shares the switcher's quiet tier — Send must stay the row's only emphasized
+ * control — and the same colour-token reasoning recorded there. It carries no
+ * auto margin: the bar's corner is claimed by the terminal control instead, so
+ * this one sits against the switcher as its cluster-mate and stays there.
+ */
+.piem-chat__thinking-switcher {
+	--icon-color: var(--text-muted);
+	--icon-color-hover: var(--text-normal);
+	color: var(--text-muted);
+	flex-shrink: 0;
+	font-size: var(--font-ui-smaller);
+	gap: var(--size-4-1);
+	padding-inline: var(--size-4-1);
+	width: auto;
+}
+
+/* Same split as the switcher's: focus on every device, hover only where a
+ * pointer can rest. */
+.piem-chat__thinking-switcher:focus-visible {
+	color: var(--text-normal);
+}
+
+@media (hover: hover) {
+
+	.piem-chat__thinking-switcher:hover {
+		color: var(--text-normal);
+	}
+}
+
+.piem-chat__thinking-switcher-name {
 	white-space: nowrap;
 }
 
@@ -1882,6 +1921,10 @@ button.piem-chat__latest {
 		min-width: 0;
 	}
 
+	.piem-chat__thinking-switcher {
+		min-height: var(--size-4-12);
+	}
+
 	.piem-chat__trace-summary,
 	.piem-chat__trace--flat {
 		min-height: var(--size-4-9);
@@ -1932,6 +1975,16 @@ button.piem-chat__latest {
 
 	.piem-chat__message--user {
 		max-width: 100%;
+	}
+
+	/*
+	 * The level word is what gives way first on a narrow panel: it is the only
+	 * fully redundant string on the bar, since the icon, the tooltip and the
+	 * menu's check all carry the state. What remains is an icon-sized button, and
+	 * the row keeps model name, thinking, ring and Send on one line.
+	 */
+	.piem-chat__thinking-switcher-name {
+		display: none;
 	}
 }
 
