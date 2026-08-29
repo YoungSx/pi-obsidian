@@ -252,16 +252,25 @@ export const en = {
 		filling: "filling",
 		ok: "ok",
 		meterHeuristic: "Estimated from message sizes; updates after the first reply.",
-		meterMeasured: "Context use reported by the provider. Compaction starts near {percent}%.",
 		/**
-		 * Tooltip when automatic compaction is switched off.
+		 * The note under the figures when the provider reports usage.
+		 *
+		 * Distilled to the one fact the figures cannot carry: when compaction
+		 * fires. "Reported by the provider" was cut — the figures already say it,
+		 * by lacking the tilde the heuristic estimate carries, and the popover is
+		 * an 11–16rem box where a preamble clause costs a wrapped line.
+		 */
+		meterMeasured: "Compaction starts near {percent}%.",
+		/**
+		 * Note when automatic compaction is switched off.
 		 *
 		 * Separate from {@link meterMeasured} because that string names a threshold,
-		 * and naming a threshold nothing acts on is the one claim this tooltip must
-		 * not make. Points at the manual command instead, which is what is left.
+		 * and naming a threshold nothing acts on is the one claim this note must not
+		 * make. Names the manual path instead, which is what is left — and names it
+		 * as an action rather than as "the Tidy up earlier messages command", since
+		 * the tidy button sits a line below in the same popover.
 		 */
-		meterNoCompaction:
-			"Context use reported by the provider. Automatic tidying is off, so use the Tidy up earlier messages command before it fills.",
+		meterNoCompaction: "Automatic tidying is off — tidy up earlier messages manually before the window fills.",
 		/**
 		 * Names for the tidy control while it cannot act.
 		 *
