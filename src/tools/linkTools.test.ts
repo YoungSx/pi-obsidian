@@ -114,6 +114,112 @@ describe("get_note_links", () => {
 	});
 });
 
+describe("backlink fast path", () => {
+	it("takes sources from the detected index while counts stay from resolvedLinks", async () => {
+		const app = createLinkApp({
+			paths: ["Hub.md", "A.md", "B.md"],
+			resolvedLinks: { "A.md": { "Hub.md": 2 }, "Hub.md": { "A.md": 1 } },
+			backlinkIndex: { "Hub.md": ["A.md", "Ghost.md", "Hub.md"] },
+		});
+
+		const result = await createNoteLinksTool(app).execute("tool-call", { path: "Hub.md", direction: "incoming" });
+
+		// Ghost.md is index-only (an unresolved mention) and Hub.md's self entry
+		// has no resolved count — both drop out of the resolvedLinks lookup, so
+		// the fast path reports exactly what the scan would.
+		expect(textOf(result)).toBe(["Links for Hub.md", "", "Incoming (1):", "A.md (2)"].join("\n"));
+	});
+
+	it("reports the same incoming links with and without the index", async () => {
+		const fixture = {
+			paths: ["Hub.md", "A.md", "B.md"],
+			resolvedLinks: { "A.md": { "Hub.md": 2 }, "B.md": { "Hub.md": 1 }, "Hub.md": { "A.md": 9 } },
+			backlinkIndex: { "Hub.md": ["B.md", "A.md"] },
+		};
+
+		const fast = await createNoteLinksTool(createLinkApp(fixture)).execute("tool-call", {
+			path: "Hub.md",
+			direction: "incoming",
+		});
+		const slow = await createNoteLinksTool(createLinkApp({ ...fixture, backlinkIndex: undefined })).execute(
+			"tool-call",
+			{ path: "Hub.md", direction: "incoming" },
+		);
+
+		expect(textOf(fast)).toBe(textOf(slow));
+	});
+
+	it("touches only the index's sources, not every file in the vault", async () => {
+		const sources = Array.from({ length: 5 }, (_unused, index) => `Source${index}.md`);
+		const app = createLinkApp({
+			paths: ["Hub.md", ...sources],
+			resolvedLinks: Object.fromEntries(sources.map((path) => [path, { "Hub.md": 1 }])),
+			backlinkIndex: { "Hub.md": ["Source1.md"] },
+		});
+		// A getter per source counts how many entries the count lookup reads.
+		let visited = 0;
+		const resolvedLinks = app.metadataCache.resolvedLinks;
+		for (const source of Object.keys(resolvedLinks)) {
+			const targets = resolvedLinks[source];
+			Object.defineProperty(resolvedLinks, source, {
+				enumerable: true,
+				get: () => {
+					visited += 1;
+					return targets;
+				},
+			});
+		}
+
+		const result = await createNoteLinksTool(app).execute("tool-call", { path: "Hub.md", direction: "incoming" });
+
+		// The whole point of the fast path: cost is bounded by backlink count,
+		// not vault size — one lookup instead of five.
+		expect(visited).toBe(1);
+		expect(textOf(result)).toContain("Incoming (1):\nSource1.md (1)");
+	});
+
+	it("accepts the index map returned bare, not only wrapped in { data }", async () => {
+		const app = createLinkApp({
+			paths: ["Hub.md", "A.md"],
+			resolvedLinks: { "A.md": { "Hub.md": 1 } },
+		});
+		(app.metadataCache as unknown as Record<string, unknown>).getBacklinksForFile = (file: TFile) =>
+			file.path === "Hub.md" ? new Map([["A.md", []]]) : new Map();
+
+		const result = await createNoteLinksTool(app).execute("tool-call", { path: "Hub.md", direction: "incoming" });
+
+		expect(textOf(result)).toContain("Incoming (1):\nA.md (1)");
+	});
+
+	it("falls back to the whole-vault scan when the detected API is half-present", async () => {
+		// #91: the host shim answers arbitrary members with `undefined` instead of
+		// throwing, so a probe that stopped at method existence would misread each
+		// of these half-present shapes as usable. None may be trusted.
+		const brokenImplementations = [
+			(): undefined => undefined,
+			(): Record<string, never> => ({}),
+			(): { data: Record<string, never> } => ({ data: {} }),
+			(): never => {
+				throw new Error("boom");
+			},
+		];
+
+		for (const getBacklinksForFile of brokenImplementations) {
+			const app = createLinkApp({
+				paths: ["Hub.md", "A.md"],
+				resolvedLinks: { "A.md": { "Hub.md": 1 } },
+			});
+			(app.metadataCache as unknown as Record<string, unknown>).getBacklinksForFile = getBacklinksForFile;
+
+			const result = await createNoteLinksTool(app).execute("tool-call", { path: "Hub.md", direction: "incoming" });
+
+			expect(textOf(result), `fallback failed for ${String(getBacklinksForFile)}`).toContain(
+				"Incoming (1):\nA.md (1)",
+			);
+		}
+	});
+});
+
 describe("get_note_metadata", () => {
 	it("reports frontmatter, merged tags, and the heading outline", async () => {
 		const app = createLinkApp({
@@ -266,6 +372,12 @@ interface LinkAppFixture {
 	resolvedLinks: Record<string, Record<string, number>>;
 	unresolvedLinks?: Record<string, Record<string, number>>;
 	metadata?: Record<string, CachedMetadata>;
+	/**
+	 * Per target path, the source paths the (undocumented) backlink index claims.
+	 * Omitting it leaves `getBacklinksForFile` off the stub, exercising the
+	 * whole-vault scan fallback.
+	 */
+	backlinkIndex?: Record<string, string[]>;
 }
 
 function createLinkApp(fixture: LinkAppFixture): App {
@@ -278,6 +390,13 @@ function createLinkApp(fixture: LinkAppFixture): App {
 			resolvedLinks: fixture.resolvedLinks,
 			unresolvedLinks: fixture.unresolvedLinks ?? {},
 			getFileCache: (file: TFile) => fixture.metadata?.[file.path] ?? null,
+			...(fixture.backlinkIndex
+				? {
+						getBacklinksForFile: (file: TFile) => ({
+							data: new Map((fixture.backlinkIndex?.[file.path] ?? []).map((source) => [source, []])),
+						}),
+					}
+				: {}),
 		},
 	} as unknown as App;
 }

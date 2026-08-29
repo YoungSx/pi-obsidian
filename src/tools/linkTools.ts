@@ -1,4 +1,4 @@
-import type { App, CachedMetadata, HeadingCache } from "obsidian";
+import type { App, CachedMetadata, HeadingCache, TFile } from "obsidian";
 import { getAllTags } from "obsidian";
 import type { AgentTool } from "@earendil-works/pi-agent-core";
 import { Type } from "typebox";
@@ -66,7 +66,7 @@ export function createNoteLinksTool(app: App): AgentTool<typeof NoteLinksParamet
 
 			const outgoing = wantsOutgoing ? toLinkReferences(resolvedLinks[file.path]) : [];
 			const unresolved = wantsOutgoing ? toLinkReferences(app.metadataCache.unresolvedLinks[file.path]) : [];
-			const incoming = wantsIncoming ? collectBacklinks(app, file.path, signal) : [];
+			const incoming = wantsIncoming ? collectBacklinks(app, file, signal) : [];
 
 			const sections: ResultSection[] = [];
 			if (wantsOutgoing) {
@@ -139,25 +139,74 @@ export function createNoteMetadataTool(app: App): AgentTool<typeof NoteMetadataP
 }
 
 /**
- * Obsidian exposes no public backlinks API — `getBacklinksForFile` is absent from
- * `obsidian.d.ts` — so backlinks are derived by inverting the forward link graph.
- * That is a whole-vault scan, hence the per-source abort check.
+ * Obsidian exposes no public backlinks API — `getBacklinksForFile` is absent
+ * from `obsidian.d.ts` — but the method exists at runtime behind the backlinks
+ * panel, so backlinks feature-detect it and fall back to inverting the forward
+ * link graph.
  *
- * Iterating keys rather than `Object.entries` keeps that check meaningful:
+ * The fast path borrows only the index's *source list*; counts still come from
+ * `resolvedLinks`, the same map the fallback reads. The two paths are therefore
+ * equal by construction: keys the index carries that `resolvedLinks` does not
+ * (e.g. unresolved mentions) drop out of the count lookup, and the only trust
+ * left is that the index lists every resolved backlink source — the assumption
+ * Obsidian's own backlinks panel runs on. The scan stays a whole-vault walk,
+ * hence the per-source abort check; the fast path's loop is bounded by the
+ * note's backlink count, and the same check guards it for symmetry.
+ *
+ * Iterating keys rather than `Object.entries` keeps the scan's check meaningful:
  * `Object.entries` reads every source's target map up front, so an abort would
  * only be noticed after the full scan it was supposed to cut short.
  */
-function collectBacklinks(app: App, targetPath: string, signal: AbortSignal | undefined): LinkReference[] {
+function collectBacklinks(app: App, file: TFile, signal: AbortSignal | undefined): LinkReference[] {
 	const resolvedLinks = app.metadataCache.resolvedLinks;
 	const backlinks: LinkReference[] = [];
-	for (const sourcePath of Object.keys(resolvedLinks)) {
+	const candidates = backlinkSources(app, file) ?? Object.keys(resolvedLinks);
+	for (const sourcePath of candidates) {
 		throwIfAborted(signal);
-		const count = resolvedLinks[sourcePath]?.[targetPath];
+		const count = resolvedLinks[sourcePath]?.[file.path];
 		if (count !== undefined) {
 			backlinks.push({ target: sourcePath, count });
 		}
 	}
 	return sortLinkReferences(backlinks);
+}
+
+/**
+ * The undocumented runtime shape behind Obsidian's backlinks panel: the internal
+ * `CustomArrayDict`, whose `data` maps backlink source paths to their link
+ * caches. Declared nowhere in `obsidian.d.ts`, so typed locally; a version that
+ * returns the map bare, or anything else entirely, fails the probe and takes
+ * the scan.
+ */
+interface BacklinkIndex {
+	data?: Map<string, unknown>;
+}
+
+function backlinkSources(app: App, file: TFile): string[] | undefined {
+	const cache = app.metadataCache as unknown as {
+		getBacklinksForFile?: (file: TFile) => BacklinkIndex | Map<string, unknown> | undefined;
+	};
+	const getBacklinksForFile = cache.getBacklinksForFile;
+	if (typeof getBacklinksForFile !== "function") {
+		return undefined;
+	}
+	let index: BacklinkIndex | Map<string, unknown> | undefined;
+	try {
+		index = getBacklinksForFile.call(cache, file);
+	} catch {
+		return undefined;
+	}
+	const data = index instanceof Map ? index : index?.data;
+	if (!(data instanceof Map)) {
+		return undefined;
+	}
+	const sources: string[] = [];
+	for (const sourcePath of data.keys()) {
+		if (typeof sourcePath === "string") {
+			sources.push(sourcePath);
+		}
+	}
+	return sources;
 }
 
 /** One note's own link map, so this is bounded by that note rather than the vault. */
