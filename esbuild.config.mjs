@@ -1,7 +1,21 @@
 import esbuild from "esbuild";
 import { writeFileSync } from "node:fs";
+import path from "node:path";
 import process from "process";
 import { builtinModules } from 'node:module';
+
+/**
+ * pi-ai imports the full `openai` and `@anthropic-ai/sdk` packages, but only
+ * through the tiny client surface our shims in `src/net/shims/` reproduce
+ * (issue #92). Aliasing them over the real packages keeps the ~232 KiB of
+ * minified SDK code out of main.js, which every Obsidian startup — mobile
+ * included — otherwise has to evaluate. The packages stay in node_modules for
+ * pi-ai's TypeScript declarations; only the bundle-time resolution changes.
+ */
+const SDK_SHIM_ALIASES = {
+	openai: path.resolve("src/net/shims/openaiSdk.ts"),
+	"@anthropic-ai/sdk": path.resolve("src/net/shims/anthropicSdk.ts"),
+};
 
 const banner =
 `/*
@@ -26,6 +40,7 @@ const context = await esbuild.context({
 		js: banner,
 	},
 	entryPoints: ["src/main.ts"],
+	alias: SDK_SHIM_ALIASES,
 	bundle: true,
 	external: [
 		"obsidian",
