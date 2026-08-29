@@ -476,19 +476,65 @@
  * The turn that has been asked for but not started arriving.
  *
  * Borrows the assistant's own chrome (`--assistant`, so no fill and no border)
- * and adds only the line itself. It is a placeholder for a message, so it must
+ * and adds only the typing dots. It is a placeholder for a message, so it must
  * occupy the place a message will: rendering it as a footnote somewhere else
  * would move the reader's eye twice — once to the promise, once to the reply.
  */
 .piem-chat__message--pending {
+	align-items: center;
 	color: var(--text-muted);
-	font-size: var(--font-ui-smaller);
+	display: inline-flex;
 }
 
-.piem-chat__pending {
+/*
+ * Three bouncing dots, the way a chat app signals "the other side is typing"
+ * without labelling the wait. Decorative — the article's `aria-label` carries
+ * the same heads-up for assistive tech, so the dots themselves are hidden from
+ * the a11y tree.
+ */
+.piem-chat__typing {
 	align-items: center;
 	display: inline-flex;
 	gap: var(--size-4-1);
+}
+
+.piem-chat__typing-dot {
+	animation: pi-typing 1.2s ease-in-out infinite;
+	border-radius: 50%;
+	flex-shrink: 0;
+	height: var(--size-4-2);
+	width: var(--size-4-2);
+}
+
+.piem-chat__typing-dot:nth-child(2) {
+	animation-delay: 0.18s;
+}
+
+.piem-chat__typing-dot:nth-child(3) {
+	animation-delay: 0.36s;
+}
+
+@keyframes pi-typing {
+
+	0%,
+	60%,
+	100% {
+		opacity: 0.35;
+		transform: translateY(0);
+	}
+
+	30% {
+		opacity: 1;
+		transform: translateY(-2px);
+	}
+}
+
+@media (prefers-reduced-motion: reduce) {
+
+	.piem-chat__typing-dot {
+		animation: none;
+		opacity: 0.6;
+	}
 }
 
 /* Aborted turn: the text below the marker is half-written, not a finished reply. */
@@ -855,6 +901,30 @@
 	50% {
 		opacity: 0.3;
 	}
+}
+
+/*
+ * The spinner is a span wrapping the SVG `setIcon` injects. Two things have to be
+ * fixed for it to rotate about its centre rather than orbiting a corner:
+ *
+ *  - The span is inline by default, so it has no box to rotate and its `transform`
+ *    can land on the SVG in an unexpected position. `inline-flex` gives it one.
+ *  - The SVG's `transform-origin` defaults to `0 0` of its viewBox (the top-left
+ *    corner), because `transform-box` defaults to `view-box` for SVG elements.
+ *    `fill-box` makes the origin the element's own bounding box, so `center` is
+ *    the geometric centre of the icon — the pivot a reader expects a spinner to
+ *    turn on.
+ */
+.piem-chat__spinner {
+	align-items: center;
+	display: inline-flex;
+	justify-content: center;
+}
+
+.piem-chat__spinner,
+.piem-chat__spinner svg {
+	transform-box: fill-box;
+	transform-origin: center;
 }
 
 .piem-chat__spinner {

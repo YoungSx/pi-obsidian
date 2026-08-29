@@ -6,12 +6,18 @@ import type { SendShortcut } from "./keyboard";
  *
  * Free of React and DOM imports so the wording can be unit-tested without a
  * renderer; `ChatStatusBar.tsx` and `ChatComposer.tsx` own the markup.
+ *
+ * The status bar reports only what cannot be shown as part of the conversation
+ * itself: opening, compaction, context-window occupancy, and spend. A turn in
+ * flight is not here — the transcript shows that as a typing indicator at the
+ * assistant's own position, the way a chat app names "the other side is typing"
+ * rather than labelling a wait. Reporting it in two places said one thing two
+ * ways and made the panel shout.
  */
 
 export interface ChatStatusInput {
 	isInitializing: boolean;
 	isCompacting: boolean;
-	isStreaming: boolean;
 	/**
 	 * Whether the reader has asked for agent-internal vocabulary.
 	 *
@@ -31,6 +37,12 @@ export interface ChatStatusInput {
  * and reserving a row for a line that is absent most of the time would push the
  * composer down for nothing.
  *
+ * Opening and compaction stay because neither has a place in the transcript:
+ * opening is the panel starting up before there is a conversation, and
+ * compaction is a request of its own that the reader did not initiate and the
+ * message stream does not narrate. A reply in flight does have a place — the
+ * typing indicator at the assistant's position — so it is not duplicated here.
+ *
  * The idle slot used to carry the send chord. That hint now lives on the Send
  * button itself — see {@link sendShortcutLabel} — where it describes the control
  * it belongs to rather than sitting in a line beside it.
@@ -39,13 +51,8 @@ export function chatStatusText(input: ChatStatusInput, t: Translator): string | 
 	if (input.isInitializing) {
 		return t.t("chatStatus.opening");
 	}
-	// Compaction outranks streaming: it is a real request of its own, and while it
-	// runs the reply is not being written yet.
 	if (input.isCompacting) {
 		return t.t(input.showAgentDetails ? "chat.compacting" : "chatStatus.tidyingUp");
-	}
-	if (input.isStreaming) {
-		return t.t("chatStatus.responding");
 	}
 	return null;
 }

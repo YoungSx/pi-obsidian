@@ -9,7 +9,6 @@ import { useT } from "./TranslatorContext";
 export interface ChatStatusBarProps {
 	isInitializing: boolean;
 	isCompacting: boolean;
-	isStreaming: boolean;
 	/**
 	 * Context-window occupancy, or null before it can be measured. Rendered only
 	 * in the agent-details tier.
@@ -45,13 +44,12 @@ export interface ChatStatusBarProps {
 export function ChatStatusBar({
 	isInitializing,
 	isCompacting,
-	isStreaming,
 	contextFill,
 	usage,
 	showAgentDetails,
 }: ChatStatusBarProps): React.JSX.Element | null {
 	const t = useT();
-	const status = chatStatusText({ isInitializing, isCompacting, isStreaming, showAgentDetails }, t);
+	const status = chatStatusText({ isInitializing, isCompacting, showAgentDetails }, t);
 	const showMeter = showAgentDetails && contextFill !== null;
 	const showUsage = showAgentDetails && usage.requests > 0;
 	/*
@@ -60,9 +58,10 @@ export function ChatStatusBar({
 	 *
 	 * An `aria-live` region is only announced if it was already in the DOM when
 	 * its content changed. Returning null here — which this did — meant the very
-	 * first "Piem is replying…" of a quiet chat arrived in a region inserted in
-	 * the same commit, which a screen reader may never announce at all. Hiding it
-	 * visually costs no height and keeps the region discovered.
+	 * first "Opening chat…" (or compaction notice) of a quiet chat arrived in a
+	 * region inserted in the same commit, which a screen reader may never
+	 * announce at all. Hiding it visually costs no height and keeps the region
+	 * discovered.
 	 */
 	const isQuiet = !status && !showMeter && !showUsage;
 

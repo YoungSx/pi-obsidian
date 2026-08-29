@@ -128,15 +128,17 @@ function hasVisibleContent(message: AssistantMessage): boolean {
 /**
  * The reply, before it has any words.
  *
- * A message card in the assistant's own position rather than a line of chrome
- * somewhere else, because its job is to hold the place the answer will appear in
- * — the reader's eye is already there. It is replaced by the real turn on the
- * first token, so it never stacks with content.
+ * A typing indicator in the assistant's own position rather than a line of
+ * chrome somewhere else, because its job is to hold the place the answer will
+ * appear in — the reader's eye is already there. It reads as "the other side is
+ * typing", the way a chat app signals that without labelling the wait, so it
+ * never says "Piem is replying" in the visible transcript. It is replaced by the
+ * real turn on the first token, so it never stacks with content.
  *
  * Not a live region: the settled turn is announced once by {@link TurnAnnouncer},
  * and announcing the start as well would make a screen reader interrupt the user
  * to say that nothing had happened yet. `aria-label` covers it for anyone
- * navigating the transcript by hand.
+ * navigating the transcript by hand, since the dots themselves are decorative.
  */
 function PendingReply(): React.JSX.Element {
 	const t = useT();
@@ -146,9 +148,10 @@ function PendingReply(): React.JSX.Element {
 			aria-label={t.t("chat.replyingAria")}
 			aria-busy={true}
 		>
-			<span className="piem-chat__pending">
-				<ObsidianIcon name="loader-circle" className="piem-chat__spinner" />
-				{t.t("chat.replying")}
+			<span className="piem-chat__typing" aria-hidden="true">
+				<span className="piem-chat__typing-dot" />
+				<span className="piem-chat__typing-dot" />
+				<span className="piem-chat__typing-dot" />
 			</span>
 		</article>
 	);
