@@ -50,6 +50,68 @@ export const markdownRenderMock = mock<(call: MarkdownRenderCall) => Promise<voi
 /** Mutable handle so UI tests can verify use of Obsidian's native tooltip. */
 export const setTooltipMock = mock<(element: HTMLElement, tooltip: string) => void>();
 
+/** One row of a recorded {@link MenuRecording}. A separator carries no title. */
+export interface MenuItemRecording {
+	title?: string;
+	icon?: string;
+	warning?: boolean;
+	separator?: boolean;
+	click?: () => void;
+}
+
+/**
+ * What a `Menu` was built out of, in the order the code added it.
+ *
+ * Obsidian's `Menu` renders into its own popover, which does not exist under
+ * `bun test`, so a menu's contents are unobservable from the DOM. Recording the
+ * builder calls instead lets a test assert on which items a menu offers, their
+ * order, and the separators between them — and lets it invoke an item's
+ * handler, which is the only way to reach code that only a menu row can trigger.
+ */
+export interface MenuRecording {
+	items: MenuItemRecording[];
+	/** Whether the menu was actually shown, rather than merely built. */
+	shown: boolean;
+	/** Titles of the non-separator items, for the common ordering assertion. */
+	titles(): string[];
+	/** Invokes the handler of the item with this title. Throws if absent. */
+	click(title: string): void;
+}
+
+/** The chainable builder Obsidian hands to `Menu.addItem`, as far as this plugin uses it. */
+interface MenuItemLike {
+	setTitle(title: string): MenuItemLike;
+	setIcon(icon: string): MenuItemLike;
+	setWarning(warning: boolean): MenuItemLike;
+	setSection(section: string): MenuItemLike;
+	setDisabled(disabled: boolean): MenuItemLike;
+	setChecked(checked: boolean): MenuItemLike;
+	onClick(handler: () => void): MenuItemLike;
+}
+
+/**
+ * Every menu built since the last {@link resetMenus}, oldest first.
+ *
+ * Module-level because `Menu` is constructed by production code, which the test
+ * has no handle on. Tests that assert on menus must call `resetMenus()` in their
+ * `beforeEach`; the array is shared with every other file in the run.
+ */
+export const openedMenus: MenuRecording[] = [];
+
+/** Discards recorded menus. Call from `beforeEach` before building a menu. */
+export function resetMenus(): void {
+	openedMenus.length = 0;
+}
+
+/** The most recently built menu. Throws rather than returning undefined. */
+export function lastMenu(): MenuRecording {
+	const menu = openedMenus.at(-1);
+	if (!menu) {
+		throw new Error("no menu was built");
+	}
+	return menu;
+}
+
 /**
  * Records the call and, by default, appends a marker element so tests can
  * observe that something was rendered into `el`. Reconfigure via
@@ -74,11 +136,65 @@ const obsidianStub = {
 	Plugin: class Plugin {},
 	Modal: class Modal {},
 	Menu: class Menu {
-		addItem(): this {
+		private readonly recording: MenuRecording = {
+			items: [],
+			shown: false,
+			titles: () => this.recording.items.filter((item) => !item.separator).map((item) => item.title ?? ""),
+			click: (title: string) => {
+				const found = this.recording.items.find((item) => item.title === title);
+				if (!found?.click) {
+					throw new Error(`no menu item titled ${title}`);
+				}
+				found.click();
+			},
+		};
+
+		constructor() {
+			openedMenus.push(this.recording);
+		}
+
+		addItem(build: (item: MenuItemLike) => unknown): this {
+			const entry: MenuItemRecording = {};
+			this.recording.items.push(entry);
+			// The builder is chainable in Obsidian, and production code relies on
+			// that, so every setter returns the same object rather than `undefined`.
+			const item: MenuItemLike = {
+				setTitle: (title: string) => {
+					entry.title = title;
+					return item;
+				},
+				setIcon: (icon: string) => {
+					entry.icon = icon;
+					return item;
+				},
+				setWarning: (warning: boolean) => {
+					entry.warning = warning;
+					return item;
+				},
+				setSection: () => item,
+				setDisabled: () => item,
+				setChecked: () => item,
+				onClick: (handler: () => void) => {
+					entry.click = handler;
+					return item;
+				},
+			};
+			build(item);
 			return this;
 		}
-		showAtMouseEvent(): void {}
-		showAtPosition(): void {}
+
+		addSeparator(): this {
+			this.recording.items.push({ separator: true });
+			return this;
+		}
+
+		showAtMouseEvent(): void {
+			this.recording.shown = true;
+		}
+
+		showAtPosition(): void {
+			this.recording.shown = true;
+		}
 	},
 	FuzzySuggestModal: class FuzzySuggestModal {},
 	// Base class for the settings panel's search-as-you-type fields. Stubbed as a
