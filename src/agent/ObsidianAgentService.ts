@@ -9,6 +9,7 @@ import {
 	type AgentEvent,
 	type AgentLoopTurnUpdate,
 	type AgentMessage,
+	type AgentTool,
 	type ExecutionEnv,
 	type PrepareNextTurnContext,
 	type PromptTemplate,
@@ -38,6 +39,7 @@ import { ObsidianSessionManager, type ActiveSessionInfo, type SessionContext, ty
 import { arrayBufferToBase64, extractImageRefs, mimeTypeForPath, sanitizeMessageForLog, stripImageRefs } from "../vault/image";
 import { injectContext, type InjectedNote } from "./contextInjection";
 import { ContextRefs, type ContextRef } from "./contextRefs";
+import { createDelegateTool } from "../subagent/delegateTool";
 import { OBSIDIAN_AGENT_SYSTEM_PROMPT } from "./systemPrompt";
 import { composeSystemPrompt, expandSkill, findSkill, formatSkillDiagnostics, loadVaultSkills, mergeSkills } from "./skillLoader";
 import { loadUserSkills, type UserSkill } from "../skills/userSkills";
@@ -1176,7 +1178,7 @@ export class ObsidianAgentService {
 			this.agent.state.thinkingLevel = clamped;
 			await this.sessionManager.appendThinkingLevelChange(clamped);
 		}
-		this.agent.state.tools = createObsidianTools(this.app, this.env, this.getSettings(), () => this.skills);
+		this.agent.state.tools = this.buildTools(true);
 		// Skills are read from the vault here too: `saveSettings` calls this after
 		// every settings change, and the panel re-reads the folder with it, so a
 		// newly saved skill reaches the running conversation without a reload.
@@ -1416,6 +1418,34 @@ export class ObsidianAgentService {
 		}
 	}
 
+	/**
+	 * Builds the vault tool set, optionally with the `delegate` tool on top.
+	 *
+	 * Both agents assemble from this one place. The delegate is only ever added
+	 * to the *parent* set: `includeDelegate: false` is what a subagent's tool
+	 * set is built with, so a subagent structurally cannot recurse — the child
+	 * set never contains the tool that would spawn grandchildren. Model,
+	 * transport, and keys are read through getters at execution time, so a
+	 * delegate run picks up whatever configuration is live when it starts.
+	 */
+	private buildTools(includeDelegate: boolean): AgentTool[] {
+		const tools = createObsidianTools(this.app, this.env, this.getSettings(), () => this.skills);
+		if (includeDelegate) {
+			tools.push(
+				createDelegateTool({
+					getModel: () => getSelectedModel(this.getSettings()),
+					getStreamFn: () => this.resolveStreamFn(),
+					// Thinking level is session-owned now; a delegate rides the live
+					// agent's current level rather than any global preference.
+					getThinkingLevel: () => this.agent?.state.thinkingLevel ?? DEFAULT_THINKING_LEVEL,
+					getApiKey: (provider) => this.getApiKey(provider),
+					createChildTools: () => this.buildTools(false),
+				}),
+			);
+		}
+		return tools;
+	}
+
 	private replaceAgent(messages: AgentMessage[], thinkingLevel: ThinkingLevel): void {
 		this.unsubscribeAgent?.();
 		// An aborted run never delivers `tool_execution_end`, so anything keyed by a
@@ -1463,7 +1493,7 @@ export class ObsidianAgentService {
 				// The caller resolves this: the loaded session's own level, or the
 				// seed a new session was created with. Global settings have no say.
 				thinkingLevel,
-				tools: createObsidianTools(this.app, this.env, settings, () => this.skills),
+				tools: this.buildTools(true),
 				messages,
 			},
 			getApiKey: (provider) => this.getApiKey(provider),

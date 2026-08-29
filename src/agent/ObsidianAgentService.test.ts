@@ -116,6 +116,49 @@ describe("ObsidianAgentService", () => {
 		expect(lastSnapshot?.messages.map((message) => message.role)).toEqual(["user", "assistant"]);
 	});
 
+	it("runs a delegated task on an in-process subagent and folds the report back in", async () => {
+		// Full chain, no mocks of the machinery under test: the parent model
+		// issues a `delegate` call, the tool builds a real child `Agent`, the
+		// child's own turn is answered by the same scripted streamFn, and the
+		// parent gets the report as a tool result and answers the user. One
+		// streamFn plays both roles, dispatched on the system prompt only the
+		// subagent prompt contains.
+		const childToolNames: string[][] = [];
+		const scripted: StreamFn = (model, context, options) => {
+			const isChild = context.systemPrompt?.includes("delegated task") ?? false;
+			if (isChild) {
+				childToolNames.push((context.tools ?? []).map((tool) => tool.name));
+				return scriptedTextStream(model, "Scout report: nothing to organize.");
+			}
+			if (!thisParentCalled) {
+				thisParentCalled = true;
+				return scriptedToolCallStream(model, "delegate_1", "delegate", {
+					task: "Sweep the vault",
+					role: "scout",
+				});
+			}
+			return scriptedTextStream(model, "Nothing needs organizing.");
+		};
+		let thisParentCalled = false;
+
+		const service = createService(new MemoryAdapter(), { streamFn: scripted });
+		await service.sendPrompt("Tidy check, please");
+
+		const snapshot = service.getSnapshot();
+		expect(snapshot.errorMessage).toBeUndefined();
+		const last = snapshot.messages[snapshot.messages.length - 1];
+		expect(last?.role).toBe("assistant");
+		expect(JSON.stringify(last)).toContain("Nothing needs organizing.");
+
+		// The child ran with the vault tool set minus what a subagent must never
+		// hold: no recursion (delegate) and, for the scout role, no mutators.
+		expect(childToolNames).toHaveLength(1);
+		expect(childToolNames[0]).not.toContain("delegate");
+		expect(childToolNames[0]).not.toContain("read_skill");
+		expect(childToolNames[0]).not.toContain("write");
+		expect(childToolNames[0]).toContain("grep");
+	});
+
 	it("reports usage once the provider has charged for a turn", async () => {
 		const service = createService();
 
@@ -1801,8 +1844,62 @@ function createServiceWithMultimodalModel(
 	return { service, settings };
 }
 
-function createFakeStreamFn(): StreamFn {
-	return (model: Model<Api>, _context: Context, _options?: SimpleStreamOptions) => {
+/** One completed provider response carrying only text, for scripted streamFns. */
+function scriptedTextStream(model: Model<Api>, text: string) {
+	const stream = createAssistantMessageEventStream();
+	const message: AssistantMessage = {
+		role: "assistant",
+		content: [{ type: "text", text }],
+		api: model.api,
+		provider: model.provider,
+		model: model.id,
+		usage: {
+			input: 1_000,
+			output: 10,
+			cacheRead: 0,
+			cacheWrite: 0,
+			totalTokens: 1_010,
+			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+		},
+		timestamp: Date.now(),
+		stopReason: "stop",
+	};
+	stream.push({ type: "done", reason: "stop", message });
+	stream.end(message);
+	return stream;
+}
+
+/** One completed provider response that requests a tool call. */
+function scriptedToolCallStream(
+	model: Model<Api>,
+	callId: string,
+	toolName: string,
+	toolArguments: Record<string, unknown>,
+) {
+	const stream = createAssistantMessageEventStream();
+	const message: AssistantMessage = {
+		role: "assistant",
+		content: [{ type: "toolCall", id: callId, name: toolName, arguments: toolArguments }],
+		api: model.api,
+		provider: model.provider,
+		model: model.id,
+		usage: {
+			input: 1_000,
+			output: 10,
+			cacheRead: 0,
+			cacheWrite: 0,
+			totalTokens: 1_010,
+			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+		},
+		timestamp: Date.now(),
+		stopReason: "toolUse",
+	};
+	stream.push({ type: "done", reason: "toolUse", message });
+	stream.end(message);
+	return stream;
+}
+
+function createFakeStreamFn(): StreamFn {	return (model: Model<Api>, _context: Context, _options?: SimpleStreamOptions) => {
 		const stream = createAssistantMessageEventStream();
 		const message: AssistantMessage = {
 			role: "assistant",
