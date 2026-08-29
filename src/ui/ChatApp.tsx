@@ -16,6 +16,7 @@ import { appendToDraft } from "./noteReference";
 import { canOpenPluginSettings, openPluginSettings } from "./pluginSettings";
 import { TranslatorProvider } from "./TranslatorContext";
 import { useSessionDraft } from "./useSessionDraft";
+import { fileToPendingImage, toImageContents, type PendingImage } from "./pendingImages";
 
 interface ChatAppProps {
 	service: ObsidianAgentService;
@@ -40,6 +41,10 @@ export function ChatApp({ service, inputController, component, draftStore }: Cha
 	// link has something to point at. It travels through state rather than a ref
 	// because the link only renders once the id exists.
 	const [composerAnchorId, setComposerAnchorId] = useState<string>();
+	// Images staged for the next send. Ephemeral by design (issue #48): they
+	// never enter the DraftStore, which persists text per session, so they live
+	// only for the turn the user is composing and clear on a successful send.
+	const [pendingImages, setPendingImages] = useState<PendingImage[]>([]);
 	const sendPromptRef = useRef<() => void>(() => undefined);
 	// Read inside the prefill handler, which is registered once and must not
 	// re-register on every keystroke just to see the current draft.
@@ -94,21 +99,35 @@ export function ChatApp({ service, inputController, component, draftStore }: Cha
 		if (!prompt || snapshot.isStreaming || snapshot.isCompacting || isInitializing) {
 			return;
 		}
+		const images = toImageContents(pendingImages);
 		if (!snapshot.isConfigured) {
 			// Send is disabled without a key, but the ⌘↵ submit command routes through
 			// `sendPromptRef` and never sees the button's disabled state. Let it reach
 			// the service so it surfaces the error banner, and deliberately skip
 			// `clearDraft()` so a request that cannot go out keeps the user's text.
-			await service.sendPrompt(prompt);
+			await service.sendPrompt(prompt, images);
 			return;
 		}
 		clearDraft();
-		const sent = await service.sendPrompt(prompt);
-		if (!sent) {
-			// Hand the text back rather than losing it to a failed request.
+		const sent = await service.sendPrompt(prompt, images);
+		if (sent) {
+			// A successful send consumed the staged images; clear the thumbnails.
+			setPendingImages([]);
+		} else {
+			// Hand the text and images back rather than losing them to a failed
+			// request (or a capability-gate block the user can still recover from).
 			setInput(prompt);
 		}
 	};
+
+	const handleAddImages = useCallback(async (files: File[]): Promise<void> => {
+		const staged = await Promise.all(files.map((file) => fileToPendingImage(file)));
+		setPendingImages((current) => [...current, ...staged]);
+	}, []);
+
+	const handleRemoveImage = useCallback((id: string): void => {
+		setPendingImages((current) => current.filter((image) => image.id !== id));
+	}, []);
 
 	sendPromptRef.current = () => {
 		void sendPrompt();
@@ -217,6 +236,9 @@ export function ChatApp({ service, inputController, component, draftStore }: Cha
 					onFocusRequested={handleFocusRequested}
 					onAnchorIdChange={handleAnchorIdChange}
 					commands={snapshot.availableCommands}
+					pendingImages={pendingImages}
+					onAddImages={(files) => void handleAddImages(files)}
+					onRemoveImage={handleRemoveImage}
 					contextRow={
 						<ContextRow
 							refs={snapshot.contextRefs}

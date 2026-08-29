@@ -1,5 +1,5 @@
 import type { App } from "obsidian";
-import type { Usage } from "@earendil-works/pi-ai";
+import { type ImageContent, type Usage } from "@earendil-works/pi-ai";
 import {
 	Agent,
 	collectEntriesForBranchSummary,
@@ -27,9 +27,11 @@ import {
 	getConfiguredApiKey,
 	getPreferredThinkingLevel,
 	getSelectedModel,
+	modelSupportsImages,
 	type PiemSettings,
 } from "../settings";
 import { ObsidianSessionManager, type ActiveSessionInfo, type SessionContext, type SessionDefaults } from "../session/ObsidianSessionManager";
+import { arrayBufferToBase64, extractImageRefs, mimeTypeForPath, sanitizeMessageForLog, stripImageRefs } from "../vault/image";
 import { injectContext } from "./contextInjection";
 import { ContextRefs, type ContextRef } from "./contextRefs";
 import { OBSIDIAN_AGENT_SYSTEM_PROMPT } from "./systemPrompt";
@@ -333,7 +335,7 @@ export class ObsidianAgentService {
 		}
 	}
 
-	async sendPrompt(prompt: string): Promise<boolean> {
+	async sendPrompt(prompt: string, images: ImageContent[] = []): Promise<boolean> {
 		const trimmedPrompt = prompt.trim();
 		if (!trimmedPrompt) {
 			return false;
@@ -372,16 +374,40 @@ export class ObsidianAgentService {
 		}
 
 		await this.refreshConfiguration();
+
+		// Clear stale banners before vault reading: a missing-embed notice raised
+		// while resolving images below must survive into the run, not be wiped by
+		// the try block's reset. The run's own error path still overwrites
+		// `errorMessage` in `catch`.
+		this.errorMessage = undefined;
+		this.noticeMessage = undefined;
+
+		// Phase 2: resolve `![[cat.png]]` embeds into ImageContent read from the
+		// vault. The bytes travel alongside the text, so the embed syntax is
+		// stripped from the prompt — leaving `![[cat.png]]` in would hand the
+		// model a broken reference to a picture it has already been given.
+		const refs = extractImageRefs(trimmedPrompt);
+		const vaultImages = await this.readVaultImages(refs);
+		const promptText = vaultImages.length > 0 ? stripImageRefs(trimmedPrompt) : trimmedPrompt;
+		const allImages = images.length > 0 ? [...images, ...vaultImages] : vaultImages;
+
+		// Phase 3: gate multimodal send on the active model's declared capability.
+		// A text-only model cannot consume an image content array; block before
+		// the run and leave both text and images with the user to reconsider.
+		if (allImages.length > 0 && !modelSupportsImages(getSelectedModel(this.getSettings()))) {
+			const t = this.t();
+			this.setError(t.t("chat.imagesNotSupported", { model: describeModelTarget(this.getSettings(), t) }));
+			return false;
+		}
+
 		let sent = false;
 		try {
-			this.errorMessage = undefined;
-			this.noticeMessage = undefined;
 			this.activeRunContext = this.contextRefs.list();
 			this.notify();
 			await this.compactContextIfNeeded(agent);
 			// The budget is per run, and `compactBetweenTurns` spends it.
 			this.midRunCompactions = 0;
-			await agent.prompt(trimmedPrompt);
+			await agent.prompt(promptText, allImages.length > 0 ? allImages : undefined);
 			sent = true;
 		} catch (error) {
 			this.errorMessage = error instanceof Error ? error.message : String(error);
@@ -1227,7 +1253,44 @@ export class ObsidianAgentService {
 		if (this.messageEntryIds.has(key)) {
 			return;
 		}
-		this.messageEntryIds.set(key, await this.sessionManager.appendMessage(message));
+		// The agent keeps `message` in `state.messages`; persisting it raw would
+		// write base64 image bytes into the JSONL session log (bloat, and a
+		// violation of issue #32), and mutating it in place to strip the image
+		// would erase the picture from the live transcript the next provider
+		// request reads. Sanitize to a deep copy with image blocks replaced by a
+		// text placeholder; dedup still keys on the original object identity.
+		const logged = sanitizeMessageForLog(message);
+		this.messageEntryIds.set(key, await this.sessionManager.appendMessage(logged));
+	}
+
+	/**
+	 * Reads `![[...]]` image embeds from the vault as `ImageContent`.
+	 *
+	 * Each path is resolved independently: a missing or unreadable image is
+	 * skipped (never thrown) so one bad embed does not block the whole send, and a
+	 * notice names it so the user knows what was dropped. Vault access stays on
+	 * the service side of the existing boundary — the UI never touches the vault.
+	 */
+	private async readVaultImages(paths: readonly string[]): Promise<ImageContent[]> {
+		if (paths.length === 0) {
+			return [];
+		}
+		const t = this.t();
+		const images: ImageContent[] = [];
+		for (const path of paths) {
+			const file = this.app.vault.getFileByPath(path);
+			if (!file) {
+				this.setNotice(t.t("chat.imageNotFound", { path }));
+				continue;
+			}
+			try {
+				const buffer = await this.app.vault.readBinary(file);
+				images.push({ type: "image", data: arrayBufferToBase64(buffer), mimeType: mimeTypeForPath(path) });
+			} catch {
+				this.setNotice(t.t("chat.imageNotFound", { path }));
+			}
+		}
+		return images;
 	}
 
 	private getSessionDefaults(): SessionDefaults {

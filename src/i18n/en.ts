@@ -101,6 +101,14 @@ export const en = {
 		compactedAria: "Compacted history",
 		earlierSummarized: "Earlier history was summarized to fit the context window.",
 		imagePlaceholder: "[image: {mimeType}]",
+		/** Shown as a banner when the active model lacks image capability. */
+		imagesNotSupported: "{model} does not accept images. Switch models or remove the image.",
+		/** alt text for a staged image thumbnail. */
+		imageThumbAlt: "Image attached: {mimeType}",
+		/** aria-label for the button removing the Nth staged image (1-based). */
+		removeImage: "Remove image {index}",
+		/** Notice when a ![[...]] embed could not be read from the vault. */
+		imageNotFound: "Could not find {path} in the vault; it was not sent.",
 		rowLabelSystem: "System",
 		rowLabelCommand: "Command",
 		rowLabelSummary: "Summary",

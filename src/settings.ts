@@ -369,6 +369,20 @@ export function getSupportedThinkingLevelOptions(settings: PiemSettings): ModelT
 	return getSupportedThinkingLevels(getSelectedModel(settings));
 }
 
+/**
+ * Whether `model` accepts image content alongside text.
+ *
+ * `Model.input` is the provider's declared capability list — `["text"]` for a
+ * text-only model, `["text", "image"]` for a multimodal one. Custom endpoints
+ * default to `["text"]` (see {@link buildConfiguredModel}) since their backing
+ * model is unknown, so this conservatively reports `false` there until a
+ * capability bit is configured. The caller gates image send on this so a
+ * text-only model never receives a content array it cannot consume.
+ */
+export function modelSupportsImages(model: Model<string>): boolean {
+	return model.input.includes("image");
+}
+
 export function getPreferredThinkingLevel(settings: PiemSettings): ModelThinkingLevel {
 	const supportedLevels = getSupportedThinkingLevelOptions(settings);
 	if (supportedLevels.includes(settings.thinkingLevel)) {
