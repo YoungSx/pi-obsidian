@@ -1,4 +1,4 @@
-import type { App } from "obsidian";
+import { type App, TFile } from "obsidian";
 import { type ImageContent, type Usage } from "@earendil-works/pi-ai";
 import {
 	Agent,
@@ -32,7 +32,7 @@ import {
 } from "../settings";
 import { ObsidianSessionManager, type ActiveSessionInfo, type SessionContext, type SessionDefaults } from "../session/ObsidianSessionManager";
 import { arrayBufferToBase64, extractImageRefs, mimeTypeForPath, sanitizeMessageForLog, stripImageRefs } from "../vault/image";
-import { injectContext } from "./contextInjection";
+import { injectContext, type InjectedNote } from "./contextInjection";
 import { ContextRefs, type ContextRef } from "./contextRefs";
 import { OBSIDIAN_AGENT_SYSTEM_PROMPT } from "./systemPrompt";
 import { composeSystemPrompt, expandSkill, findSkill, formatSkillDiagnostics, loadVaultSkills, mergeSkills } from "./skillLoader";
@@ -930,6 +930,29 @@ export class ObsidianAgentService {
 		this.replaceAgent(context.messages);
 	}
 
+	/**
+	 * Reads the active note's current text for the context block.
+	 *
+	 * Obsidian's own `cachedRead` — the same call the vault tools use — because
+	 * it serves from the metadata cache the editor keeps warm and never blocks on
+	 * disk. A read that fails (the file vanished mid-run, a fake vault in a test
+	 * that never registered it) degrades to `null`, which renders the path-only
+	 * block; a missing note must not fail the whole request.
+	 */
+	private async readActiveNote(path: string): Promise<InjectedNote | null> {
+		try {
+			const abstract = this.app.vault.getAbstractFileByPath(path);
+			// Only real Markdown notes carry injectable text. A folder, a canvas, or
+			// an image at that path falls back to the path-only line.
+			if (!(abstract instanceof TFile) || abstract.extension !== "md") {
+				return null;
+			}
+			return { path, content: await this.app.vault.cachedRead(abstract), modifiedAt: abstract.stat.mtime };
+		} catch {
+			return null;
+		}
+	}
+
 	private replaceAgent(messages: AgentMessage[]): void {
 		this.unsubscribeAgent?.();
 		// An aborted run never delivers `tool_execution_end`, so names captured for
@@ -951,13 +974,20 @@ export class ObsidianAgentService {
 			// default one silently filters that role out, which would discard every
 			// compacted turn without surfacing an error.
 			convertToLlm,
-			// Names the active and pinned notes to the model on every turn. pi applies
-			// this per LLM request against a copy of the transcript, so the block is
-			// re-derived for each turn of a tool loop and never reaches
-			// `state.messages` — nothing lands in the session log or the panel. Read
-			// through a per-run snapshot while a prompt is active, so a note switch
-			// cannot retarget a tool loop halfway through a user request.
-			transformContext: async (messages) => injectContext(messages, this.activeRunContext ?? this.contextRefs.list()),
+			// Names the active and pinned notes to the model on every turn, with the
+			// active note's current text riding along. pi applies this per LLM request
+			// against a copy of the transcript, so the block is re-derived for each
+			// turn of a tool loop and never reaches `state.messages` — nothing lands
+			// in the session log or the panel. Read through a per-run snapshot while a
+			// prompt is active, so a note switch cannot retarget a tool loop halfway
+			// through a user request. Re-reading per request is what makes the content
+			// honest: an `edit` the model just made is visible to its next turn.
+			transformContext: async (messages) => {
+				const refs = this.activeRunContext ?? this.contextRefs.list();
+				const activePath = refs.find((ref) => ref.kind === "active")?.path;
+				const note = activePath ? await this.readActiveNote(activePath) : null;
+				return injectContext(messages, refs, note);
+			},
 			initialState: {
 				// Skills were loaded by the same async path that led here
 				// (`initializeAgent` / `openSession` / `newSession` all await
