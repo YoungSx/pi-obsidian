@@ -7,6 +7,7 @@ import type { StreamFn } from "@earendil-works/pi-agent-core";
 import { ObsidianSessionManager } from "../session/ObsidianSessionManager";
 import { DEFAULT_SESSION_RETENTION } from "../session/retention";
 import { DEFAULT_SESSION_DIR } from "../session/sessionDir";
+import { DEFAULT_LOG_LEVEL } from "../logging/logLevel";
 import type { PiemSettings } from "../settings";
 import { DEFAULT_SETTINGS } from "../settings";
 import type { ObsidianAgentService as ObsidianAgentServiceType } from "./ObsidianAgentService";
@@ -144,6 +145,7 @@ describe("ObsidianAgentService", () => {
 			language: "en",
 			sessionRetention: DEFAULT_SESSION_RETENTION,
 			sessionDir: DEFAULT_SESSION_DIR,
+			logLevel: DEFAULT_LOG_LEVEL,
 		};
 		const adapter = new MemoryAdapter();
 		const service = new ObsidianAgentService(
@@ -1445,6 +1447,7 @@ function createServiceWithMultimodalModel(
 		language: "en",
 		sessionRetention: DEFAULT_SESSION_RETENTION,
 		sessionDir: DEFAULT_SESSION_DIR,
+		logLevel: DEFAULT_LOG_LEVEL,
 	};
 	const sessionManager = new ObsidianSessionManager(adapter, SESSION_DIR, "obsidian-vault:Test");
 	const service = new ObsidianAgentService(

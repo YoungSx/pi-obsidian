@@ -7,8 +7,11 @@ installObsidianStub();
 const { createSafeStorageCodec, PLAINTEXT_CODEC } = await import("./secrets");
 const { default: PiObsidianPlugin } = await import("./main");
 const { normalizeSettings } = await import("./settings");
+const { NOOP_LOGGER } = await import("./logging/Logger");
+const { spyLogger } = await import("./testing/logSpy");
 import type { SecretCodec } from "./secrets";
 import type PiObsidianPluginType from "./main";
+import type { LoggerLike } from "./logging/Logger";
 
 interface StoredData {
 	data: unknown;
@@ -18,14 +21,18 @@ interface StoredData {
  * A plugin instance with `loadData`/`saveData` backed by a map, so the
  * load-time migration can be exercised without Obsidian. The secret
  * environment is injected the same way `onload` resolves it on a real device.
+ * `Object.create` skips field initializers, so the logger `loadSettings`
+ * writes through must be handed in the way `onload` would have assigned it.
  */
 function pluginWithData(
 	initial: unknown,
 	mock: SafeStorageLikeMock,
+	log: LoggerLike = NOOP_LOGGER,
 ): { plugin: InstanceType<typeof PiObsidianPluginType>; saved: () => { value: unknown; writes: number } } {
 	const store: StoredData = { data: initial };
 	let writes = 0;
 	const plugin = Object.create(PiObsidianPlugin.prototype) as InstanceType<typeof PiObsidianPluginType>;
+	(plugin as unknown as { log: LoggerLike }).log = log;
 	(plugin as unknown as { loadData: () => Promise<unknown> }).loadData = async () => store.data;
 	(plugin as unknown as { saveData: (data: unknown) => Promise<void> }).saveData = async (data: unknown) => {
 		writes += 1;
@@ -92,6 +99,34 @@ describe("loadSettings migration", () => {
 		await plugin.loadSettings();
 		expect((saved().value as typeof plaintext).providerApiKeys.deepseek).toBe("sk-keep-me");
 		expect((saved().value as typeof plaintext).customEndpoint?.apiKey).toBe("ep");
+	});
+
+	it("warns when a sealed key came from another device's keychain and cannot be opened", async () => {
+		// Seal with one working keychain, then load with a second whose decrypt
+		// always fails — the stand-in for a vault synced between two machines.
+		const sealing = new SafeStorageLikeMock();
+		const sealedOnDisk = { providerApiKeys: { deepseek: createSafeStorageCodec(sealing).seal("sk-other-machine") } };
+		const mock = new SafeStorageLikeMock();
+		mock.decryptString = () => {
+			throw new Error("different keychain");
+		};
+		const { logger, records } = spyLogger();
+		const { plugin } = pluginWithData(structuredClone(sealedOnDisk), mock, logger);
+
+		await plugin.loadSettings();
+		expect(plugin.settings.providerApiKeys.deepseek).toBe("");
+		expect(records.some((record) => record.level === "warn" && record.message.includes("could not be decrypted"))).toBe(true);
+	});
+
+	it("does not warn for keys that decrypt fine", async () => {
+		const mock = new SafeStorageLikeMock();
+		const sealedOnDisk = { providerApiKeys: { deepseek: createSafeStorageCodec(mock).seal("sk-fine") } };
+		const { logger, records } = spyLogger();
+		const { plugin } = pluginWithData(structuredClone(sealedOnDisk), mock, logger);
+
+		await plugin.loadSettings();
+		expect(plugin.settings.providerApiKeys.deepseek).toBe("sk-fine");
+		expect(records.filter((record) => record.level === "warn")).toHaveLength(0);
 	});
 
 	it("migrates the custom endpoint key alongside provider keys", async () => {

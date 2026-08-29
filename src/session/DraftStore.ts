@@ -1,6 +1,7 @@
 import type { App, DataAdapter, Plugin } from "obsidian";
 import { normalizeFolderPath } from "../vault/path";
 import { getPluginSessionDir } from "./ObsidianSessionManager";
+import { NOOP_LOGGER, type LoggerLike } from "../logging/Logger";
 
 /**
  * Unsent composer text, kept per chat.
@@ -54,16 +55,20 @@ export class DraftStore {
 	private writeTimer: ReturnType<typeof setTimeout> | null = null;
 	private flushing: Promise<void> = Promise.resolve();
 	private sequence = 0;
+	private readonly log: LoggerLike;
 
-	constructor(adapter: DataAdapter, filePath: string) {
+	// The logger stays optional: existing direct constructions (tests) keep
+	// working, and silence beats a hard dependency for a convenience file.
+	constructor(adapter: DataAdapter, filePath: string, logger?: LoggerLike) {
 		this.adapter = adapter;
 		this.filePath = normalizeFolderPath(filePath, { allowPluginInternals: true });
+		this.log = (logger ?? NOOP_LOGGER).child("drafts");
 	}
 
-	static forPlugin(app: App, plugin: Plugin): DraftStore {
+	static forPlugin(app: App, plugin: Plugin, logger?: LoggerLike): DraftStore {
 		// Sits beside the session logs it is keyed against.
 		const sessionDir = getPluginSessionDir(app, plugin);
-		return new DraftStore(app.vault.adapter, `${sessionDir}/drafts.json`);
+		return new DraftStore(app.vault.adapter, `${sessionDir}/drafts.json`, logger);
 	}
 
 	/**
@@ -153,8 +158,11 @@ export class DraftStore {
 		this.flushing = this.flushing.then(async () => {
 			try {
 				await this.adapter.write(this.filePath, JSON.stringify(toPersistedForm(this.prune())));
-			} catch {
-				// Deliberately silent; the next pause retries.
+			} catch (error) {
+				// Logged but not thrown: an unwritable draft file is a lost
+				// convenience, not something worth surfacing mid-sentence. The
+				// next pause retries, so a transient failure leaves one entry.
+				this.log.warn("Failed to write drafts file", () => ({ path: this.filePath, error: String(error) }));
 			}
 		});
 		await this.flushing;
@@ -188,8 +196,11 @@ export class DraftStore {
 				return;
 			}
 			this.drafts = parseDraftFile(await this.adapter.read(this.filePath));
-		} catch {
-			// A corrupt or unreadable file starts empty rather than blocking the panel.
+		} catch (error) {
+			// A corrupt or unreadable file starts empty rather than blocking the
+			// panel, but the user loses drafts with no visible cause — so the
+			// reason lands in the log at a level the default view shows.
+			this.log.warn("Drafts file unreadable; starting with empty drafts", () => ({ path: this.filePath, error: String(error) }));
 			this.drafts = {};
 		}
 	}

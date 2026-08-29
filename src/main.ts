@@ -1,10 +1,14 @@
-import { Notice, Plugin, type Editor } from "obsidian";
+import { Notice, Plugin, type DataAdapter, type Editor, type WorkspaceLeaf } from "obsidian";
 import { PiemSettingTab, normalizeSettings, type PiemSettings } from "./settings";
 import { normalizeCustomEndpoint } from "./customEndpoint";
-import { VIEW_TYPE_PIEM_CHAT } from "./constants";
+import { VIEW_TYPE_PIEM_CHAT, VIEW_TYPE_PIEM_LOGS, PLUGIN_ID } from "./constants";
+import { createPluginLogger, type PluginLogger } from "./logging/pluginLogger";
+import { getLogFilePath } from "./logging/logFile";
+import { PiemLogView } from "./logging/logView";
 import type { SecretCodec } from "./secrets";
 import {
 	hasPersistedPlaintextSecrets,
+	isUndecryptableSecret,
 	persistedFormChanged,
 	sealApiKeyMap,
 	sealCustomEndpointApiKey,
@@ -12,6 +16,7 @@ import {
 	unsealCustomEndpointApiKey,
 	type PersistedSecrets,
 } from "./secrets";
+import { NOOP_LOGGER, type LoggerLike } from "./logging/Logger";
 import { createSecretEnvironment, type SecretEnvironment } from "./secretsStore";
 import { DraftStore } from "./session/DraftStore";
 import { ObsidianSessionManager } from "./session/ObsidianSessionManager";
@@ -50,6 +55,19 @@ export default class PiObsidianPlugin extends Plugin {
 	// so the shared DEFAULT_SETTINGS object is never mutated in place.
 	settings: PiemSettings = normalizeSettings(null);
 	private agentService: ObsidianAgentService | null = null;
+	/**
+	 * Assembled once per load, before settings: the settings migration is the
+	 * first code that can fail, and its catch block is where logging has to
+	 * already exist. The level reads through the settings closure, so the
+	 * object here never needs replacing.
+	 */
+	private pluginLogger: PluginLogger | null = null;
+	/**
+	 * Plugin-lifecycle logger, assigned right after `pluginLogger` exists and
+	 * before anything that can fail. Defaults to no-op so field initializers and
+	 * a shorted `onload` can still touch it without throwing.
+	 */
+	private log: LoggerLike = NOOP_LOGGER;
 	private draftStore: DraftStore | null = null;
 	/**
 	 * Held so the settings tab can report on the chat folder.
@@ -74,7 +92,7 @@ export default class PiObsidianPlugin extends Plugin {
 	 * because this sits on the `onload` path, that took the whole plugin down.
 	 */
 	private requireSecretEnvironment(): SecretEnvironment {
-		this.secretEnvironment ??= createSecretEnvironment();
+		this.secretEnvironment ??= createSecretEnvironment({ log: (message) => this.log.debug(message) });
 		return this.secretEnvironment;
 	}
 
@@ -92,6 +110,16 @@ export default class PiObsidianPlugin extends Plugin {
 	}
 
 	async onload(): Promise<void> {
+		// Logging is assembled first: everything below it can fail, and the
+		// catch blocks that report those failures need a logger that already
+		// exists. The level closure reads `this.settings`, so it sees the
+		// persisted value the moment `loadSettings` assigns it.
+		this.pluginLogger = createPluginLogger({
+			adapter: this.app.vault.adapter,
+			configDir: this.app.vault.configDir,
+			level: () => this.settings.logLevel,
+		});
+		this.log = this.requirePluginLogger().logger.child("plugin");
 		await this.loadSettings();
 		const t = this.t();
 
@@ -100,16 +128,26 @@ export default class PiObsidianPlugin extends Plugin {
 		// without reloading the plugin.
 		const sessionManager = ObsidianSessionManager.forPlugin(this.app, this, () => this.settings);
 		this.sessionManager = sessionManager;
-		this.agentService = new ObsidianAgentService(this.app, () => this.settings, sessionManager);
-		this.draftStore = DraftStore.forPlugin(this.app, this);
+		this.agentService = new ObsidianAgentService(this.app, () => this.settings, sessionManager, {
+			logger: this.requirePluginLogger().logger,
+		});
+		this.draftStore = DraftStore.forPlugin(this.app, this, this.requirePluginLogger().logger);
 
 		this.registerView(VIEW_TYPE_PIEM_CHAT, (leaf) => new PiemChatView(leaf, this.requireAgentService(), this.draftStore ?? undefined));
+		this.registerView(VIEW_TYPE_PIEM_LOGS, (leaf) => this.createLogView(leaf));
 		this.addSettingTab(new PiemSettingTab(this.app, this, this.requireSecretEnvironment()));
 		this.addCommand({
 			id: "open-chat",
 			name: t.t("commands.openChat"),
 			callback: () => {
 				void this.activateChatView();
+			},
+		});
+		this.addCommand({
+			id: "open-logs",
+			name: t.t("commands.openLogs"),
+			callback: () => {
+				void this.activateLogView();
 			},
 		});
 		this.addCommand({
@@ -201,6 +239,10 @@ export default class PiObsidianPlugin extends Plugin {
 	}
 
 	onunload(): void {
+		// Fire-and-forget: `flush` never rejects, and a final record landing after
+		// teardown still beats one lost to a dispose-then-queue race.
+		void this.pluginLogger?.fileSink.flush();
+		this.pluginLogger = null;
 		this.agentService?.dispose();
 		this.agentService = null;
 		// The view's own teardown already flushed; this only cancels a debounce
@@ -224,6 +266,11 @@ export default class PiObsidianPlugin extends Plugin {
 	 */
 	getActiveSessionDir(): string {
 		return this.sessionManager?.getSessionDir() ?? this.settings.sessionDir;
+	}
+
+	/** The Logs tab's shortcut into the viewer. */
+	openLogView(): void {
+		void this.activateLogView();
 	}
 
 	/**
@@ -280,18 +327,60 @@ export default class PiObsidianPlugin extends Plugin {
 			...provider,
 			apiKey: unsealCustomEndpointApiKey(provider?.apiKey, codec),
 		}));
+		const unsealedKeyMap = unsealApiKeyMap(loadedProviderApiKeys, codec);
 		this.settings = normalizeSettings({
 			...raw,
 			providers: unsealedProviders,
-			providerApiKeys: unsealApiKeyMap(loadedProviderApiKeys, codec),
+			providerApiKeys: unsealedKeyMap,
 			customEndpoint: unsealedCustomEndpoint,
 		});
+
+		this.warnUndecryptableSecrets(
+			{
+				providerApiKeys: loadedProviderApiKeys,
+				customEndpointApiKey: loadedEndpointApiKey,
+				configuredProviderApiKeys: loadedConfiguredProviderKeys,
+			},
+			{
+				providerApiKeys: unsealedKeyMap,
+				customEndpointApiKey: unsealedCustomEndpoint?.apiKey ?? "",
+				configuredProviderApiKeys: Object.fromEntries(unsealedProviders.map((provider) => [provider.id, provider.apiKey])),
+			},
+		);
 
 		await this.migratePlaintextSecrets(codec, {
 			providerApiKeys: loadedProviderApiKeys,
 			customEndpointApiKey: loadedEndpointApiKey,
 			configuredProviderApiKeys: loadedConfiguredProviderKeys,
 		});
+	}
+
+	/**
+	 * Logs each persisted secret that arrived sealed but could not be opened here.
+	 *
+	 * Ciphertext written by another machine's OS keychain fails to decrypt and
+	 * unsealing quietly drops it; without this the key is simply gone and every
+	 * request starts failing with an auth error that points nowhere. The user
+	 * re-enters the key once per device, and the warning is what tells them that.
+	 */
+	private warnUndecryptableSecrets(loaded: PersistedSecrets, unsealed: PersistedSecrets): void {
+		if (isUndecryptableSecret(loaded.customEndpointApiKey, unsealed.customEndpointApiKey)) {
+			this.log.warn("A stored API key could not be decrypted on this device; re-enter it in the settings.");
+		}
+		const locations: [label: string, stored: Record<string, string>, opened: Record<string, string>][] = [
+			["providerApiKeys", loaded.providerApiKeys, unsealed.providerApiKeys],
+			["configuredProviderApiKeys", loaded.configuredProviderApiKeys, unsealed.configuredProviderApiKeys],
+		];
+		for (const [label, stored, opened] of locations) {
+			for (const [id, value] of Object.entries(stored)) {
+				if (isUndecryptableSecret(value, opened[id] ?? "")) {
+					this.log.warn("A stored API key could not be decrypted on this device; re-enter it in the settings.", () => ({
+						section: label,
+						provider: id,
+					}));
+				}
+			}
+		}
 	}
 
 	/**
@@ -316,9 +405,11 @@ export default class PiObsidianPlugin extends Plugin {
 			if (persistedFormChanged(sealedSecrets, loaded)) {
 				await this.saveData(sealed);
 			}
-		} catch {
-			// Deliberately swallowed: keeping the old plaintext file beats a
-			// failed write that destroys it. The next load retries.
+		} catch (error) {
+			// Swallowed but logged: keeping the old plaintext file beats a failed
+			// write that destroys it. The next load retries; the warning is how a
+			// vault stuck on plaintext gets diagnosed instead of just observed.
+			this.log.warn("Failed to re-seal plaintext secrets; keeping the existing file", () => ({ error: String(error) }));
 		}
 	}
 
@@ -413,6 +504,45 @@ export default class PiObsidianPlugin extends Plugin {
 			throw new Error("Piem agent service is not initialized.");
 		}
 		return this.agentService;
+	}
+
+	private requirePluginLogger(): PluginLogger {
+		if (!this.pluginLogger) {
+			throw new Error("Piem logger is not initialized.");
+		}
+		return this.pluginLogger;
+	}
+
+	/** The log viewer over this load's ring buffer. */
+	private createLogView(leaf: WorkspaceLeaf): PiemLogView {
+		const pluginLogger = this.requirePluginLogger();
+		const configDir = this.app.vault.configDir;
+		return new PiemLogView(leaf, {
+			buffer: pluginLogger.buffer,
+			t: this.t(),
+			filePath: getLogFilePath(configDir, PLUGIN_ID),
+			revealFile: () => {
+				// `revealInFinder` is desktop-only; the file hint names the path for
+				// mobile users, who can reach it over sync instead.
+				const adapter = this.app.vault.adapter as DataAdapter & { revealInFinder?: (path: string) => boolean };
+				adapter.revealInFinder?.(getLogFilePath(configDir, PLUGIN_ID));
+			},
+		});
+	}
+
+	private async activateLogView(): Promise<void> {
+		const existingLeaf = this.app.workspace.getLeavesOfType(VIEW_TYPE_PIEM_LOGS)[0];
+		if (existingLeaf) {
+			await this.app.workspace.revealLeaf(existingLeaf);
+			return;
+		}
+		const leaf = this.app.workspace.getRightLeaf(false);
+		if (!leaf) {
+			new Notice(this.t().t("commands.couldNotOpenLogs"));
+			return;
+		}
+		await leaf.setViewState({ type: VIEW_TYPE_PIEM_LOGS, active: true });
+		await this.app.workspace.revealLeaf(leaf);
 	}
 }
 

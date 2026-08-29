@@ -180,3 +180,18 @@ describe("migration helpers", () => {
 		).toBe(true);
 	});
 });
+
+describe("isUndecryptableSecret", () => {
+	it("flags a sealed value that unsealed to empty", async () => {
+		const { isUndecryptableSecret } = await import("./secrets");
+		expect(isUndecryptableSecret("enc:v1:AAAA", "")).toBe(true);
+	});
+
+	it("does not flag plaintext passthroughs or legitimately empty values", async () => {
+		const { isUndecryptableSecret } = await import("./secrets");
+		// Legacy plaintext keys keep whatever they unsealed to.
+		expect(isUndecryptableSecret("sk-plain", "")).toBe(false);
+		// A decrypted value is never empty, so this pair cannot occur in practice.
+		expect(isUndecryptableSecret("enc:v1:AAAA", "sk-opened")).toBe(false);
+	});
+});

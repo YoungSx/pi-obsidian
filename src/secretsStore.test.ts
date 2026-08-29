@@ -170,4 +170,34 @@ describe("createSecretEnvironment", () => {
 		expect(() => createSecretEnvironment(hostileOptions)).not.toThrow();
 		expect(createSecretEnvironment(hostileOptions).codec()).toBe(PLAINTEXT_CODEC);
 	});
+
+	it("reports each plaintext-fallback reason through the injected log", () => {
+		const reasons: string[] = [];
+		const log = (message: string): void => {
+			reasons.push(message);
+		};
+
+		createSecretEnvironment({ isDesktopApp: false, log });
+		createSecretEnvironment({ ...desktop, hostRequire: null, log });
+		const unavailable = new SafeStorageLikeMock();
+		unavailable.available = false;
+		createSecretEnvironment({ ...desktop, safeStorage: unavailable, log });
+		// `probeSafeStorage` absorbs a hostile require itself, so the outer catch
+		// is reached through a probe that throws instead of returning false.
+		const hostileProbe = new SafeStorageLikeMock();
+		hostileProbe.isEncryptionAvailable = () => {
+			throw new Error("keychain exploded");
+		};
+		createSecretEnvironment({ ...desktop, safeStorage: hostileProbe, log });
+
+		expect(reasons).toHaveLength(4);
+		expect(reasons[0]).toContain("Not a desktop app");
+		expect(reasons[1]).toContain("safeStorage");
+		expect(reasons[2]).toContain("encryption unavailable");
+		expect(reasons[3]).toContain("probe failed");
+	});
+
+	it("stays silent when no log is injected", () => {
+		expect(() => createSecretEnvironment({ isDesktopApp: false })).not.toThrow();
+	});
 });

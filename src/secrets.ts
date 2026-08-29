@@ -105,6 +105,20 @@ export function isSealedSecret(value: string): boolean {
 	return value.startsWith(SEALED_PREFIX);
 }
 
+/**
+ * Whether unsealing silently dropped a value that arrived as ciphertext.
+ *
+ * `unseal` returns `undefined` for both an empty plaintext and a failed
+ * decryption, and the `unseal*` helpers normalize that to `""`, so the caller
+ * cannot tell them apart from the result alone. Comparing against the persisted
+ * form closes the gap: only a value that carried the sealed marker and came
+ * back empty is a dead key — a legitimately empty secret is never stored
+ * sealed.
+ */
+export function isUndecryptableSecret(stored: string, unsealed: string): boolean {
+	return stored.startsWith(SEALED_PREFIX) && unsealed === "";
+}
+
 export interface SealedKeyMap {
 	[provider: string]: string;
 }

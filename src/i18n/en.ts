@@ -30,6 +30,8 @@ export const en = {
 		menuAskAboutSelection: "Ask about selection",
 		noActiveNote: "No active note to ask about.",
 		couldNotOpenChat: "Could not open the chat view.",
+		openLogs: "Open log view",
+		couldNotOpenLogs: "Could not open the log view.",
 	},
 
 	/** Chat panel — header, banner, composer, message list, and trace rows. */
@@ -324,6 +326,11 @@ export const en = {
 		tabSessions: "History",
 		tabSkills: "Skills",
 		tabGeneral: "General",
+		tabLogs: "Logs",
+
+		logLevelHeading: "Log level",
+		logLevelDesc:
+			"How much the plugin writes to its log. \"Warnings\" is enough for everyday use; turn it down to \"Debug\" while troubleshooting, then back.",
 
 		languageHeading: "Language",
 		languageDesc: "What language the interface speaks. “Auto” follows the vault’s language.",
@@ -695,6 +702,25 @@ export const en = {
 		openaiChat: "OpenAI Chat Completions",
 		openaiResponses: "OpenAI Responses",
 		anthropicMessages: "Anthropic Messages",
+	},
+
+	/** The log viewer panel. */
+	logView: {
+		title: "Piem logs",
+		filter: {
+			all: "All levels",
+			off: "Off",
+			debug: "Debug",
+			info: "Info",
+			warn: "Warnings",
+			error: "Errors",
+		},
+		copy: "Copy",
+		clear: "Clear",
+		openFile: "Open log file",
+		empty: "No log records at this level yet.",
+		dropped: "{count} earlier record(s) were dropped to keep the buffer small.",
+		fileHint: "Persisted log: {path}",
 	},
 } as const;
 

@@ -44,8 +44,14 @@ class MemoryAdapter {
 	}
 }
 
-function createStore(adapter = new MemoryAdapter()): { store: DraftStore; adapter: MemoryAdapter } {
-	return { store: new DraftStore(adapter as unknown as DataAdapter, DRAFT_PATH), adapter };
+/**
+ * Collects the records a store emits, so the tests can pin which failures get
+ * logged rather than trusting that "somewhere a logger was touched".
+ */
+const { spyLogger } = await import("../testing/logSpy");
+
+function createStore(adapter = new MemoryAdapter(), logger?: ReturnType<typeof spyLogger>["logger"]): { store: DraftStore; adapter: MemoryAdapter } {
+	return { store: new DraftStore(adapter as unknown as DataAdapter, DRAFT_PATH, logger), adapter };
 }
 
 /**
@@ -126,6 +132,32 @@ describe("DraftStore persistence", () => {
 		const { store } = createStore(adapter);
 
 		expect(await store.get("session-a")).toBe("");
+	});
+
+	it("logs a warning when the drafts file is unreadable, so the lost drafts have a cause", async () => {
+		const adapter = new MemoryAdapter();
+		adapter.seed("{ this is not json");
+		const { logger, records } = spyLogger();
+		const { store } = createStore(adapter, logger);
+
+		expect(await store.get("session-a")).toBe("");
+		expect(records).toHaveLength(1);
+		expect(records[0]?.message).toContain("unreadable");
+	});
+
+	it("logs a warning when a write fails, without throwing into the composer", async () => {
+		const adapter = new MemoryAdapter();
+		adapter.failWrites = true;
+		const { logger, records } = spyLogger();
+		const { store } = createStore(adapter, logger);
+
+		await store.set("session-a", "still typed");
+		await store.flush();
+
+		expect(await store.get("session-a")).toBe("still typed");
+		expect(records).toHaveLength(1);
+		expect(records[0]?.message).toContain("Failed to write");
+		expect(records[0]?.detail).toMatchObject({ path: DRAFT_PATH });
 	});
 
 	it("ignores entries whose shape does not match, so a hand-edited file cannot inject undefined", async () => {
