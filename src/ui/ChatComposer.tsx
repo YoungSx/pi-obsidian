@@ -346,7 +346,7 @@ interface SendButtonProps {
 }
 
 /**
- * Send, with its shortcut printed on it.
+ * Send, with its shortcut printed on it — unless there is no keyboard to press.
  *
  * Not an {@link IconButton}: this one carries visible text beside the glyph, and
  * that text has to be `aria-hidden` so a screen reader does not read the keycaps
@@ -359,10 +359,21 @@ interface SendButtonProps {
  * that does not work, and it would compete with the one thing the button has to
  * say: that a key is what is missing. The chord returns as soon as pressing it
  * would do something.
+ *
+ * The same logic retires the chord on a phone, where the soft keyboard has no
+ * Ctrl to hold: a keycap for a key the device does not have is a dead
+ * instruction on the one control that must always be reachable. The binding
+ * itself survives — a hardware keyboard on a tablet still sends through it, and
+ * the textarea's `aria-keyshortcuts` keeps advertising that to assistive tech.
  */
 function SendButton({ shortcut, isConfigured, disabled, onSend }: SendButtonProps): React.JSX.Element {
 	const t = useT();
-	const name = isConfigured ? sendButtonTitle(shortcut, Platform.isMacOS, t) : t.t("chat.sendNeedsKey");
+	const showChord = isConfigured && !Platform.isMobile;
+	const name = !isConfigured
+		? t.t("chat.sendNeedsKey")
+		: showChord
+			? sendButtonTitle(shortcut, Platform.isMacOS, t)
+			: t.t("chat.sendMessage");
 
 	return (
 		<IconButton
@@ -376,7 +387,7 @@ function SendButton({ shortcut, isConfigured, disabled, onSend }: SendButtonProp
 			 * Keycaps, hidden from assistive tech: the accessible name above already
 			 * carries the chord, and reading the glyphs would repeat it as symbols.
 			 */}
-			{isConfigured ? (
+			{showChord ? (
 				<span className="piem-chat__send-chord" aria-hidden="true">
 					{sendShortcutLabel(shortcut, Platform.isMacOS, t)}
 				</span>

@@ -1,5 +1,5 @@
 import React from "react";
-import { Menu, type App } from "obsidian";
+import { Menu, Platform, type App } from "obsidian";
 import type { ChatSnapshot } from "../agent/ObsidianAgentService";
 import type { ActiveSessionInfo } from "../session/ObsidianSessionManager";
 import { IconButton } from "./ObsidianIcon";
@@ -60,6 +60,10 @@ export function ChatHeader({
 	// one answer, and so TypeScript carries the non-undefined session into the
 	// click handlers without a second check inside each one.
 	const editableSession = isBusy ? undefined : activeSession;
+	// The dedicated history button's availability. On a phone it leaves the row
+	// entirely — see the actions row below — and this same check gates the menu
+	// item that replaces it, so the two doors share one answer.
+	const canPickSession = !isBusy && sessions.length >= 2;
 	const openPicker = (): void => {
 		openSessionPicker(
 			app,
@@ -81,13 +85,24 @@ export function ChatHeader({
 	 * greyed it out — which is precisely when a user goes looking for settings,
 	 * since a wrong model or a missing key is what they are trying to fix.
 	 *
+	 * On a phone this menu is also the history picker's only door: the dedicated
+	 * button leaves the header row so the row can be one line tall, and the item
+	 * takes its availability from the same check the button used.
+	 *
 	 * Separators are emitted by the block that follows them rather than the one
 	 * that precedes them, so no combination of absent blocks can produce a pair
 	 * of adjacent rules or a rule against the menu's own edge.
 	 */
 	const openMenu = (event: React.MouseEvent<HTMLButtonElement>): void => {
 		const menu = new Menu();
+		const historyItem = Platform.isMobile && canPickSession;
+		if (historyItem) {
+			menu.addItem((item) => item.setTitle(t.t("chat.openChatHistory")).setIcon("history").onClick(openPicker));
+		}
 		if (editableSession) {
+			if (historyItem) {
+				menu.addSeparator();
+			}
 			menu.addItem((item) =>
 				item
 					.setTitle(t.t("chat.renameChat"))
@@ -96,7 +111,7 @@ export function ChatHeader({
 			);
 		}
 		if (onOpenSettings) {
-			if (editableSession) {
+			if (editableSession || historyItem) {
 				menu.addSeparator();
 			}
 			menu.addItem((item) => item.setTitle(t.t("chat.openSettings")).setIcon("settings").onClick(onOpenSettings));
@@ -123,9 +138,24 @@ export function ChatHeader({
 				{sessionTitle(activeSession, t)}
 			</h2>
 			<div className="piem-chat__header-actions" role="toolbar" aria-label={t.t("chat.actionsAria")}>
-				{/* Always mounted so the button positions never shift as the vault
-				    accumulates chats; disabled until there is a second one to pick. */}
-				<IconButton icon="history" label={t.t("chat.openChatHistory")} onClick={openPicker} disabled={isBusy || sessions.length < 2} />
+				{/*
+				 * Always mounted so the button positions never shift as the vault
+				 * accumulates chats; disabled until there is a second one to pick.
+				 *
+				 * Except on a phone, where the button is not mounted at all: a
+				 * two-button row under the title is the second line of chrome a
+				 * squeezed transcript cannot afford, and the picker it opens is one
+				 * menu item away in `openMenu`. On a desktop the row never wraps
+				 * anyway, so the button costs nothing there.
+				 */}
+				{Platform.isMobile ? null : (
+					<IconButton
+						icon="history"
+						label={t.t("chat.openChatHistory")}
+						onClick={openPicker}
+						disabled={isBusy || sessions.length < 2}
+					/>
+				)}
 				<IconButton icon="square-pen" label={t.t("chat.newChat")} onClick={onNewSession} disabled={isBusy} />
 				{/* Disabled only when the menu would open empty — see `openMenu`. */}
 				<IconButton
@@ -133,7 +163,7 @@ export function ChatHeader({
 					label={t.t("chat.moreActions")}
 					onClick={openMenu}
 					hasPopup="menu"
-					disabled={!editableSession && !onOpenSettings}
+					disabled={!editableSession && !onOpenSettings && !(Platform.isMobile && canPickSession)}
 				/>
 			</div>
 		</header>

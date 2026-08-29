@@ -49,6 +49,33 @@ function declarations(body: string): string {
 const allDeclarations = declarations(styles);
 
 /**
+ * The bodies of every `@media (<query>)` block in the stylesheet, found by
+ * walking braces from each opener to its match — the same walk
+ * {@link gatingBlockFor} does, collected for every opener instead of matched
+ * against one selector.
+ */
+function mediaBlocks(query: string): string[] {
+	const gate = `@media (${query}) {`;
+	const blocks: string[] = [];
+	for (let at = allDeclarations.indexOf(gate); at !== -1; at = allDeclarations.indexOf(gate, at + 1)) {
+		let depth = 0;
+		let end = at + gate.length - 1;
+		for (let i = at + gate.length - 1; i < allDeclarations.length; i += 1) {
+			if (allDeclarations[i] === "{") depth += 1;
+			else if (allDeclarations[i] === "}") {
+				depth -= 1;
+				if (depth === 0) {
+					end = i;
+					break;
+				}
+			}
+		}
+		blocks.push(allDeclarations.slice(at, end + 1));
+	}
+	return blocks;
+}
+
+/**
  * The `@media (hover: hover)` block containing `selector`, or null when the rule
  * sits outside one. Walks braces from each gate opener to its match, so a rule
  * that merely follows a gated block is not mistaken for one inside it.
@@ -220,10 +247,19 @@ describe("touch targets (WCAG 2.5.5 / 2.5.8)", () => {
 	 * mainstream way to run Obsidian mobile, which this plugin supports via
 	 * `isDesktopOnly: false` — reported `fine` and dropped back to 32px targets
 	 * while the screen stayed the main way to reach the panel.
+	 *
+	 * Layout blocks are the deliberate exception, not a loophole. The one-row
+	 * header and the focus-revealed send row ask which input is driving *now*,
+	 * and keying those on `any-pointer` would drag a mouse-driven touchscreen
+	 * laptop into the phone arrangement. So the ban lands on what a `pointer`
+	 * block may *declare* — never a touch-target size — rather than on the query
+	 * itself.
 	 */
 	it("keys every touch-target rule on any-pointer, never on pointer alone", () => {
-		expect(styles).not.toContain("@media (pointer: coarse)");
-		expect(styles.match(/@media \(any-pointer: coarse\)/g)?.length).toBe(2);
+		expect(allDeclarations.match(/@media \(any-pointer: coarse\)/g)?.length).toBe(2);
+		for (const block of mediaBlocks("pointer: coarse")) {
+			expect(block).not.toMatch(/min-(?:height|width):/);
+		}
 	});
 
 	it("grows the jump-to-latest button, by height only", () => {

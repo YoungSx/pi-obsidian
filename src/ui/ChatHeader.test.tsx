@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import type { App } from "obsidian";
 import { flushRender, installDom } from "../testing/dom";
-import { installObsidianStub, lastMenu, resetMenus } from "../testing/obsidianStub";
+import { installObsidianStub, lastMenu, platformMock, resetMenus } from "../testing/obsidianStub";
 import type { ChatSnapshot } from "../agent/ObsidianAgentService";
 import type { ContextFill, UsageTotals } from "../agent/usage";
 import type { ActiveSessionInfo } from "../session/ObsidianSessionManager";
@@ -20,6 +20,8 @@ const app = {} as App;
 interface RenderOptions {
 	/** Passed through as the header's `onOpenSettings`; omitted means unreachable. */
 	onOpenSettings?: () => void;
+	/** The vault's stored chats; the history controls gate on there being two. */
+	sessions?: ActiveSessionInfo[];
 }
 
 async function renderHeader(snapshot: ChatSnapshot, options: RenderOptions = {}): Promise<HTMLElement> {
@@ -31,7 +33,7 @@ async function renderHeader(snapshot: ChatSnapshot, options: RenderOptions = {})
 		<ChatHeader
 			app={app}
 			snapshot={snapshot}
-			sessions={[]}
+			sessions={options.sessions ?? []}
 			onOpenSession={() => undefined}
 			onNewSession={() => undefined}
 			onRenameSession={() => undefined}
@@ -123,6 +125,55 @@ describe("ChatHeader action row", () => {
 
 		const labels = Array.from(host.querySelectorAll(".piem-chat__header-actions button"), (button) => button.getAttribute("aria-label"));
 		expect(labels).toEqual(["View chat history", "New chat", "More chat actions"]);
+	});
+});
+
+/*
+ * A phone squeezes the transcript between the header above and the keyboard
+ * below, so the header's wrap — a full second row of 48px buttons on a narrow
+ * leaf — is height the conversation cannot afford. The row goes back to one
+ * line by retiring the history button; its picker stays one menu item away in
+ * the overflow menu, gated by the same availability the button had.
+ */
+describe("ChatHeader on a phone", () => {
+	beforeEach(() => {
+		createRootSync = createRootImpl;
+		resetMenus();
+		platformMock.isMobile = true;
+		document.body.replaceChildren();
+	});
+
+	afterEach(() => {
+		platformMock.isMobile = false;
+		document.body.replaceChildren();
+	});
+
+	it("drops the history button from the row, keeping new chat and the menu", async () => {
+		const host = await renderHeader(snapshot(), { sessions: [sessionInfo("a"), sessionInfo("b")] });
+
+		const labels = Array.from(host.querySelectorAll(".piem-chat__header-actions button"), (button) => button.getAttribute("aria-label"));
+		expect(labels).toEqual(["New chat", "More chat actions"]);
+	});
+
+	it("offers history at the head of the overflow menu in its place", async () => {
+		const host = await renderHeader(snapshot({ session: sessionInfo() }), {
+			onOpenSettings: () => undefined,
+			sessions: [sessionInfo("a"), sessionInfo("b")],
+		});
+
+		expect((await openOverflow(host)).titles()).toEqual(["View chat history", "Rename chat", "Open settings", "Delete chat"]);
+	});
+
+	it("keeps history out of the menu mid-turn, like the button it replaces", async () => {
+		// Opening the picker mid-turn could pull the transcript out from under a
+		// running request — the same reason rename and delete go. What is left is
+		// the settings item, which a mid-turn user may legitimately want.
+		const host = await renderHeader(snapshot({ session: sessionInfo(), isStreaming: true }), {
+			onOpenSettings: () => undefined,
+			sessions: [sessionInfo("a"), sessionInfo("b")],
+		});
+
+		expect((await openOverflow(host)).titles()).toEqual(["Open settings"]);
 	});
 });
 
