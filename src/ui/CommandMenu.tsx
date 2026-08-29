@@ -1,4 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
+import { prepareFuzzySearch, sortSearchResults } from "obsidian";
+import type { SearchResult } from "obsidian";
 import { useT } from "./TranslatorContext";
 
 /** A `/name`-command entry surfaced for autocomplete. */
@@ -13,7 +15,7 @@ export interface CommandEntry {
 interface CommandMenuProps {
 	/** All available prompt templates and skills, in service-defined order. */
 	commands: CommandEntry[];
-	/** The text after the leading `/`, lowercased for prefix matching. */
+	/** The text after the leading `/`, lowercased. Matching is case-insensitive regardless. */
 	query: string;
 	/**
 	 * Called with the chosen entry. The composer inserts its invocation plus a
@@ -32,16 +34,27 @@ interface CommandMenuProps {
  * rather than sends — a half-typed `/su` should not fire a prompt — so the
  * composer's send handler bails while this menu is open.
  *
- * The list filters by prefix on the text after `/`. With no matches it renders
+ * The list fuzzy-matches Obsidian-style on the text after `/` — subsequence hits
+ * like `/org` → `tag-organize` rank tighter matches first — rather than by
+ * prefix, because hyphenated skill names would otherwise force users to recall
+ * where a name starts instead of what it sounds like. With no matches it renders
  * nothing, which lets the composer treat `/unknown` as a normal (if invalid)
  * draft until the user sends it.
  */
 export function CommandMenu({ commands, query, onSelect, onClose }: CommandMenuProps): React.JSX.Element | null {
 	const t = useT();
-	const matches = useMemo(
-		() => commands.filter((command) => command.name.toLowerCase().startsWith(query)),
-		[commands, query],
-	);
+	const matches = useMemo(() => {
+		if (!query) {
+			// An empty query opens the full list in service order — no scoring needed.
+			return commands;
+		}
+		const search = prepareFuzzySearch(query);
+		const scored = commands
+			.map((command) => ({ command, match: search(command.name) }))
+			.filter((entry): entry is { command: CommandEntry; match: SearchResult } => entry.match !== null);
+		sortSearchResults(scored);
+		return scored.map((entry) => entry.command);
+	}, [commands, query]);
 	const [activeIndex, setActiveIndex] = useState(0);
 	const listRef = useRef<HTMLUListElement | null>(null);
 
