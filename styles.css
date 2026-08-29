@@ -378,6 +378,31 @@
 	/* Focusable log: keyboard users can scroll the transcript without tabbing
 	 * through every message. The outline stays on the theme's focus colour. */
 	scrollbar-gutter: stable;
+	/*
+	 * Obsidian sets `user-select: none` on `body` and hands it back only to a
+	 * short list of its own surfaces (`.markdown-preview-view`, `.diff-view`,
+	 * `[contenteditable]`). A plugin view is on none of those lists, so every
+	 * word of the transcript — the user's own question most of all — inherited
+	 * `none` and could not be swept with the mouse. Copying a single sentence
+	 * meant copying the whole message through the action row, and re-reading
+	 * one's own prompt meant retyping it.
+	 *
+	 * One declaration on the scroll container, not one per text block: selection
+	 * inherits, so the container is the only place that has to state it, and a
+	 * sweep across two messages stays a single range. `.piem-chat__trace-summary`
+	 * and Obsidian's `button` rule declare `none` directly, and a declaration
+	 * always beats an inherited value — the disclosure rows and the action
+	 * buttons keep their drag-free behaviour without restating it here.
+	 *
+	 * No `cursor: text` to go with it: Obsidian's own reading view sets only
+	 * `user-select`, and the transcript is a mixed surface where an I-beam over
+	 * the disclosure rows and icon buttons would misdescribe them.
+	 *
+	 * The prefixed form is what Obsidian ships on its own selectable surfaces;
+	 * the mobile app runs in older WKWebView builds that honour only that one.
+	 */
+	-webkit-user-select: text;
+	user-select: text;
 }
 
 .piem-chat__messages:focus-visible {
