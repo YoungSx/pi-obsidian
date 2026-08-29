@@ -269,9 +269,9 @@ export const zhCN: DeepPartial<EnCopy> = {
 			"请求 URL 可在各处绕过浏览器限制，但会缓冲响应——token 会一次性出现。Fetch 会增量流式返回，但可能被拦截。",
 		transportRequestUrl: "请求 URL（缓冲，各处可用）",
 		transportFetch: "Fetch（流式，可能被拦截）",
-		webFetchEnabled: "允许代理获取网页",
-		webFetchEnabledDesc:
-			"添加一个工具，代理可用来请求外部 URL。请求及其中的数据会离开笔记库和 Obsidian。默认关闭；上方的传输方式决定它如何发出。",
+		webFetchName: "获取网页",
+		webFetchDesc:
+			"任务需要网页时，代理可以请求外部 URL。这些请求及其中的数据会离开笔记库和 Obsidian；上方的传输方式决定它们如何发出。",
 		whatLeavesVault: "什么会离开笔记库",
 		whatLeavesVaultDesc:
 			"提示词、工具读取的笔记库内容以及工具结果，会发送给服务于当前模型的提供方。不会发送到任何其他地方。",

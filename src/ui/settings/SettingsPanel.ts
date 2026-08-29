@@ -138,7 +138,6 @@ export interface SettingsPanelSettings {
 	models: ModelConfig[];
 	thinkingLevel: ModelThinkingLevel;
 	networkTransport: NetworkTransport;
-	webFetchEnabled: boolean;
 	showAgentDetails: boolean;
 	sendShortcut: SendShortcut;
 	language: LanguageSetting;
@@ -711,19 +710,11 @@ function renderNetworkTab(containerEl: HTMLElement, host: SettingsPanelHost): vo
 			});
 		});
 
-	// Placed under the transport row rather than on its own: the toggle opens a
-	// channel, and the row just above is the one that names how that channel
-	// travels. A reader deciding whether to flip it sees the trade-off inline.
-	new Setting(containerEl)
-		.setName(t.t("settings.webFetchEnabled"))
-		.setDesc(t.t("settings.webFetchEnabledDesc"))
-		.addToggle((toggle) => {
-			toggle.setValue(settings.webFetchEnabled);
-			toggle.onChange(async (webFetchEnabled) => {
-				settings.webFetchEnabled = webFetchEnabled;
-				await host.save();
-			});
-		});
+	// States what the transport above actually carries. `web_fetch` sat here as an
+	// off-by-default toggle until #52; it is now always available, so this row is
+	// disclosure rather than a control — the reader learns in one place that the
+	// agent can fetch pages, and which transport those requests ride.
+	new Setting(containerEl).setName(t.t("settings.webFetchName")).setDesc(t.t("settings.webFetchDesc"));
 }
 
 /**
