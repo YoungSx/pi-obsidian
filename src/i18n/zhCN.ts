@@ -202,7 +202,7 @@ export const zhCN: DeepPartial<EnCopy> = {
 		nameDesc: "留空则回退到开场消息。",
 		pickerOpenHint: "打开对话",
 		pickerDeleteHint: "删除对话",
-		deleteRestorable: "对话记录会移入废纸篓，之后仍可从那里恢复。",
+		deleteRestorable: "对话记录会移入回收站，之后仍可从那里恢复。",
 	},
 
 	traceTool: {
@@ -239,7 +239,7 @@ export const zhCN: DeepPartial<EnCopy> = {
 
 		statusActiveModel: "当前模型",
 		providersHeading: "提供方",
-		providersDesc: "请求可以发送到的端点。一个提供方包含基础 URL、线协议和一把密钥。",
+		providersDesc: "请求可以发送到的端点。一个提供方包含基础 URL、请求协议和一把密钥。",
 		addProvider: "添加提供方",
 		noProviders: "还没有提供方。添加一个，即可将请求发送到你自己的端点或网关。",
 		editProvider: "编辑提供方",
@@ -274,9 +274,10 @@ export const zhCN: DeepPartial<EnCopy> = {
 		networkHeadingDesc: "请求如何离开笔记库。",
 		networkTransport: "网络传输",
 		networkTransportDesc:
-			"请求 URL 可在各处绕过浏览器限制，但会缓冲响应——token 会一次性出现。Fetch 会增量流式返回，但可能被拦截。",
-		transportRequestUrl: "请求 URL（缓冲，各处可用）",
-		transportFetch: "Fetch（流式，可能被拦截）",
+			"requestUrl 可在各处绕过浏览器限制，但会缓冲响应——token 会一次性出现。fetch 会增量流式返回，但可能被拦截。",
+		// 这两项是配置里的字面值（"requestUrl" | "fetch"），保持原样以便和配置、日志对上。
+		transportRequestUrl: "requestUrl（缓冲，各处可用）",
+		transportFetch: "fetch（流式，可能被拦截）",
 		webFetchName: "获取网页",
 		webFetchDesc:
 			"任务需要网页时，代理可以请求外部 URL。这些请求及其中的数据会离开笔记库和 Obsidian；上方的传输方式决定它们如何发出。",
@@ -445,7 +446,7 @@ export const zhCN: DeepPartial<EnCopy> = {
 		baseUrlDesc: "API 的根地址，例如 https://api.example.com/v1",
 		baseUrlPlaceholder: "https://api.example.com/v1",
 		protocol: "协议",
-		protocolDesc: "该端点使用的线格式。第一个选项是网关和自托管服务器实现最广泛的一种。",
+		protocolDesc: "该端点使用的请求格式。第一个选项是网关和自托管服务器实现最广泛的一种。",
 		apiKey: "API 密钥",
 		apiKeyPlaceholder: "输入 API 密钥",
 		connection: "连接",
@@ -496,10 +497,11 @@ export const zhCN: DeepPartial<EnCopy> = {
 		"zh-cn": "简体中文",
 	},
 
+	// 这些是各家 API 的产品名，保持原文以便用户对照自己端点的文档。
 	wireProtocol: {
-		openaiChat: "OpenAI 聊天补全",
-		openaiResponses: "OpenAI 回复",
-		anthropicMessages: "Anthropic 消息",
+		openaiChat: "OpenAI Chat Completions",
+		openaiResponses: "OpenAI Responses",
+		anthropicMessages: "Anthropic Messages",
 	},
 
 	logView: {
