@@ -6,7 +6,9 @@ import type { App, Component, IconName } from "obsidian";
 import type { TextBlockKind } from "./markdownPolicy";
 import { MarkdownText } from "./MarkdownText";
 import { assistantText } from "./messageActions";
+import { QuickActions } from "./QuickActions";
 import { ReplyActions } from "./ReplyActions";
+import { emptyScreenQuickActions, replyQuickActions, type QuickAction } from "./quickActionSuggestions";
 import { describeReplyCutoff, type ReplyCutoff } from "./replyCutoff";
 import { useT } from "./TranslatorContext";
 import type { Translator } from "../i18n";
@@ -61,6 +63,21 @@ export interface MessageListProps {
 	 * is a tab stop that goes nowhere.
 	 */
 	composerAnchorId?: string;
+	/**
+	 * Whether the user currently has a Markdown note open that the model is told
+	 * about. Shapes the empty screen's suggested prompts: with a note, the
+	 * suggestions are about that note; without one, they are about the vault.
+	 */
+	hasActiveNote?: boolean;
+	/** Whether a compaction request is in flight — one more reason to hide the follow-ups. */
+	isCompacting?: boolean;
+	/**
+	 * Sends a tapped quick-action prompt as the user's own message.
+	 *
+	 * Supplying it turns the suggestions on; omitting it renders no row, which
+	 * is how tests mount the transcript without wiring a sender.
+	 */
+	onQuickAction?: (prompt: string) => void;
 }
 
 /**
@@ -176,11 +193,27 @@ export function MessageList({
 	component,
 	sourcePath,
 	composerAnchorId,
+	hasActiveNote = false,
+	isCompacting = false,
+	onQuickAction,
 }: MessageListProps): React.JSX.Element {
 	const t = useT();
 	const context: MessageContext = { app, component, sourcePath, showAgentDetails, t };
 	const activeIndex = streamingIndex(isStreaming, messages.length);
 	const regenerateIndex = regenerableIndex(messages);
+	// Empty-screen suggestions exist for the configured, ready state only — the
+	// connect-model branch has its one call to action, and the skeleton has
+	// nothing to suggest yet.
+	const emptyActions =
+		!onQuickAction || isInitializing || !isConfigured ? [] : emptyScreenQuickActions(hasActiveNote, t);
+	/*
+	 * Follow-ups exist only for a settled conversation. While anything is in
+	 * flight the newest entry is not an answer the reader can react to yet, and
+	 * a row that flickers in and out around each turn reads as noise.
+	 */
+	const settledIndex = !isStreaming && !isCompacting && pendingToolCalls.length === 0 ? regenerateIndex : null;
+	const followUpActions =
+		!onQuickAction || settledIndex === null ? [] : replyQuickActions(messages[settledIndex] as AssistantMessage, t);
 	const transcriptRef = useRef<HTMLElement | null>(null);
 	const shouldFollowRef = useRef(true);
 	const [isAtLatest, setIsAtLatest] = useState(true);
@@ -251,7 +284,13 @@ export function MessageList({
 				onScroll={updateFollowState}
 			>
 				{messages.length === 0 ? (
-					<EmptyState isInitializing={isInitializing} isConfigured={isConfigured} onOpenSettings={onOpenSettings} />
+					<EmptyState
+						isInitializing={isInitializing}
+						isConfigured={isConfigured}
+						onOpenSettings={onOpenSettings}
+						quickActions={emptyActions}
+						onQuickAction={onQuickAction}
+					/>
 				) : (
 					messages.map((message, index) => (
 						<MessageRow
@@ -271,6 +310,9 @@ export function MessageList({
 					</div>
 				) : null}
 				{awaitsFirstToken(messages, isStreaming, pendingToolCalls.length > 0) ? <PendingReply /> : null}
+				{followUpActions.length > 0 && onQuickAction ? (
+					<QuickActions actions={followUpActions} onSelect={onQuickAction} />
+				) : null}
 			</main>
 			{!isAtLatest ? (
 				<button type="button" className="piem-chat__latest" onClick={scrollToLatest}>
@@ -355,6 +397,9 @@ interface EmptyStateProps {
 	isInitializing: boolean;
 	isConfigured: boolean;
 	onOpenSettings?: () => void;
+	/** Suggested first prompts; rendered in the ready branch only. */
+	quickActions: QuickAction[];
+	onQuickAction?: (prompt: string) => void;
 }
 
 /**
@@ -363,9 +408,10 @@ interface EmptyStateProps {
  * The unconfigured branch offers a button rather than printing a settings path,
  * and the ready branch names what the agent can actually do — "Start a
  * conversation" alone left the reader to guess that this thing reads and writes
- * notes, and that a selection can be sent from the editor.
+ * notes, and that a selection can be sent from the editor. The suggested
+ * prompts below that turn the description into something a tap can start.
  */
-function EmptyState({ isInitializing, isConfigured, onOpenSettings }: EmptyStateProps): React.JSX.Element {
+function EmptyState({ isInitializing, isConfigured, onOpenSettings, quickActions, onQuickAction }: EmptyStateProps): React.JSX.Element {
 	const t = useT();
 	if (isInitializing) {
 		return (
@@ -410,6 +456,7 @@ function EmptyState({ isInitializing, isConfigured, onOpenSettings }: EmptyState
 				<strong>{t.t("chat.askAboutVaultHintCommand")}</strong>
 				{t.t("chat.askAboutVaultHintAfter")}
 			</p>
+			{onQuickAction ? <QuickActions actions={quickActions} onSelect={onQuickAction} /> : null}
 		</div>
 	);
 }

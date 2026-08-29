@@ -209,6 +209,58 @@ export const zhCN: DeepPartial<EnCopy> = {
 		needOpenNoteToAppend: "打开一个笔记以追加此回复。",
 	},
 
+	quickActions: {
+		label: "试试这样问",
+		empty: {
+			summarizeNote: {
+				label: "总结这篇笔记",
+				prompt: "总结当前笔记的要点。",
+			},
+			improveNote: {
+				label: "改进这篇笔记",
+				prompt: "审阅当前笔记，给出具体的改进建议。",
+			},
+			brainstorm: {
+				label: "头脑风暴",
+				prompt: "基于当前笔记，给我五个可以延伸的方向。",
+			},
+			draftNote: {
+				label: "起草新笔记",
+				prompt: "帮我起草一篇新笔记：先问我主题，然后先列提纲再动笔。",
+			},
+			mapVault: {
+				label: "摸底我的库",
+				prompt: "列出我笔记库里的文件夹，说说它是怎么组织的。",
+			},
+			capabilities: {
+				label: "你能做什么？",
+				prompt: "在我的笔记库里你能帮我做什么？举三个具体的例子。",
+			},
+		},
+		reply: {
+			continue: {
+				label: "继续",
+				prompt: "从刚才停下的地方继续你的回答。",
+			},
+			explainCode: {
+				label: "解释代码",
+				prompt: "用大白话解释上面的代码。",
+			},
+			elaborate: {
+				label: "再深入讲讲",
+				prompt: "把上面的要点再展开讲得更深一些。",
+			},
+			keyPoints: {
+				label: "列要点",
+				prompt: "把你的回答总结成一份简短的要点清单。",
+			},
+			example: {
+				label: "举个例子",
+				prompt: "针对你刚才讲的内容，举一个具体的例子。",
+			},
+		},
+	},
+
 	noteReference: {
 		truncated: "所选文本较长，仅引用了其开头部分。",
 	},

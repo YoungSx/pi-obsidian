@@ -520,6 +520,99 @@ describe("MessageList tool-result diff", () => {
 	});
 });
 
+describe("MessageList quick actions", () => {
+	it("suggests follow-ups under a settled reply and sends the tapped prompt", async () => {
+		const selected: string[] = [];
+		const host = renderMessages([userMessage("What is this?"), assistantMessage("An answer.")], {
+			onQuickAction: (prompt) => selected.push(prompt),
+		});
+		await flushRender();
+
+		const row = host.querySelector(".piem-chat__quick-actions");
+		expect(row?.getAttribute("aria-label")).toBe("Suggested prompts");
+		const chips = Array.from(row?.querySelectorAll<HTMLButtonElement>(".piem-chat__quick-action") ?? []);
+		expect(chips.length).toBe(3);
+		chips[1]?.click();
+		await flushRender();
+		// The tap sends the full prompt from the copy table, not the chip label.
+		expect(selected[0]).toContain("Summarize your reply as a short bullet list.");
+	});
+
+	it("hides the follow-ups while the turn is still streaming", async () => {
+		const host = renderMessages([userMessage("q"), assistantMessage("partial")], {
+			isStreaming: true,
+			onQuickAction: () => undefined,
+		});
+		await flushRender();
+
+		expect(host.querySelector(".piem-chat__quick-actions")).toBeNull();
+	});
+
+	it("hides the follow-ups while tools run or compaction is in flight", async () => {
+		const running = renderMessages([userMessage("q"), assistantMessage("done")], {
+			pendingToolCalls: [{ name: "read" } as never],
+			onQuickAction: () => undefined,
+		});
+		await flushRender();
+		expect(running.querySelector(".piem-chat__quick-actions")).toBeNull();
+
+		const compacting = renderMessages([userMessage("q"), assistantMessage("done")], {
+			isCompacting: true,
+			onQuickAction: () => undefined,
+		});
+		await flushRender();
+		expect(compacting.querySelector(".piem-chat__quick-actions")).toBeNull();
+	});
+
+	it("leads with continue when the newest reply was truncated", async () => {
+		const host = renderMessages([userMessage("q"), assistantMessage("half a", { stopReason: "length" })], {
+			onQuickAction: () => undefined,
+		});
+		await flushRender();
+
+		expect(host.querySelector(".piem-chat__quick-action")?.textContent).toBe("Continue");
+	});
+
+	it("offers no follow-ups without a sender wired", async () => {
+		const host = renderMessages([userMessage("q"), assistantMessage("answer")]);
+		await flushRender();
+
+		expect(host.querySelector(".piem-chat__quick-actions")).toBeNull();
+	});
+
+	it("suggests first prompts on the ready empty screen", async () => {
+		const selected: string[] = [];
+		const host = renderMessages([], { onQuickAction: (prompt) => selected.push(prompt) });
+		await flushRender();
+
+		const chips = Array.from(host.querySelectorAll<HTMLButtonElement>(".piem-chat__empty .piem-chat__quick-action"));
+		expect(chips.length).toBe(3);
+		chips[0]?.click();
+		await flushRender();
+		expect(selected[0]).toContain("note");
+	});
+
+	it("shapes the empty-screen prompts around the open note", async () => {
+		const withNote = renderMessages([], { hasActiveNote: true, onQuickAction: () => undefined });
+		await flushRender();
+		expect(withNote.querySelector(".piem-chat__empty")?.textContent).toContain("Summarize this note");
+
+		const withoutNote = renderMessages([], { onQuickAction: () => undefined });
+		await flushRender();
+		expect(withoutNote.querySelector(".piem-chat__empty")?.textContent).toContain("Draft a new note");
+	});
+
+	it("offers no suggestions on the unconfigured or still-opening empty screen", async () => {
+		const unconfigured = renderMessages([], { isConfigured: false, onOpenSettings: () => undefined, onQuickAction: () => undefined });
+		await flushRender();
+		expect(unconfigured.querySelector(".piem-chat__quick-actions")).toBeNull();
+
+		const initializing = renderMessages([], { isInitializing: true, onQuickAction: () => undefined });
+		await flushRender();
+		expect(initializing.querySelector(".piem-chat__quick-actions")).toBeNull();
+	});
+});
+
 function toolResult(details: Record<string, unknown>): ToolResultMessage {
 	return {
 		role: "toolResult",

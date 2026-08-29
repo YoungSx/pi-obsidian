@@ -75,7 +75,11 @@ class FakeAgentService {
 	private snapshot: ChatSnapshot;
 	private readonly listeners = new Set<(snapshot: ChatSnapshot) => void>();
 
-	constructor(private readonly app: App, overrides: Partial<ChatSnapshot> = {}) {
+	constructor(
+		private readonly app: App,
+		overrides: Partial<ChatSnapshot> = {},
+		private readonly failSends = false,
+	) {
 		this.snapshot = { ...baseSnapshot(), ...overrides };
 	}
 
@@ -103,6 +107,9 @@ class FakeAgentService {
 
 	async sendPrompt(prompt: string): Promise<boolean> {
 		this.sentPrompts.push(prompt);
+		if (this.failSends) {
+			return false;
+		}
 		if (!this.snapshot.isConfigured) {
 			this.snapshot = { ...this.snapshot, errorMessage: NEEDS_KEY_MESSAGE };
 			this.notify();
@@ -187,10 +194,12 @@ interface Mounted {
 	unmount: () => Promise<void>;
 }
 
-async function mountChat(options: { withDraftStore?: boolean; snapshot?: Partial<ChatSnapshot> } = {}): Promise<Mounted> {
+async function mountChat(
+	options: { withDraftStore?: boolean; snapshot?: Partial<ChatSnapshot>; failSends?: boolean } = {},
+): Promise<Mounted> {
 	const host = document.createElement("div");
 	document.body.appendChild(host);
-	const service = new FakeAgentService(fakeApp(), options.snapshot);
+	const service = new FakeAgentService(fakeApp(), options.snapshot, options.failSends);
 	const inputController = new ChatInputController();
 	const draftStore = new RecordingDraftStore();
 	const root = createRoot(host);
@@ -434,6 +443,57 @@ describe("ChatApp model switcher", () => {
 		lastMenu().click("Sonnet 5 · Anthropic");
 
 		expect(mounted.service.switchedModels).toEqual(["m-sonnet"]);
+	});
+});
+
+describe("ChatApp quick actions", () => {
+	/** A configured target with an active note, so both suggestion rows can appear. */
+	const readySnapshot: Partial<ChatSnapshot> = {
+		isConfigured: true,
+		contextRefs: [{ kind: "active", path: "Ideas/active-note.md", isPinned: false }],
+	};
+
+	function quickActionChips(host: HTMLElement): HTMLButtonElement[] {
+		return Array.from(host.querySelectorAll<HTMLButtonElement>(".piem-chat__quick-action"));
+	}
+
+	it("sends a tapped suggestion as the user's own prompt, without touching the draft", async () => {
+		const { host, service } = await mountChat({ snapshot: readySnapshot, withDraftStore: true });
+		await typeDraft(composer(host), "my own half-finished thought");
+
+		const chips = quickActionChips(host);
+		expect(chips.some((chip) => chip.textContent === "Summarize this note")).toBe(true);
+		chips.find((chip) => chip.textContent === "Summarize this note")?.click();
+		await flushRender();
+
+		// The tap sends the full prompt, and the user's typed draft survives it.
+		expect(service.sentPrompts).toEqual(["Summarize the main points of the active note."]);
+		expect(composer(host).value).toBe("my own half-finished thought");
+	});
+
+	it("restores a declined suggestion into the draft rather than losing the tap", async () => {
+		const { host } = await mountChat({ snapshot: readySnapshot, failSends: true });
+
+		quickActionChips(host)[0]?.click();
+		await flushRender();
+
+		expect(composer(host).value).toContain("Summarize the main points of the active note.");
+	});
+
+	it("shapes the empty-screen suggestions around the active note the model is told about", async () => {
+		const withNote = await mountChat({ snapshot: readySnapshot });
+		expect(quickActionChips(withNote.host).some((chip) => chip.textContent === "Summarize this note")).toBe(true);
+		await withNote.unmount();
+
+		const withoutNote = await mountChat({ snapshot: { isConfigured: true, contextRefs: [] } });
+		expect(quickActionChips(withoutNote.host).some((chip) => chip.textContent === "Draft a new note")).toBe(true);
+		await withoutNote.unmount();
+	});
+
+	it("offers no suggestions while the panel has no credential", async () => {
+		const { host } = await mountChat();
+
+		expect(quickActionChips(host)).toHaveLength(0);
 	});
 });
 
