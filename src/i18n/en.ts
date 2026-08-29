@@ -26,7 +26,7 @@ export const en = {
 		focusInput: "Focus chat input",
 		askAboutSelection: "Ask about selection",
 		askAboutNote: "Ask about this note",
-		ribbonOpenChat: "Open chat",
+		ribbonOpenChat: "Open Piem assistant",
 		menuAskAboutSelection: "Ask about selection",
 		noActiveNote: "No active note to ask about.",
 		couldNotOpenChat: "Could not open the chat view.",
