@@ -17,6 +17,7 @@ installObsidianStub();
 const { ObsidianAgentService } = await import("./ObsidianAgentService");
 const { OBSIDIAN_AGENT_SYSTEM_PROMPT } = await import("./systemPrompt");
 const { TFile: TFileClass, TFolder: TFolderClass } = await import("obsidian");
+const { MAX_ACTIVE_NOTE_CHARS } = await import("./contextInjection");
 
 // Tests drive ObsidianSessionManager directly, so the directory is supplied here
 // rather than derived from a Vault; `Vault#configDir` is used in production code.
@@ -499,6 +500,58 @@ describe("ObsidianAgentService", () => {
 		// And it stays out of the transcript, so it is neither persisted to the
 		// session log nor rendered in the panel nor re-sent as history next turn.
 		expect(JSON.stringify(service.getSnapshot().messages)).not.toContain("<context>");
+	});
+
+	it("rides the active note's content along with its path", async () => {
+		const contexts: Context[] = [];
+		const service = createService(new MemoryAdapter(), {
+			streamFn: createCapturingStreamFn(contexts),
+			vaultFiles: { "Projects/weekly-0827.md": "Meeting at noon\nAction: buy milk" },
+		});
+		service.setActiveNotePath("Projects/weekly-0827.md");
+
+		await service.sendPrompt("Rewrite this note");
+
+		const sent = JSON.stringify(contexts[0]?.messages);
+		// The path alone told the model where to look; the content means it does
+		// not have to spend a turn on `read` before being useful.
+		expect(sent).toContain("Note content (2 lines):");
+		expect(sent).toContain("Meeting at noon");
+		// The mtime comes off the file stat, rendered as fixed ISO — the fake
+		// vault stamps mtime 1, and a fixed value is what keeps the block cached.
+		expect(sent).toContain(`Last modified: ${new Date(1).toISOString()}`);
+	});
+
+	it("keeps a giant active note inside the content budget", async () => {
+		const contexts: Context[] = [];
+		const service = createService(new MemoryAdapter(), {
+			streamFn: createCapturingStreamFn(contexts),
+			vaultFiles: { "Notes/huge.md": "z".repeat(MAX_ACTIVE_NOTE_CHARS + 5_000) },
+		});
+		service.setActiveNotePath("Notes/huge.md");
+
+		await service.sendPrompt("Trim this note");
+
+		const last = contexts[0]?.messages.at(-1);
+		const sent = typeof last?.content === "string" ? last.content : "";
+		expect(sent).toContain("Note content (first 1 of 1 lines):");
+		// The injected message is bounded even when the note is not: a giant note
+		// must not turn into a giant prompt.
+		expect(sent.length).toBeLessThan(MAX_ACTIVE_NOTE_CHARS + 400);
+	});
+
+	it("degrades to the path-only block when the note cannot be read", async () => {
+		// No vaultFiles registered: the path is watched but the fake vault has no
+		// such file, which is also what a mid-run rename or delete looks like.
+		const contexts: Context[] = [];
+		const service = createService(new MemoryAdapter(), { streamFn: createCapturingStreamFn(contexts) });
+		service.setActiveNotePath("Notes/ghost.md");
+
+		await service.sendPrompt("Hello");
+
+		const sent = JSON.stringify(contexts[0]?.messages);
+		expect(sent).toContain("Active note: Notes/ghost.md");
+		expect(sent).not.toContain("Note content");
 	});
 
 	it("injects nothing when no Markdown note is active", async () => {
