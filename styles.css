@@ -725,10 +725,25 @@
 	transition: color 0.15s ease-out;
 }
 
-.piem-chat__message-actions:hover,
+/*
+ * Keyboard focus restores strength on every device; the pointer half is gated on
+ * `hover: hover` below. A touch tap leaves `:hover` latched on the tapped element
+ * until the next tap lands elsewhere, so an ungated hover rule renders as a
+ * permanently "active" row on a phone — and this plugin ships
+ * `isDesktopOnly: false`. Obsidian answers this the same way, in 123 separate
+ * `@media (hover: hover)` blocks in `app.css`.
+ */
 .piem-chat__message-actions:focus-within {
 	--icon-color: var(--text-normal);
 	--icon-color-hover: var(--text-normal);
+}
+
+@media (hover: hover) {
+
+	.piem-chat__message-actions:hover {
+		--icon-color: var(--text-normal);
+		--icon-color-hover: var(--text-normal);
+	}
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -836,8 +851,11 @@
 	content: "";
 }
 
-.piem-chat__trace-summary:hover {
-	background: var(--background-modifier-hover);
+@media (hover: hover) {
+
+	.piem-chat__trace-summary:hover {
+		background: var(--background-modifier-hover);
+	}
 }
 
 .piem-chat__trace-summary:focus-visible {
@@ -948,8 +966,11 @@
 	transform: translateX(-50%);
 }
 
-.piem-chat__latest:hover {
-	background: var(--background-modifier-hover);
+@media (hover: hover) {
+
+	.piem-chat__latest:hover {
+		background: var(--background-modifier-hover);
+	}
 }
 
 .piem-chat__latest:focus-visible {
@@ -1142,8 +1163,11 @@
 	color: var(--text-muted);
 }
 
-.piem-chat__context-chip:hover {
-	background: var(--background-modifier-hover);
+@media (hover: hover) {
+
+	.piem-chat__context-chip:hover {
+		background: var(--background-modifier-hover);
+	}
 }
 
 /* The label carries the click target, so it owns the chip's layout share. */
@@ -1163,8 +1187,11 @@
 	padding: 0;
 }
 
-.piem-chat__context-open:hover {
-	color: var(--text-normal);
+@media (hover: hover) {
+
+	.piem-chat__context-open:hover {
+		color: var(--text-normal);
+	}
 }
 
 .piem-chat__context-open:focus-visible {
@@ -1217,10 +1244,19 @@
 	transition: color 0.15s ease-out;
 }
 
-.piem-chat__context-chip:hover .piem-chat__context-action,
+/* Focus on every device, hover only where a pointer can rest — see
+ * `.piem-chat__message-actions` for why. */
 .piem-chat__context-chip:focus-within .piem-chat__context-action {
 	--icon-color: var(--text-normal);
 	--icon-color-hover: var(--text-normal);
+}
+
+@media (hover: hover) {
+
+	.piem-chat__context-chip:hover .piem-chat__context-action {
+		--icon-color: var(--text-normal);
+		--icon-color-hover: var(--text-normal);
+	}
 }
 
 /*
@@ -1726,10 +1762,13 @@
 	white-space: nowrap;
 }
 
-.piem-settings-tab:hover {
-	background: transparent;
-	box-shadow: none;
-	color: var(--text-normal);
+@media (hover: hover) {
+
+	.piem-settings-tab:hover {
+		background: transparent;
+		box-shadow: none;
+		color: var(--text-normal);
+	}
 }
 
 .piem-settings-tab.is-active {

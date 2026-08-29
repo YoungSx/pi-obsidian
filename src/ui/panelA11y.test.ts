@@ -38,6 +38,42 @@ function declarations(body: string): string {
 	return body.replace(/\/\*[\s\S]*?\*\//g, "");
 }
 
+/**
+ * The whole stylesheet with comments stripped — the file-wide counterpart to
+ * `declarations`. Every scan that sweeps the file for a forbidden construct has
+ * to read this instead of `styles`, because the comments quote the constructs
+ * they forbid: the hover note names `@media (hover: hover)`, the ramp note names
+ * `--font-text-size`, and the breakpoint note names the `@media` query it
+ * replaced.
+ */
+const allDeclarations = declarations(styles);
+
+/**
+ * The `@media (hover: hover)` block containing `selector`, or null when the rule
+ * sits outside one. Walks braces from each gate opener to its match, so a rule
+ * that merely follows a gated block is not mistaken for one inside it.
+ */
+function gatingBlockFor(selector: string): string | null {
+	const gate = "@media (hover: hover) {";
+	for (let at = allDeclarations.indexOf(gate); at !== -1; at = allDeclarations.indexOf(gate, at + 1)) {
+		let depth = 0;
+		let end = at + gate.length - 1;
+		for (let i = at + gate.length - 1; i < allDeclarations.length; i += 1) {
+			if (allDeclarations[i] === "{") depth += 1;
+			else if (allDeclarations[i] === "}") {
+				depth -= 1;
+				if (depth === 0) {
+					end = i;
+					break;
+				}
+			}
+		}
+		const block = allDeclarations.slice(at, end + 1);
+		if (block.includes(selector)) return block;
+	}
+	return null;
+}
+
 describe("icon contrast in the resting state (WCAG 1.4.11)", () => {
 	/*
 	 * `opacity` cannot express "muted" on an icon button in this codebase.
@@ -69,16 +105,28 @@ describe("icon contrast in the resting state (WCAG 1.4.11)", () => {
 		});
 	}
 
-	it("restores full strength on hover and on keyboard focus", () => {
+	/*
+	 * Focus and hover are separate rules, not one selector list: the hover half is
+	 * gated on `@media (hover: hover)` (see the touch-hover block below) while the
+	 * focus half has to apply everywhere. Merging them would have swept keyboard
+	 * focus into the media query and lost the affordance on a phone.
+	 */
+	it("restores full strength on keyboard focus, ungated", () => {
 		// Both tokens have to move, or Obsidian's own hover rule wins.
-		for (const body of [
-			ruleBody(".piem-chat__message-actions:hover,\n.piem-chat__message-actions:focus-within"),
-			ruleBody(".piem-chat__context-chip:hover .piem-chat__context-action,\n.piem-chat__context-chip:focus-within .piem-chat__context-action"),
-		]) {
+		for (const body of [ruleBody(".piem-chat__message-actions:focus-within"), ruleBody(".piem-chat__context-chip:focus-within .piem-chat__context-action")]) {
 			expect(body).toContain("--icon-color: var(--text-normal)");
 			expect(body).toContain("--icon-color-hover: var(--text-normal)");
 		}
 	});
+
+	it("restores full strength on hover, behind a hover-capable pointer", () => {
+		for (const selector of [".piem-chat__message-actions:hover", ".piem-chat__context-chip:hover .piem-chat__context-action"]) {
+			expect(ruleBody(selector)).toContain("--icon-color: var(--text-normal)");
+			expect(ruleBody(selector)).toContain("--icon-color-hover: var(--text-normal)");
+			expect(gatingBlockFor(selector)).not.toBeNull();
+		}
+	});
+
 
 	it("keeps the disabled-button opacity, which WCAG 1.4.3 exempts", () => {
 		// Deliberately untouched: `:disabled` is exempt, and this value is itself
@@ -183,5 +231,34 @@ describe("transcript text selection", () => {
 		// Declarations only: the rule's own comment names `cursor: text` to record
 		// why it is absent, and a raw substring check would read that as present.
 		expect(declarations(ruleBody(".piem-chat__messages"))).not.toContain("cursor:");
+	});
+});
+
+describe("hover on touch (Obsidian's own convention)", () => {
+	/*
+	 * A tap latches `:hover` onto the tapped element until the next tap lands
+	 * somewhere else, so an ungated hover rule renders as a stuck "active" state on
+	 * a phone — and this plugin ships `isDesktopOnly: false`. Obsidian answers this
+	 * by wrapping every one of its own hover rules in `@media (hover: hover)`; there
+	 * are 123 such blocks in `app.css`. These gates hold the panel to that.
+	 */
+	it("gates every :hover rule behind a hover-capable pointer", () => {
+		const ungated: string[] = [];
+		// Top-of-line selectors only: anything indented already sits inside a block,
+		// and `gatingBlockFor` is what proves which block that is.
+		for (const match of allDeclarations.matchAll(/^(\S[^{\n]*:hover[^{\n]*)\{/gm)) {
+			const selector = (match[1] ?? "").trim();
+			if (selector !== "" && gatingBlockFor(selector) === null) ungated.push(selector);
+		}
+
+		expect(ungated).toEqual([]);
+	});
+
+	it("leaves focus states ungated, so they survive on touch", () => {
+		// The counterpart to the rule above: if a later edit sweeps focus into the
+		// media query alongside hover, keyboard users lose the affordance on mobile.
+		for (const selector of [".piem-chat__message-actions:focus-within", ".piem-chat__context-chip:focus-within .piem-chat__context-action"]) {
+			expect(gatingBlockFor(selector)).toBeNull();
+		}
 	});
 });
