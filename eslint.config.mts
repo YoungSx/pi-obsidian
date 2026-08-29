@@ -65,7 +65,13 @@ export default tseslint.config(
 		// The require call sits behind a lazy try/catch (see nodeHomeEnv.ts's
 		// header) so a mobile bundle never reaches it; the builtin-module ban is
 		// scoped off for that one file rather than opened up generally.
-		files: ["src/skills/nodeHomeEnv.ts"],
+		//
+		// The test is listed for the same reason, one step removed: it asserts
+		// that the module degrades on a host serving no builtins, and the only
+		// honest way to describe such a host is against real `node:fs`/`node:os`
+		// on the desktop side of the comparison. A test file is not bundled into
+		// `main.js`, so nothing here can reach a phone.
+		files: ["src/skills/nodeHomeEnv.ts", "src/skills/nodeHomeEnv.test.ts"],
 		rules: {
 			"import/no-nodejs-modules": "off",
 		},

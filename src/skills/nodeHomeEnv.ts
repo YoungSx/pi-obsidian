@@ -15,7 +15,7 @@ import {
  *
  * The bundle keeps node builtins external, so `require("node:fs")` reaches the
  * real module on desktop — where Obsidian's Electron renderer exposes
- * `require` — and the call throws on mobile, where it does not. Loading at
+ * `require` — and the call fails on mobile, where it does not. Loading at
  * module top level instead would break the whole bundle on mobile at load
  * time, so every access goes through {@link nodeRequire} and the class degrades
  * to an unavailable environment rather than taking the plugin down.
@@ -32,15 +32,41 @@ interface NodeModules {
  */
 declare const require: (id: string) => unknown;
 
-function nodeRequire(): NodeModules | undefined {
+/** The host's module lookup, as {@link secretsStore}'s `HostRequire` models it. */
+export type HostRequire = (id: string) => unknown;
+
+/**
+ * Resolves the node modules, or `undefined` when this platform has none.
+ *
+ * "Fails" covers two shapes, not one. A missing `require` throws, and a shell
+ * that has one but cannot serve a builtin throws too — but a shim that answers
+ * every id with `undefined` throws nothing, and returning its answers verbatim
+ * hands back a populated-looking `{ fs: undefined, os: undefined }`. Callers
+ * then read a truthy object and reach through it, which is how a mobile launch
+ * died on `undefined is not an object (evaluating 'this.modules.os.homedir')`
+ * instead of degrading. So the guard is the members actually used downstream:
+ * `fs.promises` for every filesystem call and `os.homedir` for the cwd. Probing
+ * the functions rather than the modules keeps the truthiness of the returned
+ * object meaning what its readers assume — that these are safe to call.
+ */
+function resolveModules(hostRequire: HostRequire): NodeModules | undefined {
 	try {
-		return {
-			fs: require("node:fs") as typeof import("node:fs"),
-			os: require("node:os") as typeof import("node:os"),
-		};
+		const fs = hostRequire("node:fs") as typeof import("node:fs") | undefined;
+		const os = hostRequire("node:os") as typeof import("node:os") | undefined;
+		return fs?.promises && typeof os?.homedir === "function" ? { fs, os } : undefined;
 	} catch {
 		return undefined;
 	}
+}
+
+/**
+ * The bundle's own `require`, wrapped so a shell that injects none is a
+ * `not_supported` environment rather than a load-time crash: reading the free
+ * identifier is itself what throws on mobile, so the read has to sit inside a
+ * function the caller guards.
+ */
+function hostRequire(id: string): unknown {
+	return require(id);
 }
 
 /**
@@ -76,12 +102,18 @@ export class NodeHomeEnv implements ExecutionEnv {
 	private readonly modules: NodeModules | undefined;
 
 	/**
-	 * @param home Overrides the detected home directory. Tests inject one; the
-	 * default is the real `os.homedir()`.
+	 * @param options.home Overrides the detected home directory. Tests inject
+	 * one; the default is the real `os.homedir()`.
+	 * @param options.hostRequire Overrides the module lookup. Following
+	 * {@link import("../secretsStore").createSecretEnvironment}, `undefined`
+	 * means "use the host's", and an explicit `null` models a shell exposing
+	 * none — the only way a test can reach the mobile branch, since the bundle's
+	 * `require` is resolved at evaluation time.
 	 */
-	constructor(home?: string) {
-		this.modules = nodeRequire();
-		this.cwd = home ?? (this.modules ? this.modules.os.homedir() : "/");
+	constructor(options: { home?: string; hostRequire?: HostRequire | null } = {}) {
+		const lookup = options.hostRequire === undefined ? hostRequire : options.hostRequire;
+		this.modules = lookup ? resolveModules(lookup) : undefined;
+		this.cwd = options.home ?? (this.modules ? this.modules.os.homedir() : "/");
 	}
 
 	async absolutePath(path: string): Promise<Result<string, FileError>> {
