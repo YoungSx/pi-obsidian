@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import { flushRender, installDom } from "../testing/dom";
-import { installObsidianStub, platformMock } from "../testing/obsidianStub";
+import { installObsidianStub, platformMock, setTooltipMock } from "../testing/obsidianStub";
 
 installObsidianStub();
 const document = installDom();
@@ -53,6 +53,7 @@ describe("ChatComposer send button", () => {
 	beforeEach(() => {
 		platformMock.isMobile = false;
 		platformMock.isMacOS = false;
+		setTooltipMock.mockClear();
 		document.body.replaceChildren();
 	});
 
@@ -89,7 +90,8 @@ describe("ChatComposer send button", () => {
 
 		const button = sendButton(host);
 		expect(button?.getAttribute("aria-label")).toBe("Send message · Ctrl+↵");
-		expect(button?.getAttribute("title")).toBe("Send message · Ctrl+↵");
+		expect(button?.getAttribute("title")).toBeNull();
+		expect(setTooltipMock).toHaveBeenCalledWith(button, "Send message · Ctrl+↵");
 		// Reading "Ctrl+↵" aloud as symbols would repeat what the name just said.
 		expect(host.querySelector(".piem-chat__send-chord")?.getAttribute("aria-hidden")).toBe("true");
 	});

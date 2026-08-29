@@ -1,5 +1,5 @@
-import React, { useEffect, useRef } from "react";
-import { setIcon, type IconName } from "obsidian";
+import React, { useCallback, useEffect, useRef } from "react";
+import { setIcon, setTooltip, type IconName } from "obsidian";
 
 interface ObsidianIconProps {
 	name: IconName;
@@ -27,6 +27,7 @@ interface IconButtonProps {
 	onClick: React.MouseEventHandler<HTMLButtonElement>;
 	disabled?: boolean;
 	className?: string;
+	children?: React.ReactNode;
 	/**
 	 * Exposes the button element, for a caller that has to move focus onto it —
 	 * e.g. a control that only appears once the one the user just pressed is gone.
@@ -34,11 +35,31 @@ interface IconButtonProps {
 	buttonRef?: React.Ref<HTMLButtonElement>;
 }
 
-export function IconButton({ icon, label, onClick, disabled = false, className, buttonRef }: IconButtonProps): React.JSX.Element {
+export function IconButton({ icon, label, onClick, disabled = false, className, children, buttonRef }: IconButtonProps): React.JSX.Element {
 	const classes = ["clickable-icon", "piem-chat__icon-button", className].filter(Boolean).join(" ");
+	const elementRef = useRef<HTMLButtonElement | null>(null);
+	const ref = useCallback(
+		(element: HTMLButtonElement | null): void => {
+			elementRef.current = element;
+			if (typeof buttonRef === "function") {
+				buttonRef(element);
+			} else if (buttonRef) {
+				buttonRef.current = element;
+			}
+		},
+		[buttonRef],
+	);
+
+	useEffect(() => {
+		if (elementRef.current) {
+			setTooltip(elementRef.current, label);
+		}
+	}, [label]);
+
 	return (
-		<button ref={buttonRef} type="button" className={classes} aria-label={label} title={label} disabled={disabled} onClick={onClick}>
+		<button ref={ref} type="button" className={classes} aria-label={label} disabled={disabled} onClick={onClick}>
 			<ObsidianIcon name={icon} />
+			{children}
 		</button>
 	);
 }
