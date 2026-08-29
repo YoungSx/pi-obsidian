@@ -262,6 +262,37 @@ describe("hover on touch (Obsidian's own convention)", () => {
 	});
 });
 
+describe("narrow-panel layout is keyed on the panel, not the window", () => {
+	/*
+	 * This view opens in a side leaf, so viewport width says nothing about how much
+	 * room the panel has. As an `@media (max-width: 32rem)` query the narrow layout
+	 * was unreachable on every desktop — a 300px sidebar on a 1920px display does
+	 * not match — and fired only on a phone, where the sidebar is `100vw` and the
+	 * two measurements coincide. Obsidian uses `@container` for exactly this, in
+	 * four blocks in `app.css`.
+	 */
+	it("declares the panel shell as the named query container", () => {
+		const body = ruleBody(".piem-chat");
+
+		expect(body).toContain("container-type: inline-size");
+		// Named, or the query can bind to one of Obsidian's anonymous containers —
+		// `.vertical-tab-content` is one, and it is an ancestor of the settings half.
+		expect(body).toContain("container-name: piem-chat");
+	});
+
+	it("queries that container rather than the viewport", () => {
+		expect(allDeclarations).toContain("@container piem-chat (max-width: 32rem)");
+	});
+
+	it("has no viewport-width breakpoint left anywhere", () => {
+		// The regression this guards is silent: a `max-width` media query still
+		// parses, still reads correctly in review, and simply never matches in a leaf.
+		const viewportWidthQueries = [...allDeclarations.matchAll(/@media[^{]*\b(?:max|min)-width\b[^{]*/g)].map((match) => match[0].trim());
+
+		expect(viewportWidthQueries).toEqual([]);
+	});
+});
+
 describe("z-index falls back to Obsidian's own layer value", () => {
 	/*
 	 * `--layer-menu` is 65 in `app.css`. The fallback these rules used to carry was
