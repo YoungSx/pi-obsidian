@@ -281,8 +281,10 @@ describe("MessageList pending reply", () => {
 		await flushRender();
 
 		const pending = host.querySelector(".piem-chat__message--pending");
-		expect(pending?.textContent).toContain("Piem is replying…");
-		// The assistant's own chrome, so it sits where the answer will appear.
+		// The reply is signalled as a typing indicator — three dots — rather than
+		// a "Piem is replying" line, so the visible text is empty. The assistant's
+		// own chrome, so it sits where the answer will appear.
+		expect(pending?.querySelectorAll(".piem-chat__typing-dot").length).toBe(3);
 		expect(pending?.className).toContain("piem-chat__message--assistant");
 	});
 

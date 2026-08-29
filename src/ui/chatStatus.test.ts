@@ -5,7 +5,7 @@ import { getT } from "../i18n";
 const en = getT("en");
 const zh = getT("zh-cn");
 
-const idle = { isInitializing: false, isCompacting: false, isStreaming: false, showAgentDetails: false };
+const idle = { isInitializing: false, isCompacting: false, showAgentDetails: false };
 
 describe("chatStatusText", () => {
 	it("reports nothing while idle, so no empty row is reserved", () => {
@@ -18,11 +18,7 @@ describe("chatStatusText", () => {
 	});
 
 	it("prefers opening over every other state, since nothing else is true yet", () => {
-		expect(chatStatusText({ ...idle, isInitializing: true, isCompacting: true, isStreaming: true }, en)).toBe("Opening chat…");
-	});
-
-	it("prefers compaction over streaming, since the reply is not being written yet", () => {
-		expect(chatStatusText({ ...idle, isCompacting: true, isStreaming: true }, en)).toBe("Tidying up earlier messages…");
+		expect(chatStatusText({ ...idle, isInitializing: true, isCompacting: true }, en)).toBe("Opening chat…");
 	});
 
 	it("names compaction by its mechanism once agent details are on", () => {
@@ -32,21 +28,16 @@ describe("chatStatusText", () => {
 		expect(chatStatusText({ ...idle, isCompacting: true, showAgentDetails: true }, en)).toBe("Compacting context…");
 	});
 
-	it("reports the streaming turn as a reply in progress", () => {
-		expect(chatStatusText({ ...idle, isStreaming: true }, en)).toBe("Piem is replying…");
-	});
-
-	it("names the in-flight turn the same way the placeholder bubble does", () => {
-		// One state must not be named two ways: the bubble in the transcript and
-		// this line report the same thing.
-		expect(chatStatusText({ ...idle, isStreaming: true }, en)).toBe(en.t("chat.replying"));
-		expect(chatStatusText({ ...idle, isStreaming: true }, zh)).toBe(zh.t("chat.replying"));
+	it("does not report a reply in flight, since the transcript already shows it", () => {
+		// A turn in flight is shown as a typing indicator at the assistant's own
+		// position in the message list. Repeating it here said one thing two ways
+		// and made the panel shout, so the bar stays silent while a turn streams.
+		expect(chatStatusText(idle, en)).toBeNull();
 	});
 });
 
 describe("chatStatusText in Chinese", () => {
 	it("translates every state", () => {
-		expect(chatStatusText({ ...idle, isStreaming: true }, zh)).toBe("Piem 正在回复…");
 		expect(chatStatusText({ ...idle, isCompacting: true }, zh)).toBe("正在整理较早的消息…");
 		expect(chatStatusText({ ...idle, isCompacting: true, showAgentDetails: true }, zh)).toBe("正在整理上下文…");
 		expect(chatStatusText({ ...idle, isInitializing: true }, zh)).toBe("正在打开对话…");

@@ -31,7 +31,6 @@ async function renderBar(overrides: Partial<Props> = {}): Promise<HTMLElement> {
 		<ChatStatusBar
 			isInitializing={false}
 			isCompacting={false}
-			isStreaming={false}
 			contextFill={fill()}
 			usage={usageTotals()}
 			showAgentDetails={true}
@@ -90,10 +89,14 @@ describe("ChatStatusBar status line", () => {
 		document.body.replaceChildren();
 	});
 
-	it("reports the in-flight turn, so the panel is never silent about a wait", async () => {
-		const host = await renderBar({ isStreaming: true });
+	it("does not report an in-flight turn here, since the transcript shows it", async () => {
+		// A turn in flight is shown as a typing indicator at the assistant's own
+		// position in the message list. The bar used to repeat it as "Piem is
+		// replying…", which said one thing two ways; it now stays silent, so the
+		// status line carries no text while a turn streams.
+		const host = await renderBar({ showAgentDetails: false, contextFill: null });
 
-		expect(host.querySelector(".piem-chat__status")?.textContent).toContain("Piem is replying…");
+		expect(host.querySelector(".piem-chat__status")?.textContent).toBe("");
 	});
 
 	it("shows the compacting notice while the summarization request runs", async () => {
@@ -171,11 +174,11 @@ describe("ChatStatusBar vocabulary tiers", () => {
 	});
 
 	it("becomes visible again once it has something to say", async () => {
-		const host = await renderBar({ showAgentDetails: false, contextFill: null, isStreaming: true });
+		const host = await renderBar({ showAgentDetails: false, contextFill: null, isCompacting: true });
 
 		const bar = host.querySelector(".piem-chat__statusbar");
 		expect(bar?.className).not.toContain("piem-chat__visually-hidden");
-		expect(bar?.textContent).toContain("Piem is replying…");
+		expect(bar?.textContent).toContain("Tidying up earlier messages");
 	});
 
 	it("still renders while idle when the meter has something to say", async () => {

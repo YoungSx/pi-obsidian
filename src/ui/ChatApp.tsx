@@ -199,7 +199,6 @@ export function ChatApp({ service, inputController, component, draftStore }: Cha
 				<ChatStatusBar
 					isInitializing={isInitializing}
 					isCompacting={snapshot.isCompacting}
-					isStreaming={snapshot.isStreaming}
 					contextFill={snapshot.contextFill}
 					usage={snapshot.usage}
 					showAgentDetails={snapshot.showAgentDetails}

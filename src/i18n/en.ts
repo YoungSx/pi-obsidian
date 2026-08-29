@@ -59,12 +59,15 @@ export const en = {
 		toolsRunning: "Tools running",
 		working: "Working: ",
 		/**
-		 * The placeholder turn shown between sending and the first token.
+		 * The typing indicator shown between sending and the first token, in the
+		 * assistant's own position in the transcript.
 		 *
-		 * Named as a turn in progress rather than as a wait ("Waiting for the
-		 * agent"): the reader wants to know the reply is coming, not that the panel
-		 * is idle. The same wording as {@link chatStatus.responding}, because the
-		 * bubble and the status bar report one state and must not name it two ways.
+		 * Copy is not shown — three bouncing dots carry the meaning, the way a
+		 * chat app signals "the other side is typing" without labelling the wait.
+		 * This string exists only for screen readers, so a non-sighted reader
+		 * gets the same heads-up a sighted one gets from the dots. It is named as
+		 * a turn in progress ("Piem is replying") rather than a wait, because the
+		 * reader wants to know the reply is coming, not that the panel is idle.
 		 */
 		replying: "Piem is replying…",
 		replyingAria: "Piem is replying",
@@ -113,11 +116,14 @@ export const en = {
 	 * One live surface for what the panel is doing. It used to be two — a status
 	 * line inside the composer and a compacting badge in the header — which
 	 * announced the same state twice to a screen reader and named it two ways.
+	 *
+	 * A reply in flight is not reported here: the transcript shows that as a
+	 * typing indicator at the assistant's position, so naming it in the bar too
+	 * would say one thing two ways.
 	 */
 	chatStatus: {
 		opening: "Opening chat…",
 		tidyingUp: "Tidying up earlier messages…",
-		responding: "Piem is replying…",
 	},
 
 	/**

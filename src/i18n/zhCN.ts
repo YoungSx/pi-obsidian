@@ -46,6 +46,10 @@ export const zhCN: DeepPartial<EnCopy> = {
 		skipToComposer: "跳到输入框",
 		toolsRunning: "工具运行中",
 		working: "正在处理：",
+		/**
+		 * 输入指示器，在发送到首个 token 之间显示在助手在消息流中的位置。
+		 * 仅用于屏幕阅读器；视觉上是三点跳动，不显示这句文字。
+		 */
 		replying: "Piem 正在回复…",
 		replyingAria: "Piem 正在回复",
 		latest: "最新",
@@ -84,7 +88,6 @@ export const zhCN: DeepPartial<EnCopy> = {
 	chatStatus: {
 		opening: "正在打开对话…",
 		tidyingUp: "正在整理较早的消息…",
-		responding: "Piem 正在回复…",
 	},
 
 	// 快捷键字形是键帽而非词语，各语言一律保持原样。
