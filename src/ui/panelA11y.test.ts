@@ -127,7 +127,6 @@ describe("icon contrast in the resting state (WCAG 1.4.11)", () => {
 		}
 	});
 
-
 	it("keeps the disabled-button opacity, which WCAG 1.4.3 exempts", () => {
 		// Deliberately untouched: `:disabled` is exempt, and this value is itself
 		// the fix for a real bug (a full-strength Send that did nothing).
@@ -260,5 +259,20 @@ describe("hover on touch (Obsidian's own convention)", () => {
 		for (const selector of [".piem-chat__message-actions:focus-within", ".piem-chat__context-chip:focus-within .piem-chat__context-action"]) {
 			expect(gatingBlockFor(selector)).toBeNull();
 		}
+	});
+});
+
+describe("z-index falls back to Obsidian's own layer value", () => {
+	/*
+	 * `--layer-menu` is 65 in `app.css`. The fallback these rules used to carry was
+	 * `10`, which is `--layer-sidedock` — so on any theme that drops the token, a
+	 * popover tied with the sidebar it lives in and lost to everything above it.
+	 * A wrong fallback is invisible until the one theme that omits the token.
+	 */
+	it("uses 65, not a lower layer's value", () => {
+		const fallbacks = [...allDeclarations.matchAll(/var\(--layer-menu,\s*([^)]+)\)/g)].map((match) => (match[1] ?? "").trim());
+
+		expect(fallbacks.length).toBeGreaterThan(0);
+		expect([...new Set(fallbacks)]).toEqual(["65"]);
 	});
 });

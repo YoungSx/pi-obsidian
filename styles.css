@@ -301,7 +301,17 @@
 	text-align: start;
 	white-space: normal;
 	width: max-content;
-	z-index: var(--layer-menu, 10);
+	/*
+	 * Fallback is 65, the value Obsidian gives `--layer-menu`. The `10` it
+	 * replaces was `--layer-sidedock`'s value, picked as if this competed with the
+	 * sidebar — it cannot: `app.css` gives `.workspace-leaf` `isolation: isolate`,
+	 * so every z-index in this file is only ever compared with the others in it.
+	 * What the wrong fallback actually risked is the comparison that does happen:
+	 * both floating surfaces here (this and the command menu) must sit above the
+	 * panel's own stacking order and agree with each other, and two different
+	 * literals is how that quietly stops being true.
+	 */
+	z-index: var(--layer-menu, 65);
 }
 
 .piem-chat__context-value {
@@ -1420,7 +1430,17 @@
 	 * the textarea has grown.
 	 */
 	bottom: calc(100% + var(--size-4-1));
-	z-index: var(--layer-menu, 10);
+	/*
+	 * Fallback is 65, the value Obsidian gives `--layer-menu`. The `10` it
+	 * replaces was `--layer-sidedock`'s value, picked as if this competed with the
+	 * sidebar — it cannot: `app.css` gives `.workspace-leaf` `isolation: isolate`,
+	 * so every z-index in this file is only ever compared with the others in it.
+	 * What the wrong fallback actually risked is the comparison that does happen:
+	 * both floating surfaces here (this and the command menu) must sit above the
+	 * panel's own stacking order and agree with each other, and two different
+	 * literals is how that quietly stops being true.
+	 */
+	z-index: var(--layer-menu, 65);
 }
 
 .piem-chat__command-menu-item {
