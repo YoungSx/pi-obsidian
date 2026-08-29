@@ -262,6 +262,38 @@ export class ObsidianSessionManager {
 		return this.sessionMetadata?.path ?? null;
 	}
 
+	/**
+	 * Reads the active session's display name straight from disk, bypassing the
+	 * live session object. pi hydrates `SessionState` once at open and mutates it
+	 * only through its own writes, so a name appended by anyone else — a second
+	 * Obsidian window on the same vault, a running pi CLI, a hand edit — is
+	 * invisible to `getName()` forever. `listSessions()` already re-reads disk
+	 * per entry via `repo.open()`, which is why the picker can be externally
+	 * correct while the active header is not; this gives that same freshness to
+	 * just the active name without the list's cost.
+	 *
+	 * The throwaway session is deliberately discarded and `this.session` is never
+	 * touched: swapping the live storage object out from under an in-flight append
+	 * or stream would be destructive, and `loadSession()` on the same path is a
+	 * session switch, not a refresh. One consequence is inherited from
+	 * `listSessions()`, which already opens throwaways concurrently with the live
+	 * session's appends: pi's loader may repair a torn tail it finds, a benign
+	 * self-healing write. Deliberately no `ensureConfiguration` here — it derives
+	 * model/thinking level from the branch and would append junk entries.
+	 *
+	 * Returns undefined both for "no active session" and "name cleared or absent";
+	 * callers compare against the cached name, and `summarize` collapses
+	 * whitespace-only names to undefined, so an external rename to `"  "` reads
+	 * as cleared exactly like a local one does.
+	 */
+	async readActiveSessionName(): Promise<string | undefined> {
+		if (!this.sessionMetadata) {
+			return undefined;
+		}
+		const fresh = await this.repo(this.resolveSessionDir()).open(this.sessionMetadata);
+		return (await fresh.getName())?.trim() || undefined;
+	}
+
 	async ensureConfiguration(defaults: SessionDefaults): Promise<void> {
 		const context = await this.buildSessionContext();
 		if (context.model?.provider !== defaults.provider || context.model.modelId !== defaults.modelId) {

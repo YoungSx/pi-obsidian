@@ -6,6 +6,7 @@ import type { ObsidianAgentService } from "../agent/ObsidianAgentService";
 import { ChatApp } from "./ChatApp";
 import { ChatInputController } from "./ChatInputController";
 import { resolveWorkingNotePath, watchActiveNote } from "./activeNoteWatch";
+import { watchSessionFile } from "./sessionFileWatch";
 import type { DraftStore } from "../session/DraftStore";
 import { getT } from "../i18n";
 
@@ -42,6 +43,29 @@ export class PiemChatView extends ItemView {
 		// Seeds the current note: the events only report changes from here on, and the
 		// panel is usually opened while a note is already in focus.
 		this.service.setActiveNotePath(resolveWorkingNotePath(this.app));
+		// Catches renames made outside this plugin — another Obsidian window on the
+		// same vault, a pi CLI, a hand edit — which the live session's in-memory
+		// name never sees. Same constructor-not-onOpen reasoning as above. While the
+		// panel is closed nothing displays the name, so no watcher runs then; the
+		// seed below re-syncs on the next open instead.
+		for (const ref of watchSessionFile(
+			this.app,
+			() => this.service.getActiveSessionPath(),
+			() => void this.service.syncExternalSessionChange(),
+		)) {
+			this.registerEvent(ref);
+		}
+		// Seeds the name comparison the same way the note path is seeded: the events
+		// only report that the file *may* have changed, and opening the panel is the
+		// moment a name changed while it was closed becomes visible.
+		void this.service.syncExternalSessionChange();
+		// Obsidian's own filesystem watcher misses events in some environments —
+		// Flatpak portals block inotify, network mounts do not propagate, Linux
+		// watch limits silently drop (its file explorer has the same blind spot).
+		// Re-syncing on focus is the cheap net: the user just looked back at the
+		// app, which is exactly when a change made elsewhere becomes relevant, and
+		// the name comparison makes a no-op focus read invisible.
+		this.registerDomEvent(window, "focus", () => void this.service.syncExternalSessionChange());
 	}
 
 	getViewType(): string {
