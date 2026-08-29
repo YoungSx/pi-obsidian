@@ -75,8 +75,8 @@ class FakeAgentService {
 	private snapshot: ChatSnapshot;
 	private readonly listeners = new Set<(snapshot: ChatSnapshot) => void>();
 
-	constructor(private readonly app: App) {
-		this.snapshot = baseSnapshot();
+	constructor(private readonly app: App, overrides: Partial<ChatSnapshot> = {}) {
+		this.snapshot = { ...baseSnapshot(), ...overrides };
 	}
 
 	getSnapshot(): ChatSnapshot {
@@ -187,10 +187,10 @@ interface Mounted {
 	unmount: () => Promise<void>;
 }
 
-async function mountChat(options: { withDraftStore?: boolean } = {}): Promise<Mounted> {
+async function mountChat(options: { withDraftStore?: boolean; snapshot?: Partial<ChatSnapshot> } = {}): Promise<Mounted> {
 	const host = document.createElement("div");
 	document.body.appendChild(host);
-	const service = new FakeAgentService(fakeApp());
+	const service = new FakeAgentService(fakeApp(), options.snapshot);
 	const inputController = new ChatInputController();
 	const draftStore = new RecordingDraftStore();
 	const root = createRoot(host);
@@ -405,6 +405,17 @@ describe("ChatApp model switcher", () => {
 		const bar = mounted.host.querySelector(".piem-chat__composer-bar");
 		const controls = Array.from(bar?.children ?? [], (child) => child.className);
 		expect(controls[0]).toContain("piem-chat__model-switcher");
+		// Adjacent, not merely on the same row: the thinking level qualifies the
+		// model like the endpoint does, so the pair reads as one cluster before Send.
+		expect(controls[1]).toContain("piem-chat__thinking-switcher");
+		expect(controls[2]).toContain("piem-chat__send-button");
+	});
+
+	it("keeps the thinking selector out of the row when the model cannot think", async () => {
+		mounted = await mountChat({ snapshot: { thinkingLevels: ["off"] } });
+
+		const bar = mounted.host.querySelector(".piem-chat__composer-bar");
+		const controls = Array.from(bar?.children ?? [], (child) => child.className);
 		expect(controls[1]).toContain("piem-chat__send-button");
 	});
 

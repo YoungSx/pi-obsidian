@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import { activeModelName, formatThinkingLevel, modelChoiceLabel, modelSwitcherTitle, type ModelTarget } from "./modelSwitcherCopy";
+import { activeModelName, modelChoiceLabel, modelSwitcherTitle, type ModelTarget } from "./modelSwitcherCopy";
 import { getT } from "../i18n";
 
 const en = getT("en");
@@ -13,9 +13,8 @@ const sonnet = { id: "m-sonnet", name: "Sonnet 5", provider: "Anthropic" };
  *
  * The button face is glanced at in a sidebar that may be 300px wide; the
  * accessible name is read aloud in full. So one carries the model alone and the
- * other carries the endpoint and, in the agent-details tier, the reasoning level
- * — which is the information the header's model line used to hold, and the reason
- * removing that line was not a loss.
+ * other carries the endpoint — the information the header's model line used to
+ * hold, and the reason removing that line was not a loss.
  */
 describe("activeModelName", () => {
 	it("shows the user's own name for the model, not the id sent to the server", () => {
@@ -49,10 +48,6 @@ describe("modelSwitcherTitle", () => {
 		expect(modelSwitcherTitle(target(), en)).toBe("Switch model · Opus 5 · OpenRouter");
 	});
 
-	it("appends the reasoning level once agent details are on", () => {
-		expect(modelSwitcherTitle(target({ showAgentDetails: true }), en)).toBe("Switch model · Opus 5 · OpenRouter · Reasoning: High");
-	});
-
 	it("names the builtin pair the way the plugin's error messages do", () => {
 		// `describeModelTarget` joins an unconfigured target with a slash; a
 		// different join here would have the panel and the banner disagree about
@@ -62,9 +57,8 @@ describe("modelSwitcherTitle", () => {
 		);
 	});
 
-	it("translates the verb and the reasoning prefix, never the model or the endpoint", () => {
+	it("translates the verb, never the model or the endpoint", () => {
 		expect(modelSwitcherTitle(target(), zh)).toBe("切换模型 · Opus 5 · OpenRouter");
-		expect(modelSwitcherTitle(target({ showAgentDetails: true }), zh)).toBe("切换模型 · Opus 5 · OpenRouter · 推理：High");
 	});
 });
 
@@ -85,12 +79,6 @@ describe("modelChoiceLabel", () => {
 	});
 });
 
-describe("formatThinkingLevel", () => {
-	it("turns the enum into prose", () => {
-		expect(formatThinkingLevel("very-high")).toBe("Very high");
-	});
-});
-
 function target(overrides: Partial<ModelTarget> = {}): ModelTarget {
 	return {
 		modelChoices: [opus, sonnet],
@@ -100,8 +88,6 @@ function target(overrides: Partial<ModelTarget> = {}): ModelTarget {
 		// which is the one case the switcher reads them in.
 		provider: "deepseek",
 		modelId: "deepseek-v4-pro",
-		thinkingLevel: "high",
-		showAgentDetails: false,
 		...overrides,
 	};
 }

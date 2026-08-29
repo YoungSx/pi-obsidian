@@ -39,9 +39,6 @@ export interface ModelTarget {
 	 */
 	provider: string;
 	modelId: string;
-	thinkingLevel: string;
-	/** Whether the reader asked for agent-internal vocabulary. */
-	showAgentDetails: boolean;
 }
 
 /**
@@ -103,20 +100,16 @@ function findActiveChoice(target: ModelTarget): ModelChoice | undefined {
 }
 
 /**
- * Model plus endpoint, and the reasoning level once agent details are on.
+ * Model plus endpoint.
  *
- * The reasoning level is here rather than on the button face because it is
- * configuration the user already chose and rarely revisits, and because it was
- * the header line's job before this: dropping that line would otherwise have
- * removed the panel's only report of it.
+ * The reasoning level used to ride this tooltip in the agent-details tier, when
+ * the header line had been the panel's only report of it; the thinking selector
+ * beside this control now shows the level outright, and saying it twice would
+ * make two adjacent controls describe the same state.
  */
 function describeTarget(target: ModelTarget, t: Translator): string {
 	const active = findActiveChoice(target);
 	// The builtin pair is joined the way `describeModelTarget` joins it, so the
 	// panel and the plugin's error messages name an unconfigured target alike.
-	const base = active ? modelChoiceLabel(active, t) : `${target.provider}/${target.modelId}`;
-	if (!target.showAgentDetails) {
-		return base;
-	}
-	return t.t("modelSwitcher.withReasoning", { model: base, level: formatThinkingLevel(target.thinkingLevel) });
+	return active ? modelChoiceLabel(active, t) : `${target.provider}/${target.modelId}`;
 }

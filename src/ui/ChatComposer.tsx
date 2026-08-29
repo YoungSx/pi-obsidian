@@ -53,6 +53,17 @@ interface ChatComposerProps {
 	 */
 	modelSwitcher?: React.ReactNode;
 	/**
+	 * The thinking-level selector, rendered immediately right of
+	 * {@link modelSwitcher}.
+	 *
+	 * Passed in for the same reason as {@link modelSwitcher}: it reads the
+	 * conversation's level and writes back to the session, and this component's
+	 * business is the draft and the send controls. Absent — or a null node, which
+	 * is what the selector itself returns for a model without reasoning — renders
+	 * nothing and the model switcher keeps the bar's leading edge alone.
+	 */
+	thinkingSelector?: React.ReactNode;
+	/**
 	 * The context-occupancy ring, rendered immediately to the left of Send.
 	 *
 	 * Passed in for the same reason as {@link contextRow}: this component knows
@@ -107,6 +118,7 @@ export function ChatComposer({
 	onAnchorIdChange,
 	contextRow,
 	modelSwitcher,
+	thinkingSelector,
 	contextGauge,
 	commands,
 	pendingImages,
@@ -303,17 +315,18 @@ export function ChatComposer({
 					<div className="piem-chat__composer-bar">
 						{/*
 						 * Reading order across the bar: what the message will be sent *to*,
-						 * then whether there is room for it, then the send control itself.
+						 * then how hard it will think, then whether there is room for it,
+						 * then the send control itself.
 						 *
-						 * The switcher claims the leading edge with its own `margin-right:
-						 * auto`, and the bar stays `flex-end` rather than switching to
-						 * `space-between`: either of these two can be absent — the switcher
-						 * when nothing is configured and settings are unreachable, the ring
-						 * before the first measurement — and `space-between` would then park
-						 * a lone Send against the left edge, away from the corner every send
-						 * button lives in.
+						 * The switcher and the thinking selector form the bar's leading
+						 * cluster — two questions about the same outgoing message — and the
+						 * terminal control claims the corner through `margin-left: auto` on
+						 * the bar's last child (see the stylesheet): every other member of
+						 * the bar can be absent, so an auto margin anchored anywhere else
+						 * would let Send drift from the corner every send button lives in.
 						 */}
 						{modelSwitcher}
+						{thinkingSelector}
 						{contextGauge}
 						{isBusy ? (
 						<IconButton

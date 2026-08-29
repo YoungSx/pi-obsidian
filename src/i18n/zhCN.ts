@@ -150,9 +150,22 @@ export const zhCN: DeepPartial<EnCopy> = {
 		switchModel: "切换模型",
 		buttonTitle: "{action} · {model}",
 		modelWithProvider: "{model} · {provider}",
-		withReasoning: "{model} · 推理：{level}",
 		noModels: "还没有配置模型",
 		manageModels: "管理模型…",
+	},
+
+	thinkingLevel: {
+		switchThinking: "调整思考力度",
+		buttonTitle: "{action} · {level}",
+		levels: {
+			off: "关闭",
+			minimal: "最低",
+			low: "低",
+			medium: "中",
+			high: "高",
+			xhigh: "极高",
+			max: "最高",
+		},
 	},
 
 	sendShortcut: {
