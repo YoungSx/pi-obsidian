@@ -383,14 +383,24 @@ button.piem-settings-tab {
 	z-index: var(--layer-menu, 65);
 }
 
+/*
+ * The figures lead the popover, so they take the `read` tier and leave the rest
+ * to step down from it. Inherited sizing set this line at the body size — the
+ * same size the state line below it rendered at — which made the readout and its
+ * verdict typographic equals; the ramp note at the top of this file is explicit
+ * that every size here reads from one of the three tokens, so the tiers are now
+ * stated rather than inherited.
+ */
 .piem-chat__context-value {
+	font-size: var(--font-ui-medium);
 	font-variant-numeric: tabular-nums;
 }
 
 /* The level named in words, not only in the ring's colour — required by the a11y
- * contract, not cosmetic. */
+ * contract, not cosmetic. One tier under the figures: a verdict, not a headline. */
 .piem-chat__context-state {
 	color: var(--text-muted);
+	font-size: var(--font-ui-small);
 }
 
 .piem-chat__context--warn .piem-chat__context-state {
@@ -410,7 +420,11 @@ button.piem-settings-tab {
 }
 
 .piem-chat__context-spend {
-	color: var(--text-faint);
+	/* `--text-muted`, not the `--text-faint` this carried: the ramp note at the
+	 * top of the file (and the chips below) record that faint at `meta` — this
+	 * line's size — falls under the 4.5:1 WCAG asks. Faint is for icons, never
+	 * for 12px text, and spend is exactly that. */
+	color: var(--text-muted);
 	font-size: var(--font-ui-smaller);
 	font-variant-numeric: tabular-nums;
 }

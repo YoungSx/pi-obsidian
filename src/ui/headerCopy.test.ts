@@ -55,10 +55,12 @@ describe("meterTitle", () => {
 	it("names no threshold when automatic compaction is off", () => {
 		// The tooltip is the only place the panel states what happens at the line,
 		// so quoting a percentage that nothing acts on would be a false promise.
+		// The prose names tidying as an action, not as "the Tidy up earlier
+		// messages command" — the tidy button sits a line below in the popover.
 		const title = meterTitle(fill({ heuristicOnly: false, compactionEnabled: false }), en);
 
 		expect(title).not.toContain("98%");
-		expect(title).toContain("Tidy up earlier messages");
+		expect(title).toContain("tidy up earlier messages");
 	});
 });
 

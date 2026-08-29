@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useId, useRef, useState } from "react";
 import { formatCost, formatTokens } from "../agent/usage";
 import type { ContextFill } from "../agent/usage";
 import { IconButton } from "./ObsidianIcon";
@@ -111,6 +111,10 @@ export function ContextGauge({
 	const isOpen = openedBy !== null;
 	const closeTimer = useRef<number | undefined>(undefined);
 	const wrapperRef = useRef<HTMLSpanElement | null>(null);
+	// Wires the ring to the popover it opens, for assistive tech that announces
+	// what a toggle controls. `useId` because nothing else guarantees a single
+	// panel per workspace: a stable literal would collide if two ever mounted.
+	const popoverId = useId();
 
 	// Clear a pending close on unmount, so a timer cannot fire into a gone tree.
 	useEffect(() => {
@@ -240,6 +244,7 @@ export function ContextGauge({
 				 */
 				className="clickable-icon piem-chat__icon-button piem-chat__context-gauge"
 				aria-expanded={isOpen}
+				aria-controls={popoverId}
 				aria-label={contextGaugeName(fill, t)}
 				onClick={togglePress}
 			>
@@ -257,6 +262,7 @@ export function ContextGauge({
 			</button>
 			{isOpen ? (
 				<ContextPopover
+					id={popoverId}
 					fill={fill}
 					usage={usage}
 					showAgentDetails={showAgentDetails}
@@ -277,6 +283,8 @@ export function ContextGauge({
 
 interface ContextPopoverProps extends Omit<ContextGaugeProps, "fill"> {
 	fill: ContextFill;
+	/** The id the ring's `aria-controls` points at; minted once in the gauge. */
+	id: string;
 }
 
 /**
@@ -287,6 +295,7 @@ interface ContextPopoverProps extends Omit<ContextGaugeProps, "fill"> {
  * button with it. A plain labelled group keeps the button reachable.
  */
 function ContextPopover({
+	id,
 	fill,
 	usage,
 	showAgentDetails,
@@ -299,7 +308,7 @@ function ContextPopover({
 	const isBusy = isStreaming || isCompacting;
 
 	return (
-		<div className="piem-chat__context-popover" role="group" aria-label={t.t("chat.contextAria")}>
+		<div id={id} className="piem-chat__context-popover" role="group" aria-label={t.t("chat.contextAria")}>
 			<span className="piem-chat__context-value">
 				{contextTokenSummary(fill)} <span aria-hidden="true">·</span> {contextPercent(fill)}%
 			</span>
