@@ -146,6 +146,15 @@ export const zhCN: DeepPartial<EnCopy> = {
 	},
 
 	// 快捷键字形是键帽而非词语，各语言一律保持原样。
+	modelSwitcher: {
+		switchModel: "切换模型",
+		buttonTitle: "{action} · {model}",
+		modelWithProvider: "{model} · {provider}",
+		withReasoning: "{model} · 推理：{level}",
+		noModels: "还没有配置模型",
+		manageModels: "管理模型…",
+	},
+
 	sendShortcut: {
 		enter: "↵",
 		modMac: "⌘↵",
@@ -157,7 +166,6 @@ export const zhCN: DeepPartial<EnCopy> = {
 		nearlyFull: "上下文即将占满",
 		filling: "正在填充",
 		ok: "正常",
-		reasoning: "推理",
 		meterHeuristic: "根据消息大小估算；首次回复后会更新。",
 		meterMeasured: "提供方报告的上下文占用。接近 {percent}% 时开始整理。",
 		meterNoCompaction: "提供方报告的上下文占用。自动整理已关闭，占满前请使用「整理较早的消息」命令。",

@@ -7,31 +7,13 @@ import {
 	contextStateText,
 	contextTokenSummary,
 	contextValueText,
-	describeModel,
-	formatThinkingLevel,
 	meterTitle,
 	tidyLabel,
 } from "./headerCopy";
 import { getT } from "../i18n";
 
-const model = { provider: "openrouter", modelId: "claude-opus-5", thinkingLevel: "high" };
 const en = getT("en");
 const zh = getT("zh-cn");
-
-describe("describeModel", () => {
-	it("shows the model alone by default, so a long provider path cannot wrap the header", () => {
-		expect(describeModel(model, false, en)).toBe("claude-opus-5");
-	});
-
-	it("restores the provider and reasoning level once details are on", () => {
-		expect(describeModel(model, true, en)).toBe("openrouter/claude-opus-5 · Reasoning: High");
-	});
-
-	it("translates the reasoning prefix but never the model id", () => {
-		expect(describeModel(model, true, zh)).toBe("openrouter/claude-opus-5 · 推理: High");
-		expect(describeModel(model, false, zh)).toBe("claude-opus-5");
-	});
-});
 
 describe("contextLevel", () => {
 	it("bands against the threshold compaction actually acts on", () => {
@@ -168,12 +150,6 @@ describe("tidyLabel", () => {
 		expect(tidyLabel({ isStreaming: false, isCompacting: false }, zh)).toBe("整理较早的消息");
 		expect(tidyLabel({ isStreaming: false, isCompacting: true }, zh)).toBe("正在整理较早的消息…");
 		expect(tidyLabel({ isStreaming: true, isCompacting: false }, zh)).toBe("回复结束后可整理较早的消息");
-	});
-});
-
-describe("formatThinkingLevel", () => {
-	it("turns the enum into prose", () => {
-		expect(formatThinkingLevel("very-high")).toBe("Very high");
 	});
 });
 

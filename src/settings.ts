@@ -9,6 +9,7 @@ import type { NetworkTransport } from "./net/obsidianFetch";
 import {
 	buildConfiguredModel,
 	describeModelConfig,
+	describeProviderConfig,
 	migrateCustomEndpoint,
 	normalizeProviderAndModelLists,
 	type ModelConfig,
@@ -239,6 +240,50 @@ export function getActiveModelConfig(settings: PiemSettings): ModelConfig | unde
 /** The provider serving `model`. */
 export function getProviderForModel(settings: PiemSettings, model: ModelConfig): ProviderConfig | undefined {
 	return settings.providers.find((provider) => provider.id === model.providerId);
+}
+
+/**
+ * One selectable model, already named for a reader.
+ *
+ * Flattened out of the {@link ModelConfig}/{@link ProviderConfig} pair on
+ * purpose. The chat panel's switcher renders a list and has to label each row
+ * without holding both settings lists and doing the join itself — a component
+ * that resolves ids at render time is a component that will disagree with the
+ * settings tab about what a model is called.
+ *
+ * Both names are carried because neither is sufficient alone: two providers can
+ * serve the same model id, and "gpt-4o-mini" listed twice is a choice the user
+ * cannot make.
+ */
+export interface ModelChoice {
+	/** The {@link ModelConfig} id, as `activeModelId` stores it. */
+	id: string;
+	/** The model's own name — its display name, or its raw api id. */
+	name: string;
+	/** The serving provider's name, or its base URL. */
+	provider: string;
+}
+
+/**
+ * The models a user can switch between, in configured order.
+ *
+ * A model whose provider is missing is omitted rather than listed as broken: it
+ * has no base URL and no credential, so {@link getSelectedModel} would answer a
+ * request for it from the builtin catalog instead — silently a different
+ * endpoint. `normalizeSettings` already drops orphans on load, so this guards a
+ * list edited live in the settings tab rather than an expected stored state.
+ */
+export function listModelChoices(settings: PiemSettings): ModelChoice[] {
+	const providersById = new Map(settings.providers.map((provider) => [provider.id, provider]));
+	const choices: ModelChoice[] = [];
+	for (const model of settings.models) {
+		const provider = providersById.get(model.providerId);
+		if (!provider) {
+			continue;
+		}
+		choices.push({ id: model.id, name: describeModelConfig(model), provider: describeProviderConfig(provider) });
+	}
+	return choices;
 }
 
 /** The active model paired with its provider, when both resolve. */

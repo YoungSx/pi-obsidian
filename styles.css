@@ -90,37 +90,26 @@
  * conversation inverted the panel's reading order.
  */
 .piem-chat__header {
-	align-items: flex-start;
+	/* `center`, not `flex-start`: the row is one line of title against 32px
+	 * buttons now that the model line has moved to the composer. It was
+	 * top-aligned while identity was two stacked lines and centring would have
+	 * floated the buttons against the middle of that block. */
+	align-items: center;
 	display: flex;
 	flex-shrink: 0;
 	gap: var(--size-4-2);
 	justify-content: space-between;
 }
 
-.piem-chat__identity {
-	flex: 1 1 auto;
-	min-width: 0;
-}
-
+/* Carries the flex sizing the identity wrapper used to, now that it is the whole
+ * of the header's identity: grow into the space the buttons leave, and allow
+ * `min-width: 0` so a long chat name ellipsizes instead of pushing them off. */
 .piem-chat__title {
+	flex: 1 1 auto;
 	font-size: var(--font-ui-medium);
 	font-weight: var(--font-semibold);
 	margin: 0;
-	overflow: hidden;
-	text-overflow: ellipsis;
-	white-space: nowrap;
-}
-
-/*
- * Provider/model strings can be long ("openrouter/anthropic/claude-…").
- * `overflow-wrap: anywhere` broke them mid-token across three lines and pushed
- * the transcript down; this is secondary metadata, so it clips and the full
- * string lives in the title attribute.
- */
-.piem-chat__model {
-	color: var(--text-muted);
-	font-size: var(--font-ui-smaller);
-	margin: var(--size-4-1) 0 0;
+	min-width: 0;
 	overflow: hidden;
 	text-overflow: ellipsis;
 	white-space: nowrap;
@@ -256,6 +245,13 @@ button.piem-settings-tab {
 	align-items: center;
 	display: inline-flex;
 	flex-shrink: 0;
+	/*
+	 * No auto margin: the ring sits immediately before Send, and the model
+	 * switcher is what holds the bar's leading edge (with `margin-right: auto`).
+	 * This rule used to push Send to the trailing edge itself, from a time when
+	 * the ring was the only thing to the left of it; keeping that here would win
+	 * the argument by flex order and collapse the switcher's claim.
+	 */
 	/* Anchors the popover to the ring rather than to the composer shell, which is
 	 * also positioned (for the command menu) and sits a textarea away. */
 	position: relative;
@@ -1592,17 +1588,80 @@ button.piem-chat__latest {
 }
 
 /*
- * Holds the one send control, at the trailing edge.
+ * The send row: which model answers, how full the context is, and Send.
  *
- * `space-between` while it held a status line on the left and Send on the right;
- * with the status line moved out, that same rule would have parked a lone Send
- * against the left edge, away from the corner every send button lives in.
+ * `flex-end` rather than `space-between`, even though the row now has three
+ * occupants. The leading edge is claimed by one `margin-right: auto` on the
+ * switcher, which is the only item that always wants it; everything after that
+ * margin collects at the trailing edge, so the gauge lands beside Send — where
+ * it answers the question it is asked, whether there is room for the thing
+ * about to be sent.
+ *
+ * `space-between` would distribute instead, and the row is not always full: with
+ * no model configured and nothing measured yet it holds a lone Send, which
+ * `space-between` would park against the leading edge, away from the corner
+ * every send button lives in.
  */
 .piem-chat__composer-bar {
 	align-items: center;
 	display: flex;
 	gap: var(--size-4-2);
 	justify-content: flex-end;
+}
+
+/*
+ * The model switcher.
+ *
+ * Quiet by construction. Send carries `mod-cta`'s accent and has to stay the only
+ * emphasized control on the row, so this keeps the muted text tier the header's
+ * model line used to have: the same information at the same weight, one row down
+ * and now answerable. Muted with a colour token rather than `opacity`, for the
+ * reason recorded on the message-action rules — `.clickable-icon` already applies
+ * `--icon-opacity`, and a second multiplier lands under the 3:1 floor.
+ */
+.piem-chat__model-switcher {
+	--icon-color: var(--text-muted);
+	--icon-color-hover: var(--text-normal);
+	color: var(--text-muted);
+	font-size: var(--font-ui-smaller);
+	gap: var(--size-4-1);
+	/* Claims the bar's leading edge, which is what keeps Send in its corner
+	 * without the bar switching to `space-between` — either this control or the
+	 * context ring can be absent, and `space-between` would then park a lone Send
+	 * against the left edge. */
+	margin-right: auto;
+	/* Overrides the shared icon-button floor: a flex item at `min-width: auto`
+	 * cannot shrink below its content, which would let a long model name push
+	 * Send off the end of a 300px sidebar instead of ellipsizing. */
+	min-width: 0;
+	padding-inline: var(--size-4-1);
+	width: auto;
+}
+
+/* Focus on every device, hover only where a pointer can rest — the tap-latch
+ * problem the touch-hover block below records. Split rather than merged: folding
+ * focus into the media query would drop the affordance on a phone. */
+.piem-chat__model-switcher:focus-visible {
+	color: var(--text-normal);
+}
+
+@media (hover: hover) {
+
+	.piem-chat__model-switcher:hover {
+		color: var(--text-normal);
+	}
+}
+
+/*
+ * The clip lives on the name, not on the button: the caret beside it is the
+ * affordance saying this opens a list, so it has to survive the truncation the
+ * name gives way to.
+ */
+.piem-chat__model-switcher-name {
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
 }
 
 /*
@@ -1657,6 +1716,10 @@ button.piem-chat__latest {
  * translation ever leaves the chord empty.
  */
 .piem-chat__send-button.mod-cta {
+	/* Never gives way: the model switcher beside it is the row's flexible half,
+	 * and a shrinking Send would clip its own chord to make room for a model
+	 * name. */
+	flex-shrink: 0;
 	gap: var(--size-4-1);
 	min-height: var(--size-4-8);
 	min-width: var(--size-4-8);
@@ -1778,6 +1841,31 @@ button.piem-chat__latest {
 	 */
 	.piem-chat__latest {
 		min-height: var(--size-4-12);
+	}
+
+	/*
+	 * The ring is a 16px glyph, and it is a bare <button> like `.piem-chat__latest`
+	 * — so the selector above never reached it either. The hit area grows to the
+	 * full 48px while the drawn ring stays 16px, which is the point: a thumb aims
+	 * at the target, not at the paint.
+	 */
+	.piem-chat__context-gauge {
+		min-height: var(--size-4-12);
+		min-width: var(--size-4-12);
+		/* Keeps the glyph on the composer bar's optical centre once the box grows
+		 * around it, rather than in the corner the flex default would leave it. */
+		align-items: center;
+		justify-content: center;
+	}
+
+	/*
+	 * Height only, and it has to be restated *after* the shared rule above: that
+	 * one raises `min-width` to 48px, which would stop a long model name from
+	 * ellipsizing on exactly the narrow screens this block is for.
+	 */
+	.piem-chat__model-switcher {
+		min-height: var(--size-4-12);
+		min-width: 0;
 	}
 
 	.piem-chat__trace-summary,

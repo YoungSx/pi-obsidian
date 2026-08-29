@@ -13,6 +13,7 @@ import { ChatStatusBar } from "./ChatStatusBar";
 import { ContextGauge } from "./ContextGauge";
 import { ContextRow } from "./ContextRow";
 import { MessageList } from "./MessageList";
+import { ModelSwitcher } from "./ModelSwitcher";
 import { appendToDraft } from "./noteReference";
 import { canOpenPluginSettings, openPluginSettings } from "./pluginSettings";
 import { TranslatorProvider } from "./TranslatorContext";
@@ -236,6 +237,17 @@ export function ChatApp({ service, inputController, component, draftStore }: Cha
 					onFocusRequested={handleFocusRequested}
 					onAnchorIdChange={handleAnchorIdChange}
 					commands={snapshot.availableCommands}
+					modelSwitcher={
+						<ModelSwitcher
+							// The snapshot already carries every field a `ModelTarget` names,
+							// so the switcher reads it directly rather than through a copy
+							// this component would have to keep in step.
+							target={snapshot}
+							onSelect={(modelId) => void service.setActiveModel(modelId)}
+							onOpenSettings={canOpenSettings ? () => openPluginSettings(app) : undefined}
+							isBusy={snapshot.isStreaming || snapshot.isCompacting}
+						/>
+					}
 					pendingImages={pendingImages}
 					onAddImages={(files) => void handleAddImages(files)}
 					onRemoveImage={handleRemoveImage}

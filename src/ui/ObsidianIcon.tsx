@@ -33,9 +33,27 @@ interface IconButtonProps {
 	 * e.g. a control that only appears once the one the user just pressed is gone.
 	 */
 	buttonRef?: React.Ref<HTMLButtonElement>;
+	/**
+	 * What pressing the button opens, when it opens something.
+	 *
+	 * Assistive tech announces a bare `<button>` as an action that happens, which
+	 * is the wrong promise for a control that instead reveals a list of choices:
+	 * the user cannot tell before pressing whether they are committing or
+	 * browsing. Absent for the buttons that really do just act.
+	 */
+	hasPopup?: "menu";
 }
 
-export function IconButton({ icon, label, onClick, disabled = false, className, children, buttonRef }: IconButtonProps): React.JSX.Element {
+export function IconButton({
+	icon,
+	label,
+	onClick,
+	disabled = false,
+	className,
+	children,
+	buttonRef,
+	hasPopup,
+}: IconButtonProps): React.JSX.Element {
 	const classes = ["clickable-icon", "piem-chat__icon-button", className].filter(Boolean).join(" ");
 	const elementRef = useRef<HTMLButtonElement | null>(null);
 	const ref = useCallback(
@@ -57,7 +75,15 @@ export function IconButton({ icon, label, onClick, disabled = false, className, 
 	}, [label]);
 
 	return (
-		<button ref={ref} type="button" className={classes} aria-label={label} disabled={disabled} onClick={onClick}>
+		<button
+			ref={ref}
+			type="button"
+			className={classes}
+			aria-label={label}
+			aria-haspopup={hasPopup}
+			disabled={disabled}
+			onClick={onClick}
+		>
 			<ObsidianIcon name={icon} />
 			{children}
 		</button>

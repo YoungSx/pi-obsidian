@@ -44,6 +44,15 @@ interface ChatComposerProps {
 	 */
 	contextRow?: React.ReactNode;
 	/**
+	 * The model switcher, rendered at the leading edge of the send bar.
+	 *
+	 * Passed in for the same reason as {@link contextRow}: it needs the configured
+	 * model list and a write back to settings, and this component's business is
+	 * the draft and the send controls. Absent renders nothing and the bar closes
+	 * up around the controls that remain.
+	 */
+	modelSwitcher?: React.ReactNode;
+	/**
 	 * The context-occupancy ring, rendered immediately to the left of Send.
 	 *
 	 * Passed in for the same reason as {@link contextRow}: this component knows
@@ -74,7 +83,7 @@ interface ChatComposerProps {
 }
 
 /**
- * The draft, the context row, and the send control.
+ * The draft, the context row, and the send row.
  *
  * The keyboard hint rides on the Send button itself rather than in a status line
  * beside it. A hint belongs to the control it describes: a reader wondering how
@@ -97,6 +106,7 @@ export function ChatComposer({
 	onFocusRequested,
 	onAnchorIdChange,
 	contextRow,
+	modelSwitcher,
 	contextGauge,
 	commands,
 	pendingImages,
@@ -292,12 +302,18 @@ export function ChatComposer({
 					) : null}
 					<div className="piem-chat__composer-bar">
 						{/*
-						 * Immediately before the send control, so the two sit together at the
-						 * trailing edge. The bar is `flex-end` and the ring adds no margin of
-						 * its own: whatever this slot holds is pushed rightward against Send,
-						 * and a bar holding Send alone — which is every render before the
-						 * first measurement — still finds it in the corner it belongs in.
+						 * Reading order across the bar: what the message will be sent *to*,
+						 * then whether there is room for it, then the send control itself.
+						 *
+						 * The switcher claims the leading edge with its own `margin-right:
+						 * auto`, and the bar stays `flex-end` rather than switching to
+						 * `space-between`: either of these two can be absent — the switcher
+						 * when nothing is configured and settings are unreachable, the ring
+						 * before the first measurement — and `space-between` would then park
+						 * a lone Send against the left edge, away from the corner every send
+						 * button lives in.
 						 */}
+						{modelSwitcher}
 						{contextGauge}
 						{isBusy ? (
 						<IconButton

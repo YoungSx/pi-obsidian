@@ -3,38 +3,20 @@ import type { ContextFill } from "../agent/usage";
 import type { Translator } from "../i18n";
 
 /**
- * Copy and level rules for the chat panel chrome.
+ * Copy and level rules for the context meter.
  *
  * Free of React and DOM imports so the wording can be unit-tested without a
- * renderer; `ChatHeader.tsx` owns the markup.
+ * renderer; `ChatStatusBar.tsx` owns the markup.
  *
  * Every function that returns prose takes the {@link Translator} rather than
  * reaching for a table itself: that keeps the language a caller's decision and
  * lets the tests assert both languages through the same entry points.
- */
-
-/** What the header carries to identify the chat's counterpart. */
-export interface ModelDescriptor {
-	provider: string;
-	modelId: string;
-	thinkingLevel: string;
-}
-
-/**
- * Names who the user is talking to.
  *
- * The default tier shows the model id alone. The provider prefix and the
- * reasoning level are configuration the user already chose in settings; on a
- * narrow leaf the full "openrouter/anthropic/claude-… · Reasoning: High" line
- * wrapped to three lines and pushed the transcript down. Turning on agent
- * details restores the full string for readers who switch models often.
+ * Named for the header because that is where the meter used to live. Both of the
+ * things that made the name accurate have since moved out — the meter to the
+ * status bar, the model line to the composer's switcher — so the module is due a
+ * rename; it is left for a pass that is not also changing what it says.
  */
-export function describeModel(model: ModelDescriptor, showAgentDetails: boolean, t: Translator): string {
-	if (!showAgentDetails) {
-		return model.modelId;
-	}
-	return `${model.provider}/${model.modelId} · ${t.t("context.reasoning")}: ${formatThinkingLevel(model.thinkingLevel)}`;
-}
 
 /**
  * Text label for the context level, mirrored from the colour so the state is
@@ -143,8 +125,4 @@ export function tidyLabel(state: { isStreaming: boolean; isCompacting: boolean }
 		return t.t("context.tidyWhileStreaming");
 	}
 	return t.t("commands.tidyUp");
-}
-
-export function formatThinkingLevel(level: string): string {
-	return level.replace(/-/g, " ").replace(/^./, (first: string) => first.toUpperCase());
 }

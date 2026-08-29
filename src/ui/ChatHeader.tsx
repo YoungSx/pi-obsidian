@@ -3,7 +3,6 @@ import { Menu, type App } from "obsidian";
 import type { ChatSnapshot } from "../agent/ObsidianAgentService";
 import type { ActiveSessionInfo } from "../session/ObsidianSessionManager";
 import { IconButton } from "./ObsidianIcon";
-import { describeModel } from "./headerCopy";
 import { useT } from "./TranslatorContext";
 import {
 	describeSession,
@@ -30,14 +29,19 @@ interface ChatHeaderProps {
 }
 
 /**
- * Who you are talking to, and the controls that steer the session.
+ * Which chat you are in, and the controls that steer it.
  *
- * Identity and actions only. The context meter, the spend counter and the
- * compaction notice used to sit in a second row here, which put a strip of
- * numbers between the reader and the first message of their conversation — and
- * turning on agent details made that strip taller. Those readouts are ambient
- * and consulted rather than read, so they now live in `ChatStatusBar` below the
- * transcript, next to the controls whose state they explain.
+ * The chat's name and its session actions — nothing else. Three other things
+ * have been evicted from this row, each for the same reason: the header sits
+ * between the reader and the first message of their own conversation, so
+ * anything parked here is read before the thing they opened the panel for.
+ *
+ * The context meter, the spend counter and the compaction notice went to
+ * `ChatStatusBar` below the transcript, where an ambient readout belongs. The
+ * model went to `ModelSwitcher` in the composer's send row, which is a stronger
+ * version of the same argument: that line was not merely ambient but inert — it
+ * named the model and offered no way to change it, while the control that could
+ * was two tabs deep in settings.
  */
 export function ChatHeader({
 	app,
@@ -110,18 +114,14 @@ export function ChatHeader({
 		menu.showAtMouseEvent(event.nativeEvent);
 	};
 
-	const modelLine = describeModel(snapshot, snapshot.showAgentDetails, t);
-
 	return (
 		<header className="piem-chat__header" aria-label={t.t("chat.headerAria")}>
-			<div className="piem-chat__identity">
-				<h2 className="piem-chat__title" title={activeSession ? describeSession(activeSession, t) : undefined}>
-					{sessionTitle(activeSession, t)}
-				</h2>
-				<p className="piem-chat__model" title={modelLine}>
-					{modelLine}
-				</p>
-			</div>
+			{/* No wrapper: the title is the whole of the header's identity now that the
+			    model line has moved, and an element holding one child is one more left
+			    edge for a reader's eye to resolve. */}
+			<h2 className="piem-chat__title" title={activeSession ? describeSession(activeSession, t) : undefined}>
+				{sessionTitle(activeSession, t)}
+			</h2>
 			<div className="piem-chat__header-actions" role="toolbar" aria-label={t.t("chat.actionsAria")}>
 				{/* Always mounted so the button positions never shift as the vault
 				    accumulates chats; disabled until there is a second one to pick. */}
@@ -132,6 +132,7 @@ export function ChatHeader({
 					icon="ellipsis"
 					label={t.t("chat.moreActions")}
 					onClick={openMenu}
+					hasPopup="menu"
 					disabled={!editableSession && !onOpenSettings}
 				/>
 			</div>

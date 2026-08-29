@@ -1,0 +1,118 @@
+import React from "react";
+import { Menu } from "obsidian";
+import { IconButton } from "./ObsidianIcon";
+import { activeModelName, modelChoiceLabel, modelSwitcherTitle, type ModelTarget } from "./modelSwitcherCopy";
+import { useT } from "./TranslatorContext";
+
+interface ModelSwitcherProps {
+	/** The target in force and the configured models available to switch to. */
+	target: ModelTarget;
+	/** Switches to a configured model by its `ModelConfig.id`. */
+	onSelect: (modelId: string) => void;
+	/**
+	 * Opens the plugin's settings tab. Absent when the host cannot reach it, in
+	 * which case the menu drops the item — the same treatment {@link ChatHeader}
+	 * gives its own settings entry.
+	 */
+	onOpenSettings?: () => void;
+	/** Whether a turn or a compaction is in flight. */
+	isBusy: boolean;
+}
+
+/**
+ * Which model answers, at the left of the send row.
+ *
+ * The panel used to print the model in the header, where it could be read and
+ * not acted on: changing it meant leaving the chat, finding **Settings → Piem**,
+ * and moving a dropdown two tabs in — for the one setting a user revisits
+ * mid-conversation more than any other. The readout and the control are the same
+ * thing now, and the header row it cost is gone.
+ *
+ * Left of Send, not right of it. Send is the row's terminal action and lives in
+ * the corner every send button lives in; the switcher qualifies the message
+ * *about* to be sent, so it reads before it — the same order as the context chips
+ * above, which also say what the next turn will carry.
+ *
+ * An Obsidian `Menu` rather than a `<select>`. The list needs a check on the
+ * active row, a separator, and an action that leaves the list entirely, none of
+ * which an `<option>` can be; and the menu arrives themed, dismissable, and
+ * keyboard-navigable rather than reimplemented here.
+ *
+ * Disabled mid-turn. {@link ObsidianAgentService.setActiveModel} reconfigures the
+ * live agent, so a switch during a tool-using run would move its remaining turns
+ * onto a different model — half a run on each, with the transcript giving no sign
+ * of where the seam is. Waiting for the turn to land costs seconds; the button
+ * stays mounted so the row does not reflow around it.
+ */
+export function ModelSwitcher({ target, onSelect, onOpenSettings, isBusy }: ModelSwitcherProps): React.JSX.Element {
+	const t = useT();
+	const choices = target.modelChoices;
+	// Nothing to pick and nowhere to go: the menu would open as a popover with one
+	// dead line in it, which reads as a bug rather than as a state.
+	const isEmpty = choices.length === 0 && !onOpenSettings;
+
+	/**
+	 * The menu.
+	 *
+	 * "Manage models" is unconditional — with models configured it is how a user
+	 * adds the next one, and with none it is the only thing the switcher can
+	 * usefully do, which is why the empty case still opens rather than going
+	 * silent. The label above it exists so that case reads as "you have not set
+	 * one up" instead of as an empty list.
+	 */
+	const openMenu = (event: React.MouseEvent<HTMLButtonElement>): void => {
+		const menu = new Menu();
+		if (choices.length === 0) {
+			menu.addItem((item) => item.setTitle(t.t("modelSwitcher.noModels")).setIsLabel(true));
+		}
+		for (const choice of choices) {
+			menu.addItem((item) =>
+				item
+					.setTitle(modelChoiceLabel(choice, t))
+					// The check is what marks the active row, so the label must not say
+					// "active" as well — the Models tab's own rows do, and repeating it
+					// here would make the checked row read as a different kind of entry.
+					.setChecked(choice.id === target.activeModelId)
+					.onClick(() => onSelect(choice.id)),
+			);
+		}
+		if (onOpenSettings) {
+			if (choices.length > 0) {
+				menu.addSeparator();
+			}
+			menu.addItem((item) => item.setTitle(t.t("modelSwitcher.manageModels")).setIcon("settings").onClick(onOpenSettings));
+		}
+		/*
+		 * Anchored to the button, not to the pointer.
+		 *
+		 * `showAtMouseEvent` would be the shorter call, but a button activated with
+		 * Enter or Space dispatches a click whose coordinates are `0, 0`, which
+		 * puts the menu in the window's top-left corner — far from the control and
+		 * off the panel entirely. The button's own top edge is where the menu
+		 * belongs either way, and Obsidian flips it above the point when there is
+		 * no room below, which at the bottom of a sidebar there never is.
+		 */
+		const rect = event.currentTarget.getBoundingClientRect();
+		menu.showAtPosition({ x: rect.left, y: rect.top });
+	};
+
+	return (
+		<IconButton
+			icon="chevrons-up-down"
+			label={modelSwitcherTitle(target, t)}
+			className="piem-chat__model-switcher"
+			disabled={isBusy || isEmpty}
+			hasPopup="menu"
+			onClick={openMenu}
+		>
+			{/*
+			 * Hidden from assistive tech: the accessible name above already carries
+			 * the model, its endpoint, and — with agent details on — the reasoning
+			 * level, so reading this too would repeat the first third of it.
+			 */}
+			<span className="piem-chat__model-switcher-name" aria-hidden="true">
+				{activeModelName(target)}
+			</span>
+		</IconButton>
+	);
+}

@@ -106,6 +106,32 @@ describe("icon contrast in the resting state (WCAG 1.4.11)", () => {
 	}
 
 	/*
+	 * The switcher is muted the same way but restored differently, so it cannot
+	 * ride the loop above.
+	 *
+	 * Those two are revealed by their *container* — the message card, the context
+	 * chip — so their base rule has to keep `--icon-color-hover` muted and a
+	 * descendant rule lifts both tokens. The switcher is its own hover target and
+	 * always visible, so the hover token is set to full strength in the base rule
+	 * itself. Asserting it as muted here would demand the pointer-on-it state be
+	 * dimmer than resting, which is the exact defect the sibling rules fix.
+	 */
+	it("mutes the model switcher with colour, and lifts it on its own hover", () => {
+		const body = ruleBody(".piem-chat__model-switcher");
+
+		expect(body).not.toMatch(/(^|[^-])opacity\s*:/);
+		expect(body).toContain("--icon-color: var(--text-muted)");
+		expect(body).toContain("--icon-color-hover: var(--text-normal)");
+		// The label beside the glyph is text, not an icon, so the icon tokens do
+		// not reach it; its own colour has to move on the same two states. Focus
+		// stays ungated and hover rides the gated block, per the touch-hover rules.
+		expect(body).toContain("color: var(--text-muted)");
+		expect(ruleBody(".piem-chat__model-switcher:focus-visible")).toContain("color: var(--text-normal)");
+		expect(ruleBody(".piem-chat__model-switcher:hover")).toContain("color: var(--text-normal)");
+		expect(gatingBlockFor(".piem-chat__model-switcher:hover")).not.toBeNull();
+	});
+
+	/*
 	 * Focus and hover are separate rules, not one selector list: the hover half is
 	 * gated on `@media (hover: hover)` (see the touch-hover block below) while the
 	 * focus half has to apply everywhere. Merging them would have swept keyboard
@@ -209,6 +235,17 @@ describe("touch targets (WCAG 2.5.5 / 2.5.8)", () => {
 		expect(rule?.[1]).toContain("min-height: var(--size-4-12)");
 		// A min-width would stretch a labelled button and fight translateX(-50%).
 		expect(declarations(rule?.[1] ?? "")).not.toContain("min-width");
+	});
+
+	it("lets the model switcher shrink under a coarse pointer, unlike its siblings", () => {
+		// The shared rule raises `min-width` to 48px, which on a phone would stop a
+		// long model name from ellipsizing and push Send off the row. Height is the
+		// half of the touch target that matters here; the button is wide by content.
+		const coarse = styles.slice(styles.lastIndexOf("@media (any-pointer: coarse)"));
+		const rule = coarse.match(/\.piem-chat__model-switcher\s*\{([^}]*)\}/);
+		expect(rule).not.toBeNull();
+		expect(rule?.[1]).toContain("min-height: var(--size-4-12)");
+		expect(rule?.[1]).toContain("min-width: 0");
 	});
 
 	it("leaves the in-chip buttons at 32px, which is a reasoned trade-off", () => {

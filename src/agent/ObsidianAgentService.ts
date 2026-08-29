@@ -27,7 +27,9 @@ import {
 	getConfiguredApiKey,
 	getPreferredThinkingLevel,
 	getSelectedModel,
+	listModelChoices,
 	modelSupportsImages,
+	type ModelChoice,
 	type PiemSettings,
 } from "../settings";
 import { ObsidianSessionManager, type ActiveSessionInfo, type SessionContext, type SessionDefaults } from "../session/ObsidianSessionManager";
@@ -76,6 +78,18 @@ export interface ChatSnapshot {
 	provider: string;
 	modelId: string;
 	thinkingLevel: ThinkingLevel;
+	/**
+	 * Configured models the panel offers to switch between, in stored order.
+	 *
+	 * Named and joined here rather than in the component, so the switcher renders
+	 * a list without holding `settings.providers` and `settings.models` and doing
+	 * the lookup itself. Empty until the user configures one, which is not an
+	 * error state: the builtin pair above still answers requests, and
+	 * {@link activeModelId} is then absent.
+	 */
+	modelChoices: ModelChoice[];
+	/** Which choice requests go out on, absent while the builtin pair serves. */
+	activeModelId?: string;
 	session?: ActiveSessionInfo;
 	/**
 	 * Bumped whenever the set of stored sessions or their labels changes. The
@@ -211,6 +225,20 @@ export interface ObsidianAgentServiceOptions {
 	 * simply passes one and no call site has to care.
 	 */
 	logger?: LoggerLike;
+	/**
+	 * Writes the settings object this service reads back to disk.
+	 *
+	 * Needed because the chat panel can now change a setting — the active model —
+	 * and the panel's only dependency is this service. The plugin's own
+	 * `saveSettings` is what belongs here: it seals the secrets, persists, and
+	 * calls {@link ObsidianAgentService.refreshConfiguration} on the way back, so
+	 * a switch reaches the running conversation through exactly the path a
+	 * settings-tab change already takes.
+	 *
+	 * Omitted falls back to reconfiguring in memory alone, which is what a test
+	 * holding the settings object directly wants.
+	 */
+	persistSettings?: () => Promise<void>;
 }
 
 interface CompactionRunOptions {
@@ -226,6 +254,8 @@ export class ObsidianAgentService {
 	private readonly sessionManager: ObsidianSessionManager;
 	private readonly streamFn: StreamFn | undefined;
 	private readonly loadUserSkillsFn: () => Promise<{ skills: UserSkill[]; diagnostics: SkillDiagnostic[] }>;
+	/** See {@link ObsidianAgentServiceOptions.persistSettings}. */
+	private readonly persistSettings: () => Promise<void>;
 	private readonly listeners = new Set<SnapshotListener>();
 	/**
 	 * Single vault execution env shared by the file tools and the prompt-template
@@ -350,6 +380,7 @@ export class ObsidianAgentService {
 		this.sessionManager = sessionManager;
 		this.streamFn = options.streamFn;
 		this.loadUserSkillsFn = options.loadUserSkills ?? loadUserSkills;
+		this.persistSettings = options.persistSettings ?? (() => this.refreshConfiguration());
 		this.log = (options.logger ?? NOOP_LOGGER).child("agent");
 		this.env = new VaultExecutionEnv(app);
 	}
@@ -819,6 +850,31 @@ export class ObsidianAgentService {
 		this.notify();
 	}
 
+	/**
+	 * Repoints requests at one of the configured models.
+	 *
+	 * The write goes through here rather than through the settings tab because
+	 * the switcher lives in the composer: the panel's only dependency is this
+	 * service, and a chat-panel control that reached for the plugin object would
+	 * be a second route to the same setting. Persistence is delegated — see
+	 * {@link ObsidianAgentServiceOptions.persistSettings} — which also carries the
+	 * reconfigure, so a switch mid-conversation lands on `agent.state.model` and
+	 * is appended to the session log like any other configuration change.
+	 *
+	 * An id that names no configured model is ignored rather than stored. A
+	 * dangling `activeModelId` does not fail loudly: {@link getSelectedModel}
+	 * answers the next request from the builtin catalog instead, which is a
+	 * different endpoint than the user believes they selected.
+	 */
+	async setActiveModel(modelId: string): Promise<void> {
+		const settings = this.getSettings();
+		if (settings.activeModelId === modelId || !settings.models.some((model) => model.id === modelId)) {
+			return;
+		}
+		settings.activeModelId = modelId;
+		await this.persistSettings();
+	}
+
 	async refreshConfiguration(): Promise<void> {
 		// A just-trashed session leaves nothing to append to; the session adopted in
 		// its place runs `ensureConfiguration` itself. Subscribers are still told:
@@ -894,6 +950,8 @@ export class ObsidianAgentService {
 			provider: model.provider,
 			modelId: model.id,
 			thinkingLevel: getPreferredThinkingLevel(settings),
+			modelChoices: listModelChoices(settings),
+			activeModelId: settings.activeModelId,
 			session: this.sessionInfo,
 			sessionRevision: this.sessionRevision,
 			usage: sumUsage(messages, this.compactionUsage),
