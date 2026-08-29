@@ -114,6 +114,59 @@ describe("ObsidianSessionManager", () => {
 		expect(context.messages).toHaveLength(1);
 		expect(context.model).toEqual({ provider: "deepseek", modelId: "deepseek-v4-pro" });
 	});
+
+	it("reports no name before a session is active", async () => {
+		const adapter = new MemoryAdapter() as unknown as DataAdapter;
+		const manager = new ObsidianSessionManager(adapter, SESSION_DIR, "obsidian-vault:Test");
+
+		expect(await manager.readActiveSessionName()).toBeUndefined();
+	});
+
+	it("reads back a name set through the local write path", async () => {
+		const adapter = new MemoryAdapter() as unknown as DataAdapter;
+		const manager = new ObsidianSessionManager(adapter, SESSION_DIR, "obsidian-vault:Test");
+		await manager.createSession(DEFAULTS);
+
+		await manager.appendSessionInfo("Local name");
+
+		expect(await manager.readActiveSessionName()).toBe("Local name");
+	});
+
+	it("reads a name an external writer appended that the live session cannot see", async () => {
+		const adapter = new MemoryAdapter() as unknown as DataAdapter;
+		const manager = new ObsidianSessionManager(adapter, SESSION_DIR, "obsidian-vault:Test");
+		await manager.createSession(DEFAULTS);
+		await manager.appendSessionInfo("Local name");
+
+		// A second manager over the same vault plays the external writer: another
+		// Obsidian window, a pi CLI, or a hand edit appending a name fact. It loads
+		// the file fresh, so its sequence numbers continue correctly.
+		const external = new ObsidianSessionManager(adapter, SESSION_DIR, "obsidian-vault:Test");
+		await external.loadSession(manager.getActiveSessionPath()!);
+		await external.appendSessionInfo("External name");
+
+		// The live session's in-memory state is hydrated once at open and never
+		// sees the external line — this is exactly the staleness the read exists
+		// to expose.
+		expect((await manager.getActiveSessionInfo()).name).toBe("Local name");
+		expect(await manager.readActiveSessionName()).toBe("External name");
+	});
+
+	it("reads a whitespace-only external name as cleared", async () => {
+		const adapter = new MemoryAdapter() as unknown as DataAdapter;
+		const manager = new ObsidianSessionManager(adapter, SESSION_DIR, "obsidian-vault:Test");
+		await manager.createSession(DEFAULTS);
+		await manager.appendSessionInfo("Local name");
+
+		const external = new ObsidianSessionManager(adapter, SESSION_DIR, "obsidian-vault:Test");
+		await external.loadSession(manager.getActiveSessionPath()!);
+		await external.appendSessionInfo("   ");
+
+		// Collapsing whitespace to cleared matches how `summarize` and the local
+		// rename path treat it, so the comparison in the service treats "  " the
+		// same as an explicit clear.
+		expect(await manager.readActiveSessionName()).toBeUndefined();
+	});
 });
 
 describe("ObsidianSessionManager branch summary", () => {

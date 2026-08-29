@@ -721,6 +721,53 @@ export class ObsidianAgentService {
 	}
 
 	/**
+	 * Reconciles the active session's display name with what is on disk. The
+	 * counterpart to {@link renameSession} for renames this plugin did not make:
+	 * a second Obsidian window on the same vault, a pi CLI sharing the folder, or
+	 * a hand edit appends a name fact to the JSONL that the live session's
+	 * in-memory state never sees.
+	 *
+	 * The name comparison is the loop guard, not a nicety. Whether this plugin's
+	 * own adapter writes surface as vault `modify` events is platform-dependent
+	 * (desktop may; mobile has no disk watcher), so every event — self-written or
+	 * external — funnels through here and only a genuinely different name is
+	 * allowed to move state. A local `renameSession` already cached the name it
+	 * wrote, so its own echo reads as unchanged and lands nowhere; without that
+	 * guard, per-append events during a streaming turn would re-render the panel
+	 * and thrash the session list effect on every message.
+	 *
+	 * Only the name is patched, never the rest of `sessionInfo`: a disk read taken
+	 * mid-stream is behind the live session's in-flight appends, so copying
+	 * `messageCount`/`updatedAt` across could only regress them. An external
+	 * process appending *messages* (not names) to the active file stays out of
+	 * scope — nothing in the panel renders that live, and the next settled
+	 * refresh re-summarizes.
+	 *
+	 * Best-effort like retention: a read that throws (the file deleted or moved
+	 * externally mid-read) leaves the current state alone rather than becoming an
+	 * unhandled rejection from a vault event handler.
+	 */
+	async syncExternalSessionChange(): Promise<void> {
+		if (!this.sessionManager.getActiveSessionPath()) {
+			return;
+		}
+		let diskName: string | undefined;
+		try {
+			diskName = await this.sessionManager.readActiveSessionName();
+		} catch {
+			return;
+		}
+		if (diskName === this.sessionInfo?.name) {
+			return;
+		}
+		if (this.sessionInfo) {
+			this.sessionInfo = { ...this.sessionInfo, name: diskName };
+		}
+		this.sessionRevision += 1;
+		this.notify();
+	}
+
+	/**
 	 * Trashes a stored session. Deleting the active one leaves the manager without
 	 * an active session, so a replacement is adopted here before anything reads
 	 * `getActiveSessionInfo` — the next stored session, or a fresh one when the
@@ -817,6 +864,11 @@ export class ObsidianAgentService {
 	 */
 	private t(): Translator {
 		return getT(resolveLanguage(this.app.vault as LanguageHost, this.getSettings().language));
+	}
+
+	/** The active session's vault path, or null when no chat is open. */
+	getActiveSessionPath(): string | null {
+		return this.sessionManager.getActiveSessionPath();
 	}
 
 	getSnapshot(): ChatSnapshot {

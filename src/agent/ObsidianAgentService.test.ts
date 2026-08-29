@@ -231,6 +231,85 @@ describe("ObsidianAgentService", () => {
 		expect(service.getSnapshot().session?.name).toBeUndefined();
 	});
 
+	it("picks up a name appended externally to the active session", async () => {
+		const adapter = new MemoryAdapter();
+		const service = createService(adapter);
+		await service.sendPrompt("First conversation");
+		await service.renameSession("Local name");
+		const revisionBefore = service.getSnapshot().sessionRevision;
+
+		// Another writer on the same vault — a second Obsidian window, a pi CLI,
+		// a hand edit — appends a name fact the live session's memory never sees.
+		const external = new ObsidianSessionManager(asDataAdapter(adapter), SESSION_DIR, "obsidian-vault:Test");
+		await external.loadSession(service.getActiveSessionPath()!);
+		await external.appendSessionInfo("External name");
+
+		await service.syncExternalSessionChange();
+
+		const snapshot = service.getSnapshot();
+		expect(snapshot.session?.name).toBe("External name");
+		// The bump is what makes the session picker re-list; without it the header
+		// would correct while the list stayed stale.
+		expect(snapshot.sessionRevision).toBe(revisionBefore + 1);
+	});
+
+	it("leaves the revision alone when the file changed but the name did not", async () => {
+		const service = createService();
+		await service.sendPrompt("First conversation");
+		await service.renameSession("Local name");
+		const revisionBefore = service.getSnapshot().sessionRevision;
+
+		// Every appended message writes the active file, and whether those writes
+		// surface as vault modify events is platform-dependent; the name
+		// comparison is what keeps a streaming turn from re-rendering per line.
+		await service.sendPrompt("Second message");
+		await service.syncExternalSessionChange();
+
+		expect(service.getSnapshot().session?.name).toBe("Local name");
+		expect(service.getSnapshot().sessionRevision).toBe(revisionBefore);
+	});
+
+	it("treats an external whitespace-only rename as cleared", async () => {
+		const adapter = new MemoryAdapter();
+		const service = createService(adapter);
+		await service.sendPrompt("First conversation");
+		await service.renameSession("Local name");
+
+		const external = new ObsidianSessionManager(asDataAdapter(adapter), SESSION_DIR, "obsidian-vault:Test");
+		await external.loadSession(service.getActiveSessionPath()!);
+		await external.appendSessionInfo("   ");
+
+		await service.syncExternalSessionChange();
+
+		// Matches how the local rename path collapses `"   "` to undefined.
+		expect(service.getSnapshot().session?.name).toBeUndefined();
+	});
+
+	it("survives the active file being deleted externally", async () => {
+		const adapter = new MemoryAdapter();
+		const service = createService(adapter);
+		await service.sendPrompt("First conversation");
+		const revisionBefore = service.getSnapshot().sessionRevision;
+
+		const external = new ObsidianSessionManager(asDataAdapter(adapter), SESSION_DIR, "obsidian-vault:Test");
+		await external.deleteSession(service.getActiveSessionPath()!);
+
+		// Best-effort by contract: a failed re-read leaves the state alone instead
+		// of turning a vault event into an unhandled rejection.
+		await service.syncExternalSessionChange();
+
+		expect(service.getSnapshot().sessionRevision).toBe(revisionBefore);
+	});
+
+	it("does nothing when no session is active", async () => {
+		const service = createService();
+
+		await service.syncExternalSessionChange();
+
+		expect(service.getSnapshot().sessionRevision).toBe(0);
+		expect(service.getSnapshot().session).toBeUndefined();
+	});
+
 	it("adopts the next stored session when the active one is deleted", async () => {
 		const service = createService();
 		await service.sendPrompt("First conversation");
