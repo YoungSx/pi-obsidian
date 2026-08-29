@@ -1120,22 +1120,37 @@
 
 @media (prefers-reduced-motion: reduce) {
 
-	.piem-chat__context-action {
+	.piem-chat__context-action,
+	.piem-chat__composer-shell {
 		transition: none;
 	}
 }
 
 /* --- composer --- */
 
+/*
+ * The composer draws no line of its own. It used to open with a full-width
+ * `border-top`, which put two rules back to back — this hairline and the shell's
+ * own frame — over one input zone. The shell's fill already separates it from the
+ * transcript; spacing comes from `.piem-chat`'s gap, uniformly on every side.
+ */
 .piem-chat__composer {
-	border-top: 1px solid var(--background-modifier-border);
 	flex-shrink: 0;
-	padding-top: var(--size-4-2);
 }
 
+/*
+ * One surface, not a framed box.
+ *
+ * The fill (`--background-secondary`) is what marks the input zone; a 1px border
+ * around it made a box in a box once the textarea inside also carried its own
+ * background — the same defect the context chips above document and shed. The
+ * border is gone and the frame's job passes to the fill alone.
+ *
+ * The focus ring is the only line the shell ever draws, so resting-state chrome
+ * stays at zero: nothing hard-split between the reader and their draft.
+ */
 .piem-chat__composer-shell {
 	background: var(--background-secondary);
-	border: 1px solid var(--background-modifier-border);
 	border-radius: var(--radius-m);
 	display: flex;
 	flex-direction: column;
@@ -1143,14 +1158,17 @@
 	padding: var(--size-4-2);
 	/* The command menu floats above the shell; it needs a positioning context. */
 	position: relative;
+	/* Paint-only transition; the ring fades in rather than popping. */
+	transition: box-shadow 0.15s ease-out;
 }
 
 /*
- * The shell carries the single focus indicator. The textarea used to draw its
- * own outline on top of this border, so one focus produced two rings.
+ * The shell carries the single focus indicator, as a ring rather than a border:
+ * the border itself was part of the noise being removed, so focus adds a line
+ * where none rested instead of recolouring one. `box-shadow` paints outside the
+ * layout box, so the ring never shifts the rows inside the shell.
  */
 .piem-chat__composer-shell:has(textarea:focus) {
-	border-color: var(--background-modifier-border-focus);
 	box-shadow: 0 0 0 1px var(--background-modifier-border-focus);
 }
 
@@ -1160,9 +1178,12 @@
  * long prompt scroll inside that same 80px.
  */
 .piem-chat__composer textarea {
-	background: var(--background-primary);
+	/* Transparent: the draft sits directly on the shell's fill. Painting its own
+	 * `--background-primary` put a box in a box — a panel inside the panel —
+	 * which is exactly the nesting the chips row shed and the shell border
+	 * above sheds with it. One surface, from the chip row to the send bar. */
+	background: transparent;
 	border: none;
-	border-radius: var(--radius-s);
 	color: var(--text-normal);
 	font-family: var(--font-interface);
 	/*
