@@ -331,6 +331,17 @@ export default class PiObsidianPlugin extends Plugin {
 		this.findChatView()?.refreshHeader();
 	}
 
+	/**
+	 * Re-reads skill files after the settings panel changed them on disk.
+	 *
+	 * Skills are vault content, not settings, so an import or deletion does not
+	 * go through {@link saveSettings} — this is the call that tells the running
+	 * agent its prompt changed.
+	 */
+	async refreshAgentSkills(): Promise<void> {
+		await this.agentService?.refreshSkills();
+	}
+
 	private async startNewChat(): Promise<void> {
 		await this.activateChatView();
 		await this.requireAgentService().newSession();

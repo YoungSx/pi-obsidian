@@ -732,6 +732,20 @@ export class ObsidianAgentService {
 		}
 	}
 
+	/**
+	 * Re-reads skill files after the settings panel changed them on disk.
+	 *
+	 * Imports, updates, and deletions land in the vault without touching
+	 * settings, so {@link refreshConfiguration} — which rides `saveSettings`
+	 * — never hears about them. This is the narrower half of that method: the
+	 * skills reload and the subscriber notification, with none of the model
+	 * and session bookkeeping a settings change needs.
+	 */
+	async refreshSkills(): Promise<void> {
+		await this.reloadSkills();
+		this.notify();
+	}
+
 	async refreshConfiguration(): Promise<void> {
 		// A just-trashed session leaves nothing to append to; the session adopted in
 		// its place runs `ensureConfiguration` itself. Subscribers are still told:
