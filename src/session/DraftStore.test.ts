@@ -1,12 +1,16 @@
 import { describe, expect, it } from "bun:test";
 import type { DataAdapter } from "obsidian";
 import { installObsidianStub } from "../testing/obsidianStub";
-import { DraftStore } from "./DraftStore";
 
-// `obsidian` is type-only here today, but the moment DraftStore switches to a
-// runtime export (debounce, #99) this file needs the shared stub in place —
-// installed eagerly so the import switch cannot silently break the run.
+// DraftStore imports Obsidian's `debounce` at runtime (#99), so the shared stub
+// must be registered before the module loads. The import below stays dynamic on
+// purpose: a static import hoists above the install call and resolves the real
+// (declaration-only) `obsidian` package first.
 installObsidianStub();
+
+const { DraftStore } = await import("./DraftStore");
+/** Instance shape of the dynamically imported class, for the signatures below. */
+type DraftStoreInstance = InstanceType<typeof DraftStore>;
 
 const DRAFT_PATH = `.${"obsidian"}/plugins/piem/sessions/drafts.json`;
 /** A second location, never seeded, standing in for a newly chosen chat folder. */
@@ -56,7 +60,7 @@ class MemoryAdapter {
  */
 const { spyLogger } = await import("../testing/logSpy");
 
-function createStore(adapter = new MemoryAdapter(), logger?: ReturnType<typeof spyLogger>["logger"]): { store: DraftStore; adapter: MemoryAdapter } {
+function createStore(adapter = new MemoryAdapter(), logger?: ReturnType<typeof spyLogger>["logger"]): { store: DraftStoreInstance; adapter: MemoryAdapter } {
 	return { store: new DraftStore(adapter as unknown as DataAdapter, DRAFT_PATH, logger), adapter };
 }
 
@@ -68,7 +72,7 @@ function createStore(adapter = new MemoryAdapter(), logger?: ReturnType<typeof s
  * behaviour under test is what a *second* load leaves behind. Constructing a
  * fresh store instead would start from an empty object and pass either way.
  */
-async function reloadFrom(store: DraftStore, filePath: string): Promise<void> {
+async function reloadFrom(store: DraftStoreInstance, filePath: string): Promise<void> {
 	const internals = store as unknown as { filePath: string; loaded: Promise<void> | null };
 	internals.filePath = filePath;
 	internals.loaded = null;
