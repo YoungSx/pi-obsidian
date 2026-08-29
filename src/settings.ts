@@ -2,7 +2,7 @@ import { App, Platform, PluginSettingTab } from "obsidian";
 import { getSupportedThinkingLevels } from "@earendil-works/pi-ai";
 import { getBuiltinModels } from "./net/builtinCatalog";
 import type { Model, ModelThinkingLevel } from "@earendil-works/pi-ai";
-import type PiObsidianPlugin from "./main";
+import type PiemPlugin from "./main";
 import { CUSTOM_ENDPOINT_PROVIDER, DEFAULT_MODEL_ID, DEFAULT_PROVIDER, DEFAULT_THINKING_LEVEL } from "./constants";
 import type { SecretEnvironment } from "./secretsStore";
 import type { NetworkTransport } from "./net/obsidianFetch";
@@ -401,10 +401,10 @@ export function getPreferredThinkingLevel(settings: PiemSettings): ModelThinking
  * testable without constructing a `PluginSettingTab`.
  */
 export class PiemSettingTab extends PluginSettingTab {
-	private readonly plugin: PiObsidianPlugin;
+	private readonly plugin: PiemPlugin;
 	private readonly secretEnvironment: SecretEnvironment | null;
 
-	constructor(app: App, plugin: PiObsidianPlugin, secretEnvironment?: SecretEnvironment) {
+	constructor(app: App, plugin: PiemPlugin, secretEnvironment?: SecretEnvironment) {
 		super(app, plugin);
 		this.plugin = plugin;
 		this.secretEnvironment = secretEnvironment ?? null;

@@ -17,9 +17,9 @@ export const CUSTOM_ENDPOINT_PROVIDER = "custom";
  * issues and blobs are its own conventions, and building them by concatenation
  * would break silently if any of them ever moves.
  */
-export const REPOSITORY_URL = "https://github.com/YoungSx/pi-obsidian";
-export const ISSUES_URL = "https://github.com/YoungSx/pi-obsidian/issues";
-export const LICENSE_URL = "https://github.com/YoungSx/pi-obsidian/blob/master/LICENSE";
+export const REPOSITORY_URL = "https://github.com/YoungSx/piem";
+export const ISSUES_URL = "https://github.com/YoungSx/piem/issues";
+export const LICENSE_URL = "https://github.com/YoungSx/piem/blob/master/LICENSE";
 
 /** Where the author's coffee money goes. */
 export const KO_FI_URL = "https://ko-fi.com/shangxin";
