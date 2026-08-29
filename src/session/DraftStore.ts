@@ -1,4 +1,5 @@
 import type { App, DataAdapter, Plugin } from "obsidian";
+import { debounce } from "obsidian";
 import { normalizeFolderPath } from "../vault/path";
 import { getPluginSessionDir } from "./ObsidianSessionManager";
 import { NOOP_LOGGER, type LoggerLike } from "../logging/Logger";
@@ -52,7 +53,17 @@ export class DraftStore {
 	private readonly filePath: string;
 	private drafts: DraftFile = {};
 	private loaded: Promise<void> | null = null;
-	private writeTimer: ReturnType<typeof setTimeout> | null = null;
+	/**
+	 * The pending disk write, as Obsidian's own debouncer.
+	 *
+	 * `resetTimer` gives the classic keystroke debounce: every `set` pushes the
+	 * write back until typing pauses. The `Debouncer` handles the timer field,
+	 * the clear-before-set, and the teardown cancel that used to be three hand-
+	 * rolled `writeTimer` blocks here.
+	 */
+	private readonly scheduleWrite = debounce(() => {
+		void this.write();
+	}, WRITE_DEBOUNCE_MS, true);
 	private flushing: Promise<void> = Promise.resolve();
 	private sequence = 0;
 	private readonly log: LoggerLike;
@@ -124,29 +135,17 @@ export class DraftStore {
 	 * exists to fix.
 	 */
 	async flush(): Promise<void> {
-		if (this.writeTimer !== null) {
-			clearTimeout(this.writeTimer);
-			this.writeTimer = null;
-		}
+		// Cancel rather than `run()`: the debouncer only fires its callback when a
+		// write is actually pending, but the store's reason for existing is that a
+		// closing panel must land every keystroke — so the write itself stays
+		// unconditional here.
+		this.scheduleWrite.cancel();
 		await this.write();
 	}
 
 	/** Cancels pending work without writing. For teardown paths that must not touch disk. */
 	dispose(): void {
-		if (this.writeTimer !== null) {
-			clearTimeout(this.writeTimer);
-			this.writeTimer = null;
-		}
-	}
-
-	private scheduleWrite(): void {
-		if (this.writeTimer !== null) {
-			clearTimeout(this.writeTimer);
-		}
-		this.writeTimer = setTimeout(() => {
-			this.writeTimer = null;
-			void this.write();
-		}, WRITE_DEBOUNCE_MS);
+		this.scheduleWrite.cancel();
 	}
 
 	/**
