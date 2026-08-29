@@ -134,24 +134,25 @@ markdownRenderMock.mockImplementation(async ({ el }: MarkdownRenderCall) => {
 });
 
 /**
- * Stand-in for Obsidian's tag combiner. The documented contract is one line —
- * "Combines all tags from frontmatter and note content into a single array" —
- * and this stub takes it literally: body tags pass through as `TagCache` holds
- * them (with the leading `#`), frontmatter tags pass through as written in YAML
- * (without it), exact duplicates collapse, and a nullish cache yields `null`.
+ * Stand-in for Obsidian's tag combiner, mirrored from the real 1.8.10
+ * implementation (decompiled `app.js`, verified 2026-08 — the ⚠ note this
+ * stub used to carry demanded exactly that verification before pinning
+ * prefix behavior):
  *
- * ⚠ What the *real* `getAllTags` does to prefixes is deliberately NOT copied
- * from any in-repo implementation: the whole point of the caller (#97) is to
- * replace a hand-rolled merge whose behavior may diverge. Community stubs
- * disagree — e.g. obsidian-journal's mock adds `#` to frontmatter tags — and
- * the official docs are silent. Do not "fix" this stub from a plugin's source;
- * verify against real Obsidian once and only then pin the normalization here.
+ * - frontmatter first, then body tags (`TagCache` entries as held, with `#`);
+ * - frontmatter key match is `tags` (falling back to `tag`; the real one
+ *   matches `/^tag(s)?$/i`, so casing and key order nuances are not modeled);
+ * - a scalar string splits on commas/newlines and whitespace, empties dropped,
+ *   non-string array entries dropped;
+ * - every frontmatter tag gets a leading `#` unless it already has one;
+ * - NO dedup and NO sort — callers do that (`getAllTags`'s own consumers,
+ *   like the tag pane, keep duplicates);
+ * - only a nullish cache yields `null`; an empty cache yields `[]`.
  */
 export function getAllTags(cache: CachedMetadata): string[] | null {
 	if (cache === null || cache === undefined) {
 		return null;
 	}
-	const bodyTags = (cache.tags ?? []).map((entry) => entry.tag);
 	const raw: unknown = cache.frontmatter?.tags ?? cache.frontmatter?.tag;
 	const frontmatterTags =
 		typeof raw === "string"
@@ -159,7 +160,11 @@ export function getAllTags(cache: CachedMetadata): string[] | null {
 			: Array.isArray(raw)
 				? raw.filter((tag): tag is string => typeof tag === "string" && tag.length > 0)
 				: [];
-	return [...new Set([...bodyTags, ...frontmatterTags])];
+	const bodyTags = (cache.tags ?? []).map((entry) => entry.tag);
+	return [
+		...frontmatterTags.map((tag) => (tag.startsWith("#") ? tag : `#${tag}`)),
+		...bodyTags,
+	];
 }
 
 /**

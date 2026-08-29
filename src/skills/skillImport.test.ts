@@ -99,6 +99,27 @@ describe("parseSkillFrontmatter", () => {
 	test("returns empty for files without frontmatter", () => {
 		expect(parseSkillFrontmatter("# just markdown")).toEqual({});
 	});
+
+	test("unquotes scalars, so the install directory matches pi's registered name", () => {
+		expect(parseSkillFrontmatter('---\nname: "my-skill"\ndescription: \'Quoted\'\n---\nbody')).toEqual({
+			name: "my-skill",
+			description: "Quoted",
+		});
+	});
+
+	test("reads folded block scalars", () => {
+		expect(parseSkillFrontmatter("---\nname: >-\n  folded\n  skill\n---\nbody")).toEqual({
+			name: "folded skill",
+		});
+	});
+
+	test("ignores commented-out keys", () => {
+		expect(parseSkillFrontmatter("---\n# name: stale\nname: real\n---\nbody")).toEqual({ name: "real" });
+	});
+
+	test("returns empty for malformed frontmatter instead of failing the import", () => {
+		expect(parseSkillFrontmatter("---\ndescription: a: b\n---\nbody")).toEqual({});
+	});
 });
 
 describe("sha256Hex", () => {

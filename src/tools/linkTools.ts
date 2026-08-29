@@ -1,4 +1,5 @@
 import type { App, CachedMetadata, HeadingCache } from "obsidian";
+import { getAllTags } from "obsidian";
 import type { AgentTool } from "@earendil-works/pi-agent-core";
 import { Type } from "typebox";
 import { normalizeVaultPath } from "../vault/path";
@@ -177,28 +178,14 @@ function formatLinkRows(references: LinkReference[]): string[] {
 }
 
 /**
- * Tags live in two places: `CachedMetadata.tags` for body tags and frontmatter
- * `tags` for declared ones, and only body tags carry the leading `#`. Reading one
- * source, or leaving the prefix inconsistent, silently loses half a note's tags.
+ * Merging frontmatter and body tags is exactly Obsidian's `getAllTags` — the
+ * function the tag pane and search are built on — so the reported set carries
+ * the prefixes the UI shows, not a second semantics for quoted or nested tags.
+ * It guarantees neither dedup nor order, and its `null` return means "no cache
+ * at all", not "no tags".
  */
 function collectTags(metadata: CachedMetadata): string[] {
-	const tags = (metadata.tags ?? []).map((tag) => tag.tag);
-	return [...new Set([...tags, ...getFrontmatterTags(metadata)].map(normalizeTag))].sort((left, right) =>
-		left.localeCompare(right),
-	);
-}
-
-function getFrontmatterTags(metadata: CachedMetadata): string[] {
-	const raw: unknown = metadata.frontmatter?.tags;
-	if (typeof raw === "string") {
-		// A YAML scalar holds either one tag or a comma/space separated list.
-		return raw.split(/[,\s]+/).filter((tag) => tag.length > 0);
-	}
-	return Array.isArray(raw) ? raw.filter((tag): tag is string => typeof tag === "string") : [];
-}
-
-function normalizeTag(tag: string): string {
-	return tag.startsWith("#") ? tag : `#${tag}`;
+	return [...new Set(getAllTags(metadata) ?? [])].sort((left, right) => left.localeCompare(right));
 }
 
 function formatFrontmatterRows(metadata: CachedMetadata): string[] {

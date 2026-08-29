@@ -1,4 +1,5 @@
 import type { ExecutionEnv } from "@earendil-works/pi-agent-core";
+import { parse } from "yaml";
 import { DEFAULT_SKILLS_DIR } from "../agent/skillLoader";
 
 /**
@@ -184,19 +185,30 @@ export function sanitizeDirName(input: string): string {
 /**
  * Extracts `name`/`description` from a skill file's frontmatter.
  *
- * Deliberately minimal: the import only needs the display name, and full
- * frontmatter validation is pi's job at load time — duplicating its rules here
- * would eventually disagree with them.
+ * Parses with the same `yaml` package pi loads skills with, so import-time and
+ * load-time agree — regex extraction read quoted, folded, or commented YAML
+ * differently and could install a skill under a directory name pi would never
+ * register. Still deliberately minimal: full frontmatter validation is pi's
+ * job at load time. A parse failure swallows to `{}` so one malformed skill
+ * falls back to the URL-derived directory instead of failing the whole import.
  */
 export function parseSkillFrontmatter(content: string): { name?: string; description?: string } {
 	const match = /^---\r?\n([\s\S]*?)\r?\n---/.exec(content);
 	if (!match) {
 		return {};
 	}
-	const block = match[1] ?? "";
-	const name = /^name:\s*(.+)$/m.exec(block)?.[1]?.trim();
-	const description = /^description:\s*(.+)$/m.exec(block)?.[1]?.trim();
-	return { name: name || undefined, description: description || undefined };
+	let parsed: unknown;
+	try {
+		parsed = parse(match[1] ?? "");
+	} catch {
+		return {};
+	}
+	if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+		return {};
+	}
+	const raw = parsed as Record<string, unknown>;
+	const read = (value: unknown) => (typeof value === "string" && value.trim() ? value.trim() : undefined);
+	return { name: read(raw.name), description: read(raw.description) };
 }
 
 export async function sha256Hex(content: string): Promise<string> {

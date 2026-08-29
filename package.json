@@ -37,6 +37,7 @@
 		"obsidian": "latest",
 		"react": "^19.2.5",
 		"react-dom": "^19.2.5",
-		"typebox": "^1.1.37"
+		"typebox": "^1.1.37",
+		"yaml": "2.9.0"
 	}
 }

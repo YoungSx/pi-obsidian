@@ -17,45 +17,47 @@ describe("obsidianStub", () => {
 			expect(getAllTags(undefined as never)).toBeNull();
 		});
 
-		it("combines body tags and frontmatter tags", () => {
+		it("combines frontmatter tags first, then body tags", () => {
 			expect(
 				getAllTags({
 					tags: [{ tag: "#body-tag", position: {} as never }],
 					frontmatter: { tags: "fm-tag" },
 				} as never),
-			).toEqual(["#body-tag", "fm-tag"]);
+			).toEqual(["#fm-tag", "#body-tag"]);
 		});
 
-		it("keeps prefixes exactly as each source holds them", () => {
-			// Body tags carry `#`; frontmatter tags arrive without it. The stub
-			// does not normalize — see the ⚠ note on the implementation.
+		it("prefixes frontmatter tags with # and keeps body tags as held", () => {
+			// Mirrors the real 1.8.10 implementation (see the provenance note on
+			// getAllTags): frontmatter declarations are normalized, body tags pass
+			// through as `TagCache` holds them.
 			expect(
 				getAllTags({
 					tags: [{ tag: "#one", position: {} as never }],
-					frontmatter: { tag: "#two" },
+					frontmatter: { tag: "two" },
 				} as never),
-			).toEqual(["#one", "#two"]);
+			).toEqual(["#two", "#one"]);
+			expect(getAllTags({ frontmatter: { tags: ["#kept"] } } as never)).toEqual(["#kept"]);
 		});
 
 		it("splits a comma- or space-separated frontmatter scalar", () => {
 			expect(getAllTags({ frontmatter: { tags: "alpha, beta gamma" } } as never)).toEqual([
-				"alpha",
-				"beta",
-				"gamma",
+				"#alpha",
+				"#beta",
+				"#gamma",
 			]);
 		});
 
 		it("accepts a frontmatter array and keeps only strings", () => {
-			expect(getAllTags({ frontmatter: { tags: ["a", 3, "b"] } } as never)).toEqual(["a", "b"]);
+			expect(getAllTags({ frontmatter: { tags: ["a", 3, "b"] } } as never)).toEqual(["#a", "#b"]);
 		});
 
-		it("deduplicates across sources", () => {
+		it("does not deduplicate — callers do", () => {
 			expect(
 				getAllTags({
 					tags: [{ tag: "#same", position: {} as never }],
 					frontmatter: { tags: "#same" },
 				} as never),
-			).toEqual(["#same"]);
+			).toEqual(["#same", "#same"]);
 		});
 
 		it("yields an empty array when neither source has tags", () => {
