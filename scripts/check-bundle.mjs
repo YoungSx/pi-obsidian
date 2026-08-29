@@ -63,6 +63,26 @@ const BANNED_MODULES = new Map([
 	],
 ]);
 
+/**
+ * Internal pi files reached by relative path, which the bundle must therefore
+ * contain.
+ *
+ * src/vault/editDiff.ts imports pi's edit/diff engine through its location
+ * under node_modules because it is not in the package's exports map (see that
+ * file's header). TypeScript resolves the relative path through its own
+ * resolution, which does not read `exports`, so a broken path survives
+ * `tsc --noEmit` and only surfaces at bundle time or runtime. A missing input
+ * here means the path broke — most likely a package-manager layout change or a
+ * pi renaming the non-public file. Matched as a substring, like
+ * {@link BANNED_MODULES}, so a nested or pnpm-style layout is caught too.
+ */
+const REQUIRED_MODULES = new Map([
+	[
+		"node_modules/@earendil-works/pi-agent-core/dist/harness/tools/edit-diff.js",
+		"src/vault/editDiff.ts reaches this file by relative path because it is not in pi's exports map. A missing input means the path broke — likely a package-manager layout change or a pi rename. See that file's header.",
+	],
+]);
+
 function formatSize(bytes) {
 	return `${(bytes / 1024 / 1024).toFixed(2)} MiB`;
 }
@@ -202,6 +222,15 @@ if (bundleInputs) {
 		const offenders = bundleInputs.filter((input) => input.includes(segment));
 		if (offenders.length > 0) {
 			failures.push({ name: `banned module in bundle: ${segment} (${offenders.length} file(s))`, why, at: "-" });
+		}
+	}
+	for (const [segment, why] of REQUIRED_MODULES) {
+		// The mirror of the ban above: a relative path into node_modules cannot be
+		// policed at the import site, so the gate is that its module actually made
+		// it into the bundle. Checked against the same inputs list so the two
+		// rules can never drift apart.
+		if (!bundleInputs.some((input) => input.includes(segment))) {
+			failures.push({ name: `required module missing from bundle: ${segment}`, why, at: "-" });
 		}
 	}
 }
