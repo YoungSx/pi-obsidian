@@ -19,3 +19,6 @@ export const CUSTOM_ENDPOINT_PROVIDER = "custom";
 export const REPOSITORY_URL = "https://github.com/YoungSx/pi-obsidian";
 export const ISSUES_URL = "https://github.com/YoungSx/pi-obsidian/issues";
 export const LICENSE_URL = "https://github.com/YoungSx/pi-obsidian/blob/master/LICENSE";
+
+/** Where the author's coffee money goes. */
+export const KO_FI_URL = "https://ko-fi.com/shangxin";

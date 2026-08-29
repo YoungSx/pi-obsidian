@@ -16,19 +16,24 @@ const en = getT("en");
 const zh = getT("zh-cn");
 
 describe("aboutLinks", () => {
-	it("points every row at the plugin's own repository over https", () => {
+	it("points every row at an https destination", () => {
 		expect(aboutLinks(en).length).toBeGreaterThan(0);
 		for (const link of aboutLinks(en)) {
-			expect(link.href).toStartWith("https://github.com/YoungSx/pi-obsidian");
+			expect(link.href).toStartWith("https://");
 		}
 	});
 
-	it("covers source, issues, and license", () => {
+	it("covers source, issues, license, and a Ko-fi sponsorship", () => {
 		const hrefs = aboutLinks(en).map((link) => link.href);
+		// Source, issues, and license live on the project's own repo; the sponsor
+		// row is the only one that leaves for a donation page.
+		const repoHrefs = hrefs.filter((href) => href.startsWith("https://github.com/YoungSx/pi-obsidian"));
 
+		expect(repoHrefs).toHaveLength(3);
 		expect(hrefs).toContain("https://github.com/YoungSx/pi-obsidian");
 		expect(hrefs.some((href) => href.endsWith("/issues"))).toBe(true);
 		expect(hrefs.some((href) => href.endsWith("/LICENSE"))).toBe(true);
+		expect(hrefs).toContain("https://ko-fi.com/shangxin");
 	});
 
 	it("keeps the destinations identical in every language", () => {
