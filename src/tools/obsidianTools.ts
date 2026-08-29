@@ -7,6 +7,8 @@ import { createActiveNoteTool } from "./noteTools";
 import { createMoveNoteTool, createTrashNoteTool } from "./organizeTools";
 import { createFindTool, createGrepTool, createLsTool } from "./searchTools";
 import { createListTasksTool, createSummarizeTasksTool } from "./taskTools";
+import { createWebFetchTool } from "./webFetchTools";
+import type { PiemSettings } from "../settings";
 
 /**
  * Builds the full Obsidian-vault tool set for a low-level pi `Agent`.
@@ -24,9 +26,15 @@ import { createListTasksTool, createSummarizeTasksTool } from "./taskTools";
  * vault-specific and stay hand-written. move/trash stay out of the native set
  * on purpose: pi's `FileSystem` rename replaces its destination, while a
  * user-facing move must refuse an occupied one.
+ *
+ * `web_fetch` is the sole outbound tool and is gated on
+ * {@link PiemSettings.webFetchEnabled}: absent from the set when off, so the
+ * model never sees a capability it is not allowed to exercise. It rides the
+ * same transport the user chose for provider requests, resolved here per build
+ * so a transport change in settings is reflected on the next turn.
  */
-export function createObsidianTools(app: App, env: ExecutionEnv): AgentTool[] {
-	return [
+export function createObsidianTools(app: App, env: ExecutionEnv, settings: PiemSettings): AgentTool[] {
+	const tools: AgentTool[] = [
 		adaptHarnessTool(createReadTool(), { context: { env } }),
 		adaptHarnessTool(createWriteTool(), { context: { env } }),
 		adaptHarnessTool(createEditTool(), { context: { env } }),
@@ -41,4 +49,8 @@ export function createObsidianTools(app: App, env: ExecutionEnv): AgentTool[] {
 		createMoveNoteTool(app),
 		createTrashNoteTool(app),
 	];
+	if (settings.webFetchEnabled) {
+		tools.push(createWebFetchTool(settings.networkTransport));
+	}
+	return tools;
 }

@@ -48,6 +48,20 @@ export interface PiemSettings {
 	providerApiKeys: Record<string, string>;
 	networkTransport: NetworkTransport;
 	/**
+	 * Whether the agent may make outbound HTTP requests at all.
+	 *
+	 * Off by default and opt-in: AGENTS.md keeps the plugin local-first, so a
+	 * tool that sends data outside the vault has to be a choice the user made,
+	 * not one the agent can make on its own. When off, `web_fetch` is absent from
+	 * the tool set entirely — there is no disabled stub for the model to reach
+	 * for, because a call that can only fail telegraphs the capability better by
+	 * not existing.
+	 *
+	 * Always present: a vault written before this setting existed gets the
+	 * safe default rather than inheriting an open channel.
+	 */
+	webFetchEnabled: boolean;
+	/**
 	 * Whether the chat panel exposes agent-internal metrics — token counts,
 	 * spend, context-window occupancy and raw tool payloads.
 	 *
@@ -115,6 +129,7 @@ export const DEFAULT_SETTINGS: PiemSettings = {
 	thinkingLevel: DEFAULT_THINKING_LEVEL,
 	providerApiKeys: {},
 	networkTransport: "requestUrl",
+	webFetchEnabled: false,
 	showAgentDetails: false,
 	language: "auto",
 	sendShortcut: DEFAULT_SEND_SHORTCUT,
@@ -178,6 +193,9 @@ export function normalizeSettings(data: Partial<PiemSettings> | null | undefined
 		thinkingLevel,
 		providerApiKeys: { ...providerApiKeys },
 		networkTransport,
+		// Absent in vaults written before this setting existed; those users keep
+		// the local-first default rather than inheriting an open outbound channel.
+		webFetchEnabled: data?.webFetchEnabled === true,
 		// Absent in vaults written before the setting existed; those users get the
 		// quiet default rather than inheriting the old always-verbose panel.
 		showAgentDetails: data?.showAgentDetails === true,

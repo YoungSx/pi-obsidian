@@ -9,6 +9,17 @@ installObsidianStub();
 const { TFile: TFileClass, TFolder: TFolderClass } = await import("obsidian");
 const { createObsidianTools } = await import("./obsidianTools");
 const { createVaultHarnessContext } = await import("../vault/harnessAdapter");
+const { DEFAULT_SETTINGS } = await import("../settings");
+
+/** Settings with web fetch off — the local-first default every vault starts in. */
+function defaultOffSettings() {
+	return { ...DEFAULT_SETTINGS };
+}
+
+/** Settings with web fetch on, riding the requestUrl transport the stub expects. */
+function webFetchOnSettings() {
+	return { ...DEFAULT_SETTINGS, webFetchEnabled: true, networkTransport: "requestUrl" as const };
+}
 
 describe("task tools", () => {
 	it("lists todo tasks from Obsidian metadata cache", async () => {
@@ -159,6 +170,19 @@ describe("tool registration", () => {
 			"trash_note",
 		]);
 	});
+
+	it("omits web_fetch by default and adds it only when opted in", () => {
+		const app = createTaskApp([]);
+
+		const off = tools(app).map((tool) => tool.name);
+		expect(off).not.toContain("web_fetch");
+
+		const on = tools(app, webFetchOnSettings()).map((tool) => tool.name);
+		// `web_fetch` lands at the tail, after the vault tools, so a reader scanning
+		// the registration order still meets the local capabilities first.
+		expect(on).toContain("web_fetch");
+		expect(on[on.length - 1]).toBe("web_fetch");
+	});
 });
 
 describe("abort handling", () => {
@@ -238,6 +262,6 @@ function getTaskTool(app: App, name: string) {
 }
 
 /** Builds tools bound to a fresh vault env for one test. */
-function tools(app: App) {
-	return createObsidianTools(app, createVaultHarnessContext(app).env);
+function tools(app: App, settings = defaultOffSettings()) {
+	return createObsidianTools(app, createVaultHarnessContext(app).env, settings);
 }
