@@ -1434,7 +1434,6 @@ function createServiceWithMultimodalModel(
 		thinkingLevel: "high",
 		providerApiKeys: { anthropic: "test-key" },
 		networkTransport: "requestUrl",
-		webFetchEnabled: false,
 		showAgentDetails: false,
 		sendShortcut: "enter",
 		language: "en",

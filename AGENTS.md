@@ -106,18 +106,54 @@ bun test
 - Attach `manifest.json`, `main.js`, and `styles.css` (if present) to the release as individual assets.
 - After the initial release, follow the process to add/update your plugin in the community catalog as required.
 
-## Security, privacy, and compliance
+## Agent capability
 
-Follow Obsidian's **Developer Policies** and **Plugin Guidelines**. In particular:
+This plugin's value is what the agent can actually do. A capability the user has
+to find and switch on is a capability the agent does not have: the model reasons
+about pages it cannot fetch and files it cannot reach, and the user reads the
+result as the plugin being weak rather than as a setting being off.
 
-- Default to local/offline operation. Only make network requests when essential to the feature.
-- No hidden telemetry. If you collect optional analytics or call third-party services, require explicit opt-in and document clearly in `README.md` and in settings.
-- Never execute remote code, fetch and eval scripts, or auto-update plugin code outside of normal releases.
-- Minimize scope: read/write only what's necessary inside the vault. Do not access files outside the vault.
-- Clearly disclose any external services used, data sent, and risks.
-- Respect user privacy. Do not collect vault contents, filenames, or personal information unless absolutely necessary and explicitly consented.
+So the default is capable:
+
+- **Ship capabilities on.** A tool that is useful is registered and available. Do
+  not add a setting whose only purpose is to withhold it.
+- **Disclose instead of gating.** State what the capability does where the model
+  and the user each meet it: the tool's own `description`, and a settings row that
+  reads as a statement rather than a permission prompt.
+- **Reserve toggles for the genuinely destructive**, and default those *on* too.
+  A toggle is for the user who wants to narrow the agent, not a gate the agent
+  must pass to be useful.
+- **Guard, don't ask.** Where an operation must be bounded, enforce the bound in
+  code and state it in the parameter's schema `description` so the model knows
+  before it calls — see `src/tools/parameters.ts`. A refusal the model can predict
+  costs nothing; one it discovers by calling costs a turn.
+
+The bounds that stay absolute, because they protect the user's data rather than
+restrict the agent's usefulness:
+
+- Never execute remote code, fetch and eval scripts, or auto-update plugin code
+  outside of normal releases.
+- Stay inside the vault. Obsidian's Vault API is the address space; do not reach
+  around it to the filesystem.
+- No hidden telemetry. Nothing about the user's vault is collected for us.
+- Clearly disclose external services used, data sent, and risks.
 - Avoid deceptive patterns, ads, or spammy notifications.
-- Register and clean up all DOM, app, and interval listeners using the provided `register*` helpers so the plugin unloads safely.
+- Register and clean up all DOM, app, and interval listeners using the provided
+  `register*` helpers so the plugin unloads safely.
+
+### Divergence from Obsidian's published guidance
+
+Obsidian's **Developer Policies** and **Plugin Guidelines** ask for explicit
+opt-in before a plugin calls a third-party service, written for plugins where the
+network is incidental. Here it is the product: the agent is a model behind an API,
+so a user who has configured a provider key has already opted into outbound
+requests, and gating individual tools behind a second consent adds friction
+without adding a decision.
+
+This is a deliberate divergence, decided in #52 when `web_fetch`'s off-by-default
+toggle was removed. Every other clause above is followed as written. If the
+community-catalog review objects, the answer is better disclosure, not a return to
+gating.
 
 ## UX & copy guidelines (for UI text, commands, settings)
 
@@ -159,9 +195,10 @@ Follow Obsidian's **Developer Policies** and **Plugin Guidelines**. In particula
 - Use `this.register*` helpers for everything that needs cleanup.
 
 **Don't**
+- Add a setting whose only effect is to withhold a working capability from the
+  agent. Disclose it instead — see **Agent capability**.
 - Introduce network calls without an obvious user-facing reason and documentation.
-- Ship features that require cloud services without clear disclosure and explicit opt-in.
-- Store or transmit vault contents unless essential and consented.
+- Store or transmit vault contents beyond the provider serving the active model.
 
 ## Common tasks
 

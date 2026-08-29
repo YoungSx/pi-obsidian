@@ -29,9 +29,13 @@ import type { PiemSettings } from "../settings";
 	 * file. move/trash stay out of the native set because pi's `FileSystem` rename
 	 * replaces its destination, while a user-facing move must refuse an occupied one.
  *
- * `web_fetch` is the sole outbound tool and is gated on
- * {@link PiemSettings.webFetchEnabled}: absent from the set when off, so the
- * model never sees a capability it is not allowed to exercise. It rides the
+ * `web_fetch` is the sole outbound tool and is always present. It was gated
+ * behind an off-by-default setting until the capability review in #52: a tool
+ * the user has to discover and enable is a tool the agent effectively does not
+ * have, and the failure mode that gating produced — the model reasoning about
+ * pages it could not reach — cost more than the channel it withheld. Disclosure
+ * moved to where it belongs: the tool's own `description` names the outbound
+ * request, and the Network tab documents the transport it rides. It rides the
  * same transport the user chose for provider requests, resolved here per build
  * so a transport change in settings is reflected on the next turn.
  */
@@ -55,12 +59,10 @@ export function createObsidianTools(
 		createActiveNoteTool(app),
 		createMoveNoteTool(app),
 		createTrashNoteTool(app),
+		createWebFetchTool(settings.networkTransport),
 	];
 	if (getSkills) {
 		tools.push(createReadSkillTool(getSkills));
-	}
-	if (settings.webFetchEnabled) {
-		tools.push(createWebFetchTool(settings.networkTransport));
 	}
 	return tools;
 }

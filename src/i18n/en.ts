@@ -380,13 +380,16 @@ export const en = {
 		transportRequestUrl: "Request URL (buffered, works everywhere)",
 		transportFetch: "Fetch (streams, may be blocked)",
 		/**
-		 * Toggle for the agent's outbound HTTP tool. Named for what it opens — a
-		 * channel out of the vault — not for the tool's internal name, because a
-		 * reader flipping this has never seen `web_fetch` and should not have to.
+		 * Disclosure for the agent's outbound HTTP tool, which is always available.
+		 *
+		 * Was a toggle until #52. Reworded from permission to plain statement: the
+		 * reader is being told what the agent can do, not asked to allow it. Still
+		 * named for the capability rather than `web_fetch`, because a reader has
+		 * never seen the tool's internal name and should not have to.
 		 */
-		webFetchEnabled: "Allow the agent to fetch web pages",
-		webFetchEnabledDesc:
-			"Adds a tool the agent can use to request external URLs. The request and any data in it leave the vault and Obsidian. Off by default; the transport above decides how it travels.",
+		webFetchName: "Fetching web pages",
+		webFetchDesc:
+			"The agent can request external URLs when a task needs a page. Those requests, and any data in them, leave the vault and Obsidian; the transport above decides how they travel.",
 		whatLeavesVault: "What leaves this vault",
 		whatLeavesVaultDesc:
 			"Prompts, vault content read by tools, and tool results are sent to the provider serving the active model. Nothing is sent anywhere else.",

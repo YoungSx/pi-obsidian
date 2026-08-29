@@ -11,14 +11,9 @@ const { createObsidianTools } = await import("./obsidianTools");
 const { createVaultHarnessContext } = await import("../vault/harnessAdapter");
 const { DEFAULT_SETTINGS } = await import("../settings");
 
-/** Settings with web fetch off — the local-first default every vault starts in. */
-function defaultOffSettings() {
-	return { ...DEFAULT_SETTINGS };
-}
-
-/** Settings with web fetch on, riding the requestUrl transport the stub expects. */
-function webFetchOnSettings() {
-	return { ...DEFAULT_SETTINGS, webFetchEnabled: true, networkTransport: "requestUrl" as const };
+/** Stock settings, riding the requestUrl transport the network stub expects. */
+function defaultSettings() {
+	return { ...DEFAULT_SETTINGS, networkTransport: "requestUrl" as const };
 }
 
 describe("task tools", () => {
@@ -168,20 +163,19 @@ describe("tool registration", () => {
 			"get_active_note",
 			"move_note",
 			"trash_note",
+			// Last in the list, after the vault tools: a reader scanning the
+			// registration order meets the local capabilities before the outbound one.
+			"web_fetch",
 		]);
 	});
 
-	it("omits web_fetch by default and adds it only when opted in", () => {
+	it("registers web_fetch with no setting to enable", () => {
 		const app = createTaskApp([]);
 
-		const off = tools(app).map((tool) => tool.name);
-		expect(off).not.toContain("web_fetch");
-
-		const on = tools(app, webFetchOnSettings()).map((tool) => tool.name);
-		// `web_fetch` lands at the tail, after the vault tools, so a reader scanning
-		// the registration order still meets the local capabilities first.
-		expect(on).toContain("web_fetch");
-		expect(on[on.length - 1]).toBe("web_fetch");
+		// Guards the #52 decision against a silent revert. The tool was gated behind
+		// an off-by-default setting, and re-adding any gate would leave the agent
+		// reasoning about pages it cannot reach — the failure the gate itself caused.
+		expect(tools(app).map((tool) => tool.name)).toContain("web_fetch");
 	});
 });
 
@@ -262,6 +256,6 @@ function getTaskTool(app: App, name: string) {
 }
 
 /** Builds tools bound to a fresh vault env for one test. */
-function tools(app: App, settings = defaultOffSettings()) {
+function tools(app: App, settings = defaultSettings()) {
 	return createObsidianTools(app, createVaultHarnessContext(app).env, settings);
 }
