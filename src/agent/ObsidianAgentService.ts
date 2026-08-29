@@ -214,9 +214,10 @@ export interface ObsidianAgentServiceOptions {
 	streamFn?: StreamFn;
 	/**
 	 * User-level skill loader, overridable so tests stay out of the real home
-	 * directory; defaults to {@link loadUserSkills}.
+	 * directory; defaults to {@link loadUserSkills}. Receives the configured
+	 * extra folder, if any.
 	 */
-	loadUserSkills?: () => Promise<{ skills: UserSkill[]; diagnostics: SkillDiagnostic[] }>;
+	loadUserSkills?: (customDir?: string) => Promise<{ skills: UserSkill[]; diagnostics: SkillDiagnostic[] }>;
 	/**
 	 * Root logger; the service logs under its `agent` child.
 	 *
@@ -253,7 +254,7 @@ export class ObsidianAgentService {
 	private readonly getSettings: () => PiemSettings;
 	private readonly sessionManager: ObsidianSessionManager;
 	private readonly streamFn: StreamFn | undefined;
-	private readonly loadUserSkillsFn: () => Promise<{ skills: UserSkill[]; diagnostics: SkillDiagnostic[] }>;
+	private readonly loadUserSkillsFn: (customDir?: string) => Promise<{ skills: UserSkill[]; diagnostics: SkillDiagnostic[] }>;
 	/** See {@link ObsidianAgentServiceOptions.persistSettings}. */
 	private readonly persistSettings: () => Promise<void>;
 	private readonly listeners = new Set<SnapshotListener>();
@@ -1191,10 +1192,14 @@ export class ObsidianAgentService {
 		// pi itself reads those directories, so a vault that already uses pi
 		// picks up the skills it wrote there, and a vault skill of the same
 		// name still wins.
-		const { skills: userSkills } = await this.loadUserSkillsFn();
+		const { skills: userSkills, diagnostics: userDiagnostics } = await this.loadUserSkillsFn(this.getSettings().userSkillsDir);
 		const skills = mergeSkills(createBuiltinSkills(this.t()), userSkills, vaultSkills);
 		this.skills = skills;
-		const problems = formatSkillDiagnostics(diagnostics);
+		// Both sets are warnings about the user's own files, so they share the
+		// notice channel; dropping the user-level half would recreate the silence
+		// this reload path exists to end — a misconfigured extra folder loading
+		// nothing would go unmentioned.
+		const problems = formatSkillDiagnostics([...diagnostics, ...userDiagnostics]);
 		if (problems) {
 			this.setNotice(problems);
 		}

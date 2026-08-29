@@ -2193,6 +2193,27 @@ button.piem-chat__latest {
 }
 
 /*
+ * The "folders searched" report in the Skills tab.
+ *
+ * A sub-heading over a list of plain per-folder facts, plus the framing
+ * sentence that makes an absent folder unremarkable. Muted like the
+ * legacy-chats note because neither is a control; the label alone carries
+ * weight so the rows below read as belonging to it.
+ */
+.piem-settings-searched-label {
+	color: var(--text-normal);
+	font-size: var(--font-ui-small);
+	font-weight: var(--font-semibold);
+	margin: var(--size-4-4) 0 0;
+}
+
+.piem-settings-searched-desc {
+	color: var(--text-muted);
+	font-size: var(--font-ui-small);
+	margin: 0 0 var(--size-4-2);
+}
+
+/*
  * Configuration that no longer resolves, named at the top of the Models tab.
  *
  * Plain text in the warning colour, no fill and no rule: it reports a
