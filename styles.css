@@ -1266,6 +1266,48 @@
 }
 
 /*
+ * Staged image thumbnails (pasted or dropped), between the context row and the
+ * textarea. Each is a small preview with a remove button overlaying its corner.
+ */
+.piem-chat__pending-images {
+	display: flex;
+	flex-wrap: wrap;
+	gap: var(--size-4-2);
+	list-style: none;
+	margin: 0;
+	padding: 0;
+}
+
+.piem-chat__pending-image {
+	border: 1px solid var(--background-modifier-border);
+	border-radius: var(--radius-s);
+	position: relative;
+}
+
+.piem-chat__pending-image-thumb {
+	border-radius: var(--radius-s);
+	display: block;
+	height: 3rem;
+	object-fit: cover;
+	width: 3rem;
+}
+
+/*
+ * The remove button sits over the thumbnail's corner so each staged image is
+ * its own target — no reliance on a hover state a touch device cannot produce.
+ */
+.piem-chat__pending-image-remove {
+	background: var(--background-primary);
+	border: 1px solid var(--background-modifier-border);
+	border-radius: var(--radius-s);
+	box-shadow: var(--shadow-s);
+	padding: 0;
+	position: absolute;
+	right: calc(var(--size-4-2) * -0.5);
+	top: calc(var(--size-4-2) * -0.5);
+}
+
+/*
  * Send rides on Obsidian's `mod-cta` (call-to-action) accent; Stop is a plain
  * icon button so it never competes visually with Send.
  *

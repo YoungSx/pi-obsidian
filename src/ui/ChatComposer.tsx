@@ -6,6 +6,7 @@ import { sendButtonTitle, sendShortcutLabel } from "./chatStatus";
 import { useT } from "./TranslatorContext";
 import { useAutosize } from "./useAutosize";
 import { CommandMenu, type CommandEntry } from "./CommandMenu";
+import type { PendingImage } from "./pendingImages";
 
 interface ChatComposerProps {
 	input: string;
@@ -48,6 +49,16 @@ interface ChatComposerProps {
 	 * other text until the user sends them.
 	 */
 	commands: CommandEntry[];
+	/**
+	 * Images staged for the next send (pasted or dropped), shown as removable
+	 * thumbnails above the textarea. Ephemeral: the parent clears them on a
+	 * successful send and never persists them.
+	 */
+	pendingImages?: PendingImage[];
+	/** Stage image files taken from a paste or drop event. */
+	onAddImages?: (files: File[]) => void;
+	/** Remove one staged image by id. */
+	onRemoveImage?: (id: string) => void;
 }
 
 /**
@@ -75,6 +86,9 @@ export function ChatComposer({
 	onAnchorIdChange,
 	contextRow,
 	commands,
+	pendingImages,
+	onAddImages,
+	onRemoveImage,
 }: ChatComposerProps): React.JSX.Element {
 	const t = useT();
 	const textareaRef = useRef<HTMLTextAreaElement | null>(null);
@@ -117,6 +131,41 @@ export function ChatComposer({
 	};
 
 	useAutosize(textareaRef, input);
+
+	/*
+	 * Image paste/drop staging.
+	 *
+	 * Only image files are pulled from the transfer; a text paste or a dropped
+	 * note falls through to the textarea's native handling. The actual byte read
+	 * and base64 encoding happen in the parent (via `fileToPendingImage`), so
+	 * this component stays free of encoding logic and the staged list is the
+	 * single source the parent owns.
+	 */
+	const handleImageTransfer = (files: FileList | null | undefined): void => {
+		if (!onAddImages || !files || files.length === 0) {
+			return;
+		}
+		const images = Array.from(files).filter((file) => file.type.startsWith("image/"));
+		if (images.length > 0) {
+			onAddImages(images);
+		}
+	};
+
+	const handlePaste = (event: React.ClipboardEvent<HTMLTextAreaElement>): void => {
+		handleImageTransfer(event.clipboardData?.files);
+	};
+
+	const handleDrop = (event: React.DragEvent<HTMLTextAreaElement>): void => {
+		// Prevent the browser from navigating to or previewing the dropped file.
+		event.preventDefault();
+		handleImageTransfer(event.dataTransfer?.files);
+	};
+
+	const handleDragOver = (event: React.DragEvent<HTMLTextAreaElement>): void => {
+		// A drop only fires when the target signals it accepts the drag; without
+		// preventDefault the drop event never reaches `handleDrop`.
+		event.preventDefault();
+	};
 
 	/*
 	 * The only keydown path.
@@ -178,11 +227,30 @@ export function ChatComposer({
 		<footer className="piem-chat__composer">
 			<div className="piem-chat__composer-shell">
 				{contextRow}
+				{pendingImages && pendingImages.length > 0 ? (
+					<ul className="piem-chat__pending-images">
+						{pendingImages.map((image, index) => (
+							<li key={image.id} className="piem-chat__pending-image">
+								<img
+									src={`data:${image.mimeType};base64,${image.data}`}
+									alt={t.t("chat.imageThumbAlt", { mimeType: image.mimeType })}
+									className="piem-chat__pending-image-thumb"
+								/>
+								<IconButton
+									icon="x"
+									label={t.t("chat.removeImage", { index: index + 1 })}
+									onClick={() => onRemoveImage?.(image.id)}
+									className="piem-chat__pending-image-remove"
+								/>
+							</li>
+						))}
+					</ul>
+				) : null}
 				<textarea
 					ref={textareaRef}
 					id={anchorId}
 					value={input}
-					onChange={(event) => {
+				onChange={(event) => {
 						const value = event.currentTarget.value;
 						onInputChange(value);
 						// Open the command menu the moment the draft becomes a lone `/`,
@@ -194,6 +262,9 @@ export function ChatComposer({
 						// Defer so a click on a menu item fires before the menu unmounts.
 						window.setTimeout(() => setMenuOpen(false), 0);
 					}}
+					onPaste={handlePaste}
+					onDrop={handleDrop}
+					onDragOver={handleDragOver}
 					placeholder={t.t("chat.placeholder")}
 					aria-label={t.t("chat.composerAria")}
 					aria-keyshortcuts={sendShortcutAria(shortcut)}

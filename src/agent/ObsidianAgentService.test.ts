@@ -837,6 +837,111 @@ describe("ObsidianAgentService", () => {
 	});
 });
 
+describe("ObsidianAgentService multimodal send", () => {
+	it("blocks image send when the active model is text-only", async () => {
+		// Default service selects deepseek-v4-pro, whose `input` is ["text"].
+		const contexts: Context[] = [];
+		const service = createService(new MemoryAdapter(), { streamFn: createCapturingStreamFn(contexts) });
+
+		const sent = await service.sendPrompt("describe this", [
+			{ type: "image", data: "AAAA", mimeType: "image/png" },
+		]);
+
+		expect(sent).toBe(false);
+		// The run never reached the provider.
+		expect(contexts).toHaveLength(0);
+		// The banner names the model and tells the user how to recover.
+		expect(service.getSnapshot().errorMessage).toContain("does not accept images");
+	});
+
+	it("sends staged images alongside text to a multimodal model", async () => {
+		const contexts: Context[] = [];
+		const { service } = createServiceWithMultimodalModel({ streamFn: createCapturingStreamFn(contexts) });
+
+		const sent = await service.sendPrompt("what is this", [
+			{ type: "image", data: "AAAA", mimeType: "image/png" },
+		]);
+
+		expect(sent).toBe(true);
+		expect(contexts.length).toBeGreaterThanOrEqual(1);
+		const firstContext = contexts[0];
+		if (!firstContext) {
+			throw new Error("Expected at least one captured request context.");
+		}
+		const userMessage = firstContext.messages.find((message) => message.role === "user");
+		expect(userMessage).toBeTruthy();
+		const content = (userMessage as { content?: unknown }).content;
+		expect(Array.isArray(content)).toBe(true);
+		expect((content as { type: string }[]).some((block) => block.type === "image")).toBe(true);
+	});
+
+	it("resolves ![[...]] embeds from the vault and strips them from the text", async () => {
+		const contexts: Context[] = [];
+		// `readVaultImages` reads via `app.vault`, not the adapter, so stage the
+		// image bytes on a fake vault that resolves `cat.png`.
+		const imageBytes = new TextEncoder().encode("fake-png-bytes").buffer as ArrayBuffer;
+		const { service } = createServiceWithMultimodalModel(
+			{ streamFn: createCapturingStreamFn(contexts) },
+			{ imageFiles: new Map([["cat.png", imageBytes]]) },
+		);
+
+		const sent = await service.sendPrompt("Look at ![[cat.png]] please");
+
+		expect(sent).toBe(true);
+		const firstContext = contexts[0];
+		if (!firstContext) {
+			throw new Error("Expected at least one captured request context.");
+		}
+		const userMessage = firstContext.messages.find((message) => message.role === "user") as
+			| { content?: unknown }
+			| undefined;
+		const content = (userMessage?.content as { type: string; text?: string; mimeType?: string }[]) ?? [];
+		// The image travelled as ImageContent…
+		expect(content.some((block) => block.type === "image" && block.mimeType === "image/png")).toBe(true);
+		// …and the embed syntax was removed from the text block.
+		const textBlock = content.find((block) => block.type === "text");
+		expect(textBlock?.text ?? "").not.toContain("![[cat.png]]");
+		expect(textBlock?.text ?? "").toContain("Look at");
+	});
+
+	it("notifies but still sends when an embed cannot be found", async () => {
+		const contexts: Context[] = [];
+		const { service } = createServiceWithMultimodalModel({ streamFn: createCapturingStreamFn(contexts) });
+
+		const sent = await service.sendPrompt("Look at ![[missing.png]] please");
+
+		expect(sent).toBe(true);
+		// The missing image surfaced as a notice, not an error that blocks.
+		expect(service.getSnapshot().noticeMessage).toContain("missing.png");
+		// No image block reached the model — only the text, embed stripped.
+		const firstContext = contexts[0];
+		if (!firstContext) {
+			throw new Error("Expected at least one captured request context.");
+		}
+		const userMessage = firstContext.messages.find((message) => message.role === "user") as
+			| { content?: unknown }
+			| undefined;
+		const content = (userMessage?.content as { type: string }[]) ?? [];
+		expect(content.some((block) => block.type === "image")).toBe(false);
+	});
+
+	it("persists a placeholder, not base64, for an image-bearing user message", async () => {
+		const adapter = new MemoryAdapter();
+		const { service } = createServiceWithMultimodalModel({}, undefined, adapter);
+
+		await service.sendPrompt("see this", [
+			{ type: "image", data: "AAAA", mimeType: "image/png" },
+		]);
+
+		const sessionPath = service.getSnapshot().session?.path ?? "";
+		const logged = await adapter.read(sessionPath);
+		// The session log must carry the placeholder text…
+		expect(logged).toContain("[image: image/png]");
+		// …and must never carry the raw base64 bytes.
+		expect(logged).not.toContain("AAAA");
+	});
+});
+
 /** Wraps SSE frames in the buffered body Obsidian's `requestUrl` returns. */
 function sseResponse(frames: object[]): { status: number; headers: Record<string, string>; arrayBuffer: ArrayBuffer } {
 	const body = frames.map((frame) => `data: ${JSON.stringify(frame)}\n\n`).join("") + "data: [DONE]\n\n";
@@ -1006,6 +1111,48 @@ function createServiceWithSettings(
 	return { service, settings };
 }
 
+/**
+ * A service backed by a multimodal model (claude-opus-5, `input: ["text","image"]`).
+ *
+ * The default service selects deepseek-v4-pro, which is text-only — fine for the
+ * capability-gate test but useless for asserting images travel through. This
+ * swaps the active model to a builtin that declares image capability, supplies
+ * an api key so `hasApiKey` passes, and optionally stages vault image bytes for
+ * `![[...]]` embed resolution (which reads `app.vault`, not the adapter).
+ */
+function createServiceWithMultimodalModel(
+	overrides: { streamFn?: StreamFn } = {},
+	vault: { imageFiles?: Map<string, ArrayBuffer> } = {},
+	memoryAdapter: MemoryAdapter = new MemoryAdapter(),
+): { service: ObsidianAgentServiceType; settings: PiemSettings } {
+	const adapter = asDataAdapter(memoryAdapter);
+	const settings: PiemSettings = {
+		providers: [],
+		models: [],
+		provider: "anthropic",
+		modelId: "claude-opus-5",
+		thinkingLevel: "high",
+		providerApiKeys: { anthropic: "test-key" },
+		networkTransport: "requestUrl",
+		webFetchEnabled: false,
+		showAgentDetails: false,
+		sendShortcut: "enter",
+		language: "en",
+		sessionRetention: DEFAULT_SESSION_RETENTION,
+		sessionDir: DEFAULT_SESSION_DIR,
+	};
+	const sessionManager = new ObsidianSessionManager(adapter, SESSION_DIR, "obsidian-vault:Test");
+	const service = new ObsidianAgentService(
+		createFakeApp(adapter, {}, vault.imageFiles),
+		() => settings,
+		sessionManager,
+		{
+			streamFn: overrides.streamFn ?? createFakeStreamFn(),
+		},
+	);
+	return { service, settings };
+}
+
 function createFakeStreamFn(): StreamFn {
 	return (model: Model<Api>, _context: Context, _options?: SimpleStreamOptions) => {
 		const stream = createAssistantMessageEventStream();
@@ -1160,8 +1307,17 @@ function createRecordingToolCallingStreamFn(
  * `DataAdapter` side, because that is the half {@link VaultExecutionEnv} reads
  * through — and the env is how prompt templates are loaded. Folders are derived
  * from the file paths, so a caller only lists leaves.
+ *
+ * `imageFiles` stages binary image bytes for `![[...]]` embed resolution, which
+ * reads `readBinary` rather than the text-reading methods above. Each path is
+ * registered as a regular `TFile` so lookups behave exactly like a vault that
+ * contains those images.
  */
-function createFakeApp(adapter: DataAdapter, vaultFiles: Record<string, string> = {}): App {
+function createFakeApp(
+	adapter: DataAdapter,
+	vaultFiles: Record<string, string> = {},
+	imageFiles?: Map<string, ArrayBuffer>,
+): App {
 	const files = new Map<string, TFile>();
 	const folders = new Map<string, TFolder>();
 
@@ -1181,15 +1337,22 @@ function createFakeApp(adapter: DataAdapter, vaultFiles: Record<string, string> 
 		return folder;
 	};
 
-	folderAt("");
-	for (const [path, content] of Object.entries(vaultFiles)) {
+	const registerFile = (path: string, size: number): void => {
 		const file = new TFileClass();
 		file.path = path;
 		file.name = path.slice(path.lastIndexOf("/") + 1);
 		file.extension = path.slice(path.lastIndexOf(".") + 1);
-		file.stat = { size: content.length, mtime: 1, ctime: 1 };
+		file.stat = { size, mtime: 1, ctime: 1 };
 		files.set(path, file);
 		folderAt(getParent(path)).children.push(file);
+	};
+
+	folderAt("");
+	for (const [path, content] of Object.entries(vaultFiles)) {
+		registerFile(path, content.length);
+	}
+	for (const [path, bytes] of imageFiles ?? []) {
+		registerFile(path, bytes.byteLength);
 	}
 
 	return {
@@ -1203,6 +1366,7 @@ function createFakeApp(adapter: DataAdapter, vaultFiles: Record<string, string> 
 			getAbstractFileByPath: (path: string) => files.get(path) ?? folders.get(path) ?? null,
 			read: async (file: TFile) => vaultFiles[file.path] ?? "",
 			cachedRead: async (file: TFile) => vaultFiles[file.path] ?? "",
+			readBinary: async (file: { path: string }) => imageFiles?.get(file.path) ?? new ArrayBuffer(0),
 		},
 		workspace: {
 			getActiveViewOfType: () => null,
