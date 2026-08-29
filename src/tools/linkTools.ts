@@ -2,21 +2,26 @@ import type { App, CachedMetadata, HeadingCache } from "obsidian";
 import type { AgentTool } from "@earendil-works/pi-agent-core";
 import { Type } from "typebox";
 import { normalizeVaultPath } from "../vault/path";
+import { maxResultsParameter, vaultPathParameter } from "./parameters";
 import { getVaultFile, textResult, throwIfAborted } from "./toolResult";
 
 const LinkDirectionParameter = Type.Optional(
-	Type.Union([Type.Literal("outgoing"), Type.Literal("incoming"), Type.Literal("both")]),
+	// Only the default is stated. The tool description already names outgoing links,
+	// backlinks and unresolved links, so the enum members read against that.
+	Type.Union([Type.Literal("outgoing"), Type.Literal("incoming"), Type.Literal("both")], {
+		description: 'Defaults to "both".',
+	}),
 );
 
 const NoteLinksParameters = Type.Object({
-	path: Type.String(),
+	path: vaultPathParameter("Note to read."),
 	direction: LinkDirectionParameter,
-	maxResults: Type.Optional(Type.Number()),
+	maxResults: maxResultsParameter(100),
 });
 
 const NoteMetadataParameters = Type.Object({
-	path: Type.String(),
-	maxResults: Type.Optional(Type.Number()),
+	path: vaultPathParameter("Note to read."),
+	maxResults: maxResultsParameter(100),
 });
 
 /**

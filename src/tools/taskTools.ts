@@ -12,22 +12,38 @@ import {
 	type TaskStatusFilter,
 	type VaultTask,
 } from "../vault/tasks";
+import { maxResultsParameter, vaultScopeParameter } from "./parameters";
 import { compareFiles, textResult, throwIfAborted } from "./toolResult";
 
-const TaskStatusParameter = Type.Optional(Type.Union([Type.Literal("todo"), Type.Literal("done"), Type.Literal("all")]));
+/**
+ * The status filter, built per tool because only the default differs.
+ *
+ * Stated at each use rather than once here: `list_tasks` defaults to todo and
+ * `summarize_tasks` to all, and a single shared description would have to be
+ * vague about the one fact a caller needs.
+ */
+function taskStatusParameter(defaultValue: "todo" | "all") {
+	return Type.Optional(
+		Type.Union([Type.Literal("todo"), Type.Literal("done"), Type.Literal("all")], {
+			description: `Defaults to "${defaultValue}".`,
+		}),
+	);
+}
+
+const TaskQueryParameter = Type.Optional(Type.String({ description: "Case-insensitive substring filter on task text." }));
 
 const ListTasksParameters = Type.Object({
-	path: Type.Optional(Type.String()),
-	status: TaskStatusParameter,
-	query: Type.Optional(Type.String()),
-	maxResults: Type.Optional(Type.Number()),
+	path: vaultScopeParameter("Folder or note."),
+	status: taskStatusParameter("todo"),
+	query: TaskQueryParameter,
+	maxResults: maxResultsParameter(100),
 });
 
 const SummarizeTasksParameters = Type.Object({
-	path: Type.Optional(Type.String()),
-	status: TaskStatusParameter,
-	query: Type.Optional(Type.String()),
-	maxResults: Type.Optional(Type.Number()),
+	path: vaultScopeParameter("Folder or note."),
+	status: taskStatusParameter("all"),
+	query: TaskQueryParameter,
+	maxResults: maxResultsParameter(100),
 });
 
 export function createListTasksTool(app: App): AgentTool<typeof ListTasksParameters> {
