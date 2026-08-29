@@ -178,14 +178,19 @@ describe("ChatComposer keyboard contract", () => {
 		expect(sent).toHaveLength(0);
 	});
 
-	it("overrides Enter-to-send on a phone, where the label must follow the binding", async () => {
+	it("overrides Enter-to-send on a phone, where the keycap goes but the binding stays", async () => {
 		// A soft keyboard has no Shift+Enter, so Enter-to-send would leave a mobile
-		// reader unable to type a second line at all. The button must not then keep
-		// promising that a bare Enter sends.
+		// reader unable to type a second line at all. It has no Ctrl either, so the
+		// button must not keep promising a chord that cannot be pressed: the keycap
+		// and the chord in the name go. The binding itself survives — a hardware
+		// keyboard on a tablet still sends through it, and the textarea keeps
+		// advertising that to assistive tech.
 		platformMock.isMobile = true;
 		const host = await renderComposer({ sendShortcut: "enter" });
 
-		expect(host.querySelector(".piem-chat__send-chord")?.textContent).toBe("Ctrl+↵");
+		expect(host.querySelector(".piem-chat__send-chord")).toBeNull();
+		const send = host.querySelector<HTMLButtonElement>(".piem-chat__send-button");
+		expect(send?.getAttribute("aria-label")).toBe("Send message");
 		expect(host.querySelector("textarea")?.getAttribute("aria-keyshortcuts")).toBe("Control+Enter Meta+Enter");
 	});
 });

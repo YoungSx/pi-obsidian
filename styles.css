@@ -1881,6 +1881,13 @@ button.piem-chat__latest {
  * toolbar wraps beneath the title. User messages stop being held to 90% here as
  * well, or a phone clips them.
  *
+ * The wrap clause above is a fallback, not the design: on a touch-primary
+ * device the block below pins the header back to one row, because React has
+ * already retired the history button that made the row too long — three buttons
+ * became two, and two fit beside the title. The wrap is what a narrow *mouse*
+ * leaf gets, where all three buttons are present and one row would crush the
+ * title into an ellipsis.
+ *
  * The context readout used to need a clause here too — the bar gave up a third of
  * its width so the row still fit. The ring has no width to give up, which is one
  * breakpoint's worth of rules this stylesheet no longer carries.
@@ -1911,6 +1918,71 @@ button.piem-chat__latest {
 
 	.piem-chat__message--user {
 		max-width: 100%;
+	}
+}
+
+/* --- touch-primary layout --- */
+
+/*
+ * Layout keyed on `pointer` — the *primary* input — where the sizing block
+ * above deliberately uses `any-pointer`. The two ask different questions:
+ * sizing asks whether a thumb might ever reach a control, and every answer
+ * counts; layout asks which input the reader is driving *now*, and a mouse on
+ * a touchscreen laptop should keep the desktop arrangement even though its
+ * screen is touchable. A phone's primary pointer is coarse even with a
+ * hardware keyboard attached, which is the device this block is for.
+ */
+@media (pointer: coarse) {
+
+	/*
+	 * The header stays one row tall on a phone: title, new chat, ⋯.
+	 *
+	 * Everything between the reader and the first message costs transcript
+	 * height, and on a phone the wrapped toolbar was a full second row of
+	 * 48px-tall buttons — a quarter of the visible transcript gone before a
+	 * single word was read. The button that made the row too long has already
+	 * left (React, keyed on `Platform.isMobile`, for the same reason); these two
+	 * declarations only retire the wrap that row used to need. The narrow-leaf
+	 * block above still fires first; cascade order puts this one on top.
+	 */
+	@container piem-chat (max-width: 32rem) {
+		.piem-chat__header {
+			flex-wrap: nowrap;
+		}
+
+		.piem-chat__header-actions {
+			flex-basis: auto;
+			justify-content: flex-end;
+		}
+	}
+
+	/*
+	 * The send row — model switcher, occupancy ring, Send/Stop — shows up only
+	 * when the composer is in use: on shell focus, or while a turn is running.
+	 *
+	 * A row of controls that sit idle between turns is the same vertical spend
+	 * as the header's wrapped row, and the keyboard that opens when the reader
+	 * taps the textarea makes every saved pixel twice as valuable — the
+	 * transcript above is what is left to read. The switches:
+	 *
+	 * `:focus-within` on the shell covers composing, and stays true while focus
+	 * moves to the switcher or Send inside the bar. `aria-busy` covers the turn
+	 * itself, so Stop stays reachable from a blurred composer — a tap that
+	 * dismisses the keyboard also blurs the textarea, and a Stop button that
+	 * vanished with focus would strand a running request. The attribute is
+	 * already maintained by `ChatApp` for exactly the busy states, so this
+	 * costs no new state and no JS.
+	 *
+	 * `display` rather than `visibility`/`opacity`: the row must actually give
+	 * its height back, or nothing above moves.
+	 */
+	.piem-chat__composer-bar {
+		display: none;
+	}
+
+	.piem-chat__composer-shell:focus-within .piem-chat__composer-bar,
+	.piem-chat[aria-busy="true"] .piem-chat__composer-bar {
+		display: flex;
 	}
 }
 
