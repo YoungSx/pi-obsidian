@@ -28,7 +28,7 @@ export const zhCN: DeepPartial<EnCopy> = {
 	},
 
 	chat: {
-		placeholder: "询问 Piem…",
+		placeholder: "询问 Piem，或输入 / 使用命令…",
 		composerAria: "给 Piem 发消息",
 		stopCompaction: "停止整理",
 		stopResponse: "停止回复",
@@ -83,6 +83,9 @@ export const zhCN: DeepPartial<EnCopy> = {
 		contextLabel: "上下文",
 		contextValueText: "已使用 {estimated}{tokens} / {window} {unit}，{percent}%，{state}",
 		contextEstimatedPrefix: "约 ",
+		commandMenuAria: "提示命令",
+		unknownCommand: "未知命令：/{name}",
+		templatesLoadedWithWarnings: "已加载提示命令，但有 {count} 条警告。",
 	},
 
 	chatStatus: {
@@ -216,6 +219,9 @@ export const zhCN: DeepPartial<EnCopy> = {
 			"请求 URL 可在各处绕过浏览器限制，但会缓冲响应——token 会一次性出现。Fetch 会增量流式返回，但可能被拦截。",
 		transportRequestUrl: "请求 URL（缓冲，各处可用）",
 		transportFetch: "Fetch（流式，可能被拦截）",
+		webFetchEnabled: "允许代理获取网页",
+		webFetchEnabledDesc:
+			"添加一个工具，代理可用来请求外部 URL。请求及其中的数据会离开笔记库和 Obsidian。默认关闭；上方的传输方式决定它如何发出。",
 		whatLeavesVault: "什么会离开笔记库",
 		whatLeavesVaultDesc:
 			"提示词、工具读取的笔记库内容以及工具结果，会发送给服务于当前模型的提供方。不会发送到任何其他地方。",
@@ -236,6 +242,9 @@ export const zhCN: DeepPartial<EnCopy> = {
 		licenseName: "许可协议",
 		licenseDesc: "本插件的分发条款。",
 		licenseLabel: "阅读许可协议",
+		sponsorName: "赞助我",
+		sponsorDesc: "请我在 Ko-fi 上喝杯咖啡。",
+		sponsorLabel: "疯狂星期四 V 我 50",
 	},
 
 	compaction: {

@@ -1,22 +1,19 @@
 import type { App, DataAdapter, Plugin } from "obsidian";
-import type { AgentMessage, CompactResult, ThinkingLevel } from "@earendil-works/pi-agent-core";
-import { normalizeFolderPath } from "../vault/path";
 import {
-	buildSessionContext,
-	createEntryId,
-	createSessionHeader,
-	createSessionId,
-	getLastLeafId,
-	parseSessionEntries,
-	serializeSessionEntries,
-	type CompactionSessionEntry,
-	type MessageSessionEntry,
-	type ModelChangeSessionEntry,
-	type SessionContext,
-	type SessionEntry,
-	type SessionInfoEntry,
-	type ThinkingLevelChangeSessionEntry,
-} from "./jsonl";
+	buildContextEntries,
+	buildSessionContext as buildPiSessionContext,
+	type BranchSummaryResult,
+	JsonlSessionRepo,
+	sessionEntryToContextMessages,
+	type AgentMessage,
+	type CompactResult,
+	type Entry,
+	type JsonlSessionMetadata,
+	type Session,
+	type ThinkingLevel,
+} from "@earendil-works/pi-agent-core";
+import { normalizeFolderPath } from "../vault/path";
+import { ObsidianSessionFileSystem } from "./ObsidianSessionFileSystem";
 import { selectSessionsToEvict, UNLIMITED_SESSION_RETENTION } from "./retention";
 
 export interface SessionDefaults {
@@ -35,79 +32,51 @@ export interface ActiveSessionInfo {
 	firstMessage: string;
 }
 
-interface SessionFileInfo extends ActiveSessionInfo {
-	modifiedTime: number;
+export interface SessionContext {
+	messages: AgentMessage[];
+	messageOrigins: (string | null)[];
+	model: { provider: string; modelId: string } | null;
+	thinkingLevel: ThinkingLevel;
 }
 
-/**
- * Where chats go and how many are kept, asked per operation rather than captured.
- *
- * Both are settings the user can change with the plugin running, and the Sessions
- * tab promises the folder "takes effect for the next chat you create" — which
- * only holds if the manager asks at creation time instead of remembering what it
- * was constructed with.
- */
 export interface SessionPolicy {
 	sessionDir(): string;
-	/** {@link UNLIMITED_SESSION_RETENTION} keeps every chat. */
 	retentionLimit(): number;
 }
 
-/**
- * The slice of settings the policy is built from.
- *
- * Declared structurally instead of importing `PiemSettings`, so this module stays
- * upstream of `settings.ts` — which already imports the retention and folder
- * helpers that live beside it.
- */
 export interface SessionSettings {
 	sessionDir: string;
 	sessionRetention: number;
 }
 
+type PiSession = Session<JsonlSessionMetadata>;
+
+/** Piem's product-facing wrapper around pi's durable JSONL session repository. */
 export class ObsidianSessionManager {
-	private readonly adapter: DataAdapter;
+	private readonly fs: ObsidianSessionFileSystem;
 	private readonly policy: SessionPolicy;
 	private readonly cwd: string;
-	private sessionFile: string | null = null;
-	private entries: SessionEntry[] = [];
-	private leafId: string | null = null;
+	private session: PiSession | null = null;
+	private sessionMetadata: JsonlSessionMetadata | null = null;
 
-	/**
-	 * A bare folder is a fixed location with no cap — the shape a caller wants
-	 * when the directory is its own decision rather than the user's setting.
-	 */
 	constructor(adapter: DataAdapter, location: string | SessionPolicy, cwd: string) {
-		this.adapter = adapter;
+		this.fs = new ObsidianSessionFileSystem(adapter);
 		this.policy = typeof location === "string" ? fixedSessionPolicy(location) : location;
 		this.cwd = cwd;
 	}
 
-	static forPlugin(app: App, plugin: Plugin, getSettings: () => SessionSettings): ObsidianSessionManager {
-		// The settings are already coerced by `normalizeSettings`, so they are read
-		// straight through: a second `readRetentionLimit` here would put the same
-		// rule in two places, and `selectSessionsToEvict` treats an unreadable limit
-		// as unlimited anyway — the direction that cannot cost anyone a chat.
+	static forPlugin(app: App, _plugin: Plugin, getSettings: () => SessionSettings): ObsidianSessionManager {
 		const policy: SessionPolicy = {
 			sessionDir: () => getSettings().sessionDir,
 			retentionLimit: () => getSettings().sessionRetention,
 		};
-		return new ObsidianSessionManager(app.vault.adapter, policy, `obsidian-vault:${app.vault.getName()}`);
+		return new ObsidianSessionManager(app.vault.adapter, policy, "piem");
 	}
 
 	async createSession(defaults: SessionDefaults): Promise<ActiveSessionInfo> {
-		// Resolved once and reused: the folder is read from live settings, and a
-		// change landing between these awaits would otherwise create the directory
-		// in one place and write the chat to another.
 		const sessionDir = this.resolveSessionDir();
-		await this.ensureSessionDirectory(sessionDir);
-		const sessionId = createSessionId();
-		const timestamp = new Date().toISOString();
-		const fileTimestamp = timestamp.replace(/[:.]/g, "-");
-		this.sessionFile = `${sessionDir}/${fileTimestamp}_${sessionId}.jsonl`;
-		this.entries = [createSessionHeader(sessionId, this.cwd, timestamp)];
-		this.leafId = null;
-		await this.adapter.write(this.sessionFile, serializeSessionEntries(this.entries));
+		this.session = await this.repo(sessionDir).create({ cwd: this.cwd });
+		this.sessionMetadata = await this.session.getMetadata();
 		await this.appendModelChange(defaults.provider, defaults.modelId);
 		await this.appendThinkingLevelChange(defaults.thinkingLevel);
 		await this.evictSurplusSessions(sessionDir);
@@ -125,76 +94,45 @@ export class ObsidianSessionManager {
 	}
 
 	async loadSession(path: string): Promise<ActiveSessionInfo> {
-		const sessionPath = normalizeFolderPath(path, { allowPluginInternals: true });
-		const content = await this.adapter.read(sessionPath);
-		const entries = parseSessionEntries(content);
-		if (entries[0]?.type !== "session") {
-			throw new Error("Session file is missing a session header.");
+		const target = normalizeFolderPath(path, { allowPluginInternals: true });
+		const metadata = await this.findMetadata(target);
+		if (!metadata) {
+			throw new Error(`Session not found: ${target}`);
 		}
-		this.sessionFile = sessionPath;
-		this.entries = entries;
-		this.leafId = getLastLeafId(entries);
+		this.session = await this.repo(this.resolveSessionDir()).open(metadata);
+		this.sessionMetadata = await this.session.getMetadata();
 		return this.getActiveSessionInfo();
 	}
 
-	/**
-	 * Moves a session file to trash rather than removing it: the JSONL log is the
-	 * only copy of a conversation, so a misclick has to stay recoverable. The
-	 * system trash is preferred because it is where users already look, and it
-	 * reports failure (disabled by the OS or the user) instead of throwing, so the
-	 * vault-local `.trash` folder covers that case.
-	 *
-	 * Deleting the active session leaves no active session; callers must adopt a
-	 * replacement before touching `getActiveSessionInfo`, which throws without one.
-	 */
 	async deleteSession(path: string): Promise<void> {
-		const sessionPath = normalizeFolderPath(path, { allowPluginInternals: true });
-		if (!(await this.adapter.trashSystem(sessionPath))) {
-			await this.adapter.trashLocal(sessionPath);
+		const target = normalizeFolderPath(path, { allowPluginInternals: true });
+		const result = await this.fs.remove(target, { force: true });
+		if (!result.ok) {
+			throw result.error;
 		}
-		if (this.sessionFile === sessionPath) {
-			this.sessionFile = null;
-			this.entries = [];
-			this.leafId = null;
+		if (this.sessionMetadata?.path === target) {
+			this.session = null;
+			this.sessionMetadata = null;
 		}
 	}
 
-	/**
-	 * Stored chats, newest first.
-	 *
-	 * Reads without creating the folder. It used to ensure the directory first,
-	 * which was invisible while chats lived inside the plugin; now that they live
-	 * in the vault, that would put an empty folder in the file explorer of every
-	 * user who installs the plugin and never chats. {@link createSession} creates
-	 * it when there is something to write.
-	 */
 	async listSessions(): Promise<ActiveSessionInfo[]> {
-		const sessions = await this.readSessionFiles(this.resolveSessionDir());
-		return sessions.map(({ modifiedTime: _modifiedTime, ...session }) => session);
+		const metadata = await this.repo(this.resolveSessionDir()).list({ cwd: this.cwd });
+		const sessions = await Promise.all(metadata.map((item) => this.readSessionInfo(item)));
+		return sessions
+			.filter((session): session is SessionFileInfo => session !== null)
+			.sort((left, right) => right.modifiedTime - left.modifiedTime)
+			.map(({ modifiedTime: _modifiedTime, ...session }) => session);
 	}
 
-	/** The folder chat logs are being written to right now. */
 	getSessionDir(): string {
 		return this.resolveSessionDir();
 	}
 
-	/**
-	 * Chat logs in the active folder.
-	 *
-	 * Counts files rather than parsing them: this answers a settings row, and
-	 * reading every conversation to size a directory is not a cost a dialog should
-	 * pay. Zero when the folder does not exist yet.
-	 */
 	async countStoredSessions(): Promise<number> {
-		return (await this.listSessionFiles(this.resolveSessionDir())).length;
+		return (await this.repo(this.resolveSessionDir()).list({ cwd: this.cwd })).length;
 	}
 
-	/**
-	 * Chat logs in a folder this manager does not write to.
-	 *
-	 * Exists for the folder earlier releases used: nothing is migrated, so the
-	 * Sessions tab has to be able to say how many chats were left behind there.
-	 */
 	async countSessionsIn(dir: string): Promise<number> {
 		let normalized: string;
 		try {
@@ -202,113 +140,132 @@ export class ObsidianSessionManager {
 		} catch {
 			return 0;
 		}
-		return (await this.listSessionFiles(normalized)).length;
+		return this.countJsonlFiles(normalized);
 	}
 
 	async appendMessage(message: AgentMessage): Promise<string> {
-		return this.appendEntry<MessageSessionEntry>({
-			type: "message",
-			id: createEntryId(this.entries),
-			parentId: this.leafId,
-			timestamp: new Date().toISOString(),
-			message,
-		});
+		const persisted = JSON.parse(JSON.stringify(message)) as AgentMessage;
+		return this.requireSession().appendMessage(persisted);
 	}
 
 	async appendModelChange(provider: string, modelId: string): Promise<string> {
-		return this.appendEntry<ModelChangeSessionEntry>({
-			type: "model_change",
-			id: createEntryId(this.entries),
-			parentId: this.leafId,
-			timestamp: new Date().toISOString(),
-			provider,
-			modelId,
-		});
+		const session = this.requireSession();
+		return (await session.appendEntry({ type: "model_change", id: session.idGenerator.next(), provider, modelId }, "main")).id;
 	}
 
 	async appendThinkingLevelChange(thinkingLevel: ThinkingLevel): Promise<string> {
-		return this.appendEntry<ThinkingLevelChangeSessionEntry>({
-			type: "thinking_level_change",
-			id: createEntryId(this.entries),
-			parentId: this.leafId,
-			timestamp: new Date().toISOString(),
-			thinkingLevel,
-		});
+		const session = this.requireSession();
+		return (await session.appendEntry({ type: "thinking_level_change", id: session.idGenerator.next(), thinkingLevel }, "main")).id;
 	}
 
 	async appendCompaction(result: CompactResult): Promise<string> {
-		return this.appendEntry<CompactionSessionEntry>({
-			type: "compaction",
-			id: createEntryId(this.entries),
-			parentId: this.leafId,
-			timestamp: new Date().toISOString(),
+		const session = this.requireSession();
+		// Agent messages may carry optional fields as explicit `undefined`; pi's
+		// durable payload contract rejects those even though JSON.stringify would
+		// silently omit them. Normalize to the wire shape before appending.
+		const persisted = JSON.parse(JSON.stringify(result)) as CompactResult;
+		const entry = {
+			type: "compaction" as const,
+			id: session.idGenerator.next(),
+			summary: persisted.summary,
+			tokensBefore: persisted.tokensBefore,
+			retainedTail: persisted.retainedTail,
+			...(persisted.usage === undefined ? {} : { usage: persisted.usage }),
+			...(persisted.details === undefined ? {} : { details: persisted.details }),
+		};
+		return (await session.appendEntry(entry, "main")).id;
+	}
+
+	/**
+	 * Persists a summary of the branch a rewind abandoned. Appended with the
+	 * current leaf as its parent — which, after {@link rewindTo} has moved the
+	 * leaf back to the fork point, is the new main line — so a reload projects
+	 * it into context as a memory of the fork rather than leaving it stranded
+	 * on the dead branch. `fromId` names the leaf the abandoned branch ended on.
+	 */
+	async appendBranchSummary(result: BranchSummaryResult, fromId: string): Promise<string> {
+		const session = this.requireSession();
+		const entry = {
+			type: "branch_summary" as const,
+			id: session.idGenerator.next(),
+			fromId,
 			summary: result.summary,
-			tokensBefore: result.tokensBefore,
-			retainedTail: result.retainedTail,
-			usage: result.usage,
-		});
+			details: { readFiles: result.readFiles, modifiedFiles: result.modifiedFiles },
+			...(result.usage === undefined ? {} : { usage: result.usage }),
+		};
+		return (await session.appendEntry(entry, "main")).id;
 	}
 
 	async appendSessionInfo(name: string | undefined): Promise<string> {
-		return this.appendEntry<SessionInfoEntry>({
-			type: "session_info",
-			id: createEntryId(this.entries),
-			parentId: this.leafId,
-			timestamp: new Date().toISOString(),
-			name,
+		const session = this.requireSession();
+		await session.setName(name);
+		return (await session.getMetadata()).id;
+	}
+
+	async buildSessionContext(): Promise<SessionContext> {
+		const entries = await this.requireSession().findEntriesOnBranch({ order: "oldestFirst" });
+		const piContext = buildPiSessionContext(entries);
+		const contextEntries = buildContextEntries(entries);
+		const messages: AgentMessage[] = [];
+		const messageOrigins: (string | null)[] = [];
+		contextEntries.forEach((entry, index) => {
+			const projected = sessionEntryToContextMessages(entry, index, contextEntries);
+			messages.push(...projected);
+			messageOrigins.push(...projected.map(() => (entry.type === "message" ? entry.id : null)));
 		});
+		return {
+			messages,
+			messageOrigins,
+			model: piContext.model,
+			thinkingLevel: piContext.thinkingLevel as ThinkingLevel,
+		};
 	}
 
-	buildSessionContext(): SessionContext {
-		return buildSessionContext(this.entries, this.leafId);
-	}
-
-	/**
-	 * Re-points the active branch just before `entryId`, abandoning that entry
-	 * and everything after it on its branch.
-	 *
-	 * The log stays append-only — nothing is rewritten or removed. Moving the
-	 * leaf back makes the next append a sibling of the discarded entries rather
-	 * than their child, so {@link buildSessionContext} walks past them and a
-	 * reload shows the branch that is actually active. Without this, a retry
-	 * that only truncated the in-memory transcript would hang the replacement
-	 * off the reply it meant to discard, and reloading would resurrect it.
-	 */
-	rewindTo(entryId: string): void {
-		const target = this.entries.find((entry) => entry.type !== "session" && entry.id === entryId);
-		if (!target || target.type === "session") {
+	async rewindTo(entryId: string): Promise<void> {
+		const session = this.requireSession();
+		const entry = await session.getEntry(entryId);
+		if (!entry) {
 			throw new Error(`Unknown session entry: ${entryId}`);
 		}
-		this.leafId = target.parentId;
+		await session.moveLane("main", entry.parentId);
 	}
 
-	/**
-	 * Newest persisted compaction, so a reloaded session updates that summary
-	 * rather than summarizing its own summary from scratch.
-	 */
-	getLastCompaction(): CompactResult | undefined {
-		for (let index = this.entries.length - 1; index >= 0; index -= 1) {
-			const entry = this.entries[index];
-			if (entry?.type === "compaction") {
-				return { summary: entry.summary, tokensBefore: entry.tokensBefore, retainedTail: entry.retainedTail, usage: entry.usage };
-			}
-		}
-		return undefined;
+	/** The entry the active branch currently ends on, or null for a fresh log. */
+	async getLeafId(): Promise<string | null> {
+		return this.requireSession().getLeafId();
 	}
 
-	getActiveSessionInfo(): ActiveSessionInfo {
-		if (!this.sessionFile) {
-			throw new Error("No active session.");
+	/** Returns the live pi session for read-only branch traversal. */
+	async buildReadOnlySessionView(): Promise<Session> {
+		return this.requireSession();
+	}
+
+	async getLastCompaction(): Promise<CompactResult | undefined> {
+		const entry = await this.requireSession().findEntryOnBranch({ type: "compaction" });
+		if (!entry || entry.type !== "compaction") {
+			return undefined;
 		}
-		return summarizeSession(this.sessionFile, this.entries, Date.now());
+		return {
+			summary: entry.summary,
+			tokensBefore: entry.tokensBefore,
+			retainedTail: entry.retainedTail,
+			usage: entry.usage,
+			details: entry.details,
+		};
+	}
+
+	async getActiveSessionInfo(): Promise<ActiveSessionInfo> {
+		const session = this.requireSession();
+		const metadata = this.sessionMetadata ?? (await session.getMetadata());
+		return this.summarize(metadata, session);
 	}
 
 	getActiveSessionPath(): string | null {
-		return this.sessionFile;
+		return this.sessionMetadata?.path ?? null;
 	}
 
 	async ensureConfiguration(defaults: SessionDefaults): Promise<void> {
-		const context = this.buildSessionContext();
+		const context = await this.buildSessionContext();
 		if (context.model?.provider !== defaults.provider || context.model.modelId !== defaults.modelId) {
 			await this.appendModelChange(defaults.provider, defaults.modelId);
 		}
@@ -317,108 +274,100 @@ export class ObsidianSessionManager {
 		}
 	}
 
-	private async appendEntry<TEntry extends Exclude<SessionEntry, { type: "session" }>>(entry: TEntry): Promise<string> {
-		if (!this.sessionFile) {
-			throw new Error("No active session.");
-		}
-		this.entries.push(entry);
-		this.leafId = entry.id;
-		await this.adapter.append(this.sessionFile, `${JSON.stringify(entry)}\n`);
-		return entry.id;
+	private repo(sessionDir: string): JsonlSessionRepo {
+		return new JsonlSessionRepo({ fs: this.fs, sessionsRoot: sessionDir });
 	}
 
-	/**
-	 * The configured folder, coerced.
-	 *
-	 * `allowPluginInternals` is what keeps a vault pointed at the folder earlier
-	 * releases used working. `normalizeSessionDir` refuses that path for a folder
-	 * the user *types* — hiding chats inside the plugin is what the move exists to
-	 * undo — and `normalizeSettings` therefore resolves a stored legacy folder to
-	 * the vault default. So nothing is migrated and nothing throws: new chats go to
-	 * the default folder, the old ones stay on disk, and the Sessions tab names
-	 * where. A manager handed the legacy folder directly still serves it.
-	 */
+	private requireSession(): PiSession {
+		if (!this.session) {
+			throw new Error("No active session.");
+		}
+		return this.session;
+	}
+
 	private resolveSessionDir(): string {
 		return normalizeFolderPath(this.policy.sessionDir(), { allowPluginInternals: true });
 	}
 
-	private async ensureSessionDirectory(sessionDir: string): Promise<void> {
-		let current = "";
-		for (const segment of sessionDir.split("/")) {
-			current = current ? `${current}/${segment}` : segment;
-			if (!(await this.adapter.exists(current))) {
-				await this.adapter.mkdir(current);
-			}
-		}
+	private async findMetadata(path: string): Promise<JsonlSessionMetadata | undefined> {
+		const metadata = await this.repo(this.resolveSessionDir()).list();
+		return metadata.find((item) => item.path === path);
 	}
 
-	/**
-	 * Trims the folder to the retention limit, oldest first.
-	 *
-	 * Runs after the new chat is written and adopted so it counts against the cap,
-	 * which is what the Sessions tab promises: a limit of N leaves N chats, not N
-	 * plus the one just created. Eviction goes through {@link deleteSession}, so
-	 * what falls outside the cap lands in trash and stays recoverable.
-	 *
-	 * A trash that fails is swallowed. The cost is a folder holding more chats than
-	 * the user asked for; refusing to open the new chat over it would trade a
-	 * harmless overrun for a broken feature.
-	 */
+	private async countJsonlFiles(path: string): Promise<number> {
+		const listing = await this.fs.listDir(path);
+		if (!listing.ok) {
+			return 0;
+		}
+		let count = 0;
+		for (const entry of listing.value) {
+			if (entry.kind === "file" && entry.name.endsWith(".jsonl")) {
+				count += 1;
+			} else if (entry.kind === "directory") {
+				count += await this.countJsonlFiles(entry.path);
+			}
+		}
+		return count;
+	}
+
 	private async evictSurplusSessions(sessionDir: string): Promise<void> {
 		const limit = this.policy.retentionLimit();
-		// Checked before the read, not just inside `selectSessionsToEvict`: an
-		// unlimited cap is the old behaviour and should not pay for a scan of every
-		// chat on every new one.
 		if (limit <= UNLIMITED_SESSION_RETENTION) {
 			return;
 		}
-		const sessions = await this.readSessionFiles(sessionDir);
-		for (const session of selectSessionsToEvict({ sessions, limit, activePath: this.sessionFile })) {
+		const metadata = await this.repo(sessionDir).list({ cwd: this.cwd });
+		const sessions = await Promise.all(metadata.map((item) => this.readSessionInfo(item)));
+		for (const session of selectSessionsToEvict({
+			sessions: sessions.filter((item): item is SessionFileInfo => item !== null),
+			limit,
+			activePath: this.sessionMetadata?.path,
+		})) {
 			try {
 				await this.deleteSession(session.path);
 			} catch {
-				// See above: an overrun beats blocking the chat that triggered it.
+				// Retention is best-effort; never block the newly created chat.
 			}
 		}
 	}
 
-	/** Parsed chat logs in `sessionDir`, newest first. Malformed files are dropped. */
-	private async readSessionFiles(sessionDir: string): Promise<SessionFileInfo[]> {
-		const sessionFiles = await this.listSessionFiles(sessionDir);
-		const sessions = await Promise.all(sessionFiles.map((path) => this.readSessionInfo(path)));
-		return sessions
-			.filter((session): session is SessionFileInfo => session !== null)
-			.sort((left, right) => right.modifiedTime - left.modifiedTime);
-	}
-
-	private async listSessionFiles(sessionDir: string): Promise<string[]> {
+	private async readSessionInfo(metadata: JsonlSessionMetadata): Promise<SessionFileInfo | null> {
 		try {
-			const listing = await this.adapter.list(sessionDir);
-			return listing.files.filter((path) => path.endsWith(".jsonl"));
-		} catch {
-			// A folder that does not exist is the ordinary state of a vault that has
-			// not chatted yet, not a failure worth reporting: callers read it as
-			// empty, and `createSession` creates it when there is something to write.
-			return [];
-		}
-	}
-
-	private async readSessionInfo(path: string): Promise<SessionFileInfo | null> {
-		try {
-			const [content, stat] = await Promise.all([this.adapter.read(path), this.adapter.stat(path)]);
-			const entries = parseSessionEntries(content);
-			if (entries[0]?.type !== "session") {
-				return null;
-			}
-			const modifiedTime = getSessionModifiedTime(entries, stat?.mtime ?? Date.now());
-			return {
-				...summarizeSession(path, entries, modifiedTime),
-				modifiedTime,
-			};
+			const session = await this.repo(this.resolveSessionDir()).open(metadata);
+			return this.summarize(metadata, session);
 		} catch {
 			return null;
 		}
 	}
+
+	private async summarize(metadata: JsonlSessionMetadata, session: PiSession): Promise<SessionFileInfo> {
+		const entries = await session.findEntries({ order: "oldestFirst" });
+		const stats = await session.getStats();
+		const name = await session.getName();
+		const info = await this.fs.fileInfo(metadata.path);
+		const modifiedTime = info.ok ? info.value.mtimeMs : metadata.modifiedAt;
+		const entryTime = entries.reduce((latest, entry) => {
+			const messageTime = entry.type === "message" && typeof entry.message.timestamp === "number" ? entry.message.timestamp : 0;
+			return Math.max(latest, entry.timestamp, messageTime);
+		}, 0);
+		const effectiveModifiedTime = Math.max(modifiedTime, entryTime);
+		const firstMessage = entries.find(
+			(entry): entry is Extract<Entry, { type: "message" }> => entry.type === "message" && entry.message.role === "user",
+		);
+		return {
+			id: metadata.id,
+			path: metadata.path,
+			createdAt: new Date(metadata.createdAt).toISOString(),
+			updatedAt: new Date(effectiveModifiedTime).toISOString(),
+			name: name?.trim() || undefined,
+			messageCount: stats.messageCount,
+			firstMessage: firstMessage ? extractMessageText(firstMessage.message) || "(no messages)" : "(no messages)",
+			modifiedTime: effectiveModifiedTime,
+		};
+	}
+}
+
+interface SessionFileInfo extends ActiveSessionInfo {
+	modifiedTime: number;
 }
 
 function fixedSessionPolicy(sessionDir: string): SessionPolicy {
@@ -430,70 +379,15 @@ export function getPluginSessionDir(app: App, plugin: Plugin): string {
 	return `${pluginDir}/sessions`;
 }
 
-function summarizeSession(path: string, entries: SessionEntry[], modifiedTime: number): ActiveSessionInfo {
-	const header = entries[0];
-	if (!header || header.type !== "session") {
-		throw new Error("Session entries must start with a session header.");
-	}
-
-	const messageEntries = entries.filter((entry): entry is MessageSessionEntry => entry.type === "message");
-	return {
-		id: header.id,
-		path,
-		createdAt: header.timestamp,
-		updatedAt: new Date(getSessionModifiedTime(entries, modifiedTime)).toISOString(),
-		name: getSessionName(entries),
-		messageCount: messageEntries.length,
-		firstMessage: getFirstUserMessage(messageEntries) || "(no messages)",
-	};
-}
-
-function getSessionName(entries: SessionEntry[]): string | undefined {
-	let name: string | undefined;
-	for (const entry of entries) {
-		if (entry.type === "session_info") {
-			name = entry.name?.trim() || undefined;
-		}
-	}
-	return name;
-}
-
-function getFirstUserMessage(entries: MessageSessionEntry[]): string | undefined {
-	for (const entry of entries) {
-		if (entry.message.role === "user") {
-			return extractMessageText(entry.message);
-		}
-	}
-	return undefined;
-}
-
-function getSessionModifiedTime(entries: SessionEntry[], fallback: number): number {
-	let modifiedTime = fallback;
-	for (const entry of entries) {
-		if (entry.type === "message") {
-			modifiedTime = Math.max(modifiedTime, entry.message.timestamp);
-			continue;
-		}
-		if (entry.type !== "session") {
-			modifiedTime = Math.max(modifiedTime, new Date(entry.timestamp).getTime());
-		}
-	}
-	return modifiedTime;
-}
-
 function extractMessageText(message: AgentMessage): string {
 	if (!("content" in message)) {
 		return "";
 	}
-	const content = message.content;
-	if (typeof content === "string") {
-		return content;
+	if (typeof message.content === "string") {
+		return message.content;
 	}
-	if (!Array.isArray(content)) {
-		return "";
-	}
-	return content
-		.filter((part): part is { type: "text"; text: string } => part.type === "text")
+	return message.content
+		.filter((part): part is Extract<typeof part, { type: "text" }> => part.type === "text")
 		.map((part) => part.text)
 		.join("\n");
 }

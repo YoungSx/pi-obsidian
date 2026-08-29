@@ -1,6 +1,6 @@
 import { describe, expect, it } from "bun:test";
 import { installObsidianStub, requestUrlMock } from "../testing/obsidianStub";
-import type { App, DataAdapter, ListedFiles, Stat } from "obsidian";
+import type { App, DataAdapter, ListedFiles, Stat, TFile, TFolder } from "obsidian";
 import type { Api, AssistantMessage, Context, Model, SimpleStreamOptions } from "@earendil-works/pi-ai";
 import { createAssistantMessageEventStream } from "@earendil-works/pi-ai";
 import type { StreamFn } from "@earendil-works/pi-agent-core";
@@ -8,12 +8,14 @@ import { ObsidianSessionManager } from "../session/ObsidianSessionManager";
 import { DEFAULT_SESSION_RETENTION } from "../session/retention";
 import { DEFAULT_SESSION_DIR } from "../session/sessionDir";
 import type { PiemSettings } from "../settings";
+import { DEFAULT_SETTINGS } from "../settings";
 import type { ObsidianAgentService as ObsidianAgentServiceType } from "./ObsidianAgentService";
 
 installObsidianStub();
 
 // Dynamic imports so the mocked module wins over any cached real one.
 const { ObsidianAgentService } = await import("./ObsidianAgentService");
+const { TFile: TFileClass, TFolder: TFolderClass } = await import("obsidian");
 
 // Tests drive ObsidianSessionManager directly, so the directory is supplied here
 // rather than derived from a Vault; `Vault#configDir` is used in production code.
@@ -123,6 +125,7 @@ describe("ObsidianAgentService", () => {
 		// had never registered `custom`, so every send failed with
 		// "Unknown provider: custom". The streamFn must resolve per request.
 		const settings: PiemSettings = {
+			...DEFAULT_SETTINGS,
 			providers: [],
 			models: [],
 			provider: "deepseek",
@@ -204,9 +207,9 @@ describe("ObsidianAgentService", () => {
 		await service.renameSession("Release notes");
 
 		const content = await adapter.read(session?.path ?? "");
-		expect(content).toContain('"type":"session_info"');
+		expect(content).toContain('"kind":"fact"');
 		expect(content).toContain("First conversation");
-		expect(content.split("\n")[0]).toContain('"type":"session"');
+		expect(content.split("\n")[0]).toContain('"kind":"header"');
 	});
 
 	it("clearing the name falls back to the derived label", async () => {
@@ -762,13 +765,13 @@ describe("ObsidianAgentService", () => {
 			const entries = (await adapter.read(sessionPath))
 				.split("\n")
 				.filter((line) => line.trim() !== "")
-				.map((line) => JSON.parse(line) as { type: string; id?: string; parentId?: string });
-			const compaction = entries.filter((e: { type: string }) => e.type === "compaction");
+				.map((line) => JSON.parse(line) as { kind: string; type?: string; id?: string; parentId?: string });
+			const compaction = entries.filter((e) => e.kind === "entry" && e.type === "compaction");
 			expect(compaction).toHaveLength(1);
-			const entryIndex = entries.findIndex((e: { type: string }) => e.type === "compaction");
+			const entryIndex = entries.findIndex((e) => e.kind === "entry" && e.type === "compaction");
 			const precedingMessageIds = entries
 				.slice(0, entryIndex)
-				.filter((e: { type: string }) => e.type === "message")
+				.filter((e) => e.kind === "entry" && e.type === "message")
 				.map((e) => e.id ?? "");
 			expect(compaction[0]?.parentId).toBe(precedingMessageIds.at(-1));
 
@@ -894,9 +897,83 @@ describe("language in the snapshot", () => {
 	});
 });
 
+describe("prompt commands", () => {
+	it("sends the expanded template body, not the /name the user typed", async () => {
+		const contexts: Context[] = [];
+		const service = createService(new MemoryAdapter(), {
+			streamFn: createCapturingStreamFn(contexts),
+			vaultFiles: { ".piem/prompts/echo.md": "---\ndescription: Echo it back\n---\nRepeat this verbatim: $ARGUMENTS" },
+		});
+
+		expect(await service.sendPrompt("/echo hello world")).toBe(true);
+
+		// The model must see the expansion; the raw `/echo …` never reaches it.
+		const sent = contexts.at(-1)?.messages.at(-1);
+		expect(sent?.role).toBe("user");
+		expect(JSON.stringify(sent?.content)).toContain("Repeat this verbatim: hello world");
+		expect(JSON.stringify(sent?.content)).not.toContain("/echo");
+	});
+
+	it("honours quoting when splitting arguments", async () => {
+		const contexts: Context[] = [];
+		const service = createService(new MemoryAdapter(), {
+			streamFn: createCapturingStreamFn(contexts),
+			vaultFiles: { ".piem/prompts/pair.md": "First is $1 and second is $2." },
+		});
+
+		await service.sendPrompt('/pair one "two three"');
+
+		// pi's parseCommandArgs keeps the quoted span as a single positional, so
+		// `$2` is the whole phrase rather than just `two`.
+		expect(JSON.stringify(contexts.at(-1)?.messages.at(-1)?.content)).toContain("First is one and second is two three.");
+	});
+
+	it("refuses an unknown /name with a notice instead of sending it as prose", async () => {
+		const contexts: Context[] = [];
+		const service = createService(new MemoryAdapter(), { streamFn: createCapturingStreamFn(contexts) });
+
+		expect(await service.sendPrompt("/nope")).toBe(false);
+
+		// A typo'd command is a mistake, not a message: sending it verbatim would
+		// waste a turn asking the model about a slash the user meant as a command.
+		expect(service.getSnapshot().noticeMessage).toBe("Unknown command: /nope");
+		expect(contexts).toHaveLength(0);
+	});
+
+	it("resolves a builtin on the first message of a session", async () => {
+		// Regression: the command lookup used to run before initialize(), which is
+		// what loads the templates, so the first `/summarize` of a session was
+		// reported as unknown.
+		const contexts: Context[] = [];
+		const service = createService(new MemoryAdapter(), { streamFn: createCapturingStreamFn(contexts) });
+
+		expect(await service.sendPrompt("/summarize")).toBe(true);
+		expect(JSON.stringify(contexts.at(-1)?.messages.at(-1)?.content)).toContain("Summarize the active note concisely.");
+	});
+
+	it("offers builtins and vault templates together for autocomplete", async () => {
+		const service = createService(new MemoryAdapter(), {
+			vaultFiles: { ".piem/prompts/echo.md": "---\ndescription: Echo it back\n---\nRepeat: $ARGUMENTS" },
+		});
+		await service.initialize();
+
+		const names = service.getSnapshot().availableCommands.map((command) => command.name);
+		expect(names).toContain("summarize");
+		expect(names).toContain("echo");
+	});
+
+	it("leaves an ordinary message that merely contains a slash alone", async () => {
+		const contexts: Context[] = [];
+		const service = createService(new MemoryAdapter(), { streamFn: createCapturingStreamFn(contexts) });
+
+		expect(await service.sendPrompt("what does src/main.ts do?")).toBe(true);
+		expect(JSON.stringify(contexts.at(-1)?.messages.at(-1)?.content)).toContain("what does src/main.ts do?");
+	});
+});
+
 function createService(
 	memoryAdapter: MemoryAdapter = new MemoryAdapter(),
-	overrides: { streamFn?: StreamFn } = {},
+	overrides: { streamFn?: StreamFn; vaultFiles?: Record<string, string> } = {},
 ): ObsidianAgentServiceType {
 	return createServiceWithSettings(memoryAdapter, overrides).service;
 }
@@ -904,10 +981,11 @@ function createService(
 /** Same, but hands back the live settings object so a test can mutate it. */
 function createServiceWithSettings(
 	memoryAdapter: MemoryAdapter = new MemoryAdapter(),
-	overrides: { streamFn?: StreamFn } = {},
+	overrides: { streamFn?: StreamFn; vaultFiles?: Record<string, string> } = {},
 ): { service: ObsidianAgentServiceType; settings: PiemSettings } {
 	const adapter = asDataAdapter(memoryAdapter);
 	const settings: PiemSettings = {
+		...DEFAULT_SETTINGS,
 		providers: [],
 		models: [],
 		provider: "deepseek",
@@ -922,7 +1000,7 @@ function createServiceWithSettings(
 		sessionDir: DEFAULT_SESSION_DIR,
 	};
 	const sessionManager = new ObsidianSessionManager(adapter, SESSION_DIR, "obsidian-vault:Test");
-	const service = new ObsidianAgentService(createFakeApp(adapter), () => settings, sessionManager, {
+	const service = new ObsidianAgentService(createFakeApp(adapter, overrides.vaultFiles), () => settings, sessionManager, {
 		streamFn: overrides.streamFn ?? createFakeStreamFn(),
 	});
 	return { service, settings };
@@ -1075,15 +1153,56 @@ function createRecordingToolCallingStreamFn(
 	return { streamFn, requests };
 }
 
-function createFakeApp(adapter: DataAdapter): App {
+/**
+ * A fake app whose vault fronts an in-memory file tree.
+ *
+ * `vaultFiles` populates the `TFile`/`TFolder` side of the vault rather than the
+ * `DataAdapter` side, because that is the half {@link VaultExecutionEnv} reads
+ * through — and the env is how prompt templates are loaded. Folders are derived
+ * from the file paths, so a caller only lists leaves.
+ */
+function createFakeApp(adapter: DataAdapter, vaultFiles: Record<string, string> = {}): App {
+	const files = new Map<string, TFile>();
+	const folders = new Map<string, TFolder>();
+
+	const folderAt = (path: string): TFolder => {
+		const existing = folders.get(path);
+		if (existing) {
+			return existing;
+		}
+		const folder = new TFolderClass();
+		folder.path = path;
+		folder.name = path.slice(path.lastIndexOf("/") + 1);
+		folder.children = [];
+		folders.set(path, folder);
+		if (path !== "") {
+			folderAt(getParent(path)).children.push(folder);
+		}
+		return folder;
+	};
+
+	folderAt("");
+	for (const [path, content] of Object.entries(vaultFiles)) {
+		const file = new TFileClass();
+		file.path = path;
+		file.name = path.slice(path.lastIndexOf("/") + 1);
+		file.extension = path.slice(path.lastIndexOf(".") + 1);
+		file.stat = { size: content.length, mtime: 1, ctime: 1 };
+		files.set(path, file);
+		folderAt(getParent(path)).children.push(file);
+	}
+
 	return {
 		vault: {
 			adapter,
 			getName: () => "Test",
-			getFiles: () => [],
-			getRoot: () => ({ children: [] }),
-			getFileByPath: () => null,
-			getFolderByPath: () => null,
+			getFiles: () => Array.from(files.values()),
+			getRoot: () => folderAt(""),
+			getFileByPath: (path: string) => files.get(path) ?? null,
+			getFolderByPath: (path: string) => folders.get(path) ?? null,
+			getAbstractFileByPath: (path: string) => files.get(path) ?? folders.get(path) ?? null,
+			read: async (file: TFile) => vaultFiles[file.path] ?? "",
+			cachedRead: async (file: TFile) => vaultFiles[file.path] ?? "",
 		},
 		workspace: {
 			getActiveViewOfType: () => null,
@@ -1100,4 +1219,3 @@ function getParent(path: string): string {
 	const index = path.lastIndexOf("/");
 	return index === -1 ? "" : path.slice(0, index);
 }
-

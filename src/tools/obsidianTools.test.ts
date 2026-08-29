@@ -8,6 +8,18 @@ installObsidianStub();
 // Runtime classes come from the mocked module; types stay type-only.
 const { TFile: TFileClass, TFolder: TFolderClass } = await import("obsidian");
 const { createObsidianTools } = await import("./obsidianTools");
+const { createVaultHarnessContext } = await import("../vault/harnessAdapter");
+const { DEFAULT_SETTINGS } = await import("../settings");
+
+/** Settings with web fetch off — the local-first default every vault starts in. */
+function defaultOffSettings() {
+	return { ...DEFAULT_SETTINGS };
+}
+
+/** Settings with web fetch on, riding the requestUrl transport the stub expects. */
+function webFetchOnSettings() {
+	return { ...DEFAULT_SETTINGS, webFetchEnabled: true, networkTransport: "requestUrl" as const };
+}
 
 describe("task tools", () => {
 	it("lists todo tasks from Obsidian metadata cache", async () => {
@@ -26,7 +38,7 @@ describe("task tools", () => {
 		expect(result.details).toMatchObject({ path: "Projects", status: "todo", count: 1, returnedCount: 1, truncated: false });
 
 		function getTool(name: string) {
-			const matchingTool = createObsidianTools(app).find((candidate) => candidate.name === name);
+			const matchingTool = tools(app).find((candidate) => candidate.name === name);
 			if (!matchingTool) {
 				throw new Error(`Missing tool: ${name}`);
 			}
@@ -58,7 +70,7 @@ describe("task tools", () => {
 		expect(result.details).toMatchObject({ status: "all", fileCount: 2, returnedFileCount: 2, todo: 2, done: 1, total: 3 });
 
 		function getTool(name: string) {
-			const matchingTool = createObsidianTools(app).find((candidate) => candidate.name === name);
+			const matchingTool = tools(app).find((candidate) => candidate.name === name);
 			if (!matchingTool) {
 				throw new Error(`Missing tool: ${name}`);
 			}
@@ -138,7 +150,7 @@ describe("tool registration", () => {
 	it("registers every vault tool under its expected name", () => {
 		const app = createTaskApp([]);
 
-		const names = createObsidianTools(app).map((tool) => tool.name);
+		const names = tools(app).map((tool) => tool.name);
 
 		// `organizeTools.test.ts` and friends call their factories directly, so this
 		// is the only place a tool that was written but never registered shows up.
@@ -158,6 +170,19 @@ describe("tool registration", () => {
 			"trash_note",
 		]);
 	});
+
+	it("omits web_fetch by default and adds it only when opted in", () => {
+		const app = createTaskApp([]);
+
+		const off = tools(app).map((tool) => tool.name);
+		expect(off).not.toContain("web_fetch");
+
+		const on = tools(app, webFetchOnSettings()).map((tool) => tool.name);
+		// `web_fetch` lands at the tail, after the vault tools, so a reader scanning
+		// the registration order still meets the local capabilities first.
+		expect(on).toContain("web_fetch");
+		expect(on[on.length - 1]).toBe("web_fetch");
+	});
 });
 
 describe("abort handling", () => {
@@ -176,7 +201,7 @@ describe("abort handling", () => {
 		// records that stale result as a success, so every tool must reject instead.
 		// The native edit tool validates `edits` is non-empty before checking the
 		// signal, so it gets a real edit pair; other tools ignore the extra fields.
-		for (const tool of createObsidianTools(app)) {
+		for (const tool of tools(app)) {
 			const params = { path: "Note.md", pattern: "Task", content: "x", edits: [{ oldText: "Task", newText: "Done" }] };
 			const error = await tool.execute("tool-call", params as never, controller.signal).then(
 				() => null,
@@ -229,9 +254,14 @@ describe("abort handling", () => {
 });
 
 function getTaskTool(app: App, name: string) {
-	const tool = createObsidianTools(app).find((candidate) => candidate.name === name);
+	const tool = tools(app).find((candidate) => candidate.name === name);
 	if (!tool) {
 		throw new Error(`Missing tool: ${name}`);
 	}
 	return tool;
+}
+
+/** Builds tools bound to a fresh vault env for one test. */
+function tools(app: App, settings = defaultOffSettings()) {
+	return createObsidianTools(app, createVaultHarnessContext(app).env, settings);
 }

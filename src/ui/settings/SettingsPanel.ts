@@ -138,6 +138,7 @@ export interface SettingsPanelSettings {
 	models: ModelConfig[];
 	thinkingLevel: ModelThinkingLevel;
 	networkTransport: NetworkTransport;
+	webFetchEnabled: boolean;
 	showAgentDetails: boolean;
 	sendShortcut: SendShortcut;
 	language: LanguageSetting;
@@ -706,6 +707,20 @@ function renderNetworkTab(containerEl: HTMLElement, host: SettingsPanelHost): vo
 			dropdown.setValue(settings.networkTransport);
 			dropdown.onChange(async (transport) => {
 				settings.networkTransport = transport as NetworkTransport;
+				await host.save();
+			});
+		});
+
+	// Placed under the transport row rather than on its own: the toggle opens a
+	// channel, and the row just above is the one that names how that channel
+	// travels. A reader deciding whether to flip it sees the trade-off inline.
+	new Setting(containerEl)
+		.setName(t.t("settings.webFetchEnabled"))
+		.setDesc(t.t("settings.webFetchEnabledDesc"))
+		.addToggle((toggle) => {
+			toggle.setValue(settings.webFetchEnabled);
+			toggle.onChange(async (webFetchEnabled) => {
+				settings.webFetchEnabled = webFetchEnabled;
 				await host.save();
 			});
 		});

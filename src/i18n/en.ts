@@ -34,7 +34,11 @@ export const en = {
 
 	/** Chat panel — header, banner, composer, message list, and trace rows. */
 	chat: {
-		placeholder: "Ask Piem…",
+		/**
+		 * Doubles as the only advert for slash commands: the composer has no other
+		 * affordance saying they exist, and a user who never types `/` never learns.
+		 */
+		placeholder: "Ask Piem, or / for commands…",
 		composerAria: "Message Piem",
 		stopCompaction: "Stop compaction",
 		stopResponse: "Stop response",
@@ -108,6 +112,12 @@ export const en = {
 		contextLabel: "Context",
 		contextValueText: "{estimated}{tokens} of {window} {unit} used, {percent} percent, {state}",
 		contextEstimatedPrefix: "Estimated ",
+		/** Accessible name for the `/`-command autocomplete list. */
+		commandMenuAria: "Prompt commands",
+		/** Notice shown when a `/name` matches no loaded template. */
+		unknownCommand: "Unknown command: /{name}",
+		/** Notice summarizing non-fatal warnings from loading prompt templates. */
+		templatesLoadedWithWarnings: "Loaded prompt commands with {count} warning(s).",
 	},
 
 	/**
@@ -313,6 +323,14 @@ export const en = {
 			"Request URL bypasses browser restrictions everywhere but buffers responses — tokens appear all at once. Fetch streams incrementally but may be blocked.",
 		transportRequestUrl: "Request URL (buffered, works everywhere)",
 		transportFetch: "Fetch (streams, may be blocked)",
+		/**
+		 * Toggle for the agent's outbound HTTP tool. Named for what it opens — a
+		 * channel out of the vault — not for the tool's internal name, because a
+		 * reader flipping this has never seen `web_fetch` and should not have to.
+		 */
+		webFetchEnabled: "Allow the agent to fetch web pages",
+		webFetchEnabledDesc:
+			"Adds a tool the agent can use to request external URLs. The request and any data in it leave the vault and Obsidian. Off by default; the transport above decides how it travels.",
 		whatLeavesVault: "What leaves this vault",
 		whatLeavesVaultDesc:
 			"Prompts, vault content read by tools, and tool results are sent to the provider serving the active model. Nothing is sent anywhere else.",
@@ -344,6 +362,9 @@ export const en = {
 		licenseName: "License",
 		licenseDesc: "The terms this plugin is distributed under.",
 		licenseLabel: "Read the license",
+		sponsorName: "Support the project",
+		sponsorDesc: "Fuel the plugin's development on Ko-fi.",
+		sponsorLabel: "Support on Ko-fi",
 	},
 
 	/**

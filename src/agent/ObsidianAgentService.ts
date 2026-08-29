@@ -2,16 +2,22 @@ import type { App } from "obsidian";
 import type { Usage } from "@earendil-works/pi-ai";
 import {
 	Agent,
+	collectEntriesForBranchSummary,
 	convertToLlm,
+	createBranchSummaryMessage,
+	generateBranchSummary,
 	type AgentEvent,
 	type AgentLoopTurnUpdate,
 	type AgentMessage,
+	type ExecutionEnv,
 	type PrepareNextTurnContext,
+	type PromptTemplate,
+	type PromptTemplateDiagnostic,
 	type StreamFn,
 	type ThinkingLevel,
 } from "@earendil-works/pi-agent-core";
 import { createObsidianModels, withRequestDefaults, type ObsidianModelsBundle } from "../net/streamFn";
-import { compactIfNeeded, needsCompaction, type CompactResult } from "./compaction";
+import { compactIfNeeded, needsCompaction, DEFAULT_COMPACTION_RETRY, type CompactResult } from "./compaction";
 import { measureContextFill, sumUsage, type ContextFill, type UsageTotals } from "./usage";
 import { resolveCompactionSettings, type CompactionSettings } from "./compactionSettings";
 import { createObsidianTools } from "../tools/obsidianTools";
@@ -23,13 +29,20 @@ import {
 	getSelectedModel,
 	type PiemSettings,
 } from "../settings";
-import { ObsidianSessionManager, type ActiveSessionInfo, type SessionDefaults } from "../session/ObsidianSessionManager";
-import type { SessionContext } from "../session/jsonl";
+import { ObsidianSessionManager, type ActiveSessionInfo, type SessionContext, type SessionDefaults } from "../session/ObsidianSessionManager";
 import { injectContext } from "./contextInjection";
 import { ContextRefs, type ContextRef } from "./contextRefs";
 import { OBSIDIAN_AGENT_SYSTEM_PROMPT } from "./systemPrompt";
 import { getT, resolveLanguage, type Language, type LanguageHost, type Translator } from "../i18n";
 import type { SendShortcut } from "../ui/keyboard";
+import { VaultExecutionEnv } from "../vault/VaultExecutionEnv";
+import { BUILTIN_PROMPT_TEMPLATES } from "./builtinTemplates";
+import {
+	expandPromptTemplate,
+	findPromptTemplate,
+	loadVaultPromptTemplates,
+	parsePromptCommand,
+} from "./promptTemplates";
 
 export interface ChatSnapshot {
 	messages: AgentMessage[];
@@ -115,6 +128,15 @@ export interface ChatSnapshot {
 	 * nothing to re-enable.
 	 */
 	isFollowingActiveNote: boolean;
+	/**
+	 * Prompt templates available as `/name` commands, for autocomplete.
+	 *
+	 * Name and description only — the template body never reaches the UI. Builtins
+	 * are listed first, then the vault's own `.piem/prompts` templates, in load
+	 * order. Empty when the vault has none and nothing ships, which renders no
+	 * autocomplete list.
+	 */
+	availableCommands: { name: string; description: string }[];
 }
 
 /**
@@ -179,6 +201,17 @@ export class ObsidianAgentService {
 	private readonly sessionManager: ObsidianSessionManager;
 	private readonly streamFn: StreamFn | undefined;
 	private readonly listeners = new Set<SnapshotListener>();
+	/**
+	 * Single vault execution env shared by the file tools and the prompt-template
+	 * loader.
+	 *
+	 * Reused across `refreshConfiguration` and `initializeAgent` rather than
+	 * rebuilt each time: pi's file mutation queue keys per-path locks off env
+	 * object identity, and the template list survives a tool refresh only if the
+	 * env it was read through is not replaced underneath it. Stateless by design
+	 * — every call routes through the vault API — so one instance is safe to hold.
+	 */
+	private readonly env: ExecutionEnv;
 	private agent: Agent | null = null;
 	private unsubscribeAgent: (() => void) | null = null;
 	private initialization: Promise<void> | null = null;
@@ -232,6 +265,17 @@ export class ObsidianAgentService {
 	/** Mirrors `compaction` for the snapshot: true from launch until it settles. */
 	private isCompacting = false;
 	private compactionController: AbortController | null = null;
+	/**
+	 * Abort controller for a branch-summary request in flight, separate from
+	 * {@link compactionController} so cancelling one never cancels the other.
+	 *
+	 * A branch summary is not a compaction: it runs once, on a rewind, and its
+	 * banner would be wrong ("Compacting context…") on an operation the user
+	 * initiated explicitly. The two share only that both are background LLM
+	 * requests this service should cancel on abort/dispose/session-switch, so
+	 * they share those exit paths but not a controller.
+	 */
+	private branchSummaryController: AbortController | null = null;
 	/** Frozen for one user turn so a mid-loop note switch cannot retarget a write. */
 	private activeRunContext: ContextRef[] | null = null;
 	/**
@@ -244,12 +288,25 @@ export class ObsidianAgentService {
 	private readonly contextRefs = new ContextRefs();
 	/** Mid-run compactions spent on the active run; the budget is per run. */
 	private midRunCompactions = 0;
+	/**
+	 * Loaded prompt templates: builtins first, then the vault's `.piem/prompts`.
+	 *
+	 * Reloaded each `initializeAgent` so a template file added mid-session is
+	 * picked up on the next panel open. A `/name` that matches nothing here is
+	 * reported as unknown rather than sent.
+	 */
+	private promptTemplates: PromptTemplate[] = [];
+	/** Non-fatal warnings from the last vault template load, surfaced as a notice. */
+	private templateDiagnostics: PromptTemplateDiagnostic[] = [];
+	/** Prevents two retries from racing while the branch pointer is being persisted. */
+	private retryInFlight = false;
 
 	constructor(app: App, getSettings: () => PiemSettings, sessionManager: ObsidianSessionManager, options: ObsidianAgentServiceOptions = {}) {
 		this.app = app;
 		this.getSettings = getSettings;
 		this.sessionManager = sessionManager;
 		this.streamFn = options.streamFn;
+		this.env = new VaultExecutionEnv(app);
 	}
 
 	subscribe(listener: SnapshotListener): () => void {
@@ -282,7 +339,27 @@ export class ObsidianAgentService {
 			return false;
 		}
 
+		// Initialization is what populates `promptTemplates`, so it has to run
+		// before the command lookup below — otherwise the very first message of a
+		// session would report every `/name` as unknown.
 		await this.initialize();
+
+		// A `/name args` invocation expands the named template into its model-facing
+		// text and sends that instead. The expansion is a real user message: it
+		// persists to the session log and shows in the transcript, unlike the
+		// ephemeral context injection in `transformContext`. Recursing once is safe
+		// because the expanded body does not start with `/`.
+		const command = parsePromptCommand(trimmedPrompt);
+		if (command) {
+			const template = findPromptTemplate(this.promptTemplates, command.name);
+			if (!template) {
+				const t = this.t();
+				this.setNotice(t.t("chat.unknownCommand", { name: command.name }));
+				return false;
+			}
+			return this.sendPrompt(expandPromptTemplate(template, command.args));
+		}
+
 		const agent = this.requireAgent();
 		if (agent.state.isStreaming) {
 			this.setError("The agent is already responding.");
@@ -310,7 +387,7 @@ export class ObsidianAgentService {
 			this.errorMessage = error instanceof Error ? error.message : String(error);
 		} finally {
 			this.activeRunContext = null;
-			this.notifySettledState();
+			await this.notifySettledState();
 		}
 		return sent;
 	}
@@ -344,6 +421,12 @@ export class ObsidianAgentService {
 	 * would leave the log's leaf on the abandoned reply, the replacement would be
 	 * appended below it, and reloading the session would show both.
 	 *
+	 * Before the rewind, {@link summarizeAbandonedBranch} generates a summary of
+	 * the fork being abandoned and persists it on the new main line, so the model
+	 * — and a reload — remember what was explored down it. A summary failure never
+	 * blocks the rewind: the user asked to retry, not to summarize, so the worst
+	 * case is a fork forgotten, not a retry that never happens.
+	 *
 	 * A turn the log cannot name is refused rather than retried in memory alone.
 	 * That covers messages a compaction absorbed, whose text survives only inside
 	 * the summary — rewinding to before the compaction would discard the summary
@@ -352,33 +435,118 @@ export class ObsidianAgentService {
 	async retryFrom(index: number): Promise<boolean> {
 		await this.initialize();
 		const agent = this.requireAgent();
-		if (agent.state.isStreaming || this.isCompacting) {
+		if (agent.state.isStreaming || this.isCompacting || this.branchSummaryController || this.retryInFlight) {
 			return false;
 		}
-
-		const promptIndex = findPromptIndex(agent.state.messages, index);
-		if (promptIndex === null) {
-			return false;
-		}
-		const promptMessage = agent.state.messages[promptIndex];
-		const prompt = extractUserText(promptMessage);
-		if (!prompt) {
-			return false;
-		}
-		const entryId = promptMessage ? this.messageEntryIds.get(promptMessage) : undefined;
-		if (!entryId) {
-			return false;
-		}
-
+		this.retryInFlight = true;
 		try {
-			this.sessionManager.rewindTo(entryId);
-		} catch (error) {
-			this.setError(error instanceof Error ? error.message : String(error));
-			return false;
+			const promptIndex = findPromptIndex(agent.state.messages, index);
+			if (promptIndex === null) {
+				return false;
+			}
+			const promptMessage = agent.state.messages[promptIndex];
+			const prompt = extractUserText(promptMessage);
+			if (!prompt) {
+				return false;
+			}
+			const entryId = promptMessage ? this.messageEntryIds.get(promptMessage) : undefined;
+			if (!entryId) {
+				return false;
+			}
+
+			// `summarizeAbandonedBranch` performs the rewind itself, after collecting
+			// the branch off the pre-rewind log, and returns the summary message (if
+			// one was generated) to splice into the in-memory transcript.
+			let summaryMessage: AgentMessage | null;
+			try {
+				summaryMessage = await this.summarizeAbandonedBranch(entryId);
+			} catch (error) {
+				this.setError(error instanceof Error ? error.message : String(error));
+				return false;
+			}
+			agent.state.messages = agent.state.messages.slice(0, promptIndex);
+			if (summaryMessage) {
+				agent.state.messages = [...agent.state.messages.slice(0, promptIndex), summaryMessage];
+			}
+			this.notify();
+			return await this.sendPrompt(prompt);
+		} finally {
+			this.retryInFlight = false;
 		}
-		agent.state.messages = agent.state.messages.slice(0, promptIndex);
-		this.notify();
-		return await this.sendPrompt(prompt);
+	}
+
+	/**
+	 * Summarizes the branch a rewind is about to abandon, then rewinds.
+	 *
+	 * The summary is generated from a throwaway pi {@link Session} view built over
+	 * the current log — before the rewind moves the leaf — because
+	 * {@link collectEntriesForBranchSummary} walks the parent chain from the old
+	 * leaf to the fork point, and that chain only exists while the abandoned
+	 * branch is still the live one. Once the summary lands (or fails), the rewind
+	 * proceeds and the summary entry is appended on the new main line, where
+	 * {@link buildSessionContext} projects it into context on the next reload.
+	 *
+	 * Returns the branch-summary message to splice into the live transcript, or
+	 * `null` when no summary was generated (no abandoned branch, a compaction was
+	 * already running, or the request was aborted). Never throws on a summary
+	 * failure — only on an unknown rewind target, which surfaces as a user error.
+	 */
+	private async summarizeAbandonedBranch(entryId: string): Promise<AgentMessage | null> {
+		const oldLeafId = await this.sessionManager.getLeafId();
+		// No leaf means a fresh log with nothing to abandon; `oldLeafId === entryId`
+		// means the rewind targets the current tip, so there is no fork below it.
+		if (!oldLeafId || oldLeafId === entryId) {
+			await this.sessionManager.rewindTo(entryId);
+			return null;
+		}
+		// A compaction in flight owns the log's summarization budget; a second
+		// concurrent summarization request would race it for the same provider
+		// keys and muddy the usage accounting, so the branch summary is skipped.
+		// The rewind still happens — the user's intent is the retry, not the
+		// summary.
+		if (this.isCompacting) {
+			await this.sessionManager.rewindTo(entryId);
+			return null;
+		}
+
+		const controller = new AbortController();
+		this.branchSummaryController = controller;
+		try {
+			const session = await this.sessionManager.buildReadOnlySessionView();
+			const collected = await collectEntriesForBranchSummary(session, oldLeafId, entryId);
+			if (collected.entries.length === 0) {
+				await this.sessionManager.rewindTo(entryId);
+				return null;
+			}
+
+			const model = getSelectedModel(this.getSettings());
+			const result = await generateBranchSummary(collected.entries, {
+				models: withRequestDefaults(this.requireModelsBundle(), (provider) => this.getApiKey(provider)),
+				model,
+				signal: controller.signal,
+				retry: DEFAULT_COMPACTION_RETRY,
+			});
+
+			// The rewind is deferred until after the summary so the view walked a
+			// still-live branch; it is unconditional because the retry was the
+			// user's actual request. A failed or aborted summary simply means the
+			// fork is forgotten, not that the retry is blocked.
+			await this.sessionManager.rewindTo(entryId);
+
+			if (!result.ok) {
+				if (!controller.signal.aborted) {
+					this.setError(`Could not summarize the abandoned branch: ${result.error.message}`);
+				}
+				return null;
+			}
+
+			await this.sessionManager.appendBranchSummary(result.value, oldLeafId);
+			return createBranchSummaryMessage(result.value.summary, oldLeafId, Date.now());
+		} finally {
+			if (this.branchSummaryController === controller) {
+				this.branchSummaryController = null;
+			}
+		}
 	}
 
 	abort(): void {
@@ -387,6 +555,7 @@ export class ObsidianAgentService {
 		// both ways — `runExclusiveCompaction` links the run's signal into this
 		// controller — so aborting both is right and idempotent.
 		this.compactionController?.abort();
+		this.branchSummaryController?.abort();
 		const agent = this.agent;
 		if (!agent) {
 			return;
@@ -427,6 +596,7 @@ export class ObsidianAgentService {
 
 		this.agent?.abort();
 		this.compactionController?.abort();
+		this.branchSummaryController?.abort();
 		try {
 			this.sessionInfo = await this.sessionManager.loadSession(path);
 		} catch (error) {
@@ -434,8 +604,8 @@ export class ObsidianAgentService {
 			return;
 		}
 
-		const context = this.sessionManager.buildSessionContext();
-		this.lastCompaction = this.sessionManager.getLastCompaction();
+		const context = await this.sessionManager.buildSessionContext();
+		this.lastCompaction = await this.sessionManager.getLastCompaction();
 		// Usage is per-transcript, and a reloaded session's compaction cost was
 		// already paid in an earlier run, so the running total starts from history.
 		this.compactionUsage = [];
@@ -445,7 +615,7 @@ export class ObsidianAgentService {
 		this.adoptSessionContext(context);
 		this.errorMessage = undefined;
 		await this.sessionManager.ensureConfiguration(this.getSessionDefaults());
-		this.sessionInfo = this.sessionManager.getActiveSessionInfo();
+		this.sessionInfo = await this.sessionManager.getActiveSessionInfo();
 		this.notify();
 	}
 
@@ -458,7 +628,7 @@ export class ObsidianAgentService {
 
 		const trimmedName = name.trim();
 		await this.sessionManager.appendSessionInfo(trimmedName || undefined);
-		this.sessionInfo = this.sessionManager.getActiveSessionInfo();
+		this.sessionInfo = await this.sessionManager.getActiveSessionInfo();
 		this.sessionRevision += 1;
 		this.notify();
 	}
@@ -475,6 +645,7 @@ export class ObsidianAgentService {
 		if (wasActive) {
 			this.agent?.abort();
 			this.compactionController?.abort();
+			this.branchSummaryController?.abort();
 		}
 
 		try {
@@ -513,9 +684,9 @@ export class ObsidianAgentService {
 		const defaults = this.getSessionDefaults();
 		this.agent.state.model = getSelectedModel(this.getSettings());
 		this.agent.state.thinkingLevel = defaults.thinkingLevel;
-		this.agent.state.tools = createObsidianTools(this.app);
+		this.agent.state.tools = createObsidianTools(this.app, this.env, this.getSettings());
 		await this.sessionManager.ensureConfiguration(defaults);
-		this.refreshSessionInfo();
+		await this.refreshSessionInfo();
 		this.notify();
 	}
 
@@ -523,6 +694,7 @@ export class ObsidianAgentService {
 		this.unsubscribeAgent?.();
 		this.unsubscribeAgent = null;
 		this.compactionController?.abort();
+		this.branchSummaryController?.abort();
 		this.agent?.abort();
 		this.listeners.clear();
 	}
@@ -579,6 +751,10 @@ export class ObsidianAgentService {
 			sendShortcut: settings.sendShortcut,
 			contextRefs: this.contextRefs.list(),
 			isFollowingActiveNote: this.contextRefs.isFollowingActive(),
+			availableCommands: this.promptTemplates.map((template) => ({
+				name: template.name,
+				description: template.description ?? "",
+			})),
 		};
 	}
 
@@ -635,10 +811,29 @@ export class ObsidianAgentService {
 	private async initializeAgent(): Promise<void> {
 		const defaults = this.getSessionDefaults();
 		this.sessionInfo = await this.sessionManager.continueRecentSession(defaults);
-		const context = this.sessionManager.buildSessionContext();
-		this.lastCompaction = this.sessionManager.getLastCompaction();
+		const context = await this.sessionManager.buildSessionContext();
+		this.lastCompaction = await this.sessionManager.getLastCompaction();
 		this.adoptSessionContext(context);
+		await this.refreshPromptTemplates();
 		this.notify();
+	}
+
+	/**
+	 * Reloads prompt templates from the vault and merges them with the builtins.
+	 *
+	 * Non-fatal diagnostics are surfaced as a notice rather than blocking init: a
+	 * malformed `.md` in `.piem/prompts` should not stop the panel from opening,
+	 * and every well-formed sibling still loads. Builtins are constant, so only
+	 * the vault half can produce warnings.
+	 */
+	private async refreshPromptTemplates(): Promise<void> {
+		const loaded = await loadVaultPromptTemplates(this.env);
+		this.promptTemplates = [...BUILTIN_PROMPT_TEMPLATES, ...loaded.templates];
+		this.templateDiagnostics = loaded.diagnostics;
+		if (loaded.diagnostics.length > 0) {
+			const t = this.t();
+			this.setNotice(t.t("chat.templatesLoadedWithWarnings", { count: loaded.diagnostics.length }));
+		}
 	}
 
 	/**
@@ -692,7 +887,7 @@ export class ObsidianAgentService {
 				systemPrompt: OBSIDIAN_AGENT_SYSTEM_PROMPT,
 				model,
 				thinkingLevel: getPreferredThinkingLevel(settings),
-				tools: createObsidianTools(this.app),
+				tools: createObsidianTools(this.app, this.env, settings),
 				messages,
 			},
 			getApiKey: (provider) => this.getApiKey(provider),
@@ -736,7 +931,7 @@ export class ObsidianAgentService {
 		} catch (error) {
 			this.errorMessage = error instanceof Error ? error.message : String(error);
 		}
-		this.refreshSessionInfo();
+		await this.refreshSessionInfo();
 		this.notify();
 	}
 
@@ -862,7 +1057,7 @@ export class ObsidianAgentService {
 				this.setNotice("Nothing to compact yet.");
 			}
 		} finally {
-			this.notifySettledState();
+			await this.notifySettledState();
 		}
 	}
 
@@ -960,7 +1155,7 @@ export class ObsidianAgentService {
 			this.compactionUsage = [...this.compactionUsage, outcome.result.usage];
 		}
 		await this.sessionManager.appendCompaction(outcome.result);
-		this.refreshSessionInfo();
+		await this.refreshSessionInfo();
 		this.notify();
 		return true;
 	}
@@ -1079,8 +1274,8 @@ export class ObsidianAgentService {
 		this.notify();
 	}
 
-	private notifySettledState(): void {
-		this.refreshSessionInfo();
+	private async notifySettledState(): Promise<void> {
+		await this.refreshSessionInfo();
 		this.notify();
 	}
 
@@ -1088,9 +1283,9 @@ export class ObsidianAgentService {
 	 * Skipped while no session is active — trashing the active session leaves that
 	 * gap until a replacement is adopted, and `getActiveSessionInfo` throws in it.
 	 */
-	private refreshSessionInfo(): void {
+	private async refreshSessionInfo(): Promise<void> {
 		if (this.sessionManager.getActiveSessionPath()) {
-			this.sessionInfo = this.sessionManager.getActiveSessionInfo();
+			this.sessionInfo = await this.sessionManager.getActiveSessionInfo();
 		}
 	}
 

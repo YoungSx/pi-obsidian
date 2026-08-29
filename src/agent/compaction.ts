@@ -167,8 +167,8 @@ function toHarnessEntries(messages: AgentMessage[], previous?: CompactResult): E
 		summary: previous.summary,
 		tokensBefore: previous.tokensBefore,
 		retainedTail: previous.retainedTail,
-		details: previous.details,
-		usage: previous.usage,
+		...(previous.details === undefined ? {} : { details: previous.details }),
+		...(previous.usage === undefined ? {} : { usage: previous.usage }),
 	};
 	const remaining = dropRetainedPrefix(messages, previous.retainedTail);
 	return [compaction, ...remaining.map((message, index) => toMessageEntry(message, index, compaction.id))];

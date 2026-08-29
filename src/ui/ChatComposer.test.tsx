@@ -37,6 +37,7 @@ async function renderComposer(overrides: Partial<Props> = {}): Promise<HTMLEleme
 			onInputChange={noop}
 			onSend={noop}
 			onAbort={noop}
+			commands={[]}
 			{...overrides}
 		/>,
 	);

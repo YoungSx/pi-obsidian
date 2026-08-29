@@ -111,6 +111,7 @@ async function renderComposer(overrides: Partial<ComposerProps> = {}): Promise<H
 			onInputChange={() => undefined}
 			onSend={() => undefined}
 			onAbort={() => undefined}
+			commands={[]}
 			{...overrides}
 		/>,
 	);

@@ -97,6 +97,13 @@ npm run verify
 Release artifacts are `main.js`, `manifest.json`, and `styles.css` at the
 plugin root.
 
+## Support
+
+Piem is free and open source. If it saves you a few hours, fuel the author
+with coffee — 疯狂星期四，V 我 50。
+
+[![ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/shangxin)
+
 ## Acknowledgements
 
 Piem grew from the original
