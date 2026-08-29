@@ -87,6 +87,28 @@ export default tseslint.config(
 			"import/no-nodejs-modules": "off",
 		},
 	},
+	{
+		// The SDK shims (issue #92) reproduce the two provider SDKs' HTTP surface
+		// so the real packages stay out of the bundle. Their contract tests spin
+		// a local node:http server to pin the wire shape, and deliberately
+		// exercise raw fetch — the shims' whole job is to hand pi-ai's fetch-based
+		// decoders a Response, so the Obsidian requestUrl indirection would test
+		// nothing. The test file is never bundled into main.js, so none of this
+		// reaches a phone; the runtime shim files never touch global fetch
+		// themselves (the caller injects one).
+		files: ["src/net/shims/*.ts"],
+		languageOptions: {
+			globals: {
+				// First async-generator usage in the plugin; the browser-globals
+				// preset predates the TS lib type landing in the globals list.
+				AsyncGenerator: "readonly",
+			},
+		},
+		rules: {
+			"import/no-nodejs-modules": "off",
+			"no-restricted-globals": "off",
+		},
+	},
 	globalIgnores([
 		"node_modules",
 		// Nested agent worktrees are separate checkouts; linting them here would

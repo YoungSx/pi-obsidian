@@ -61,6 +61,14 @@ const BANNED_MODULES = new Map([
 		"node_modules/@google/genai/",
 		"270 KiB of unreachable code: the adapter behind it throws on any fetch that is not globalThis.fetch, and every request here passes one to reach Obsidian's requestUrl. It returns through a provider factory in src/net/builtinCatalog.ts — import neither googleProvider nor GOOGLE_MODELS (see issue #91).",
 	],
+	[
+		"node_modules/openai/",
+		"~138 KiB minified that every Obsidian startup would evaluate: esbuild must alias it to src/net/shims/openaiSdk.ts, which reproduces the exact client surface pi-ai's openai-completions.js and openai-responses.js touch (see issue #92). If this appears, an import path bypassed the alias.",
+	],
+	[
+		"node_modules/@anthropic-ai/sdk/",
+		"~92 KiB minified that every Obsidian startup would evaluate: esbuild must alias it to src/net/shims/anthropicSdk.ts, which reproduces the exact client surface pi-ai's anthropic-messages.js touches (see issue #92). If this appears, an import path bypassed the alias.",
+	],
 ]);
 
 /**
