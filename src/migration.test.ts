@@ -5,12 +5,12 @@ import { installObsidianStub, SafeStorageLikeMock } from "./testing/obsidianStub
 installObsidianStub();
 
 const { createSafeStorageCodec, PLAINTEXT_CODEC } = await import("./secrets");
-const { default: PiObsidianPlugin } = await import("./main");
+const { default: PiemPlugin } = await import("./main");
 const { normalizeSettings } = await import("./settings");
 const { NOOP_LOGGER } = await import("./logging/Logger");
 const { spyLogger } = await import("./testing/logSpy");
 import type { SecretCodec } from "./secrets";
-import type PiObsidianPluginType from "./main";
+import type PiemPluginType from "./main";
 import type { LoggerLike } from "./logging/Logger";
 
 interface StoredData {
@@ -28,10 +28,10 @@ function pluginWithData(
 	initial: unknown,
 	mock: SafeStorageLikeMock,
 	log: LoggerLike = NOOP_LOGGER,
-): { plugin: InstanceType<typeof PiObsidianPluginType>; saved: () => { value: unknown; writes: number } } {
+): { plugin: InstanceType<typeof PiemPluginType>; saved: () => { value: unknown; writes: number } } {
 	const store: StoredData = { data: initial };
 	let writes = 0;
-	const plugin = Object.create(PiObsidianPlugin.prototype) as InstanceType<typeof PiObsidianPluginType>;
+	const plugin = Object.create(PiemPlugin.prototype) as InstanceType<typeof PiemPluginType>;
 	(plugin as unknown as { log: LoggerLike }).log = log;
 	(plugin as unknown as { loadData: () => Promise<unknown> }).loadData = async () => store.data;
 	(plugin as unknown as { saveData: (data: unknown) => Promise<void> }).saveData = async (data: unknown) => {

@@ -27,10 +27,10 @@ describe("aboutLinks", () => {
 		const hrefs = aboutLinks(en).map((link) => link.href);
 		// Source, issues, and license live on the project's own repo; the sponsor
 		// row is the only one that leaves for a donation page.
-		const repoHrefs = hrefs.filter((href) => href.startsWith("https://github.com/YoungSx/pi-obsidian"));
+		const repoHrefs = hrefs.filter((href) => href.startsWith("https://github.com/YoungSx/piem"));
 
 		expect(repoHrefs).toHaveLength(3);
-		expect(hrefs).toContain("https://github.com/YoungSx/pi-obsidian");
+		expect(hrefs).toContain("https://github.com/YoungSx/piem");
 		expect(hrefs.some((href) => href.endsWith("/issues"))).toBe(true);
 		expect(hrefs.some((href) => href.endsWith("/LICENSE"))).toBe(true);
 		expect(hrefs).toContain("https://ko-fi.com/shangxin");

@@ -42,7 +42,7 @@ input**, **Ask about selection**, and **Ask about this note**. Press
 
 For manual installation, copy `main.js`, `manifest.json`, and `styles.css`
 into `<vault>/.obsidian/plugins/piem/`. The repository is
-[`YoungSx/pi-obsidian`](https://github.com/YoungSx/pi-obsidian).
+[`YoungSx/piem`](https://github.com/YoungSx/piem).
 
 ## Tools
 

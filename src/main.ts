@@ -50,7 +50,7 @@ function readPersistedProviderKeys(raw: Partial<PiemSettings> | null): Record<st
 	return keys;
 }
 
-export default class PiObsidianPlugin extends Plugin {
+export default class PiemPlugin extends Plugin {
 	// Fresh defaults until `onload` loads persisted data; `normalizeSettings` deep-copies
 	// so the shared DEFAULT_SETTINGS object is never mutated in place.
 	settings: PiemSettings = normalizeSettings(null);
