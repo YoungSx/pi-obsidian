@@ -141,4 +141,92 @@ describe("JSONL session helpers", () => {
 		expect(context.messageOrigins).toEqual([null, null, "e9"]);
 	});
 
+	it("projects a branch summary into context as a memory of the abandoned fork", () => {
+		const header = createSessionHeader("session-1", "obsidian-vault:Test", "2026-05-03T00:00:00.000Z");
+		const entries: SessionEntry[] = [
+			header,
+			{
+				type: "message",
+				id: "e1",
+				parentId: null,
+				timestamp: "2026-05-03T00:00:01.000Z",
+				message: { role: "user", content: "Main line question", timestamp: 1 } as never,
+			},
+			// The branch summary hangs off e1 — the new main line's leaf after a
+			// rewind — so buildSessionContext walks through it.
+			{
+				type: "branch_summary",
+				id: "bs1",
+				parentId: "e1",
+				timestamp: "2026-05-03T00:00:02.000Z",
+				fromId: "dead-leaf",
+				summary: "Explored a dead-end approach",
+				details: { readFiles: ["a.ts"], modifiedFiles: ["b.ts"] },
+			},
+		];
+
+		const context = buildSessionContext(entries, "bs1");
+
+		expect(context.messages).toHaveLength(2);
+		expect(context.messages[0]).toMatchObject({ role: "user", content: "Main line question" });
+		expect(context.messages[1]).toMatchObject({
+			role: "branchSummary",
+			summary: "Explored a dead-end approach",
+			fromId: "dead-leaf",
+		});
+		// Like a compaction, a branch summary is not a point a retry can rewind to.
+		expect(context.messageOrigins).toEqual(["e1", null]);
+	});
+
+	it("survives a round-trip through serialize and parse", () => {
+		const header = createSessionHeader("session-1", "obsidian-vault:Test", "2026-05-03T00:00:00.000Z");
+		const entries: SessionEntry[] = [
+			header,
+			{
+				type: "branch_summary",
+				id: "bs1",
+				parentId: null,
+				timestamp: "2026-05-03T00:00:01.000Z",
+				fromId: "dead-leaf",
+				summary: "Dead-end",
+				details: { readFiles: [], modifiedFiles: [] },
+			},
+		];
+
+		expect(parseSessionEntries(serializeSessionEntries(entries))).toEqual(entries);
+	});
+
+	it("coexists with a compaction, the summary landing after the fork point", () => {
+		const header = createSessionHeader("session-1", "obsidian-vault:Test", "2026-05-03T00:00:00.000Z");
+		const entries: SessionEntry[] = [
+			header,
+			{
+				type: "compaction",
+				id: "c1",
+				parentId: null,
+				timestamp: "2026-05-03T00:00:01.000Z",
+				summary: "Compacted history",
+				tokensBefore: 1_000,
+				retainedTail: [{ role: "user", content: "Kept", timestamp: 1 } as never],
+			},
+			{
+				type: "branch_summary",
+				id: "bs1",
+				parentId: "c1",
+				timestamp: "2026-05-03T00:00:02.000Z",
+				fromId: "dead-leaf",
+				summary: "Abandoned branch",
+			},
+		];
+
+		const context = buildSessionContext(entries, "bs1");
+
+		// The compaction expands into its summary + retained tail, then the
+		// branch summary follows. All three compaction-absorbed messages and the
+		// branch summary are unbranchable.
+		expect(context.messages).toHaveLength(3);
+		expect(context.messageOrigins).toEqual([null, null, null]);
+		expect(context.messages[2]).toMatchObject({ role: "branchSummary", summary: "Abandoned branch" });
+	});
+
 });

@@ -115,6 +115,75 @@ describe("ObsidianSessionManager", () => {
 	});
 });
 
+describe("ObsidianSessionManager branch summary", () => {
+	it("persists a branch summary so a reload keeps the abandoned fork in context", async () => {
+		const adapter = new MemoryAdapter() as unknown as DataAdapter;
+		const manager = new ObsidianSessionManager(adapter, SESSION_DIR, "obsidian-vault:Test");
+		await manager.createSession(DEFAULTS);
+		// `appendBranchSummary` hangs the summary off the current leaf — the same
+		// spot `summarizeAbandonedBranch` leaves it after a rewind — so a reload
+		// walks through it on the live branch. `fromId` points the other way, at
+		// the leaf of the branch that was abandoned, which is off this path.
+		await manager.appendMessage({ role: "user", content: [{ type: "text", text: "Main line" }], timestamp: 1 });
+		const summaryId = await manager.appendBranchSummary(
+			{ summary: "Explored a dead end", readFiles: ["a.ts"], modifiedFiles: ["b.ts"] },
+			"dead-leaf",
+		);
+
+		// The summary is on disk as a branch_summary line, not just in memory.
+		const content = await adapter.read(manager.getActiveSessionPath()!);
+		expect(content).toContain('"type":"branch_summary"');
+		expect(content).toContain('"fromId":"dead-leaf"');
+
+		// A fresh manager loading the file projects the summary into context, so
+		// the memory survives a reload instead of being stranded on the dead branch.
+		const reloaded = new ObsidianSessionManager(adapter as unknown as DataAdapter, SESSION_DIR, "obsidian-vault:Test");
+		await reloaded.loadSession(manager.getActiveSessionPath()!);
+		const context = reloaded.buildSessionContext();
+
+		expect(reloaded.getLeafId()).toBe(summaryId);
+		expect(context.messages.at(-1)).toMatchObject({ role: "branchSummary", summary: "Explored a dead end", fromId: "dead-leaf" });
+	});
+
+	it("replays entries onto a read-only view whose walks follow the recorded chain", async () => {
+		const adapter = new MemoryAdapter() as unknown as DataAdapter;
+		const manager = new ObsidianSessionManager(adapter, SESSION_DIR, "obsidian-vault:Test");
+		await manager.createSession(DEFAULTS);
+		const firstId = await manager.appendMessage({ role: "user", content: [{ type: "text", text: "First" }], timestamp: 1 });
+		const middleId = await manager.appendMessage({ role: "assistant", content: [{ type: "text", text: "Second" }], timestamp: 2, api: "openai-completions", provider: "deepseek", model: "deepseek-v4-pro", usage: EMPTY_USAGE, stopReason: "stop" } as never);
+		const leafId = await manager.appendMessage({ role: "user", content: [{ type: "text", text: "Third" }], timestamp: 3 });
+
+		const session = await manager.buildReadOnlySessionView();
+
+		// The view's leaf is the last appended entry — pi keeps the provisioned id.
+		expect(await session.getLeafId()).toBe(leafId);
+
+		// Walking to root from the leaf yields the whole chain in leaf-to-root
+		// order, which is what `collectEntriesForBranchSummary` relies on to build
+		// the old-branch path. The ids are the ones the log recorded. Below the
+		// three messages sit the settings entries `createSession` wrote.
+		const branch = await session.findEntriesOnBranch({ start: leafId });
+		expect(branch.slice(0, 3).map((entry) => entry.id)).toEqual([leafId, middleId, firstId]);
+		expect(branch.length).toBeGreaterThan(3);
+
+		// pi rebinds parentId to the lane's running leaf, so the middle entry's
+		// parent is the first entry — the chain the log recorded, reconstructed
+		// from lane state rather than the forwarded parentId.
+		const middle = await session.getEntry(middleId);
+		expect(middle?.parentId).toBe(firstId);
+		expect(middle?.seq).toBeTypeOf("number");
+	});
+});
+
+const EMPTY_USAGE = {
+	input: 0,
+	output: 0,
+	cacheRead: 0,
+	cacheWrite: 0,
+	totalTokens: 0,
+	cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+} as const;
+
 /**
  * A policy whose folder and cap can be changed mid-test, which is the shape
  * production uses: both are settings the user can edit with the plugin running.
