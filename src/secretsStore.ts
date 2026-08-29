@@ -32,6 +32,12 @@ export interface CreateSecretStoreOptions {
 	 * Pass `null` to model a desktop shell that exposes no `require` at all.
 	 */
 	hostRequire?: HostRequire | null;
+	/**
+	 * Receives the reason this device fell back to plaintext storage. Injectable
+	 * so the pure module stays free of the logger; the plugin routes it to debug
+	 * level, where an "is my key encrypted?" question gets a direct answer.
+	 */
+	log?: (message: string) => void;
 }
 
 /**
@@ -121,23 +127,31 @@ function probeSafeStorage(hostRequire: HostRequire): SafeStorageLike | null {
  */
 export function createSecretEnvironment(options: CreateSecretStoreOptions = {}): SecretEnvironment {
 	const plaintext: SecretEnvironment = { codec: () => PLAINTEXT_CODEC };
+	const log = options.log ?? (() => {});
 	try {
 		const isDesktopApp = options.isDesktopApp ?? Platform.isDesktopApp;
 		if (!isDesktopApp) {
+			log("Not a desktop app; storing secrets as plaintext.");
 			return plaintext;
 		}
 
 		// `undefined` means "detect"; an explicit `null` means "there is none".
 		const hostRequire = options.hostRequire === undefined ? resolveHostRequire() : options.hostRequire;
 		const safeStorage = options.safeStorage ?? (hostRequire ? probeSafeStorage(hostRequire) : null);
-		if (!safeStorage || !safeStorage.isEncryptionAvailable()) {
+		if (!safeStorage) {
+			log("OS keychain (safeStorage) unavailable; storing secrets as plaintext.");
+			return plaintext;
+		}
+		if (!safeStorage.isEncryptionAvailable()) {
+			log("OS keychain reports encryption unavailable; storing secrets as plaintext.");
 			return plaintext;
 		}
 		// Built once: the codec is stateless, but resolving it per call would
 		// re-probe `isEncryptionAvailable` through its `canRoundTrip` getter.
 		const codec = createSafeStorageCodec(safeStorage);
 		return { codec: () => codec };
-	} catch {
+	} catch (error) {
+		log(`Secret storage probe failed; storing secrets as plaintext. ${String(error)}`);
 		return plaintext;
 	}
 }

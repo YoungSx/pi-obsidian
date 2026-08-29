@@ -17,6 +17,7 @@ import {
 import { normalizeCompactionConfig, type CompactionConfig } from "./agent/compactionSettings";
 import { DEFAULT_SESSION_RETENTION, readRetentionLimit } from "./session/retention";
 import { DEFAULT_SESSION_DIR, normalizeSessionDir } from "./session/sessionDir";
+import { DEFAULT_LOG_LEVEL, readLogLevel, type LogLevelSetting } from "./logging/logLevel";
 import {
 	buildCustomEndpointModel,
 	isCustomEndpointActive,
@@ -102,6 +103,13 @@ export interface PiemSettings {
 	 */
 	sessionDir: string;
 	/**
+	 * Threshold below which log records are discarded.
+	 *
+	 * Read live by the logger through the settings closure, so a change on the
+	 * Logs tab takes effect on the next record without reloading the plugin.
+	 */
+	logLevel: LogLevelSetting;
+	/**
 	 * Legacy single-endpoint form, superseded by {@link providers}/{@link models}.
 	 *
 	 * Retained after migration rather than cleared: a user who rolls back to an
@@ -124,6 +132,7 @@ export const DEFAULT_SETTINGS: PiemSettings = {
 	sendShortcut: DEFAULT_SEND_SHORTCUT,
 	sessionRetention: DEFAULT_SESSION_RETENTION,
 	sessionDir: DEFAULT_SESSION_DIR,
+	logLevel: DEFAULT_LOG_LEVEL,
 };
 
 /**
@@ -199,6 +208,9 @@ export function normalizeSettings(data: Partial<PiemSettings> | null | undefined
 		// they can be opened, searched, and backed up. Nothing is moved — chats in
 		// the old plugin folder stay on disk, and the Sessions tab says where.
 		sessionDir: normalizeSessionDir(data?.sessionDir) ?? DEFAULT_SESSION_DIR,
+		// A corrupted or unknown stored value degrades to the default rather than
+		// throwing, matching how every other enum-typed setting is repaired.
+		logLevel: readLogLevel(data?.logLevel),
 		customEndpoint,
 	};
 	if (activeModelId) {
@@ -420,6 +432,7 @@ export class PiemSettingTab extends PluginSettingTab {
 				}
 			},
 			secretStorage: this.encryptionAvailable ? "encrypted" : "plaintext",
+			openLogView: () => this.plugin.openLogView(),
 			thinkingLevels: () => getSupportedThinkingLevelOptions(this.plugin.settings),
 			preferredThinkingLevel: () => getPreferredThinkingLevel(this.plugin.settings),
 			describeTarget: () => describeModelTarget(this.plugin.settings, getT(language)),

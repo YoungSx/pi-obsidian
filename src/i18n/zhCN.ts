@@ -25,6 +25,8 @@ export const zhCN: DeepPartial<EnCopy> = {
 		menuAskAboutSelection: "询问所选内容",
 		noActiveNote: "没有可询问的当前笔记。",
 		couldNotOpenChat: "无法打开对话视图。",
+		openLogs: "打开日志视图",
+		couldNotOpenLogs: "无法打开日志视图。",
 	},
 
 	chat: {
@@ -226,6 +228,11 @@ export const zhCN: DeepPartial<EnCopy> = {
 		tabSessions: "历史",
 		tabSkills: "技能",
 		tabGeneral: "通用",
+		tabLogs: "日志",
+
+		logLevelHeading: "日志级别",
+		logLevelDesc:
+			"插件往日志里写多少内容。日常使用“警告”就够；排查问题时调成“调试”，看完再调回去。",
 
 		languageHeading: "语言",
 		languageDesc: "界面使用的语言。“自动”会跟随笔记库的语言。",
@@ -493,5 +500,23 @@ export const zhCN: DeepPartial<EnCopy> = {
 		openaiChat: "OpenAI 聊天补全",
 		openaiResponses: "OpenAI 回复",
 		anthropicMessages: "Anthropic 消息",
+	},
+
+	logView: {
+		title: "Piem 日志",
+		filter: {
+			all: "全部级别",
+			off: "关闭",
+			debug: "调试",
+			info: "信息",
+			warn: "警告",
+			error: "错误",
+		},
+		copy: "复制",
+		clear: "清空",
+		openFile: "打开日志文件",
+		empty: "该级别下暂无日志。",
+		dropped: "已有 {count} 条更早的记录被丢弃，以保证缓冲区不超限。",
+		fileHint: "落盘日志：{path}",
 	},
 };

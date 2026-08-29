@@ -11,6 +11,7 @@ import {
 	type ProviderConfig,
 } from "../../modelConfig";
 import { LANGUAGES, getT, type LanguageSetting, type Translator } from "../../i18n";
+import { LOG_LEVEL_SETTINGS, readLogLevel, type LogLevelSetting } from "../../logging/logLevel";
 import { createObsidianModels } from "../../net/streamFn";
 import type { NetworkTransport } from "../../net/obsidianFetch";
 import {
@@ -119,6 +120,8 @@ export interface SettingsPanelHost {
 	 * plugin-internal one, and the row has to name where the logs actually are.
 	 */
 	activeSessionDir(): string;
+	/** Opens the log viewer panel; the Logs tab's shortcut into it. */
+	openLogView(): void;
 	/**
 	 * Chats left in the folder earlier releases used, and where that folder is.
 	 *
@@ -182,6 +185,7 @@ export interface SettingsPanelSettings {
 	compaction?: CompactionConfig;
 	sessionRetention: number;
 	sessionDir: string;
+	logLevel: LogLevelSetting;
 }
 
 /** Which tab is open. Module-level so it survives a re-render of the panel. */
@@ -203,6 +207,7 @@ export function renderSettingsPanel(containerEl: HTMLElement, host: SettingsPane
 		// for their own conversations.
 		{ id: "sessions", label: t.t("settings.tabSessions"), render: (el) => renderSessionsTab(el, host) },
 		{ id: "skills", label: t.t("settings.tabSkills"), render: (el) => renderSkillsTab(el, host) },
+		{ id: "logs", label: t.t("settings.tabLogs"), render: (el) => renderLogsTab(el, host) },
 		// Language and About each held one or two rows and no control that changed
 		// behaviour; merged because a reader reaching for either is doing the same
 		// thing — adjusting the plugin rather than configuring it.
@@ -814,7 +819,36 @@ function renderAboutRows(containerEl: HTMLElement, host: SettingsPanelHost): voi
 }
 
 /**
- * The language row.
+ * Logs tab.
+ *
+ * One threshold and a shortcut into the viewer. The threshold is written to
+ * settings and takes effect immediately — the logger reads it live through the
+ * settings closure, so no reload is involved. Filter labels on the viewer's own
+ * dropdown are shared copy (`logView.filter.*`); a threshold and a view filter
+ * are different controls, but the level words themselves should not differ
+ * between them.
+ */
+function renderLogsTab(containerEl: HTMLElement, host: SettingsPanelHost): void {
+	const { settings, t } = host;
+
+	new Setting(containerEl)
+		.setName(t.t("settings.logLevelHeading"))
+		.setDesc(t.t("settings.logLevelDesc"))
+		.addDropdown((dropdown) => {
+			for (const level of LOG_LEVEL_SETTINGS) {
+				dropdown.addOption(level, t.t(`logView.filter.${level}`));
+			}
+			dropdown.setValue(settings.logLevel);
+			dropdown.onChange(async (level) => {
+				settings.logLevel = readLogLevel(level);
+				await host.save();
+			});
+		});
+	new Setting(containerEl).addButton((button) => button.setButtonText(t.t("commands.openLogs")).onClick(() => host.openLogView()));
+}
+
+/**
+ * The language rows.
  *
  * Changing the language re-renders the whole panel rather than this one tab: the
  * tab strip's own labels are copy too, so redrawing only the pane would leave

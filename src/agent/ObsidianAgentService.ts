@@ -38,6 +38,8 @@ import { OBSIDIAN_AGENT_SYSTEM_PROMPT } from "./systemPrompt";
 import { composeSystemPrompt, expandSkill, findSkill, formatSkillDiagnostics, loadVaultSkills, mergeSkills } from "./skillLoader";
 import { loadUserSkills, type UserSkill } from "../skills/userSkills";
 import type { Skill, SkillDiagnostic } from "@earendil-works/pi-agent-core";
+import { describeAgentEvent } from "./agentEventLog";
+import { NOOP_LOGGER, type LoggerLike } from "../logging/Logger";
 import { getT, resolveLanguage, type Language, type LanguageHost, type Translator } from "../i18n";
 import type { SendShortcut } from "../ui/keyboard";
 import { VaultExecutionEnv } from "../vault/VaultExecutionEnv";
@@ -201,6 +203,14 @@ export interface ObsidianAgentServiceOptions {
 	 * directory; defaults to {@link loadUserSkills}.
 	 */
 	loadUserSkills?: () => Promise<{ skills: UserSkill[]; diagnostics: SkillDiagnostic[] }>;
+	/**
+	 * Root logger; the service logs under its `agent` child.
+	 *
+	 * Optional because the service predates logging and tests construct it
+	 * bare. Omitted falls back to {@link NOOP_LOGGER}, so production wiring
+	 * simply passes one and no call site has to care.
+	 */
+	logger?: LoggerLike;
 }
 
 interface CompactionRunOptions {
@@ -261,6 +271,14 @@ export class ObsidianAgentService {
 	 * and dropped when the call ends.
 	 */
 	private readonly pendingToolNames = new Map<string, string>();
+	/** Start time per in-flight tool call, for the duration logged at end. */
+	private readonly pendingToolStarts = new Map<string, number>();
+	/**
+	 * Where the agent's lifecycle is logged. `NOOP_LOGGER` rather than nullable:
+	 * a service without a logger is a valid test configuration, and an `if` at
+	 * every emit site is how logging quietly stops happening.
+	 */
+	private readonly log: LoggerLike;
 	private errorMessage: string | undefined;
 	private noticeMessage: string | undefined;
 	/** Agent-reported error the user already dismissed; see {@link dismissMessages}. */
@@ -332,6 +350,7 @@ export class ObsidianAgentService {
 		this.sessionManager = sessionManager;
 		this.streamFn = options.streamFn;
 		this.loadUserSkillsFn = options.loadUserSkills ?? loadUserSkills;
+		this.log = (options.logger ?? NOOP_LOGGER).child("agent");
 		this.env = new VaultExecutionEnv(app);
 	}
 
@@ -970,7 +989,10 @@ export class ObsidianAgentService {
 				return null;
 			}
 			return { path, content: await this.app.vault.cachedRead(abstract), modifiedAt: abstract.stat.mtime };
-		} catch {
+		} catch (error) {
+			// Degrades to the path-only block; debug level because the common case
+			// (note closed mid-run) is routine, not a fault worth warning about.
+			this.log.debug("Failed to read active note; sending the path-only context block", () => ({ path, error: String(error) }));
 			return null;
 		}
 	}
@@ -1074,10 +1096,12 @@ export class ObsidianAgentService {
 	private async handleAgentEvent(event: AgentEvent): Promise<void> {
 		if (event.type === "tool_execution_start") {
 			this.pendingToolNames.set(event.toolCallId, event.toolName);
+			this.pendingToolStarts.set(event.toolCallId, Date.now());
 		}
 		if (event.type === "tool_execution_end") {
 			this.pendingToolNames.delete(event.toolCallId);
 		}
+		this.logAgentEvent(event);
 		try {
 			if (event.type === "message_end") {
 				await this.persistMessage(event.message);
@@ -1088,10 +1112,49 @@ export class ObsidianAgentService {
 				}
 			}
 		} catch (error) {
-			this.errorMessage = error instanceof Error ? error.message : String(error);
+			const message = error instanceof Error ? error.message : String(error);
+			this.errorMessage = message;
+			// The snapshot field renders once in the panel; the log keeps the
+			// failure even after the user dismisses the notice.
+			this.log.error("Failed to persist agent output", () => ({ event: event.type, error: message }));
 		}
 		await this.refreshSessionInfo();
 		this.notify();
+	}
+
+	/**
+	 * Emits one agent event through the logger, if it is worth a record.
+	 *
+	 * The mapping lives in {@link describeAgentEvent} so it can be tested
+	 * without an agent; here is only the timing bookkeeping the mapping cannot
+	 * do — a tool's duration spans two events, so the start time has to be
+	 * remembered until the end arrives.
+	 */
+	private logAgentEvent(event: AgentEvent): void {
+		// Duration is computed here, not by the mapping: it spans two events, so
+		// only this side of the boundary knows both endpoints.
+		let durationMs: number | undefined;
+		if (event.type === "tool_execution_end") {
+			const startedAt = this.pendingToolStarts.get(event.toolCallId);
+			this.pendingToolStarts.delete(event.toolCallId);
+			if (startedAt !== undefined) {
+				durationMs = Math.max(0, Date.now() - startedAt);
+			}
+		}
+		const entry = describeAgentEvent(event, durationMs);
+		if (!entry) {
+			return;
+		}
+		const { level, message, detail } = entry;
+		if (level === "error") {
+			this.log.error(message, () => detail ?? {});
+		} else if (level === "warn") {
+			this.log.warn(message, () => detail ?? {});
+		} else if (level === "info") {
+			this.log.info(message, () => detail ?? {});
+		} else {
+			this.log.debug(message, () => detail ?? {});
+		}
 	}
 
 	/**
