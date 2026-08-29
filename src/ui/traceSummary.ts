@@ -1,4 +1,4 @@
-import type { ToolResultMessage } from "@earendil-works/pi-ai";
+import type { ImageContent, TextContent, ToolResultMessage } from "@earendil-works/pi-ai";
 import type { Translator } from "../i18n";
 
 /**
@@ -108,9 +108,39 @@ export function summarizeToolPayload(payload: unknown): string {
  * is already a written sentence ("Applied 2 edits to Note.md.").
  */
 export function summarizeToolResult(message: ToolResultMessage, t: Translator): string {
-	const firstText = message.content.find((content) => content.type === "text");
-	if (!firstText || firstText.type !== "text") {
+	const summary = summarizeToolContent(message.content);
+	if (summary === null) {
 		return message.isError ? t.t("traceTool.failed") : "";
+	}
+	return summary;
+}
+
+/**
+ * How one running tool is named in the live status row.
+ *
+ * The tool's display name, plus the newest line it reported in parentheses. A
+ * tool that reports nothing renders exactly as it did before this existed —
+ * which is every tool in this plugin today, so the common row is unchanged and
+ * only a tool that actually streams gains the suffix.
+ */
+export function describePendingTool(pending: { name: string; progress?: string }, showAgentDetails: boolean, t: Translator): string {
+	const label = describeTool(pending.name, showAgentDetails, t);
+	return pending.progress ? `${label} (${pending.progress})` : label;
+}
+
+/**
+ * First non-blank line of a tool's text content, clipped to the row width.
+ *
+ * Shared by the finished-result rows and the live progress line so a streaming
+ * tool and the same tool's settled result are summarized by one rule. Returns
+ * `null` when there is no text block at all, which the two callers read
+ * differently: a finished result treats it as "failed, with nothing to quote",
+ * while a progress update treats it as "running, nothing to show yet".
+ */
+export function summarizeToolContent(content: readonly (TextContent | ImageContent)[]): string | null {
+	const firstText = content.find((block) => block.type === "text");
+	if (!firstText || firstText.type !== "text") {
+		return null;
 	}
 	const firstLine = firstText.text.split("\n").find((line) => line.trim()) ?? "";
 	return clip(firstLine.trim());
