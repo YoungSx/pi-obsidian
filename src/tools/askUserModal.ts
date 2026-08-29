@@ -126,7 +126,7 @@ export function buildAskUserForm(container: HTMLElement, questions: readonly Ask
 		);
 	};
 
-	for (const [index, item] of items.entries()) {
+	for (const item of items) {
 		const question = item.question;
 		const state = item.state;
 		const block = document.createElement("div");
