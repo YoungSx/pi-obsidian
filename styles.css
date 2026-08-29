@@ -499,6 +499,12 @@
 }
 
 .piem-chat__typing-dot {
+	/*
+	 * The dots are empty spans — without a fill they are invisible, and the
+	 * bounce animation would animate nothing. `currentColor` tracks the
+	 * pending card's `--text-muted`, so theme switches retint them for free.
+	 */
+	background: currentColor;
 	animation: pi-typing 1.2s ease-in-out infinite;
 	border-radius: 50%;
 	flex-shrink: 0;
