@@ -433,7 +433,8 @@ function baseSnapshot(): ChatSnapshot {
 		pendingToolCalls: [],
 		provider: DEFAULT_SETTINGS.provider,
 		modelId: DEFAULT_SETTINGS.modelId,
-		thinkingLevel: DEFAULT_SETTINGS.thinkingLevel,
+		thinkingLevel: "off",
+		thinkingLevels: ["off", "low", "high"],
 		modelChoices: [
 			{ id: "m-opus", name: "Opus 5", provider: "OpenRouter" },
 			{ id: "m-sonnet", name: "Sonnet 5", provider: "Anthropic" },

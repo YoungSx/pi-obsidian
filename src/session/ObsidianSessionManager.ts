@@ -13,13 +13,19 @@ import {
 	type ThinkingLevel,
 } from "@earendil-works/pi-agent-core";
 import { normalizeFolderPath } from "../vault/path";
+import { DEFAULT_THINKING_LEVEL } from "../constants";
 import { ObsidianSessionFileSystem } from "./ObsidianSessionFileSystem";
 import { selectSessionsToEvict, UNLIMITED_SESSION_RETENTION } from "./retention";
 
 export interface SessionDefaults {
 	provider: string;
 	modelId: string;
-	thinkingLevel: ThinkingLevel;
+	/**
+	 * The level a *brand-new* session starts on. The stored sessions keep their
+	 * own level from here on — {@link ensureConfiguration} no longer pushes this
+	 * value over an existing conversation — so it is a seed, not a setting.
+	 */
+	thinkingLevel?: ThinkingLevel;
 }
 
 export interface ActiveSessionInfo {
@@ -78,7 +84,7 @@ export class ObsidianSessionManager {
 		this.session = await this.repo(sessionDir).create({ cwd: this.cwd });
 		this.sessionMetadata = await this.session.getMetadata();
 		await this.appendModelChange(defaults.provider, defaults.modelId);
-		await this.appendThinkingLevelChange(defaults.thinkingLevel);
+		await this.appendThinkingLevelChange(defaults.thinkingLevel ?? DEFAULT_THINKING_LEVEL);
 		await this.evictSurplusSessions(sessionDir);
 		return this.getActiveSessionInfo();
 	}
@@ -156,6 +162,30 @@ export class ObsidianSessionManager {
 	async appendThinkingLevelChange(thinkingLevel: ThinkingLevel): Promise<string> {
 		const session = this.getSession();
 		return (await session.appendEntry({ type: "thinking_level_change", id: session.idGenerator.next(), thinkingLevel }, "main")).id;
+	}
+
+	/**
+	 * The thinking level the most recent stored session ended on, for seeding a
+	 * brand-new conversation. Read through a throwaway session the same way
+	 * {@link readActiveSessionName} does: the live session object is never
+	 * touched, so an in-flight append cannot be disturbed. Undefined when no
+	 * session exists yet or the newest one predates level entries (pi's context
+	 * builder already defaults those to `"off"`, so `undefined` here only means
+	 * "nothing to inherit").
+	 */
+	async readLastSessionThinkingLevel(): Promise<ThinkingLevel | undefined> {
+		const sessions = await this.listSessions();
+		const newest = sessions[0];
+		if (!newest) {
+			return undefined;
+		}
+		const metadata = await this.findMetadata(newest.path);
+		if (!metadata) {
+			return undefined;
+		}
+		const previous = await this.repo(this.resolveSessionDir()).open(metadata);
+		const entries = await previous.findEntriesOnBranch({ order: "oldestFirst" });
+		return buildPiSessionContext(entries).thinkingLevel as ThinkingLevel | undefined;
 	}
 
 	async appendCompaction(result: CompactResult): Promise<string> {
@@ -295,12 +325,13 @@ export class ObsidianSessionManager {
 	}
 
 	async ensureConfiguration(defaults: SessionDefaults): Promise<void> {
+		// Model only. The thinking level used to be re-asserted here from global
+		// settings, which made the session's own recorded level decorative; the
+		// level now belongs to the conversation, so the session file wins and
+		// this sync must not overwrite it.
 		const context = await this.buildSessionContext();
 		if (context.model?.provider !== defaults.provider || context.model.modelId !== defaults.modelId) {
 			await this.appendModelChange(defaults.provider, defaults.modelId);
-		}
-		if (context.thinkingLevel !== defaults.thinkingLevel) {
-			await this.appendThinkingLevelChange(defaults.thinkingLevel);
 		}
 	}
 

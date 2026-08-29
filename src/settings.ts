@@ -1,9 +1,8 @@
 import { App, Platform, PluginSettingTab } from "obsidian";
-import { getSupportedThinkingLevels } from "@earendil-works/pi-ai";
 import { getBuiltinModels } from "./net/builtinCatalog";
-import type { Model, ModelThinkingLevel } from "@earendil-works/pi-ai";
+import type { Model } from "@earendil-works/pi-ai";
 import type PiemPlugin from "./main";
-import { CUSTOM_ENDPOINT_PROVIDER, DEFAULT_MODEL_ID, DEFAULT_PROVIDER, DEFAULT_THINKING_LEVEL } from "./constants";
+import { CUSTOM_ENDPOINT_PROVIDER, DEFAULT_MODEL_ID, DEFAULT_PROVIDER } from "./constants";
 import type { SecretEnvironment } from "./secretsStore";
 import type { NetworkTransport } from "./net/obsidianFetch";
 import {
@@ -34,8 +33,6 @@ import { normalizeUserSkillsDir } from "./skills/userSkillsDir";
 import { VaultExecutionEnv } from "./vault/VaultExecutionEnv";
 import { createFetchForTransport } from "./net/obsidianFetch";
 
-const OFF_THINKING_LEVEL: ModelThinkingLevel = "off";
-
 export interface PiemSettings {
 	/**
 	 * The {@link ModelConfig} every request goes out on. Undefined means no
@@ -51,7 +48,6 @@ export interface PiemSettings {
 	provider: string;
 	/** Builtin catalog model id, used when no configured model is active. */
 	modelId: string;
-	thinkingLevel: ModelThinkingLevel;
 	providerApiKeys: Record<string, string>;
 	networkTransport: NetworkTransport;
 	/**
@@ -139,7 +135,6 @@ export const DEFAULT_SETTINGS: PiemSettings = {
 	models: [],
 	provider: DEFAULT_PROVIDER,
 	modelId: DEFAULT_MODEL_ID,
-	thinkingLevel: DEFAULT_THINKING_LEVEL,
 	providerApiKeys: {},
 	networkTransport: "requestUrl",
 	showAgentDetails: false,
@@ -163,7 +158,10 @@ export const DEFAULT_SETTINGS: PiemSettings = {
 export function normalizeSettings(data: Partial<PiemSettings> | null | undefined): PiemSettings {
 	const provider = data?.provider || DEFAULT_PROVIDER;
 	const modelId = data?.modelId || DEFAULT_MODEL_ID;
-	const thinkingLevel = data?.thinkingLevel || DEFAULT_THINKING_LEVEL;
+	// A stored `thinkingLevel` from before the field moved into the session file
+	// is deliberately dropped, not migrated: the level now belongs to each
+	// conversation, and a global leftover would claim authority over sessions
+	// that already recorded their own.
 	const providerApiKeys = data?.providerApiKeys || {};
 	const networkTransport: NetworkTransport = data?.networkTransport === "fetch" ? "fetch" : "requestUrl";
 	// A corrupted or unknown stored value degrades to "auto" rather than
@@ -204,7 +202,6 @@ export function normalizeSettings(data: Partial<PiemSettings> | null | undefined
 		models,
 		provider,
 		modelId,
-		thinkingLevel,
 		providerApiKeys: { ...providerApiKeys },
 		networkTransport,
 		// Absent in vaults written before the setting existed; those users get the
@@ -430,10 +427,6 @@ export function describeModelTarget(settings: PiemSettings, t: Translator): stri
 	return `${settings.provider}/${settings.modelId}`.replace(/^./, (first) => first.toUpperCase());
 }
 
-export function getSupportedThinkingLevelOptions(settings: PiemSettings): ModelThinkingLevel[] {
-	return getSupportedThinkingLevels(getSelectedModel(settings));
-}
-
 /**
  * Whether `model` accepts image content alongside text.
  *
@@ -446,17 +439,6 @@ export function getSupportedThinkingLevelOptions(settings: PiemSettings): ModelT
  */
 export function modelSupportsImages(model: Model<string>): boolean {
 	return model.input.includes("image");
-}
-
-export function getPreferredThinkingLevel(settings: PiemSettings): ModelThinkingLevel {
-	const supportedLevels = getSupportedThinkingLevelOptions(settings);
-	if (supportedLevels.includes(settings.thinkingLevel)) {
-		return settings.thinkingLevel;
-	}
-	if (supportedLevels.includes(DEFAULT_THINKING_LEVEL)) {
-		return DEFAULT_THINKING_LEVEL;
-	}
-	return supportedLevels[0] ?? OFF_THINKING_LEVEL;
 }
 
 /**
@@ -500,8 +482,6 @@ export class PiemSettingTab extends PluginSettingTab {
 			},
 			secretStorage: this.encryptionAvailable ? "encrypted" : "plaintext",
 			openLogView: () => this.plugin.openLogView(),
-			thinkingLevels: () => getSupportedThinkingLevelOptions(this.plugin.settings),
-			preferredThinkingLevel: () => getPreferredThinkingLevel(this.plugin.settings),
 			describeTarget: () => describeModelTarget(this.plugin.settings, getT(language)),
 			t: getT(language),
 			contextWindow: () => getSelectedModel(this.plugin.settings).contextWindow,

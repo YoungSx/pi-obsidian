@@ -1,5 +1,5 @@
 import { type App, TFile } from "obsidian";
-import { type ImageContent, type Usage } from "@earendil-works/pi-ai";
+import { clampThinkingLevel, getSupportedThinkingLevels, type ImageContent, type Usage } from "@earendil-works/pi-ai";
 import {
 	Agent,
 	collectEntriesForBranchSummary,
@@ -21,11 +21,11 @@ import { compactIfNeeded, needsCompaction, DEFAULT_COMPACTION_RETRY, type Compac
 import { measureContextFill, sumUsage, type ContextFill, type UsageTotals } from "./usage";
 import { resolveCompactionSettings, type CompactionSettings } from "./compactionSettings";
 import { createObsidianTools } from "../tools/obsidianTools";
+import { DEFAULT_THINKING_LEVEL } from "../constants";
 import {
 	describeModelTarget,
 	getApiKeyForProvider,
 	getConfiguredApiKey,
-	getPreferredThinkingLevel,
 	getSelectedModel,
 	listModelChoices,
 	modelSupportsImages,
@@ -101,7 +101,20 @@ export interface ChatSnapshot {
 	noticeMessage?: string;
 	provider: string;
 	modelId: string;
+	/**
+	 * The level this conversation runs at, read from the live agent — which the
+	 * session file drives — rather than from settings. A global field would
+	 * masquerade as a default while every session carries its own.
+	 */
 	thinkingLevel: ThinkingLevel;
+	/**
+	 * Levels the active model accepts, `"off"` included, in escalation order.
+	 *
+	 * A single entry means the model takes no reasoning at all (custom endpoints
+	 * default conservative until their capability bit is set), which is the
+	 * selector's signal to stay unrendered rather than offer one choice.
+	 */
+	thinkingLevels: ThinkingLevel[];
 	/**
 	 * Configured models the panel offers to switch between, in stored order.
 	 *
@@ -761,8 +774,14 @@ export class ObsidianAgentService {
 
 	async newSession(): Promise<void> {
 		this.agent?.abort();
+		// The level is inherited from the conversation just left, not from a
+		// global setting: the user tuned it there and a fresh chat should not
+		// start from a value they never chose. Clamped to the model the new
+		// session will run on, since the previous one may have run another.
+		const inherited = await this.sessionManager.readLastSessionThinkingLevel();
+		const seed = clampThinkingLevel(getSelectedModel(this.getSettings()), inherited ?? DEFAULT_THINKING_LEVEL);
 		const defaults = this.getSessionDefaults();
-		this.sessionInfo = await this.sessionManager.createSession(defaults);
+		this.sessionInfo = await this.sessionManager.createSession({ ...defaults, thinkingLevel: seed });
 		this.messageEntryIds = new WeakMap<object, string>();
 		this.lastCompaction = undefined;
 		this.overheadUsage = [];
@@ -770,7 +789,7 @@ export class ObsidianAgentService {
 		// carrying either forward would shape a fresh chat the user never set up that
 		// way. The active note is left alone because it describes the workspace.
 		this.contextRefs.reset();
-		this.replaceAgent([]);
+		this.replaceAgent([], seed);
 		this.errorMessage = undefined;
 		this.sessionRevision += 1;
 		this.notify();
@@ -952,6 +971,23 @@ export class ObsidianAgentService {
 		await this.persistSettings();
 	}
 
+	/**
+	 * Sets the level on the live conversation — the session's own property, not a
+	 * global one. The change is recorded in the session file so a reload or
+	 * another window replays it, exactly like a model change. A no-op when the
+	 * level is already set (the selector's job) or there is no live agent.
+	 */
+	async setThinkingLevel(level: ThinkingLevel): Promise<void> {
+		if (!this.agent || this.agent.state.thinkingLevel === level) {
+			return;
+		}
+		this.agent.state.thinkingLevel = level;
+		if (this.sessionManager.getActiveSessionPath()) {
+			await this.sessionManager.appendThinkingLevelChange(level);
+		}
+		this.notify();
+	}
+
 	async refreshConfiguration(): Promise<void> {
 		// A just-trashed session leaves nothing to append to; the session adopted in
 		// its place runs `ensureConfiguration` itself. Subscribers are still told:
@@ -963,8 +999,17 @@ export class ObsidianAgentService {
 			return;
 		}
 		const defaults = this.getSessionDefaults();
-		this.agent.state.model = getSelectedModel(this.getSettings());
-		this.agent.state.thinkingLevel = defaults.thinkingLevel;
+		const model = getSelectedModel(this.getSettings());
+		this.agent.state.model = model;
+		// The level belongs to the session and is left alone here. Only a model
+		// that can no longer express it forces a rewrite, and the session file is
+		// told — an agent state silently diverging from the recorded level would
+		// resurrect the old bug on the next reload.
+		const clamped = clampThinkingLevel(model, this.agent.state.thinkingLevel);
+		if (clamped !== this.agent.state.thinkingLevel) {
+			this.agent.state.thinkingLevel = clamped;
+			await this.sessionManager.appendThinkingLevelChange(clamped);
+		}
 		this.agent.state.tools = createObsidianTools(this.app, this.env, this.getSettings(), () => this.skills);
 		// Skills are read from the vault here too: `saveSettings` calls this after
 		// every settings change, and the panel re-reads the folder with it, so a
@@ -1033,7 +1078,10 @@ export class ObsidianAgentService {
 			noticeMessage: this.noticeMessage,
 			provider: model.provider,
 			modelId: model.id,
-			thinkingLevel: getPreferredThinkingLevel(settings),
+			// The session's own level, not a settings fallback: with no agent yet
+			// there is no conversation either, so "off" is the honest default.
+			thinkingLevel: agent?.state.thinkingLevel ?? "off",
+			thinkingLevels: getSupportedThinkingLevels(model),
 			modelChoices: listModelChoices(settings),
 			activeModelId: settings.activeModelId,
 			session: this.sessionInfo,
@@ -1162,7 +1210,13 @@ export class ObsidianAgentService {
 				this.messageEntryIds.set(message, entryId);
 			}
 		});
-		this.replaceAgent(context.messages);
+		// The session's recorded level, clamped to the model requests will run on:
+		// the conversation may have last run a model whose ceiling differs, and a
+		// level the model cannot express is an error waiting for the next prompt.
+		this.replaceAgent(
+			context.messages,
+			clampThinkingLevel(getSelectedModel(this.getSettings()), context.thinkingLevel),
+		);
 	}
 
 	/**
@@ -1191,7 +1245,7 @@ export class ObsidianAgentService {
 		}
 	}
 
-	private replaceAgent(messages: AgentMessage[]): void {
+	private replaceAgent(messages: AgentMessage[], thinkingLevel: ThinkingLevel): void {
 		this.unsubscribeAgent?.();
 		// An aborted run never delivers `tool_execution_end`, so anything keyed by a
 		// call that was in flight would otherwise accumulate for the life of the
@@ -1235,7 +1289,9 @@ export class ObsidianAgentService {
 				// agent gets its prompt refreshed by `reloadSkills` itself.
 				systemPrompt: composeSystemPrompt(OBSIDIAN_AGENT_SYSTEM_PROMPT, this.skills),
 				model,
-				thinkingLevel: getPreferredThinkingLevel(settings),
+				// The caller resolves this: the loaded session's own level, or the
+				// seed a new session was created with. Global settings have no say.
+				thinkingLevel,
 				tools: createObsidianTools(this.app, this.env, settings, () => this.skills),
 				messages,
 			},
@@ -1732,12 +1788,10 @@ export class ObsidianAgentService {
 	}
 
 	private getSessionDefaults(): SessionDefaults {
-		const settings = this.getSettings();
-		const model = getSelectedModel(settings);
+		const model = getSelectedModel(this.getSettings());
 		return {
 			provider: model.provider,
 			modelId: model.id,
-			thinkingLevel: getPreferredThinkingLevel(settings),
 		};
 	}
 
