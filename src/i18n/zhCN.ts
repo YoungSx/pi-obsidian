@@ -95,6 +95,7 @@ export const zhCN: DeepPartial<EnCopy> = {
 		unknownCommand: "未知命令：/{name}",
 		commandConflict: "提示和技能都使用 /{name}。本次已使用提示；如需技能，请输入 /skill:{name}。",
 		templatesLoadedWithWarnings: "已加载提示命令，但有 {count} 条警告。",
+		nothingToCompact: "暂时没有可整理的内容。",
 	},
 
 	builtinSkills: {

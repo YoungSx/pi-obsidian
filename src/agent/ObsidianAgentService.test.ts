@@ -476,7 +476,12 @@ describe("ObsidianAgentService", () => {
 
 		// The error banner is an assertive alert; a "nothing happened" outcome
 		// routed through it made screen readers interrupt the user.
-		expect(service.getSnapshot().noticeMessage).toBe("Nothing to compact yet.");
+		//
+		// Wording comes from the copy table rather than a literal in this method,
+		// which is what it used to be — a Chinese reader who pressed Tidy up got
+		// one line of English back. It matches the command that reaches it ("Tidy
+		// up earlier messages"), not the detail-tier word "compact".
+		expect(service.getSnapshot().noticeMessage).toBe("Nothing to tidy up yet.");
 		expect(service.getSnapshot().errorMessage).toBeUndefined();
 		expect(service.getSnapshot().messages).toHaveLength(0);
 	});
