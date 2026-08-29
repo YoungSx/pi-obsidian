@@ -4,7 +4,8 @@ import { installObsidianStub, requestUrlMock } from "../testing/obsidianStub";
 /** The subset of Obsidian's `RequestUrlResponse` that these tests rely on. */
 interface MockRequestUrlResponse {
 	status: number;
-	headers: Record<string, string>;
+	/** Optional so a test can model a response that carried no headers at all. */
+	headers?: Record<string, string>;
 	arrayBuffer: ArrayBuffer;
 }
 
@@ -164,6 +165,158 @@ describe("createObsidianRequestUrlFetch", () => {
 		// The user pressed stop: that must surface as an abort, not as the
 		// provider-side timeout wording.
 		expect(pending).rejects.toThrow(/aborted/i);
+	});
+
+	// The `Response` constructor is stricter than HTTP, and `requestUrl` hands
+	// back whatever the wire carried. Everything below is a response a real
+	// server can legitimately send that the unguarded constructor refused to
+	// represent, taking the whole tool call down with a bare `TypeError`.
+	describe("responses the Response constructor refuses verbatim", () => {
+		it("keeps a 304 as a 304, with the body dropped rather than the status rewritten", async () => {
+			// The empty buffer is the point: `requestUrl` returns `arrayBuffer`
+			// unconditionally, and an empty ArrayBuffer still counts as a body, so
+			// this is exactly the shape a cached re-request produces.
+			requestUrlMock.mockResolvedValue(mockResponse({
+				status: 304,
+				headers: { etag: '"abc"' },
+				arrayBuffer: textToArrayBuffer(""),
+			}));
+			const obsidianFetch = createObsidianRequestUrlFetch();
+
+			const response = await obsidianFetch("https://example.com/page");
+
+			expect(response.status).toBe(304);
+			expect(response.body).toBeNull();
+			expect(await response.text()).toBe("");
+			expect(response.headers.get("etag")).toBe('"abc"');
+		});
+
+		it("drops the body on 304 even when bytes came with it", async () => {
+			// Bun's `Response` tolerates a body here where Chromium and undici
+			// throw, so asserting "it did not throw" would pass without the fix.
+			// The null body is what proves the guard ran.
+			requestUrlMock.mockResolvedValue(mockResponse({
+				status: 304,
+				headers: {},
+				arrayBuffer: textToArrayBuffer("unexpected"),
+			}));
+			const obsidianFetch = createObsidianRequestUrlFetch();
+
+			const response = await obsidianFetch("https://example.com/page");
+
+			expect(response.status).toBe(304);
+			expect(response.body).toBeNull();
+			expect(await response.text()).toBe("");
+		});
+
+		it.each([204, 205])("keeps a null-body status %i intact", async (status) => {
+			requestUrlMock.mockResolvedValue(mockResponse({
+				status,
+				headers: {},
+				arrayBuffer: textToArrayBuffer(""),
+			}));
+			const obsidianFetch = createObsidianRequestUrlFetch();
+
+			const response = await obsidianFetch("https://example.com/resource", { method: "DELETE" });
+
+			expect(response.status).toBe(status);
+			expect(response.body).toBeNull();
+		});
+
+		it("still carries the body for a status that allows one", async () => {
+			// The guard must not overreach: 429 has a body worth reading, and an
+			// over-broad null-body rule would swallow the provider's own error text.
+			requestUrlMock.mockResolvedValue(mockResponse({
+				status: 429,
+				headers: {},
+				arrayBuffer: textToArrayBuffer('{"error":"slow down"}'),
+			}));
+			const obsidianFetch = createObsidianRequestUrlFetch();
+
+			const response = await obsidianFetch("https://example.com/api");
+
+			expect(response.status).toBe(429);
+			expect(await response.text()).toContain("slow down");
+		});
+
+		it.each([0, 100, 600, Number.NaN])("names the offending value when the status is %p", async (status) => {
+			// No honest `Response` exists for these, so the transport fails — but
+			// with the value in the message, rather than as an anonymous TypeError
+			// from inside the constructor.
+			requestUrlMock.mockResolvedValue(mockResponse({
+				status,
+				headers: {},
+				arrayBuffer: textToArrayBuffer(""),
+			}));
+			const obsidianFetch = createObsidianRequestUrlFetch();
+
+			expect(obsidianFetch("https://example.com/weird")).rejects.toThrow(
+				new RegExp(`outside 200-599.*${status === 0 ? "0" : String(status)}`),
+			);
+		});
+	});
+
+	describe("headers the Headers constructor refuses", () => {
+		it("skips a pseudo-header and keeps the rest of the response", async () => {
+			// Real HTTP/2 origins emit `:status`. Building the map in one call meant
+			// that single entry cost the caller the body, the status, and every
+			// well-formed sibling along with it.
+			requestUrlMock.mockResolvedValue(mockResponse({
+				status: 200,
+				headers: { ":status": "200", "content-type": "text/html", "x-ok": "1" },
+				arrayBuffer: textToArrayBuffer("<html></html>"),
+			}));
+			const obsidianFetch = createObsidianRequestUrlFetch();
+
+			const response = await obsidianFetch("https://example.com/page");
+
+			expect(response.status).toBe(200);
+			expect(await response.text()).toBe("<html></html>");
+			expect(response.headers.get("content-type")).toBe("text/html");
+			expect(response.headers.get("x-ok")).toBe("1");
+		});
+
+		it("skips a name containing a space", async () => {
+			requestUrlMock.mockResolvedValue(mockResponse({
+				status: 200,
+				headers: { "bad name": "x", "x-good": "y" },
+				arrayBuffer: textToArrayBuffer("body"),
+			}));
+			const obsidianFetch = createObsidianRequestUrlFetch();
+
+			const response = await obsidianFetch("https://example.com/page");
+
+			expect(await response.text()).toBe("body");
+			expect(response.headers.get("x-good")).toBe("y");
+		});
+
+		it("skips a value containing a newline", async () => {
+			requestUrlMock.mockResolvedValue(mockResponse({
+				status: 200,
+				headers: { "x-folded": "a\nb", "x-good": "y" },
+				arrayBuffer: textToArrayBuffer("body"),
+			}));
+			const obsidianFetch = createObsidianRequestUrlFetch();
+
+			const response = await obsidianFetch("https://example.com/page");
+
+			expect(await response.text()).toBe("body");
+			expect(response.headers.get("x-folded")).toBeNull();
+			expect(response.headers.get("x-good")).toBe("y");
+		});
+
+		it("tolerates a response with no headers at all", async () => {
+			requestUrlMock.mockResolvedValue({
+				status: 200,
+				arrayBuffer: textToArrayBuffer("body"),
+			} as MockRequestUrlResponse);
+			const obsidianFetch = createObsidianRequestUrlFetch();
+
+			const response = await obsidianFetch("https://example.com/page");
+
+			expect(response.status).toBe(200);
+			expect(await response.text()).toBe("body");
+		});
 	});
 
 	it("defaults to GET without a body", async () => {
