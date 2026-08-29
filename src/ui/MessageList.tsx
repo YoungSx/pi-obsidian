@@ -1,25 +1,31 @@
 import React, { useEffect, useRef, useState } from "react";
 import type { AgentMessage, CompactionSummaryMessage } from "@earendil-works/pi-agent-core";
+import type { PendingToolCall } from "../agent/ObsidianAgentService";
 import type { AssistantMessage, ToolResultMessage, UserMessage } from "@earendil-works/pi-ai";
 import type { App, Component, IconName } from "obsidian";
 import type { TextBlockKind } from "./markdownPolicy";
 import { MarkdownText } from "./MarkdownText";
 import { assistantText } from "./messageActions";
 import { ReplyActions } from "./ReplyActions";
+import { describeReplyCutoff, type ReplyCutoff } from "./replyCutoff";
 import { useT } from "./TranslatorContext";
 import type { Translator } from "../i18n";
 import { ObsidianIcon } from "./ObsidianIcon";
-import { countDiffLines, describeTool, isToolIdentifier, summarizeToolPayload, summarizeToolResult } from "./traceSummary";
+import { countDiffLines, describePendingTool, describeTool, isToolIdentifier, summarizeToolPayload, summarizeToolResult } from "./traceSummary";
 
 export interface MessageListProps {
 	messages: AgentMessage[];
 	/** True while the agent turn is in flight; the last message is the streaming one. */
 	isStreaming: boolean;
 	/**
-	 * Tool names running right now, worded like the collapsed trace rows so the
-	 * live line and the finished rows do not name the same tool two ways.
+	 * Tools running right now, worded like the collapsed trace rows so the live
+	 * line and the finished rows do not name the same tool two ways.
+	 *
+	 * Each may carry a `progress` line the tool reported through pi's
+	 * `tool_execution_update`. Absent for a tool that reports nothing, in which
+	 * case the row shows the name alone exactly as it always has.
 	 */
-	pendingToolCalls: string[];
+	pendingToolCalls: PendingToolCall[];
 	isInitializing?: boolean;
 	isConfigured?: boolean;
 	/**
@@ -261,7 +267,7 @@ export function MessageList({
 					<div aria-label={t.t("chat.toolsRunning")} className="piem-chat__tool-status" role="status">
 						<ObsidianIcon name="loader-circle" className="piem-chat__spinner" />
 						{t.t("chat.working")}
-						{pendingToolCalls.map((toolName) => describeTool(toolName, showAgentDetails, t)).join(", ")}
+						{pendingToolCalls.map((pending) => describePendingTool(pending, showAgentDetails, t)).join(", ")}
 					</div>
 				) : null}
 				{awaitsFirstToken(messages, isStreaming, pendingToolCalls.length > 0) ? <PendingReply /> : null}
@@ -335,10 +341,14 @@ function TurnAnnouncer({ messages, isStreaming }: { messages: AgentMessage[]; is
  */
 function assistantSpeech(message: AssistantMessage, t: Translator): string {
 	const spoken = assistantText(message);
-	if (message.stopReason === "aborted") {
-		return spoken ? `${spoken} — ${t.t("chat.youStoppedSpoken")}` : t.t("chat.youStopped");
+	const cutoff = describeReplyCutoff(message, t);
+	if (!cutoff) {
+		return spoken;
 	}
-	return spoken;
+	// Continues the sentence when there are words to continue, and stands alone
+	// when the reply was cut before producing any — the case a reader most needs
+	// told, since an otherwise-empty turn announces nothing at all.
+	return spoken ? `${spoken} — ${cutoff.spoken}` : cutoff.notice;
 }
 
 interface EmptyStateProps {
@@ -431,6 +441,7 @@ function MessageRow({ message, isStreaming, renderContext, onRetry }: MessageRow
 	if (message.role !== "user" && message.role !== "assistant") {
 		return <HarnessTrace message={message} context={renderContext} />;
 	}
+	const cutoff = replyCutoff(message, renderContext.t);
 	return (
 		/*
 		 * No role banner. A two-party conversation in a 300px sidebar identifies its
@@ -445,10 +456,10 @@ function MessageRow({ message, isStreaming, renderContext, onRetry }: MessageRow
 			aria-label={renderContext.t.t(message.role === "user" ? "chat.you" : "chat.agent")}
 		>
 			<div className="piem-chat__message-content">{renderMessageContent(message, { isStreaming, renderContext })}</div>
-			{wasInterrupted(message) ? (
+			{cutoff ? (
 				<p className="piem-chat__interrupted">
-					<ObsidianIcon name="circle-slash" />
-					{renderContext.t.t("chat.youStopped")}
+					<ObsidianIcon name={cutoff.icon} />
+					{cutoff.notice}
 				</p>
 			) : null}
 			{message.role === "assistant" && !isStreaming ? (
@@ -458,9 +469,14 @@ function MessageRow({ message, isStreaming, renderContext, onRetry }: MessageRow
 	);
 }
 
-/** True for an assistant turn the user aborted, so the half-written text is not read as complete. */
-function wasInterrupted(message: UserMessage | AssistantMessage): boolean {
-	return message.role === "assistant" && message.stopReason === "aborted";
+/**
+ * Why an assistant turn stopped early, or `null` when it finished normally.
+ *
+ * Narrows to the assistant role here so the render site can stay a single
+ * expression; a user message never carries a stop reason.
+ */
+function replyCutoff(message: UserMessage | AssistantMessage, t: Translator): ReplyCutoff | null {
+	return message.role === "assistant" ? describeReplyCutoff(message, t) : null;
 }
 
 /**

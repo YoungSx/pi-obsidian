@@ -68,6 +68,8 @@ export const zhCN: DeepPartial<EnCopy> = {
 		askAboutVaultHintAfter: "。",
 		youStopped: "你已停止这条回复。",
 		youStoppedSpoken: "你已停止这条回复。",
+		replyTruncated: "这条回复达到模型的长度上限，提前结束了。",
+		replyTruncatedSpoken: "这条回复达到模型的长度上限，提前结束了。",
 		you: "你",
 		agent: "Piem",
 		thoughtItThrough: "思考了一下",

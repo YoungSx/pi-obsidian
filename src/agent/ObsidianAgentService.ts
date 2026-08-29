@@ -41,6 +41,7 @@ import { composeSystemPrompt, expandSkill, findSkill, formatSkillDiagnostics, lo
 import { loadUserSkills, type UserSkill } from "../skills/userSkills";
 import type { Skill, SkillDiagnostic } from "@earendil-works/pi-agent-core";
 import { describeAgentEvent } from "./agentEventLog";
+import { summarizeToolContent } from "../ui/traceSummary";
 import { NOOP_LOGGER, type LoggerLike } from "../logging/Logger";
 import { getT, resolveLanguage, type Language, type LanguageHost, type Translator } from "../i18n";
 import type { SendShortcut } from "../ui/keyboard";
@@ -54,19 +55,42 @@ import {
 	parsePromptCommand,
 } from "./promptTemplates";
 
+/** A tool call in flight, with whatever progress it has reported. */
+export interface PendingToolCall {
+	/** Tool id as pi names it (`grep`), which the UI translates for display. */
+	name: string;
+	/**
+	 * Newest progress line the tool reported, if any.
+	 *
+	 * One line rather than accumulated output: this renders inside the live
+	 * status row in a 300px sidebar, and the full text is already on its way to
+	 * the transcript as the tool result. Absent until the tool reports something,
+	 * which is distinct from an empty string — a tool that reports a blank line
+	 * has still said nothing worth showing.
+	 */
+	progress?: string;
+}
+
 export interface ChatSnapshot {
 	messages: AgentMessage[];
 	streamingMessage?: AgentMessage;
 	isStreaming: boolean;
 	/**
-	 * Names of the tools running right now.
+	 * The tools running right now, newest progress included.
 	 *
 	 * Names, not the ids pi tracks in `agent.state.pendingToolCalls`: that Set
 	 * holds tool call ids, so rendering it put `toolu_bdrk_01...` in front of the
 	 * user. {@link ObsidianAgentService} keeps the id-to-name mapping from the
 	 * execution events and resolves it here.
+	 *
+	 * `progress` carries what the tool has reported through pi's
+	 * `tool_execution_update` event, which a tool emits by calling the `onUpdate`
+	 * callback pi hands its `execute`. It is absent for a tool that reports
+	 * nothing — every tool in this plugin today — so the row reads exactly as it
+	 * did before for them, and a long-running tool that does report gains a live
+	 * line without any other call site changing.
 	 */
-	pendingToolCalls: string[];
+	pendingToolCalls: PendingToolCall[];
 	errorMessage?: string;
 	/**
 	 * Informational message that is not a failure ("Nothing to compact yet.").
@@ -210,6 +234,29 @@ function extractUserText(message: AgentMessage | undefined): string {
 		.trim();
 }
 
+/**
+ * The line a tool's progress update contributes to the live status row.
+ *
+ * pi types `tool_execution_update.partialResult` as `any` — it is whatever the
+ * tool passed to `onUpdate`, so nothing here may assume a shape. Anything that
+ * is not an object with a content array reduces to `null` rather than throwing
+ * out of an event handler, which would abort the run over a cosmetic detail.
+ *
+ * Summarizing goes through the same {@link summarizeToolContent} the finished
+ * result rows use, so a tool's streamed progress and its settled result are
+ * clipped and first-lined by one rule instead of two that can drift.
+ */
+function firstProgressLine(partialResult: unknown): string | null {
+	if (partialResult === null || typeof partialResult !== "object") {
+		return null;
+	}
+	const content = (partialResult as { content?: unknown }).content;
+	if (!Array.isArray(content)) {
+		return null;
+	}
+	return summarizeToolContent(content);
+}
+
 export interface ObsidianAgentServiceOptions {
 	streamFn?: StreamFn;
 	/**
@@ -305,6 +352,15 @@ export class ObsidianAgentService {
 	/** Start time per in-flight tool call, for the duration logged at end. */
 	private readonly pendingToolStarts = new Map<string, number>();
 	/**
+	 * Newest progress line each in-flight tool has reported.
+	 *
+	 * Keyed by call id like the two maps above, and cleared by the same event, so
+	 * {@link forgetPendingToolCalls} owns all three. Holds only the latest line
+	 * rather than accumulating: the full output arrives in the tool result, and
+	 * the live row has one line to spend.
+	 */
+	private readonly pendingToolProgress = new Map<string, string>();
+	/**
 	 * Where the agent's lifecycle is logged. `NOOP_LOGGER` rather than nullable:
 	 * a service without a logger is a valid test configuration, and an `if` at
 	 * every emit site is how logging quietly stops happening.
@@ -317,8 +373,21 @@ export class ObsidianAgentService {
 	private modelsBundle: ObsidianModelsBundle | null = null;
 	private modelsBundleKey: string | null = null;
 	private lastCompaction: CompactResult | undefined;
-	/** Compaction bills a separate request whose usage is not in the transcript. */
-	private compactionUsage: Usage[] = [];
+	/**
+	 * Usage from requests the plugin bills that no transcript message carries.
+	 *
+	 * Both summarization paths land here. Compaction and branch summarization are
+	 * real provider calls that cost real tokens, but neither appends an assistant
+	 * message — so {@link sumUsage}, which reads usage off the transcript, cannot
+	 * see them. Anything the plugin spends outside a conversational turn has to be
+	 * reported through this side channel or the panel under-reports what the user
+	 * was charged.
+	 *
+	 * Named for the category rather than for compaction alone: the narrower name
+	 * this replaced is what let branch summarization ship without its cost being
+	 * counted.
+	 */
+	private overheadUsage: Usage[] = [];
 	/**
 	 * Single-flight guard for compaction.
 	 *
@@ -659,6 +728,13 @@ export class ObsidianAgentService {
 				return null;
 			}
 
+			// Same side channel compaction uses, for the same reason: this was a
+			// billed provider request, and the message it produces is a
+			// `branchSummary` rather than an assistant turn, so `sumUsage` cannot
+			// find its cost in the transcript. Recorded before the append so a
+			// throw there cannot silently drop an amount the user was already
+			// charged.
+			this.recordOverheadUsage(result.value.usage);
 			await this.sessionManager.appendBranchSummary(result.value, oldLeafId);
 			return createBranchSummaryMessage(result.value.summary, oldLeafId, Date.now());
 		} finally {
@@ -689,7 +765,7 @@ export class ObsidianAgentService {
 		this.sessionInfo = await this.sessionManager.createSession(defaults);
 		this.messageEntryIds = new WeakMap<object, string>();
 		this.lastCompaction = undefined;
-		this.compactionUsage = [];
+		this.overheadUsage = [];
 		// Pins and a dismissed follow belong to the conversation that collected them;
 		// carrying either forward would shape a fresh chat the user never set up that
 		// way. The active note is left alone because it describes the workspace.
@@ -727,7 +803,7 @@ export class ObsidianAgentService {
 		this.lastCompaction = await this.sessionManager.getLastCompaction();
 		// Usage is per-transcript, and a reloaded session's compaction cost was
 		// already paid in an earlier run, so the running total starts from history.
-		this.compactionUsage = [];
+		this.overheadUsage = [];
 		// Same reasoning as `newSession`: the incoming conversation gets a clean
 		// follow state and no inherited pins.
 		this.contextRefs.reset();
@@ -944,8 +1020,15 @@ export class ObsidianAgentService {
 			// the tool. An id with no captured name is dropped rather than shown
 			// raw, so a missed event cannot leak `toolu_…` into the panel.
 			pendingToolCalls: [...(agent?.state.pendingToolCalls ?? new Set<string>())]
-				.map((toolCallId) => this.pendingToolNames.get(toolCallId))
-				.filter((toolName): toolName is string => toolName !== undefined),
+				.map((toolCallId) => {
+					const name = this.pendingToolNames.get(toolCallId);
+					if (name === undefined) {
+						return undefined;
+					}
+					const progress = this.pendingToolProgress.get(toolCallId);
+					return progress === undefined ? { name } : { name, progress };
+				})
+				.filter((pending): pending is PendingToolCall => pending !== undefined),
 			errorMessage: this.errorMessage ?? this.visibleAgentError(agent),
 			noticeMessage: this.noticeMessage,
 			provider: model.provider,
@@ -955,7 +1038,7 @@ export class ObsidianAgentService {
 			activeModelId: settings.activeModelId,
 			session: this.sessionInfo,
 			sessionRevision: this.sessionRevision,
-			usage: sumUsage(messages, this.compactionUsage),
+			usage: sumUsage(messages, this.overheadUsage),
 			contextFill: measureContextFill(messages, contextWindow, this.resolveCompaction(contextWindow)),
 			isCompacting: this.isCompacting,
 			isConfigured: this.hasApiKey(),
@@ -1110,11 +1193,13 @@ export class ObsidianAgentService {
 
 	private replaceAgent(messages: AgentMessage[]): void {
 		this.unsubscribeAgent?.();
-		// An aborted run never delivers `tool_execution_end`, so names captured for
-		// calls that were in flight would otherwise accumulate for the life of the
-		// panel. A fresh agent has nothing in flight, which makes this the point
-		// where the map is known to be safe to drop.
-		this.pendingToolNames.clear();
+		// An aborted run never delivers `tool_execution_end`, so anything keyed by a
+		// call that was in flight would otherwise accumulate for the life of the
+		// panel. Both maps are keyed that way and both are only ever cleared by that
+		// event, so they share the leak and have to share the fix. A fresh agent has
+		// nothing in flight, which makes this the point where they are known to be
+		// safe to drop.
+		this.forgetPendingToolCalls();
 		const settings = this.getSettings();
 		const model = getSelectedModel(settings);
 		// Annotated because the `prepareNextTurnWithContext` closure below refers to
@@ -1213,8 +1298,20 @@ export class ObsidianAgentService {
 			this.pendingToolNames.set(event.toolCallId, event.toolName);
 			this.pendingToolStarts.set(event.toolCallId, Date.now());
 		}
+		// pi emits this whenever a tool calls the `onUpdate` callback handed to its
+		// `execute`. Recording it is what lets a long-running tool report progress
+		// instead of the panel showing an unchanging "Working…" until it returns.
+		// A line the tool leaves blank is dropped rather than stored, so the row
+		// falls back to the plain tool name instead of rendering an empty detail.
+		if (event.type === "tool_execution_update") {
+			const line = firstProgressLine(event.partialResult);
+			if (line) {
+				this.pendingToolProgress.set(event.toolCallId, line);
+			}
+		}
 		if (event.type === "tool_execution_end") {
 			this.pendingToolNames.delete(event.toolCallId);
+			this.pendingToolProgress.delete(event.toolCallId);
 		}
 		this.logAgentEvent(event);
 		try {
@@ -1235,6 +1332,22 @@ export class ObsidianAgentService {
 		}
 		await this.refreshSessionInfo();
 		this.notify();
+	}
+
+	/**
+	 * Drops the per-call bookkeeping both in-flight maps hold.
+	 *
+	 * One method rather than two `clear()` calls at the call site: the maps are
+	 * two halves of one fact — what is running right now — and each is only ever
+	 * emptied by `tool_execution_end`. A run that is aborted never delivers that
+	 * event for the calls still in flight, so anything not cleared here survives
+	 * for the life of the panel. Clearing them together is what keeps the next
+	 * reader from having to notice that the second one exists.
+	 */
+	private forgetPendingToolCalls(): void {
+		this.pendingToolNames.clear();
+		this.pendingToolStarts.clear();
+		this.pendingToolProgress.clear();
 	}
 
 	/**
@@ -1488,13 +1601,27 @@ export class ObsidianAgentService {
 
 		agent.state.messages = outcome.messages;
 		this.lastCompaction = outcome.result;
-		if (outcome.result.usage) {
-			this.compactionUsage = [...this.compactionUsage, outcome.result.usage];
-		}
+		this.recordOverheadUsage(outcome.result.usage);
 		await this.sessionManager.appendCompaction(outcome.result);
 		await this.refreshSessionInfo();
 		this.notify();
 		return true;
+	}
+
+	/**
+	 * Books usage from a request that produced no assistant message.
+	 *
+	 * Both summarization paths call this rather than pushing onto
+	 * {@link overheadUsage} themselves, so "a billed request outside a turn must
+	 * be counted" is enforced in one place instead of being re-derived at each
+	 * call site. Absent usage is a no-op: a provider that reports none is normal,
+	 * and it must not be booked as a zero-cost request in the count.
+	 */
+	private recordOverheadUsage(usage: Usage | undefined): void {
+		if (!usage) {
+			return;
+		}
+		this.overheadUsage = [...this.overheadUsage, usage];
 	}
 
 	/**

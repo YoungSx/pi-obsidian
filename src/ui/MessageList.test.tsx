@@ -94,7 +94,7 @@ describe("MessageList compaction divider", () => {
 		// Re-render with pending tools through the same host.
 		const root = roots.get(host)!;
 		root.render(
-			<MessageList messages={[]} isStreaming={false} pendingToolCalls={["read", "grep"]} app={app} component={component} sourcePath="" />,
+			<MessageList messages={[]} isStreaming={false} pendingToolCalls={[{ name: "read" }, { name: "grep" }]} app={app} component={component} sourcePath="" />,
 		);
 		await flushRender();
 
@@ -111,7 +111,7 @@ describe("MessageList compaction divider", () => {
 			<MessageList
 				messages={[]}
 				isStreaming={false}
-				pendingToolCalls={["read", "grep"]}
+				pendingToolCalls={[{ name: "read" }, { name: "grep" }]}
 				showAgentDetails
 				app={app}
 				component={component}
@@ -324,7 +324,7 @@ describe("MessageList pending reply", () => {
 	});
 
 	it("stands down while a tool runs, since the line above already reports it", async () => {
-		const host = renderMessages([userMessage("hi")], { isStreaming: true, pendingToolCalls: ["read"] });
+		const host = renderMessages([userMessage("hi")], { isStreaming: true, pendingToolCalls: [{ name: "read" }] });
 		await flushRender();
 
 		expect(host.querySelector(".piem-chat__tool-status")).not.toBeNull();

@@ -431,6 +431,34 @@ describe("ObsidianAgentService", () => {
 		expect(messages.filter((message) => message.role === "assistant")).toHaveLength(1);
 	});
 
+	it("counts the branch summary's request in the running total", async () => {
+		// Retrying forks the log, and `summarizeAbandonedBranch` spends a real
+		// provider request to describe the branch being left behind. That request
+		// produces a `branchSummary` message rather than an assistant turn, so
+		// `sumUsage` — which reads usage off the transcript — cannot see it. It has to
+		// arrive through the same side channel compaction uses, or the panel reports
+		// less than the user was charged.
+		//
+		// The expected count is 2, not 3: a retry truncates the transcript, so the
+		// abandoned assistant turn's usage leaves the total along with the message.
+		// What remains is the replacement turn plus the summary — and it is exactly
+		// the summary that went uncounted, making 1 the number this asserts against.
+		requestUrlMock.mockImplementation(async () => sseResponse([summaryChunk("ABANDONED BRANCH"), usageChunk()]));
+		const service = createService();
+		await service.sendPrompt("Which notes mention pi?");
+		const before = service.getSnapshot().messages;
+
+		expect(await service.retryFrom(before.length - 1)).toBe(true);
+
+		const after = service.getSnapshot();
+		// Proves the summary actually happened, so the count below cannot pass by
+		// coincidence on a run where no branch was summarized at all.
+		expect(after.messages.some((message) => message.role === "branchSummary")).toBe(true);
+		expect(after.usage.requests).toBe(2);
+		// The summary's tokens ride along too, not just its request count.
+		expect(after.usage.tokens).toBeGreaterThan(0);
+	});
+
 	it("declines a retry for a turn the log cannot name", async () => {
 		// A transcript adopted without entry ids stands in for the turns a
 		// compaction absorbed: their text survives only inside the summary, so
@@ -453,7 +481,7 @@ describe("ObsidianAgentService", () => {
 	});
 
 	it("reports pending tool calls by name, never the provider's call ids", async () => {
-		let snapshotDuringTool: string[] | undefined;
+		let snapshotDuringTool: { name: string; progress?: string }[] | undefined;
 		const service = createService(new MemoryAdapter(), {
 			streamFn: createToolCallingStreamFn("ls", "toolu_bdrk_0152GcOpaqueId"),
 		});
@@ -466,9 +494,75 @@ describe("ObsidianAgentService", () => {
 		await service.sendPrompt("What folders do I have?");
 
 		// The id pi tracks is opaque to a reader; the panel has to name the tool.
-		expect(snapshotDuringTool).toEqual(["ls"]);
+		expect(snapshotDuringTool).toEqual([{ name: "ls" }]);
 		// And the call clears once it finishes, so the status row does not stick.
 		expect(service.getSnapshot().pendingToolCalls).toEqual([]);
+	});
+
+	it("carries a streaming tool's progress onto the snapshot", async () => {
+		// pi delivers progress as `tool_execution_update`, which a tool raises by
+		// calling the `onUpdate` callback pi hands its `execute`. No tool in this
+		// plugin reports progress yet, so the event is fed to the subscriber
+		// directly — that boundary is exactly what is under test, and adding a
+		// production hook only a test would use would be the wrong seam.
+		const service = createService(new MemoryAdapter(), {
+			streamFn: createToolCallingStreamFn("grep", "toolu_streaming"),
+		});
+		await service.initialize();
+		const handle = service as unknown as {
+			handleAgentEvent: (event: unknown) => Promise<void>;
+			agent: { state: { pendingToolCalls: ReadonlySet<string> } };
+		};
+
+		await handle.handleAgentEvent({ type: "tool_execution_start", toolCallId: "toolu_streaming", toolName: "grep", args: {} });
+		await handle.handleAgentEvent({
+			type: "tool_execution_update",
+			toolCallId: "toolu_streaming",
+			toolName: "grep",
+			args: {},
+			partialResult: { content: [{ type: "text", text: "42 files scanned\nsecond line ignored" }], details: {} },
+		});
+
+		// pi owns which calls are in flight, so the snapshot only reports a tool
+		// the agent also considers pending. Reflect that here.
+		(handle.agent.state as { pendingToolCalls: ReadonlySet<string> }).pendingToolCalls = new Set(["toolu_streaming"]);
+
+		// Only the first non-blank line: the row has one line to spend, and the
+		// full output arrives with the tool result anyway.
+		expect(service.getSnapshot().pendingToolCalls).toEqual([{ name: "grep", progress: "42 files scanned" }]);
+
+		// The progress must not outlive the call that produced it.
+		await handle.handleAgentEvent({ type: "tool_execution_end", toolCallId: "toolu_streaming", toolName: "grep", result: {}, isError: false });
+		(handle.agent.state as { pendingToolCalls: ReadonlySet<string> }).pendingToolCalls = new Set();
+		expect(service.getSnapshot().pendingToolCalls).toEqual([]);
+	});
+
+	it("forgets in-flight tool bookkeeping when the agent is replaced", async () => {
+		// A run that never delivers `tool_execution_end` — the shape an abort
+		// produces — leaves per-call entries behind in every map keyed by call id.
+		// `replaceAgent` is the point where nothing can still be in flight, so
+		// both maps must be empty afterwards. Asserting on both is the point: they
+		// are two halves of one fact, and an earlier revision cleared only the one
+		// the panel renders, leaving the timing map to grow for the life of the
+		// panel.
+		const service = createService(new MemoryAdapter(), {
+			streamFn: createToolCallingStreamFn("ls", "toolu_orphaned"),
+		});
+		await service.sendPrompt("What folders do I have?");
+
+		const internals = service as unknown as {
+			pendingToolNames: Map<string, string>;
+			pendingToolStarts: Map<string, number>;
+		};
+		// Stand in for the calls an aborted run abandons: `tool_execution_start`
+		// recorded them and no end event ever arrived to clear them.
+		internals.pendingToolNames.set("toolu_abandoned", "grep");
+		internals.pendingToolStarts.set("toolu_abandoned", Date.now());
+
+		await service.newSession();
+
+		expect(internals.pendingToolNames.size).toBe(0);
+		expect(internals.pendingToolStarts.size).toBe(0);
 	});
 
 	it("ends the run after a tool fails and accepts the next prompt", async () => {

@@ -97,6 +97,18 @@ export const en = {
 		youStopped: "You stopped this reply.",
 		/** Appended to spoken text, so it continues the sentence in lower case. */
 		youStoppedSpoken: "you stopped this reply.",
+		/**
+		 * Shown when the provider cut the reply at its output-token ceiling
+		 * (`stopReason: "length"`).
+		 *
+		 * Names the limit rather than blaming the model: the sentence stops
+		 * mid-thought through no decision of its own, and a reader who knows why can
+		 * ask for a shorter answer or raise the limit. "Ask again" is the recovery,
+		 * and the Retry action beside it is how.
+		 */
+		replyTruncated: "This reply hit the model's length limit and stopped early.",
+		/** Appended to spoken text, so it continues the sentence in lower case. */
+		replyTruncatedSpoken: "this reply hit the model's length limit and stopped early.",
 		you: "You",
 		agent: "Piem",
 		thoughtItThrough: "Thought it through",

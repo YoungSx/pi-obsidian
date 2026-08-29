@@ -1,6 +1,6 @@
 import { describe, expect, it } from "bun:test";
 import type { ToolResultMessage } from "@earendil-works/pi-ai";
-import { countDiffLines, describeTool, isToolIdentifier, summarizeToolPayload, summarizeToolResult } from "./traceSummary";
+import { countDiffLines, describePendingTool, describeTool, isToolIdentifier, summarizeToolPayload, summarizeToolResult } from "./traceSummary";
 import { getT } from "../i18n";
 
 const en = getT("en");
@@ -118,3 +118,25 @@ function result(text: string): ToolResultMessage {
 		timestamp: Date.now(),
 	} as ToolResultMessage;
 }
+
+describe("describePendingTool", () => {
+	it("names a tool that has reported nothing exactly as the row always did", () => {
+		// Every tool in this plugin is instantaneous and reports no progress, so
+		// this is the common row: it must not gain empty parentheses.
+		expect(describePendingTool({ name: "grep" }, false, en)).toBe("Searched the vault");
+	});
+
+	it("appends the newest progress line a streaming tool reported", () => {
+		expect(describePendingTool({ name: "grep", progress: "42 files scanned" }, false, en)).toBe("Searched the vault (42 files scanned)");
+	});
+
+	it("keeps the raw tool id under agent details, progress included", () => {
+		expect(describePendingTool({ name: "grep", progress: "42 files scanned" }, true, en)).toBe("grep (42 files scanned)");
+	});
+
+	it("translates the tool name and leaves the tool's own words alone", () => {
+		// The progress line comes from the tool, not from the copy table, so it is
+		// passed through verbatim in either language.
+		expect(describePendingTool({ name: "grep", progress: "42 files scanned" }, false, zh)).toBe("搜索了笔记库 (42 files scanned)");
+	});
+});
