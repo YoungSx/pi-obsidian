@@ -21,7 +21,7 @@ export const zhCN: DeepPartial<EnCopy> = {
 		focusInput: "聚焦对话输入框",
 		askAboutSelection: "询问所选内容",
 		askAboutNote: "询问此笔记",
-		ribbonOpenChat: "打开对话",
+		ribbonOpenChat: "打开 Piem 助手",
 		menuAskAboutSelection: "询问所选内容",
 		noActiveNote: "没有可询问的当前笔记。",
 		couldNotOpenChat: "无法打开对话视图。",
