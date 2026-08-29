@@ -31,13 +31,15 @@ const BUNDLE = process.argv[2] ?? "main.js";
  *
  * The number is anchored to measurement, not taste. Trimming pi-ai's provider
  * catalog down to the shipped slice (see {@link ../src/net/builtinCatalog.ts})
- * took the bundle from ~1.83 MiB to ~1.47 MiB. The ceiling sits at 1.65 MiB:
- * roughly 180 KiB of deliberate headroom, enough that ordinary feature work
+ * took the bundle from ~1.83 MiB to ~1.47 MiB. The skills feature (URL import,
+ * the manager, its settings UI, and bilingual copy) spent the original 180 KiB
+ * of headroom by ~1.67 MiB, so the ceiling moved with it, to 1.75 MiB: again
+ * roughly 80 KiB above the measured size, enough that ordinary feature work
  * does not trip the gate, while a regression that pulls the full catalog — or
  * anything else of that order — lands above the line and gets caught here
  * rather than on a user's phone.
  */
-const MAX_BUNDLE_BYTES = Math.round(1.65 * 1024 * 1024);
+const MAX_BUNDLE_BYTES = Math.round(1.75 * 1024 * 1024);
 
 function formatSize(bytes) {
 	return `${(bytes / 1024 / 1024).toFixed(2)} MiB`;
