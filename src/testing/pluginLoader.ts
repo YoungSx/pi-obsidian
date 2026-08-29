@@ -1,5 +1,6 @@
 import { createRequire } from "node:module";
 import { readFileSync } from "node:fs";
+import { debounce, getAllTags, prepareFuzzySearch, sortSearchResults } from "./obsidianStub";
 
 /**
  * Loads the built `main.js` the way Obsidian does, so a bundle that cannot be
@@ -242,7 +243,15 @@ export function createObsidianHostModule(record: PluginHostRecord, platform: Rec
 		requestUrl: async (): Promise<unknown> => ({ status: 200, text: "", json: {} }),
 		setIcon: () => undefined,
 		normalizePath: (path: string) => path,
-		debounce: <A extends unknown[]>(fn: (...args: A) => unknown) => fn,
+		// Same implementations as the unit-test stub: the two surfaces stay
+		// separate (this one serves the bundle smoke test, not mock.module), but
+		// the semantics must not drift between them.
+		getAllTags,
+		prepareFuzzySearch,
+		sortSearchResults,
+		// The old pass-through (`fn => fn`) had neither cancel() nor run(), so any
+		// Debouncer consumer in the bundle would TypeError on the smoke test.
+		debounce,
 	};
 }
 

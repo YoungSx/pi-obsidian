@@ -1,6 +1,12 @@
 import { describe, expect, it } from "bun:test";
 import type { DataAdapter } from "obsidian";
+import { installObsidianStub } from "../testing/obsidianStub";
 import { DraftStore } from "./DraftStore";
+
+// `obsidian` is type-only here today, but the moment DraftStore switches to a
+// runtime export (debounce, #99) this file needs the shared stub in place —
+// installed eagerly so the import switch cannot silently break the run.
+installObsidianStub();
 
 const DRAFT_PATH = `.${"obsidian"}/plugins/piem/sessions/drafts.json`;
 /** A second location, never seeded, standing in for a newly chosen chat folder. */

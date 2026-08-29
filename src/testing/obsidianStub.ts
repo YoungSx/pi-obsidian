@@ -1,4 +1,11 @@
 import { mock } from "bun:test";
+import type {
+	CachedMetadata,
+	Debouncer,
+	SearchMatchPart,
+	SearchResult,
+	SearchResultContainer,
+} from "obsidian";
 
 /**
  * Registers the `obsidian` module stub used by every test.
@@ -126,7 +133,139 @@ markdownRenderMock.mockImplementation(async ({ el }: MarkdownRenderCall) => {
 	el.appendChild(marker);
 });
 
+/**
+ * Stand-in for Obsidian's tag combiner. The documented contract is one line —
+ * "Combines all tags from frontmatter and note content into a single array" —
+ * and this stub takes it literally: body tags pass through as `TagCache` holds
+ * them (with the leading `#`), frontmatter tags pass through as written in YAML
+ * (without it), exact duplicates collapse, and a nullish cache yields `null`.
+ *
+ * ⚠ What the *real* `getAllTags` does to prefixes is deliberately NOT copied
+ * from any in-repo implementation: the whole point of the caller (#97) is to
+ * replace a hand-rolled merge whose behavior may diverge. Community stubs
+ * disagree — e.g. obsidian-journal's mock adds `#` to frontmatter tags — and
+ * the official docs are silent. Do not "fix" this stub from a plugin's source;
+ * verify against real Obsidian once and only then pin the normalization here.
+ */
+export function getAllTags(cache: CachedMetadata): string[] | null {
+	if (cache === null || cache === undefined) {
+		return null;
+	}
+	const bodyTags = (cache.tags ?? []).map((entry) => entry.tag);
+	const raw: unknown = cache.frontmatter?.tags ?? cache.frontmatter?.tag;
+	const frontmatterTags =
+		typeof raw === "string"
+			? raw.split(/[,\s]+/).filter((tag) => tag.length > 0)
+			: Array.isArray(raw)
+				? raw.filter((tag): tag is string => typeof tag === "string" && tag.length > 0)
+				: [];
+	return [...new Set([...bodyTags, ...frontmatterTags])];
+}
+
+/**
+ * Stand-in for Obsidian's fuzzy matcher: case-insensitive in-order subsequence
+ * matching, adjacent hits collapsed into one range.
+ *
+ * The score is a deterministic stand-in — shorter text and fewer, tighter ranges
+ * rank higher — NOT Obsidian's real scoring, which weighs prefixes, word
+ * boundaries, and consecutive runs much more richly. Tests must assert on which
+ * texts match and on ordering between clearly different candidates; absolute
+ * score values are meaningless under this stub.
+ */
+export function prepareFuzzySearch(query: string): (text: string) => SearchResult | null {
+	const needle = query.toLowerCase();
+	return (text: string) => {
+		const haystack = text.toLowerCase();
+		const ranges: SearchMatchPart[] = [];
+		let cursor = 0;
+		for (const char of needle) {
+			const index = haystack.indexOf(char, cursor);
+			if (index === -1) {
+				return null;
+			}
+			const last = ranges.at(-1);
+			if (last !== undefined && last[1] === index) {
+				last[1] = index + 1;
+			} else {
+				ranges.push([index, index + 1]);
+			}
+			cursor = index + 1;
+		}
+		return { score: 1_000 - haystack.length - ranges.length, matches: ranges };
+	};
+}
+
+/** Sorts in place, best match (highest score) first, matching Obsidian's UI order. */
+export function sortSearchResults(results: SearchResultContainer[]): void {
+	results.sort((left, right) => right.match.score - left.match.score);
+}
+
+/**
+ * Stand-in for Obsidian's `debounce`, implementing the `Debouncer` contract:
+ * every invocation schedules with its latest args; `run()` executes the pending
+ * call immediately; `cancel()` drops it. With `resetTimer` false (Obsidian's
+ * default) a pending timer is not pushed back by later calls — it fires at its
+ * original deadline with the newest args; with true, each call restarts the
+ * clock, the classic debounce.
+ */
+export function debounce<T extends unknown[], V>(
+	cb: (...args: [...T]) => V,
+	timeout = 0,
+	resetTimer = false,
+): Debouncer<T, V> {
+	let timer: ReturnType<typeof setTimeout> | null = null;
+	let pendingArgs: [...T] | null = null;
+
+	const debounced = (...args: [...T]): Debouncer<T, V> => {
+		pendingArgs = args;
+		if (timer !== null && resetTimer) {
+			clearTimeout(timer);
+			timer = null;
+		}
+		if (timer === null) {
+			// Args are read at fire time, not captured here: without resetTimer
+			// later calls leave the original deadline standing but must still run
+			// with the newest arguments.
+			timer = setTimeout(() => {
+				timer = null;
+				const args = pendingArgs;
+				pendingArgs = null;
+				if (args !== null) {
+					cb(...args);
+				}
+			}, timeout);
+		}
+		return debounced;
+	};
+
+	debounced.cancel = (): Debouncer<T, V> => {
+		if (timer !== null) {
+			clearTimeout(timer);
+			timer = null;
+		}
+		pendingArgs = null;
+		return debounced;
+	};
+
+	debounced.run = (): V | void => {
+		if (timer === null) {
+			return;
+		}
+		clearTimeout(timer);
+		timer = null;
+		const args = pendingArgs;
+		pendingArgs = null;
+		return cb(...(args as [...T]));
+	};
+
+	return debounced;
+}
+
 const obsidianStub = {
+	getAllTags,
+	prepareFuzzySearch,
+	sortSearchResults,
+	debounce,
 	MarkdownView: class MarkdownView {},
 	ItemView: class ItemView {},
 	MarkdownRenderer: {
