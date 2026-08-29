@@ -205,9 +205,9 @@ describe("ObsidianAgentService", () => {
 		await service.renameSession("Release notes");
 
 		const content = await adapter.read(session?.path ?? "");
-		expect(content).toContain('"type":"session_info"');
+		expect(content).toContain('"kind":"fact"');
 		expect(content).toContain("First conversation");
-		expect(content.split("\n")[0]).toContain('"type":"session"');
+		expect(content.split("\n")[0]).toContain('"kind":"header"');
 	});
 
 	it("clearing the name falls back to the derived label", async () => {
@@ -763,13 +763,13 @@ describe("ObsidianAgentService", () => {
 			const entries = (await adapter.read(sessionPath))
 				.split("\n")
 				.filter((line) => line.trim() !== "")
-				.map((line) => JSON.parse(line) as { type: string; id?: string; parentId?: string });
-			const compaction = entries.filter((e: { type: string }) => e.type === "compaction");
+				.map((line) => JSON.parse(line) as { kind: string; type?: string; id?: string; parentId?: string });
+			const compaction = entries.filter((e) => e.kind === "entry" && e.type === "compaction");
 			expect(compaction).toHaveLength(1);
-			const entryIndex = entries.findIndex((e: { type: string }) => e.type === "compaction");
+			const entryIndex = entries.findIndex((e) => e.kind === "entry" && e.type === "compaction");
 			const precedingMessageIds = entries
 				.slice(0, entryIndex)
-				.filter((e: { type: string }) => e.type === "message")
+				.filter((e) => e.kind === "entry" && e.type === "message")
 				.map((e) => e.id ?? "");
 			expect(compaction[0]?.parentId).toBe(precedingMessageIds.at(-1));
 
@@ -1216,4 +1216,3 @@ function getParent(path: string): string {
 	const index = path.lastIndexOf("/");
 	return index === -1 ? "" : path.slice(0, index);
 }
-

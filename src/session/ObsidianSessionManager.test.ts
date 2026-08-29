@@ -93,7 +93,8 @@ describe("ObsidianSessionManager", () => {
 
 		const content = await adapter.read(info.path);
 		expect(info.path).toContain(`${SESSION_DIR}/`);
-		expect(content.split("\n")[0]).toContain('"type":"session"');
+		expect(content.split("\n")[0]).toContain('"kind":"header"');
+		expect(content).toContain('"kind":"entry"');
 		expect(content).toContain('"type":"model_change"');
 		expect(content).toContain('"type":"thinking_level_change"');
 		expect(content).toContain('"role":"user"');
@@ -107,7 +108,7 @@ describe("ObsidianSessionManager", () => {
 
 		const nextManager = new ObsidianSessionManager(adapter, SESSION_DIR, "obsidian-vault:Test");
 		const info = await nextManager.continueRecentSession({ provider: "deepseek", modelId: "deepseek-v4-pro", thinkingLevel: "high" });
-		const context = nextManager.buildSessionContext();
+		const context = await nextManager.buildSessionContext();
 
 		expect(info.messageCount).toBe(1);
 		expect(context.messages).toHaveLength(1);
@@ -139,9 +140,9 @@ describe("ObsidianSessionManager branch summary", () => {
 		// the memory survives a reload instead of being stranded on the dead branch.
 		const reloaded = new ObsidianSessionManager(adapter as unknown as DataAdapter, SESSION_DIR, "obsidian-vault:Test");
 		await reloaded.loadSession(manager.getActiveSessionPath()!);
-		const context = reloaded.buildSessionContext();
+		const context = await reloaded.buildSessionContext();
 
-		expect(reloaded.getLeafId()).toBe(summaryId);
+		expect(await reloaded.getLeafId()).toBe(summaryId);
 		expect(context.messages.at(-1)).toMatchObject({ role: "branchSummary", summary: "Explored a dead end", fromId: "dead-leaf" });
 	});
 
