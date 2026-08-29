@@ -44,9 +44,9 @@ interface ChatComposerProps {
 	 */
 	contextRow?: React.ReactNode;
 	/**
-	 * `/name` prompt commands available to autocomplete. Empty when no templates
-	 * loaded; the menu simply never opens, and `/`-prefixed drafts behave like any
-	 * other text until the user sends them.
+	 * `/name` prompt templates and skills available to autocomplete. Empty when
+	 * nothing loaded; the menu simply never opens, and `/`-prefixed drafts behave
+	 * like any other text until the user sends them.
 	 */
 	commands: CommandEntry[];
 	/**
@@ -122,8 +122,8 @@ export function ChatComposer({
 	}, [input]);
 	const showMenu = menuOpen && commandQuery !== null && commands.length > 0;
 
-	const selectCommand = (name: string): void => {
-		onInputChange(`/${name} `);
+	const selectCommand = (command: CommandEntry): void => {
+		onInputChange(`/${command.invocation} `);
 		setMenuOpen(false);
 		// Keep the caret after the trailing space so the user types arguments next,
 		// not back into the name.
@@ -222,7 +222,6 @@ export function ChatComposer({
 		onAnchorIdChange?.(anchorId);
 	}, [onAnchorIdChange, anchorId]);
 
-
 	return (
 		<footer className="piem-chat__composer">
 			<div className="piem-chat__composer-shell">
@@ -246,13 +245,13 @@ export function ChatComposer({
 						))}
 					</ul>
 				) : null}
-				<textarea
-					ref={textareaRef}
-					id={anchorId}
-					value={input}
-				onChange={(event) => {
-						const value = event.currentTarget.value;
-						onInputChange(value);
+					<textarea
+						ref={textareaRef}
+						id={anchorId}
+						value={input}
+						onChange={(event) => {
+							const value = event.currentTarget.value;
+							onInputChange(value);
 						// Open the command menu the moment the draft becomes a lone `/`,
 						// close it the moment it stops being one. Kept here rather than in an
 						// effect so the menu tracks the keystroke, not a render behind it.
@@ -277,10 +276,9 @@ export function ChatComposer({
 						onSelect={selectCommand}
 						onClose={() => setMenuOpen(false)}
 					/>
-				) : null}
-				<div className="piem-chat__composer-bar">
-
-					{isBusy ? (
+					) : null}
+					<div className="piem-chat__composer-bar">
+						{isBusy ? (
 						<IconButton
 							icon="square"
 							label={t.t(isCompacting ? "chat.stopCompaction" : "chat.stopResponse")}

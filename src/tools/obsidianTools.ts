@@ -1,5 +1,5 @@
 import type { App } from "obsidian";
-import type { AgentTool, ExecutionEnv } from "@earendil-works/pi-agent-core";
+import type { AgentTool, ExecutionEnv, Skill } from "@earendil-works/pi-agent-core";
 import { createEditTool, createReadTool, createWriteTool } from "@earendil-works/pi-agent-core";
 import { adaptHarnessTool } from "../vault/harnessAdapter";
 import { createNoteLinksTool, createNoteMetadataTool } from "./linkTools";
@@ -8,6 +8,7 @@ import { createMoveNoteTool, createTrashNoteTool } from "./organizeTools";
 import { createFindTool, createGrepTool, createLsTool } from "./searchTools";
 import { createListTasksTool, createSummarizeTasksTool } from "./taskTools";
 import { createWebFetchTool } from "./webFetchTools";
+import { createReadSkillTool } from "./skillTools";
 import type { PiemSettings } from "../settings";
 
 /**
@@ -22,10 +23,11 @@ import type { PiemSettings } from "../settings";
  * mutations could interleave. The same env is reused to load prompt templates,
  * so a reload never hands the loader a different object than the tools queue on.
  *
- * The remaining tools (ls, find, grep, tasks, notes, move, trash) are
- * vault-specific and stay hand-written. move/trash stay out of the native set
- * on purpose: pi's `FileSystem` rename replaces its destination, while a
- * user-facing move must refuse an occupied one.
+	 * The remaining tools (ls, find, grep, tasks, notes, skills, move, trash) are
+	 * application-specific and stay hand-written. `read_skill` serves the loaded
+	 * in-memory set, including bundled skills that intentionally have no vault
+	 * file. move/trash stay out of the native set because pi's `FileSystem` rename
+	 * replaces its destination, while a user-facing move must refuse an occupied one.
  *
  * `web_fetch` is the sole outbound tool and is gated on
  * {@link PiemSettings.webFetchEnabled}: absent from the set when off, so the
@@ -33,7 +35,12 @@ import type { PiemSettings } from "../settings";
  * same transport the user chose for provider requests, resolved here per build
  * so a transport change in settings is reflected on the next turn.
  */
-export function createObsidianTools(app: App, env: ExecutionEnv, settings: PiemSettings): AgentTool[] {
+export function createObsidianTools(
+	app: App,
+	env: ExecutionEnv,
+	settings: PiemSettings,
+	getSkills?: () => readonly Skill[],
+): AgentTool[] {
 	const tools: AgentTool[] = [
 		adaptHarnessTool(createReadTool(), { context: { env } }),
 		adaptHarnessTool(createWriteTool(), { context: { env } }),
@@ -49,6 +56,9 @@ export function createObsidianTools(app: App, env: ExecutionEnv, settings: PiemS
 		createMoveNoteTool(app),
 		createTrashNoteTool(app),
 	];
+	if (getSkills) {
+		tools.push(createReadSkillTool(getSkills));
+	}
 	if (settings.webFetchEnabled) {
 		tools.push(createWebFetchTool(settings.networkTransport));
 	}

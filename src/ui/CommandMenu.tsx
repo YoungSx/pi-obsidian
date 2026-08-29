@@ -5,24 +5,27 @@ import { useT } from "./TranslatorContext";
 export interface CommandEntry {
 	name: string;
 	description: string;
+	kind: "template" | "skill";
+	/** Text inserted after `/`; differs only for a shadowed skill. */
+	invocation: string;
 }
 
 interface CommandMenuProps {
-	/** All available commands (builtins first, then vault templates). */
+	/** All available prompt templates and skills, in service-defined order. */
 	commands: CommandEntry[];
 	/** The text after the leading `/`, lowercased for prefix matching. */
 	query: string;
 	/**
-	 * Called with the chosen command name. The composer replaces the draft with
-	 * `/name ` (trailing space) so the user can keep typing arguments.
+	 * Called with the chosen entry. The composer inserts its invocation plus a
+	 * trailing space so the user can keep typing arguments.
 	 */
-	onSelect: (name: string) => void;
+	onSelect: (command: CommandEntry) => void;
 	/** Called when the user dismisses the menu (Escape or blur). */
 	onClose: () => void;
 }
 
 /**
- * Autocomplete list for `/name` prompt commands, floated above the composer.
+ * Autocomplete list for `/name` prompt templates and skills, floated above the composer.
  *
  * Keyboard-only by design: the composer opens it on `/`, and the arrow keys and
  * Enter it owns here are the ones that complete a command. Enter *completes*
@@ -100,7 +103,7 @@ export function CommandMenu({ commands, query, onSelect, onClose }: CommandMenuP
 				event.stopPropagation();
 				const match = currentMatches[currentIndex];
 				if (match) {
-					currentOnSelect(match.name);
+					currentOnSelect(match);
 				}
 				return;
 			}
@@ -126,15 +129,25 @@ export function CommandMenu({ commands, query, onSelect, onClose }: CommandMenuP
 	return (
 		<ul ref={listRef} className="piem-chat__command-menu" role="listbox" aria-label={t.t("chat.commandMenuAria")}>
 			{matches.map((match, index) => (
-				<li key={match.name} role="option" aria-selected={index === activeIndex} className="piem-chat__command-menu-item">
+				<li
+					key={`${match.kind}:${match.name}`}
+					role="option"
+					aria-selected={index === activeIndex}
+					className="piem-chat__command-menu-item"
+				>
 					<button
 						type="button"
 						className="piem-chat__command-menu-button"
 						onMouseEnter={() => setActiveIndex(index)}
-						onClick={() => onSelect(match.name)}
+						onClick={() => onSelect(match)}
 						tabIndex={-1}
 					>
-						<span className="piem-chat__command-menu-name">/{match.name}</span>
+						<span className="piem-chat__command-menu-heading">
+							<span className="piem-chat__command-menu-name">/{match.name}</span>
+							<span className="piem-chat__command-menu-kind">
+								{t.t(match.kind === "template" ? "chat.commandKindTemplate" : "chat.commandKindSkill")}
+							</span>
+						</span>
 						{match.description ? <span className="piem-chat__command-menu-desc">{match.description}</span> : null}
 					</button>
 				</li>

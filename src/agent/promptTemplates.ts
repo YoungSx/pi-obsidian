@@ -43,6 +43,8 @@ export interface ParsedPromptCommand {
 	name: string;
 	/** Positional arguments, shell-style parsed. */
 	args: string[];
+	/** The unparsed text after the command name, for skill instructions. */
+	additionalInstructions: string;
 }
 
 /**
@@ -64,11 +66,11 @@ export function parsePromptCommand(input: string): ParsedPromptCommand | null {
 	const withoutSlash = trimmed.slice(1);
 	const firstSpace = withoutSlash.search(/\s/);
 	if (firstSpace === -1) {
-		return { name: withoutSlash, args: [] };
+		return { name: withoutSlash, args: [], additionalInstructions: "" };
 	}
 	const name = withoutSlash.slice(0, firstSpace);
 	const rest = withoutSlash.slice(firstSpace + 1).trimStart();
-	return { name, args: parseCommandArgs(rest) };
+	return { name, args: parseCommandArgs(rest), additionalInstructions: rest };
 }
 
 /**

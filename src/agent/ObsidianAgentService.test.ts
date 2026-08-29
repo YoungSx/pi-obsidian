@@ -1063,9 +1063,36 @@ describe("prompt commands", () => {
 		});
 		await service.initialize();
 
-		const names = service.getSnapshot().availableCommands.map((command) => command.name);
+		const commands = service.getSnapshot().availableCommands;
+		const names = commands.map((command) => command.name);
 		expect(names).toContain("summarize");
 		expect(names).toContain("echo");
+		expect(commands.find((command) => command.name === "echo")?.kind).toBe("template");
+		expect(commands.find((command) => command.name === "link-graph")?.kind).toBe("skill");
+		const summarizeCommands = commands.filter((command) => command.name === "summarize");
+		expect(summarizeCommands).toHaveLength(2);
+		expect(summarizeCommands[0]).toMatchObject({ kind: "template", invocation: "summarize" });
+		expect(summarizeCommands[1]).toMatchObject({ kind: "skill", invocation: "skill:summarize" });
+	});
+
+	it("uses the template on a short-name collision and keeps the skill reachable explicitly", async () => {
+		const contexts: Context[] = [];
+		const service = createService(new MemoryAdapter(), {
+			streamFn: createCapturingStreamFn(contexts),
+			vaultFiles: {
+				".piem/prompts/review.md": "PROMPT VERSION: $ARGUMENTS",
+				"Piem/skills/review/SKILL.md": "---\nname: review\ndescription: Skill version\n---\nSKILL VERSION",
+			},
+		});
+
+		expect(await service.sendPrompt("/review first")).toBe(true);
+		expect(JSON.stringify(contexts.at(-1)?.messages.at(-1)?.content)).toContain("PROMPT VERSION: first");
+		expect(service.getSnapshot().noticeMessage).toContain("use /skill:review for the skill");
+
+		expect(await service.sendPrompt("/skill:review focus on risks")).toBe(true);
+		const explicit = JSON.stringify(contexts.at(-1)?.messages.at(-1)?.content);
+		expect(explicit).toContain("SKILL VERSION");
+		expect(explicit).toContain("focus on risks");
 	});
 
 	it("leaves an ordinary message that merely contains a slash alone", async () => {
@@ -1115,16 +1142,55 @@ describe("vault skills", () => {
 		expect(prompt).toContain("Piem/skills/summarize/SKILL.md");
 	});
 
-	it("keeps a skill-less vault's prompt identical to the bare base", async () => {
+	it("includes bundled skills when the vault has no skill files", async () => {
 		const prompts: string[] = [];
 		const service = createSkillsService(createFakeApp(asDataAdapter(new MemoryAdapter())), prompts);
 
 		await service.sendPrompt("Hello");
 
-		// `formatSkillsForSystemPrompt` renders an empty set as "", so the composed
-		// prompt is the base constant verbatim — no appended block, no stray bytes.
-		expect(prompts.at(-1)).toBe(OBSIDIAN_AGENT_SYSTEM_PROMPT);
-		expect(prompts.at(-1)).not.toContain("<available_skills>");
+		const prompt = prompts.at(-1) ?? "";
+		expect(prompt.startsWith(OBSIDIAN_AGENT_SYSTEM_PROMPT)).toBe(true);
+		expect(prompt).toContain("<available_skills>");
+		for (const name of ["summarize", "link-graph", "tag-organize", "find-skills"]) {
+			expect(prompt).toContain(`<name>${name}</name>`);
+		}
+	});
+
+	it("injects a bundled skill's complete instructions and additional request", async () => {
+		const contexts: Context[] = [];
+		const service = new ObsidianAgentService(
+			createFakeApp(asDataAdapter(new MemoryAdapter())),
+			() => defaultTestSettings(),
+			new ObsidianSessionManager(asDataAdapter(new MemoryAdapter()), SESSION_DIR, "obsidian-vault:Test"),
+			{ streamFn: createCapturingStreamFn(contexts) },
+		);
+
+		expect(await service.sendPrompt("/link-graph focus on unresolved links")).toBe(true);
+
+		const sent = JSON.stringify(contexts.at(-1)?.messages.at(-1)?.content);
+		expect(sent).toContain("link-graph");
+		expect(sent).toContain("Call get_note_links with direction set to both");
+		expect(sent).toContain("focus on unresolved links");
+	});
+
+	it("lets a vault skill override bundled content and provenance", async () => {
+		const contexts: Context[] = [];
+		const app = createVaultAppWithSkills({
+			"Piem/skills/summarize/SKILL.md": "---\nname: summarize\ndescription: My summary\n---\nMY VAULT INSTRUCTIONS",
+		});
+		const service = new ObsidianAgentService(
+			app,
+			() => defaultTestSettings(),
+			new ObsidianSessionManager(asDataAdapter(new MemoryAdapter()), SESSION_DIR, "obsidian-vault:Test"),
+			{ streamFn: createCapturingStreamFn(contexts) },
+		);
+
+		expect(await service.sendPrompt("/skill:summarize")).toBe(true);
+
+		const sent = JSON.stringify(contexts.at(-1)?.messages.at(-1)?.content);
+		expect(sent).toContain("MY VAULT INSTRUCTIONS");
+		expect(sent).toContain("Piem/skills/summarize/SKILL.md");
+		expect(sent).not.toContain("Call get_active_note");
 	});
 
 	it("surfaces skill diagnostics as a notice the user can still see", async () => {
@@ -1153,7 +1219,7 @@ describe("vault skills", () => {
 		const service = createSkillsService(createVaultAppWithSkills(skillFiles), prompts);
 
 		await service.sendPrompt("Hello");
-		expect(prompts.at(-1)).not.toContain("<available_skills>");
+		expect(prompts.at(-1)).not.toContain("new/SKILL.md");
 
 		// The user saves a new SKILL.md; saveSettings → refreshConfiguration picks
 		// it up, so the running conversation sees it without a plugin reload.
@@ -1162,6 +1228,25 @@ describe("vault skills", () => {
 		await service.sendPrompt("Hello again");
 
 		expect(prompts.at(-1)).toContain("new/SKILL.md");
+	});
+
+	it("can invoke a vault skill added after initialization on the very next send", async () => {
+		const skillFiles: Record<string, string> = {};
+		const contexts: Context[] = [];
+		const service = new ObsidianAgentService(
+			createVaultAppWithSkills(skillFiles),
+			() => defaultTestSettings(),
+			new ObsidianSessionManager(asDataAdapter(new MemoryAdapter()), SESSION_DIR, "obsidian-vault:Test"),
+			{ streamFn: createCapturingStreamFn(contexts) },
+		);
+
+		await service.sendPrompt("Hello");
+		skillFiles["Piem/skills/new/SKILL.md"] = "---\nname: new\ndescription: Newly saved\n---\nFRESH SKILL BODY";
+
+		expect(await service.sendPrompt("/new extra detail")).toBe(true);
+		const sent = JSON.stringify(contexts.at(-1)?.messages.at(-1)?.content);
+		expect(sent).toContain("FRESH SKILL BODY");
+		expect(sent).toContain("extra detail");
 	});
 });
 

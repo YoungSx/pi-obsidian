@@ -1,5 +1,5 @@
 import type { SkillDiagnostic, Skill } from "@earendil-works/pi-agent-core";
-import { formatSkillsForSystemPrompt, loadSkills } from "@earendil-works/pi-agent-core";
+import { formatSkillInvocation, formatSkillsForSystemPrompt, loadSkills } from "@earendil-works/pi-agent-core";
 import type { ExecutionEnv } from "@earendil-works/pi-agent-core";
 
 /**
@@ -36,6 +36,27 @@ export async function loadVaultSkills(
 	return loadSkills(env, `/${skillsDir}`);
 }
 
+/**
+ * Combines bundled defaults with vault-authored skills.
+ *
+ * A user file with the same name replaces the builtin instead of creating two
+ * ambiguous commands. Other vault skills follow the bundled set in load order.
+ */
+export function mergeSkills(builtins: Skill[], vaultSkills: Skill[]): Skill[] {
+	const vaultNames = new Set(vaultSkills.map((skill) => skill.name));
+	return [...builtins.filter((skill) => !vaultNames.has(skill.name)), ...vaultSkills];
+}
+
+/** Exact, case-sensitive lookup, matching prompt-template command routing. */
+export function findSkill(skills: Skill[], name: string): Skill | undefined {
+	return skills.find((skill) => skill.name === name);
+}
+
+/** Injects the complete skill plus the caller's optional extra instruction. */
+export function expandSkill(skill: Skill, additionalInstructions?: string): string {
+	return formatSkillInvocation(skill, additionalInstructions);
+}
+
 /** One line per warning, ready for the notice banner. */
 export function formatSkillDiagnostics(diagnostics: SkillDiagnostic[]): string {
 	if (diagnostics.length === 0) {
@@ -54,5 +75,8 @@ export function formatSkillDiagnostics(diagnostics: SkillDiagnostic[]): string {
  */
 export function composeSystemPrompt(basePrompt: string, skills: Skill[]): string {
 	const formatted = formatSkillsForSystemPrompt(skills);
-	return formatted ? `${basePrompt}\n\n${formatted}` : basePrompt;
+	if (!formatted) {
+		return basePrompt;
+	}
+	return `${basePrompt}\n\n${formatted}\n\nIn Piem, use the read_skill tool with the listed name to read a skill's complete instructions. Do not pass a skill location to the vault read tool.`;
 }

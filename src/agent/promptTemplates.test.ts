@@ -110,31 +110,43 @@ describe("parsePromptCommand", () => {
 	});
 
 	it("parses a bare command name with no arguments", () => {
-		expect(parsePromptCommand("/echo")).toEqual({ name: "echo", args: [] });
+		expect(parsePromptCommand("/echo")).toEqual({ name: "echo", args: [], additionalInstructions: "" });
 	});
 
 	it("parses a command with a single positional argument", () => {
-		expect(parsePromptCommand("/echo hello")).toEqual({ name: "echo", args: ["hello"] });
+		expect(parsePromptCommand("/echo hello")).toEqual({ name: "echo", args: ["hello"], additionalInstructions: "hello" });
 	});
 
 	it("splits arguments on whitespace", () => {
-		expect(parsePromptCommand("/echo hello world")).toEqual({ name: "echo", args: ["hello", "world"] });
+		expect(parsePromptCommand("/echo hello world")).toEqual({
+			name: "echo",
+			args: ["hello", "world"],
+			additionalInstructions: "hello world",
+		});
 	});
 
 	it("honours double quotes so a quoted phrase stays one argument", () => {
-		expect(parsePromptCommand('/echo hello "world foo"')).toEqual({ name: "echo", args: ["hello", "world foo"] });
+		expect(parsePromptCommand('/echo hello "world foo"')).toEqual({
+			name: "echo",
+			args: ["hello", "world foo"],
+			additionalInstructions: 'hello "world foo"',
+		});
 	});
 
 	it("honours single quotes the same way", () => {
-		expect(parsePromptCommand("/echo 'a b' c")).toEqual({ name: "echo", args: ["a b", "c"] });
+		expect(parsePromptCommand("/echo 'a b' c")).toEqual({
+			name: "echo",
+			args: ["a b", "c"],
+			additionalInstructions: "'a b' c",
+		});
 	});
 
 	it("flags a bare slash as a command with an empty name, leaving usefulness to the caller", () => {
-		expect(parsePromptCommand("/")).toEqual({ name: "", args: [] });
+		expect(parsePromptCommand("/")).toEqual({ name: "", args: [], additionalInstructions: "" });
 	});
 
 	it("ignores leading whitespace before the slash", () => {
-		expect(parsePromptCommand("  /echo hi")).toEqual({ name: "echo", args: ["hi"] });
+		expect(parsePromptCommand("  /echo hi")).toEqual({ name: "echo", args: ["hi"], additionalInstructions: "hi" });
 	});
 });
 
