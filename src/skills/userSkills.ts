@@ -67,10 +67,55 @@ export interface UserSkillsLoad {
  * touches, and degrades to an empty set on mobile, where the node filesystem
  * does not exist: inheriting user skills is a desktop capability, silently.
  *
+ * The degradation is a skip, not a load that yields nothing. pi's loader
+ * reports every non-`not_found` failure as a diagnostic, and on mobile every
+ * directory lookup fails that way — so without the skip, each agent start
+ * raises a notice blaming node for the absence, on a platform where the
+ * user's own files were never the problem. An unavailable environment is a
+ * capability fact, not a warning about the user's files; it is reported
+ * through {@link userSkillsSupported} to the surfaces that need it, and here
+ * it simply means the directories were never consulted (`found: undefined`).
+ *
  * @param customDir The user's own directory, or `undefined` for none.
+ * @param env Overrides the node-backed environment. Following
+ * {@link loadUserSkillsFromEnv}'s test seam, an injected one lets a test drive
+ * the unavailable branch that the real bundle only reaches on mobile.
  */
-export async function loadUserSkills(customDir?: string): Promise<UserSkillsLoad> {
-	return loadUserSkillsFromEnv(new NodeHomeEnv(), customDir);
+export async function loadUserSkills(customDir?: string, env: ExecutionEnv = new NodeHomeEnv()): Promise<UserSkillsLoad> {
+	if (env instanceof NodeHomeEnv && !env.available) {
+		return unsupportedLoad();
+	}
+	return loadUserSkillsFromEnv(env, customDir);
+}
+
+/**
+ * The empty load an unavailable environment produces.
+ *
+ * The built-in pair is listed with `found: undefined` — "the environment could
+ * not tell" — rather than omitted, so a report rendered from this shape still
+ * says which directories belong here instead of implying there are none. The
+ * configured extra directory is left out on purpose: nothing probed it, so
+ * listing it would claim a look that never happened.
+ */
+function unsupportedLoad(): UserSkillsLoad {
+	return {
+		skills: [],
+		diagnostics: [],
+		searched: USER_SKILLS_DIRS.map((dir) => ({ dir, found: undefined, loaded: 0 })),
+	};
+}
+
+/**
+ * Whether user-level skills can be read on this device, decided by probing.
+ *
+ * Replaces the panel's old `Platform.isDesktop` guess: desktop Electron
+ * exposes `require`, but the platform name is a correlation, not the
+ * capability — this asks {@link NodeHomeEnv} directly, the same question
+ * {@link loadUserSkills} answers by skipping. Synchronous and cheap because
+ * the probe is construction-time module resolution, not filesystem I/O.
+ */
+export function userSkillsSupported(): boolean {
+	return new NodeHomeEnv().available;
 }
 
 /**
