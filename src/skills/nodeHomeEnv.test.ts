@@ -113,6 +113,10 @@ describe("NodeHomeEnv where node is unavailable", () => {
 				expect(() => new NodeHomeEnv({ hostRequire: lookup })).not.toThrow();
 			});
 
+			it("reports itself unavailable, the capability signal loaders skip on", () => {
+				expect(new NodeHomeEnv({ hostRequire: lookup }).available).toBe(false);
+			});
+
 			it("roots the cwd at / rather than a half-detected home", () => {
 				expect(new NodeHomeEnv({ hostRequire: lookup }).cwd).toBe("/");
 			});
@@ -176,6 +180,10 @@ describe("NodeHomeEnv where node is available", () => {
 		const env = new NodeHomeEnv({ hostRequire: realRequire });
 
 		expect(env.cwd).toBe(nodeOs.homedir());
+	});
+
+	it("reports itself available, matching the modules it actually resolved", () => {
+		expect(new NodeHomeEnv({ hostRequire: realRequire }).available).toBe(true);
 	});
 
 	it("prefers an injected home over the detected one", () => {

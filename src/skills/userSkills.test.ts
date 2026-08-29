@@ -1,7 +1,8 @@
 import { describe, expect, it } from "bun:test";
 import type { ExecutionEnv } from "@earendil-works/pi-agent-core";
 
-const { USER_SKILLS_DIRS, loadUserSkillsFromEnv } = await import("./userSkills");
+const { USER_SKILLS_DIRS, loadUserSkills, loadUserSkillsFromEnv, userSkillsSupported } = await import("./userSkills");
+const { NodeHomeEnv } = await import("./nodeHomeEnv");
 
 /** Minimal ExecutionEnv over a fixed path→content map; paths are literal, so tests use the raw `~` form. */
 function fakeHomeEnv(files: Record<string, string>): ExecutionEnv {
@@ -100,6 +101,45 @@ describe("loadUserSkills", () => {
 
 		expect(skills).toEqual([]);
 		expect(diagnostics).toEqual([]);
+	});
+});
+
+describe("loadUserSkills where node is unavailable", () => {
+	// The mobile shape: pi's loader reports any non-`not_found` failure as a
+	// diagnostic, so letting the load run there would raise a "node filesystem
+	// is unavailable" notice on every agent start — blaming the user's files
+	// for a capability the device never had. The skip is the fix; these pin it.
+	it("skips the load entirely instead of collecting diagnostics", async () => {
+		const env = new NodeHomeEnv({ hostRequire: null });
+		const { skills, diagnostics } = await loadUserSkills(undefined, env);
+
+		expect(skills).toEqual([]);
+		expect(diagnostics).toEqual([]);
+	});
+
+	it("names the built-in pair as unconsulted, not absent", async () => {
+		const env = new NodeHomeEnv({ hostRequire: null });
+		const { searched } = await loadUserSkills(undefined, env);
+
+		expect(searched).toEqual(
+			USER_SKILLS_DIRS.map((dir) => ({ dir, found: undefined, loaded: 0 })),
+		);
+	});
+
+	it("leaves the configured extra folder out of the report, since nothing probed it", async () => {
+		const env = new NodeHomeEnv({ hostRequire: null });
+		const { searched } = await loadUserSkills("~/Sync/skills", env);
+
+		expect(searched.map((entry) => entry.dir)).toEqual(USER_SKILLS_DIRS);
+	});
+});
+
+describe("userSkillsSupported", () => {
+	it("follows the env's probe rather than a platform guess", async () => {
+		// The test runner has a real `require`, so the honest answer here is
+		// yes; the no-node side is covered by NodeHomeEnv's own unavailable
+		// cases above, which this flag reads.
+		expect(userSkillsSupported()).toBe(true);
 	});
 });
 

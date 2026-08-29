@@ -118,6 +118,18 @@ function hostRequire(id: string): unknown {
 export class NodeHomeEnv implements ExecutionEnv {
 	readonly cwd: string;
 
+	/**
+	 * Whether node modules resolved at construction.
+	 *
+	 * False is the mobile shape, and callers should treat it as a capability
+	 * signal rather than pre-filtering on `Platform.isDesktop`: the platform
+	 * name is a guess about where `require` exists, while this is the answer.
+	 * {@link run} already degrades every operation to `not_supported`, so this
+	 * flag changes nothing about the env's behaviour — it only lets a caller
+	 * skip work that cannot succeed instead of collecting its failures.
+	 */
+	readonly available: boolean;
+
 	private readonly modules: NodeModules | undefined;
 
 	/**
@@ -132,6 +144,7 @@ export class NodeHomeEnv implements ExecutionEnv {
 	constructor(options: { home?: string; hostRequire?: HostRequire | null } = {}) {
 		const lookup = options.hostRequire === undefined ? hostRequire : options.hostRequire;
 		this.modules = lookup ? resolveModules(lookup) : undefined;
+		this.available = this.modules !== undefined;
 		this.cwd = options.home ?? (this.modules ? this.modules.os.homedir() : "/");
 	}
 

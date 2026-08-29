@@ -1,4 +1,5 @@
 import { App, Platform, PluginSettingTab } from "obsidian";
+import { getSupportedThinkingLevels } from "@earendil-works/pi-ai";
 import { getBuiltinModels } from "./net/builtinCatalog";
 import type { Model } from "@earendil-works/pi-ai";
 import type PiemPlugin from "./main";
@@ -28,7 +29,7 @@ import { renderSettingsPanel } from "./ui/settings/SettingsPanel";
 import { getT, isLanguageSetting, resolveLanguage, type LanguageHost, type LanguageSetting, type Translator } from "./i18n";
 import { DEFAULT_SEND_SHORTCUT, isSendShortcutSetting, type SendShortcut } from "./ui/keyboard";
 import { SkillManager } from "./skills/skillManager";
-import { loadUserSkills } from "./skills/userSkills";
+import { loadUserSkills, userSkillsSupported } from "./skills/userSkills";
 import { normalizeUserSkillsDir } from "./skills/userSkillsDir";
 import { VaultExecutionEnv } from "./vault/VaultExecutionEnv";
 import { createFetchForTransport } from "./net/obsidianFetch";
@@ -508,7 +509,10 @@ export class PiemSettingTab extends PluginSettingTab {
 					// the panel reports on the folder currently in the field rather
 					// than the one that was set when the tab opened.
 					loadUserSkills: () => loadUserSkills(this.plugin.settings.userSkillsDir),
-					userSkillsAvailable: Platform.isDesktop,
+					// Probed rather than Platform.isDesktop: the same signal
+					// loadUserSkills skips on, so the panel and the loader can
+					// never disagree about whether this device has a node fs.
+					userSkillsAvailable: userSkillsSupported(),
 				};
 			})(),
 		});
