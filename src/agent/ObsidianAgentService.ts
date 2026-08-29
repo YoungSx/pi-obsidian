@@ -517,8 +517,8 @@ export class ObsidianAgentService {
 	/**
 	 * Summarizes the branch a rewind is about to abandon, then rewinds.
 	 *
-	 * The summary is generated from a throwaway pi {@link Session} view built over
-	 * the current log — before the rewind moves the leaf — because
+	 * The summary is generated from the repository's live pi {@link Session}
+	 * before the rewind moves the leaf, because
 	 * {@link collectEntriesForBranchSummary} walks the parent chain from the old
 	 * leaf to the fork point, and that chain only exists while the abandoned
 	 * branch is still the live one. Once the summary lands (or fails), the rewind
@@ -531,7 +531,8 @@ export class ObsidianAgentService {
 	 * failure — only on an unknown rewind target, which surfaces as a user error.
 	 */
 	private async summarizeAbandonedBranch(entryId: string): Promise<AgentMessage | null> {
-		const oldLeafId = await this.sessionManager.getLeafId();
+		const session = this.sessionManager.getSession();
+		const oldLeafId = await session.getLeafId();
 		// No leaf means a fresh log with nothing to abandon; `oldLeafId === entryId`
 		// means the rewind targets the current tip, so there is no fork below it.
 		if (!oldLeafId || oldLeafId === entryId) {
@@ -551,7 +552,6 @@ export class ObsidianAgentService {
 		const controller = new AbortController();
 		this.branchSummaryController = controller;
 		try {
-			const session = await this.sessionManager.buildReadOnlySessionView();
 			const collected = await collectEntriesForBranchSummary(session, oldLeafId, entryId);
 			if (collected.entries.length === 0) {
 				await this.sessionManager.rewindTo(entryId);

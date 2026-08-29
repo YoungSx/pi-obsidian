@@ -145,21 +145,21 @@ export class ObsidianSessionManager {
 
 	async appendMessage(message: AgentMessage): Promise<string> {
 		const persisted = JSON.parse(JSON.stringify(message)) as AgentMessage;
-		return this.requireSession().appendMessage(persisted);
+		return this.getSession().appendMessage(persisted);
 	}
 
 	async appendModelChange(provider: string, modelId: string): Promise<string> {
-		const session = this.requireSession();
+		const session = this.getSession();
 		return (await session.appendEntry({ type: "model_change", id: session.idGenerator.next(), provider, modelId }, "main")).id;
 	}
 
 	async appendThinkingLevelChange(thinkingLevel: ThinkingLevel): Promise<string> {
-		const session = this.requireSession();
+		const session = this.getSession();
 		return (await session.appendEntry({ type: "thinking_level_change", id: session.idGenerator.next(), thinkingLevel }, "main")).id;
 	}
 
 	async appendCompaction(result: CompactResult): Promise<string> {
-		const session = this.requireSession();
+		const session = this.getSession();
 		// Agent messages may carry optional fields as explicit `undefined`; pi's
 		// durable payload contract rejects those even though JSON.stringify would
 		// silently omit them. Normalize to the wire shape before appending.
@@ -184,7 +184,7 @@ export class ObsidianSessionManager {
 	 * on the dead branch. `fromId` names the leaf the abandoned branch ended on.
 	 */
 	async appendBranchSummary(result: BranchSummaryResult, fromId: string): Promise<string> {
-		const session = this.requireSession();
+		const session = this.getSession();
 		const entry = {
 			type: "branch_summary" as const,
 			id: session.idGenerator.next(),
@@ -197,13 +197,13 @@ export class ObsidianSessionManager {
 	}
 
 	async appendSessionInfo(name: string | undefined): Promise<string> {
-		const session = this.requireSession();
+		const session = this.getSession();
 		await session.setName(name);
 		return (await session.getMetadata()).id;
 	}
 
 	async buildSessionContext(): Promise<SessionContext> {
-		const entries = await this.requireSession().findEntriesOnBranch({ order: "oldestFirst" });
+		const entries = await this.getSession().findEntriesOnBranch({ order: "oldestFirst" });
 		const piContext = buildPiSessionContext(entries);
 		const contextEntries = buildContextEntries(entries);
 		const messages: AgentMessage[] = [];
@@ -222,7 +222,7 @@ export class ObsidianSessionManager {
 	}
 
 	async rewindTo(entryId: string): Promise<void> {
-		const session = this.requireSession();
+		const session = this.getSession();
 		const entry = await session.getEntry(entryId);
 		if (!entry) {
 			throw new Error(`Unknown session entry: ${entryId}`);
@@ -230,18 +230,16 @@ export class ObsidianSessionManager {
 		await session.moveLane("main", entry.parentId);
 	}
 
-	/** The entry the active branch currently ends on, or null for a fresh log. */
-	async getLeafId(): Promise<string | null> {
-		return this.requireSession().getLeafId();
-	}
-
-	/** Returns the live pi session for read-only branch traversal. */
-	async buildReadOnlySessionView(): Promise<Session> {
-		return this.requireSession();
+	/** The live pi session opened or created by the repository. */
+	getSession(): PiSession {
+		if (!this.session) {
+			throw new Error("No active session.");
+		}
+		return this.session;
 	}
 
 	async getLastCompaction(): Promise<CompactResult | undefined> {
-		const entry = await this.requireSession().findEntryOnBranch({ type: "compaction" });
+		const entry = await this.getSession().findEntryOnBranch({ type: "compaction" });
 		if (!entry || entry.type !== "compaction") {
 			return undefined;
 		}
@@ -255,7 +253,7 @@ export class ObsidianSessionManager {
 	}
 
 	async getActiveSessionInfo(): Promise<ActiveSessionInfo> {
-		const session = this.requireSession();
+		const session = this.getSession();
 		const metadata = this.sessionMetadata ?? (await session.getMetadata());
 		return this.summarize(metadata, session);
 	}
@@ -276,13 +274,6 @@ export class ObsidianSessionManager {
 
 	private repo(sessionDir: string): JsonlSessionRepo {
 		return new JsonlSessionRepo({ fs: this.fs, sessionsRoot: sessionDir });
-	}
-
-	private requireSession(): PiSession {
-		if (!this.session) {
-			throw new Error("No active session.");
-		}
-		return this.session;
 	}
 
 	private resolveSessionDir(): string {

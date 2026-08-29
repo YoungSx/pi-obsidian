@@ -140,11 +140,7 @@ describe("collectEntriesForBranchSummary", () => {
 	});
 });
 
-/**
- * Replays a message list onto a throwaway pi session, the same shape
- * `ObsidianSessionManager.buildReadOnlySessionView` produces. Returns the ids
- * pi assigned in root-to-leaf order so tests can name fork points and leaves.
- */
+/** Creates a native in-memory pi session and returns its root-to-leaf ids. */
 async function buildSession(messages: AgentMessage[]): Promise<{ session: Session; ids: string[] }> {
 	const storage = new InMemorySessionStorage({ id: "branch-summary-test", createdAt: 0 });
 	// `new Session(storage)` already provisions the "main" lane; creating it
