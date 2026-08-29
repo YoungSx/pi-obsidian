@@ -293,6 +293,35 @@ describe("narrow-panel layout is keyed on the panel, not the window", () => {
 	});
 });
 
+describe("type ramp scales as one unit (WCAG 1.4.4)", () => {
+	/*
+	 * On mobile Obsidian rebinds the UI scale to the reader's note size:
+	 * `.is-mobile` sets `--font-ui-medium: var(--font-text-size)` and derives the
+	 * other two from it, so a phone at 20px notes draws this panel at 20/18.7/16.
+	 * A hardcoded px here would be the one element that refuses to follow that — a
+	 * resize-text failure surfacing only on a device none of these tests run on.
+	 */
+	it("takes every font-size from the --font-ui-* ramp", () => {
+		const allowed = new Set(["var(--font-ui-smaller)", "var(--font-ui-small)", "var(--font-ui-medium)", "var(--font-ui-large)", "inherit"]);
+		const offenders = [...allDeclarations.matchAll(/font-size:\s*([^;]+);/g)].map((match) => (match[1] ?? "").trim()).filter((value) => !allowed.has(value));
+
+		expect(offenders).toEqual([]);
+	});
+
+	it("never reads --font-text-size directly", () => {
+		// It is the *note* body size. Reaching for it would size the panel off the
+		// reading scale on desktop, where the UI scale is deliberately independent.
+		expect(allDeclarations).not.toContain("--font-text-size");
+	});
+
+	it("pairs the transcript with the panel title on one token", () => {
+		// The bug this fixed was the reply rendering a step *above* the title, so the
+		// two have to move together — which means reading from the same token.
+		expect(ruleBody(".piem-chat__message-content")).toContain("font-size: var(--font-ui-medium)");
+		expect(ruleBody(".piem-chat__title")).toContain("font-size: var(--font-ui-medium)");
+	});
+});
+
 describe("z-index falls back to Obsidian's own layer value", () => {
 	/*
 	 * `--layer-menu` is 65 in `app.css`. The fallback these rules used to carry was
