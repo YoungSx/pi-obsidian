@@ -20,6 +20,27 @@ jobs:
                   bun-version: 1.4.0
             - run: bun install --frozen-lockfile
 
+            # The tag is the only release input; the version-bearing files are
+            # stamped from it here rather than hand-edited before tagging.
+            - name: Stamp release version from tag
+              run: node scripts/stamp-version.mjs "$GITHUB_REF_NAME"
+
+            # Stamp-then-assert: the step above should guarantee this, but it
+            # doubles as a guard against a broken stamping script shipping a
+            # manifest that contradicts the tag.
+            - name: Verify stamped versions match the tag
+              run: |
+                  TAG="${GITHUB_REF_NAME#v}"
+                  for f in manifest.json package.json; do
+                      FILE_VERSION=$(node -p "require('./$f').version")
+                      if [ "$TAG" != "$FILE_VERSION" ]; then
+                          echo "$f version $FILE_VERSION does not match tag $TAG"
+                          exit 1
+                      fi
+                  done
+                  node -e "const v=require('./versions.json'); if(!(('$TAG') in v)) process.exit(1)" \
+                      || { echo "versions.json has no entry for $TAG"; exit 1; }
+
             # Every gate below runs against this exact artifact — the one that
             # gets uploaded. 0.1.0-alpha.3 shipped a bundle that could not be
             # loaded at all because nothing in this workflow ever inspected the
