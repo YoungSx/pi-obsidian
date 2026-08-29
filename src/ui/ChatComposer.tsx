@@ -44,13 +44,15 @@ interface ChatComposerProps {
 	 */
 	contextRow?: React.ReactNode;
 	/**
-	 * The context-occupancy ring, rendered at the leading edge of the send bar.
+	 * The context-occupancy ring, rendered immediately to the left of Send.
 	 *
 	 * Passed in for the same reason as {@link contextRow}: this component knows
 	 * about the draft and the send controls, not about token accounting. It sits in
 	 * the send bar rather than a row of its own because it costs no height there,
-	 * and next to Send is where it answers the question it is asked — whether
-	 * there is room for the thing about to be sent.
+	 * and it sits *against* Send rather than across the bar from it because that is
+	 * the question it answers — whether there is room for the thing the button next
+	 * to it is about to send. Parked at the far leading edge it read as unrelated
+	 * chrome, a full sidebar's width from the control it qualifies.
 	 */
 	contextGauge?: React.ReactNode;
 	/**
@@ -290,12 +292,11 @@ export function ChatComposer({
 					) : null}
 					<div className="piem-chat__composer-bar">
 						{/*
-						 * Leading edge, ahead of the send control. Its own rule pushes Send
-						 * to the trailing edge with `margin-inline-end: auto` rather than the
-						 * bar switching to `space-between`: the bar holds one child whenever
-						 * the ring has nothing measured yet, and `space-between` would then
-						 * park a lone Send against the left edge — the bug the current
-						 * `flex-end` was chosen to fix.
+						 * Immediately before the send control, so the two sit together at the
+						 * trailing edge. The bar is `flex-end` and the ring adds no margin of
+						 * its own: whatever this slot holds is pushed rightward against Send,
+						 * and a bar holding Send alone — which is every render before the
+						 * first measurement — still finds it in the corner it belongs in.
 						 */}
 						{contextGauge}
 						{isBusy ? (

@@ -168,6 +168,34 @@
 	opacity: 0.4;
 }
 
+/*
+ * Bare `<button>`s — the ones that are a label, a row or a tab rather than a
+ * control — with Obsidian's control chrome taken back off.
+ *
+ * `app.css` styles every `button:not(.clickable-icon)` as a form control:
+ * `--interactive-normal` fill and `--input-shadow`, both theme tokens. That
+ * selector is (0,1,1), so a plain `.piem-chat__thing { background: transparent }`
+ * at (0,1,0) loses to it — which is how a 16px ring and a chip's file name both
+ * shipped inside filled, rounded boxes that changed shape with the theme.
+ *
+ * Qualified by the element for exactly that reason: `button.piem-chat__x` ties
+ * Obsidian's rule at (0,1,1) and wins on source order. Not `!important`, which
+ * would also silence the hover and selected states below, and not `:where()`,
+ * which contributes nothing and would leave the tie unbroken. Matching the
+ * host's own selector shape is the whole trick.
+ *
+ * A button that *wants* the control look — `.piem-chat__banner-action`, the
+ * `mod-cta` in the empty state — is simply absent from this list. Anything that
+ * needs a fill of its own has to be element-qualified too, or this rule will
+ * outrank it; `.piem-chat__latest` is the one such case.
+ */
+button.piem-chat__command-menu-button,
+button.piem-chat__context-open,
+button.piem-settings-tab {
+	background: transparent;
+	box-shadow: none;
+}
+
 /* --- status bar (between the transcript and the composer) --- */
 
 /*
@@ -228,36 +256,40 @@
 	align-items: center;
 	display: inline-flex;
 	flex-shrink: 0;
-	/*
-	 * Pushes Send to the trailing edge without the bar switching to
-	 * `space-between`. The bar holds a lone Send whenever nothing is measured yet,
-	 * and `space-between` would then park it against the leading edge — the bug
-	 * the bar's `flex-end` was chosen to fix.
-	 */
-	margin-inline-end: auto;
 	/* Anchors the popover to the ring rather than to the composer shell, which is
 	 * also positioned (for the command menu) and sits a textarea away. */
 	position: relative;
 }
 
 /*
- * Deliberately not Obsidian's `.clickable-icon`: that applies
- * `opacity: var(--icon-opacity)` (0.85), which would multiply with whichever
- * band colour the ring is carrying. This codebase has shipped that class of bug
- * once already, when a `color` override left the warn band grey.
+ * On Obsidian's `.clickable-icon`, with the opacity that class carries pinned
+ * open.
+ *
+ * Leaving the class off was the bug. `app.css` styles every `<button>` that is
+ * *not* a `.clickable-icon` as a form control — `--interactive-normal` fill,
+ * `--input-shadow`, `--button-radius` — and it does so at a specificity (0,1,1)
+ * that the bare `background: transparent` which used to sit here (0,1,0) could
+ * not reach. The ring shipped inside a filled, rounded box that changed shape
+ * with the theme, because those are theme tokens. Declaring the class is how a
+ * plugin says "this button is a glyph, not a control", and it ends the argument
+ * rather than winning it: `:not(.clickable-icon)` simply stops matching.
+ *
+ * The reason it was left off is real — `opacity: var(--icon-opacity)` (0.85)
+ * multiplies into whichever band colour the ring is carrying — and the fix is
+ * the token, not the class, which is also the documented way to bend Obsidian's
+ * own components. A value declared on the element outranks the inherited one.
+ * Both halves have to move: Obsidian's mobile block sets
+ * `--icon-opacity-hover: 0.65`, so pinning only the resting value would have
+ * dimmed the ring at the moment a thumb was on it.
+ *
+ * Sizing, focus ring and the coarse-pointer target all arrive with
+ * `.piem-chat__icon-button`, which this now also carries. They used to be
+ * restated here, once per property, for a button that had opted out of the
+ * family it belongs to.
  */
 .piem-chat__context-gauge {
-	background: transparent;
-	border: none;
-	box-shadow: none;
-	cursor: pointer;
-	display: inline-flex;
-	padding: 0;
-}
-
-.piem-chat__context-gauge:focus-visible {
-	outline: 2px solid var(--background-modifier-border-focus);
-	outline-offset: 2px;
+	--icon-opacity: 1;
+	--icon-opacity-hover: 1;
 }
 
 .piem-chat__context-ring {
@@ -316,9 +348,14 @@
  * The figures the ring cannot carry, plus the one action they imply.
  *
  * Opens upward from the ring and overlays the draft, which is where a control's
- * own disclosure belongs — close enough that the pointer can cross into it. Held
- * to 16rem so it clears the panel edge in a 300px sidebar, where `left: 0` puts
- * it on the transcript's text column.
+ * own disclosure belongs — close enough that the pointer can cross into it.
+ *
+ * Anchored by `right: 0`, not `left: 0`. The ring sits a Send button in from the
+ * trailing edge, so growing rightward pushed a 16rem panel through the sidebar's
+ * own edge and Obsidian does not scroll a leaf sideways to reveal it — the
+ * readout simply got clipped. Growing leftward it has the whole composer width to
+ * expand into. `max-width` stays as the floor for a 300px sidebar; the two
+ * together mean the popover cannot leave the panel in either direction.
  */
 .piem-chat__context-popover {
 	background: var(--background-primary);
@@ -329,11 +366,11 @@
 	display: flex;
 	flex-direction: column;
 	gap: var(--size-4-1);
-	left: 0;
 	max-width: 16rem;
 	min-width: 11rem;
 	padding: var(--size-4-2);
 	position: absolute;
+	right: 0;
 	text-align: start;
 	white-space: normal;
 	width: max-content;
@@ -1001,7 +1038,14 @@
  * the message list visibly shrank the moment it appeared. `absolute` against
  * `.piem-chat__transcript` (already `position: relative`) takes it out of flow.
  */
-.piem-chat__latest {
+/*
+ * Element-qualified so its own fill survives: see the bare-button reset near the
+ * top. Unlike the buttons listed there this one *is* a floating control and wants
+ * to read as one — but `--background-secondary` and `--shadow-s` at (0,1,0) still
+ * lost to Obsidian's (0,1,1) form-control rule, so it was quietly wearing
+ * `--interactive-normal` and `--input-shadow` instead of what it asks for here.
+ */
+button.piem-chat__latest {
 	align-items: center;
 	background: var(--background-secondary);
 	border: 1px solid var(--background-modifier-border);
@@ -1223,17 +1267,24 @@
 	}
 }
 
-/* The label carries the click target, so it owns the chip's layout share. */
+/*
+ * The label carries the click target, so it owns the chip's layout share.
+ *
+ * The fill and shadow it used to declare here now come off in the shared bare-
+ * button reset above, which is the only place that arithmetic is written down.
+ */
 .piem-chat__context-open {
 	align-items: center;
-	background: transparent;
 	border: none;
-	box-shadow: none;
 	color: inherit;
 	cursor: pointer;
 	display: inline-flex;
 	font-size: inherit;
 	gap: var(--size-4-1);
+	/* Obsidian gives every `<button>` `height: var(--input-height)` — 30px, a form
+	 * control's height. That overrode the 24px chip this label sits in and set the
+	 * row's height from the inside. `auto` hands it back to `min-height` below. */
+	height: auto;
 	/* Matches the chip so the whole height is clickable, not just the glyph row. */
 	min-height: var(--size-4-6);
 	min-width: 0;
@@ -1492,7 +1543,6 @@
 
 .piem-chat__command-menu-button {
 	align-items: baseline;
-	background: transparent;
 	border: none;
 	border-radius: var(--radius-s);
 	color: var(--text-normal);
@@ -1730,21 +1780,6 @@
 		min-height: var(--size-4-12);
 	}
 
-	/*
-	 * The ring is a 16px glyph, and it is a bare <button> like `.piem-chat__latest`
-	 * — so the selector above never reached it either. The hit area grows to the
-	 * full 48px while the drawn ring stays 16px, which is the point: a thumb aims
-	 * at the target, not at the paint.
-	 */
-	.piem-chat__context-gauge {
-		min-height: var(--size-4-12);
-		min-width: var(--size-4-12);
-		/* Keeps the glyph on the composer bar's optical centre once the box grows
-		 * around it, rather than in the corner the flex default would leave it. */
-		align-items: center;
-		justify-content: center;
-	}
-
 	.piem-chat__trace-summary,
 	.piem-chat__trace--flat {
 		min-height: var(--size-4-9);
@@ -1826,10 +1861,8 @@
  * shift the label by a pixel.
  */
 .piem-settings-tab {
-	background: transparent;
 	border: none;
 	border-radius: 0;
-	box-shadow: none;
 	color: var(--text-muted);
 	cursor: pointer;
 	flex-shrink: 0;
