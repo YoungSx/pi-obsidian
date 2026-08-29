@@ -7,6 +7,7 @@ import {
 	type ProviderConfig,
 } from "../../modelConfig";
 import { getBuiltinModels, getBuiltinProviders } from "../../net/builtinCatalog";
+import type { ProviderListing } from "../../net/modelListingCache";
 import { CatalogSuggest, type CatalogSuggestion } from "./CatalogSuggest";
 import type { Translator } from "../../i18n";
 import { attachTestButton, type TestRowHandle } from "./testResult";
@@ -35,30 +36,69 @@ export interface ModelModalOptions {
 	test(draft: ModelConfig): Promise<ConnectionTestResult>;
 	/** Persists the result. Called only on a valid submit. */
 	onSubmit(model: ModelConfig): Promise<void>;
+	/**
+	 * Asks one endpoint which models it serves, for the id suggestions.
+	 *
+	 * Injected rather than reached for, exactly as {@link test} is: it decides
+	 * which transport the request travels, which is a setting this form has no
+	 * business reading. Optional so a caller that has no network — a test, or a
+	 * future embedder — gets the builtin catalog and nothing worse.
+	 *
+	 * Expected to resolve for an unreachable endpoint rather than reject; see
+	 * {@link ModelListingCache}.
+	 */
+	listModels?(provider: ProviderConfig, signal: AbortSignal): Promise<ProviderListing>;
+	/** Listings already collected this session, shown before any new probe returns. */
+	knownListings?(): readonly ProviderListing[];
 }
 
 /**
- * Builds the model-id suggestion list from the builtin catalog.
+ * Builds the model-id suggestion list.
  *
- * Every provider's models are offered regardless of which provider is selected:
- * a gateway commonly serves models it did not originate — an OpenAI-compatible
- * proxy fronting Claude, say — so filtering by the selected provider would hide
- * exactly the ids a BYOK user needs. The provider name rides along as the
- * description, which also makes it searchable.
+ * Two sources, in priority order. First, what the user's own endpoints said when
+ * asked — the authority on what they will actually accept, and the only source
+ * that knows anything about a private gateway. Then the builtin catalog, which
+ * fills in ids no endpoint mentioned: it is a build-time snapshot, so it is the
+ * fallback rather than the truth, and it still carries the plugin through an
+ * endpoint that implements no listing or cannot be reached right now.
+ *
+ * Suggestions are never filtered to the selected provider, for two reasons. A
+ * gateway commonly serves models it did not originate — an OpenAI-compatible
+ * proxy fronting Claude, say — so filtering would hide exactly the ids a BYOK
+ * user needs. And `modelConfig.ts` reserves a many-to-many future: fallback
+ * chains "only reorder model references", so a model will eventually name more
+ * than one provider, and a list scoped to a single selection would have to be
+ * torn down to get there.
+ *
+ * An id offered by several sources appears once, with every source named in the
+ * description, rather than being attributed to whichever was probed first.
  */
-export function buildModelSuggestions(): CatalogSuggestion[] {
-	const suggestions: CatalogSuggestion[] = [];
-	const seen = new Set<string>();
-	for (const provider of getBuiltinProviders()) {
-		for (const model of getBuiltinModels(provider)) {
-			if (seen.has(model.id)) {
-				continue;
-			}
-			seen.add(model.id);
-			suggestions.push({ value: model.id, description: provider });
+export function buildModelSuggestions(listings: readonly ProviderListing[] = []): CatalogSuggestion[] {
+	const sourcesById = new Map<string, string[]>();
+
+	const add = (id: string, source: string): void => {
+		const sources = sourcesById.get(id);
+		if (!sources) {
+			sourcesById.set(id, [source]);
+			return;
+		}
+		if (!sources.includes(source)) {
+			sources.push(source);
+		}
+	};
+
+	for (const listing of listings) {
+		for (const id of listing.modelIds) {
+			add(id, describeProviderConfig(listing.provider));
 		}
 	}
-	return suggestions;
+	for (const provider of getBuiltinProviders()) {
+		for (const model of getBuiltinModels(provider)) {
+			add(model.id, provider);
+		}
+	}
+
+	return [...sourcesById].map(([value, sources]) => ({ value, description: sources.join(", ") }));
 }
 
 /**
@@ -89,6 +129,10 @@ export class ModelModal extends Modal {
 	private readonly isNew: boolean;
 	private readonly options: ModelModalOptions;
 	private testRow: TestRowHandle | null = null;
+	/** Aborts any listing probe still outstanding when the form closes. */
+	private probes = new AbortController();
+	/** Listings this form has collected, seeded from the session's existing ones. */
+	private listings: readonly ProviderListing[] = [];
 
 	constructor(options: ModelModalOptions) {
 		super(options.app);
@@ -104,6 +148,14 @@ export class ModelModal extends Modal {
 		const { t } = this.options;
 		this.setTitle(t.t(this.isNew ? "modelModal.addTitle" : "modelModal.editTitle"));
 
+		this.probes = new AbortController();
+		this.listings = this.options.knownListings?.() ?? [];
+		// Opening this form is the deliberate action that earns a request, so the
+		// selected provider is asked now — one endpoint, not a fan-out across every
+		// configured one. Nothing waits on it: suggestions render from what is
+		// already known, and the answer joins the list when it arrives.
+		this.probeSelectedProvider();
+
 		new Setting(contentEl)
 			.setName(t.t("modelModal.provider"))
 			.setDesc(t.t("modelModal.providerDesc"))
@@ -115,6 +167,9 @@ export class ModelModal extends Modal {
 				dropdown.onChange((providerId) => {
 					this.draft.providerId = providerId;
 					this.testRow?.reset();
+					// Picking a different endpoint is the second deliberate action that
+					// earns a request. Still one endpoint, still nothing awaited here.
+					this.probeSelectedProvider();
 				});
 			});
 
@@ -130,7 +185,10 @@ export class ModelModal extends Modal {
 					this.draft.modelApiId = value;
 					this.testRow?.reset();
 				});
-				new CatalogSuggest(this.app, text.inputEl, buildModelSuggestions, (value) => {
+					// Read through a closure rather than passed as a snapshot, so a probe
+				// that lands after this field was built still shows up: the suggest
+				// re-reads on every keystroke, and never triggers a request itself.
+				new CatalogSuggest(this.app, text.inputEl, () => buildModelSuggestions(this.listings), (value) => {
 					this.draft.modelApiId = value;
 					this.testRow?.reset();
 				});
@@ -190,7 +248,49 @@ export class ModelModal extends Modal {
 	}
 
 	onClose(): void {
+		// Stops this form waiting on a listing it can no longer show. The request
+		// itself is left to finish inside the cache, so reopening the form reuses
+		// the answer instead of starting over.
+		this.probes.abort();
 		this.contentEl.empty();
+	}
+
+	/**
+	 * Asks the selected provider for its model ids, in the background.
+	 *
+	 * Fires on open and on a provider change — both deliberate user actions — and
+	 * never on the typing path. The cache behind it collapses repeats, so switching
+	 * back and forth between two providers costs two requests in total.
+	 *
+	 * Failure is silent by design: the suggestion list is simply shorter, and the
+	 * connection-test button is the deliberate way to find out why an endpoint is
+	 * unhappy. An abort is silent too — the form is gone.
+	 */
+	private probeSelectedProvider(): void {
+		if (!this.options.listModels) {
+			return;
+		}
+		const provider = this.options.providers.find((entry) => entry.id === this.draft.providerId);
+		if (!provider) {
+			return;
+		}
+		const signal = this.probes.signal;
+		// Invoked as a property rather than through an extracted reference, so an
+		// implementation that is a real method keeps its receiver.
+		void this.options.listModels(provider, signal).then(
+			() => {
+				if (signal.aborted) {
+					return;
+				}
+				// Re-read the cache rather than appending the one result: it is the
+				// authority on which fingerprint is current, so a provider whose URL
+				// was corrected does not end up listed under both.
+				this.listings = this.options.knownListings?.() ?? this.listings;
+			},
+			() => {
+				// Unreachable endpoint or a closed form. Nothing to add either way.
+			},
+		);
 	}
 
 	/**

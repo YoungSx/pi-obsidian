@@ -12,7 +12,8 @@ import {
 } from "../../modelConfig";
 import { LANGUAGES, getT, type LanguageSetting, type Translator } from "../../i18n";
 import { createObsidianModels } from "../../net/streamFn";
-import type { NetworkTransport } from "../../net/obsidianFetch";
+import { createFetchForTransport, type NetworkTransport } from "../../net/obsidianFetch";
+import { ModelListingCache } from "../../net/modelListingCache";
 import {
 	describeModelDeletion,
 	describeProviderDeletion,
@@ -314,6 +315,8 @@ function renderModelList(containerEl: HTMLElement, host: SettingsPanelHost, refr
 					providers: settings.providers,
 					t,
 					test: (draft) => testDraftModel(host, draft),
+					listModels: (provider, signal) => listingCacheFor(settings.networkTransport).ensure(provider, signal),
+					knownListings: () => listingCacheFor(settings.networkTransport).known(),
 					onSubmit: async (model) => {
 						settings.models.push(model);
 						// The first model configured becomes the active one: a user who
@@ -365,6 +368,8 @@ function renderModelList(containerEl: HTMLElement, host: SettingsPanelHost, refr
 					providers: settings.providers,
 					t,
 					test: (draft) => testDraftModel(host, draft),
+					listModels: (provider, signal) => listingCacheFor(settings.networkTransport).ensure(provider, signal),
+					knownListings: () => listingCacheFor(settings.networkTransport).known(),
 					onSubmit: async (updated) => {
 						replaceById(settings.models, updated);
 						await host.save();
@@ -833,6 +838,32 @@ async function testDraftProvider(host: SettingsPanelHost, draft: ProviderConfig)
 		providers: [draft],
 	});
 	return testProviderConnection(models, draft, host.settings.models, host.t, { fetch: fetchImpl });
+}
+
+/**
+ * Model listings collected this session, one cache per transport.
+ *
+ * Module-level for the same reason {@link lastActiveTabId} is: the panel is
+ * redrawn from scratch on a language change and the Models tab on every list
+ * edit, so anything owned by a render is lost immediately — and a cache that
+ * empties whenever the user adds a provider would re-probe on the next form,
+ * which is the cost it exists to avoid.
+ *
+ * Keyed by transport rather than rebuilt on change, because the transport is
+ * part of what the answer depended on. A probe that came back empty because
+ * `fetch` was blocked by CORS should not keep a switch to `requestUrl` from
+ * trying again, and both answers stay usable if the user switches back.
+ */
+const listingCaches = new Map<NetworkTransport, ModelListingCache>();
+
+function listingCacheFor(transport: NetworkTransport): ModelListingCache {
+	const existing = listingCaches.get(transport);
+	if (existing) {
+		return existing;
+	}
+	const cache = new ModelListingCache({ fetch: createFetchForTransport(transport) });
+	listingCaches.set(transport, cache);
+	return cache;
 }
 
 /** Same, for a model draft: the provider it names is resolved from saved settings. */
