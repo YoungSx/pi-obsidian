@@ -163,6 +163,14 @@ describe("tool registration", () => {
 			"get_active_note",
 			"move_note",
 			"trash_note",
+			// Screen tools, after the vault tools and before the outbound one: they
+			// act on what the user sees rather than on vault contents.
+			"open_note",
+			"open_side_panel",
+			"insert_at_cursor",
+			"goto_location",
+			"notify",
+			"ask_user",
 			// Last in the list, after the vault tools: a reader scanning the
 			// registration order meets the local capabilities before the outbound one.
 			"web_fetch",

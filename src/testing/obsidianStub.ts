@@ -42,6 +42,26 @@ export const platformMock = {
 	isMacOS: false,
 };
 
+/** One toast handed to Obsidian's `Notice`. */
+export interface NoticeRecording {
+	message: string;
+	/** Present when the caller chose a duration; otherwise Obsidian's default. */
+	timeout?: number;
+}
+
+/**
+ * Every toast constructed since the last {@link resetNotices}, oldest first.
+ *
+ * Module-level because `Notice` is constructed by production code, which the
+ * test has no handle on — same shape as {@link openedMenus}.
+ */
+export const shownNotices: NoticeRecording[] = [];
+
+/** Discards recorded toasts. Call from `beforeEach`. */
+export function resetNotices(): void {
+	shownNotices.length = 0;
+}
+
 /** Arguments of the most recent `MarkdownRenderer.render` call. */
 export interface MarkdownRenderCall {
 	app: unknown;
@@ -299,7 +319,56 @@ const obsidianStub = {
 			await markdownRenderMock({ app, markdown, el, sourcePath, component }),
 	},
 	Plugin: class Plugin {},
-	Modal: class Modal {},
+	/**
+	 * Modal with the element scaffold Obsidian's real one builds in its
+	 * constructor, mounted into the document body like the real `open()` does.
+	 *
+	 * Tests that construct a Modal subclass must run `installDom()` first —
+	 * there is no document under bare `bun test`, and silently skipping the
+	 * mount would leave the modal's buttons unreachable from assertions.
+	 */
+	Modal: class Modal {
+		modalEl: HTMLElement;
+		titleEl: HTMLElement;
+		contentEl: HTMLElement;
+
+		constructor() {
+			const doc = globalThis.document;
+			if (!doc) {
+				throw new Error("installDom() must run before a Modal can be constructed in tests");
+			}
+			this.modalEl = doc.createElement("div");
+			this.titleEl = doc.createElement("div");
+			this.contentEl = doc.createElement("div");
+			this.modalEl.append(this.titleEl, this.contentEl);
+			doc.body.appendChild(this.modalEl);
+		}
+
+		// Real Obsidian drives the lifecycle itself — open() invokes onOpen(),
+		// close() invokes onClose() — so the stub must too, or a subclass whose
+		// whole body lives in onOpen builds nothing in tests.
+		open(): void {
+			this.onOpen();
+		}
+		close(): void {
+			this.onClose();
+			this.modalEl.remove();
+		}
+		onOpen(): void {}
+		onClose(): void {}
+		setTitle(title: string): this {
+			this.titleEl.textContent = title;
+			return this;
+		}
+		setContent(content: string | HTMLElement): this {
+			if (typeof content === "string") {
+				this.contentEl.textContent = content;
+			} else {
+				this.contentEl.replaceChildren(content);
+			}
+			return this;
+		}
+	},
 	Menu: class Menu {
 		private readonly recording: MenuRecording = {
 			items: [],
@@ -378,7 +447,19 @@ const obsidianStub = {
 	},
 	PluginSettingTab: class PluginSettingTab {},
 	Setting: class Setting {},
-	Notice: class Notice {},
+	Notice: class Notice {
+		constructor(message: string | DocumentFragment, timeout?: number) {
+			shownNotices.push({ message: typeof message === "string" ? message : String(message), timeout });
+		}
+		setMessage(message: string): this {
+			const last = shownNotices.at(-1);
+			if (last) {
+				last.message = message;
+			}
+			return this;
+		}
+		hide(): void {}
+	},
 	Scope: class Scope {},
 	TFile: class TFile {},
 	TFolder: class TFolder {},

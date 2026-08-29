@@ -213,6 +213,13 @@ export const zhCN: DeepPartial<EnCopy> = {
 		truncated: "所选文本较长，仅引用了其开头部分。",
 	},
 
+	askUser: {
+		title: "Piem 提问",
+		confirm: "确认",
+		other: "其他…",
+		multiHint: "选择一项或多项后确认。",
+	},
+
 	session: {
 		newChat: "新建对话",
 		untitled: "未命名对话",

@@ -4,6 +4,10 @@ import { createEditTool, createReadTool, createWriteTool } from "@earendil-works
 import { adaptHarnessTool } from "../vault/harnessAdapter";
 import { createNoteLinksTool, createNoteMetadataTool } from "./linkTools";
 import { createActiveNoteTool } from "./noteTools";
+import { createOpenNoteTool, createOpenSidePanelTool } from "./navigationTools";
+import { createGotoLocationTool, createInsertAtCursorTool } from "./editorTools";
+import { createAskUserTool, createNotifyTool } from "./interactionTools";
+import { getT, resolveLanguage, type LanguageHost } from "../i18n";
 import { createMoveNoteTool, createTrashNoteTool } from "./organizeTools";
 import { createFindTool, createGrepTool, createLsTool } from "./searchTools";
 import { createListTasksTool, createSummarizeTasksTool } from "./taskTools";
@@ -23,11 +27,12 @@ import type { PiemSettings } from "../settings";
  * mutations could interleave. The same env is reused to load prompt templates,
  * so a reload never hands the loader a different object than the tools queue on.
  *
-	 * The remaining tools (ls, find, grep, tasks, notes, skills, move, trash) are
-	 * application-specific and stay hand-written. `read_skill` serves the loaded
-	 * in-memory set, including bundled skills that intentionally have no vault
-	 * file. move/trash stay out of the native set because pi's `FileSystem` rename
-	 * replaces its destination, while a user-facing move must refuse an occupied one.
+	 * The remaining tools (ls, find, grep, tasks, notes, skills, move, trash, and
+	 * the screen tools — open/panel/cursor/notify/ask) are application-specific
+	 * and stay hand-written. `read_skill` serves the loaded in-memory set,
+	 * including bundled skills that intentionally have no vault file. move/trash
+	 * stay out of the native set because pi's `FileSystem` rename replaces its
+	 * destination, while a user-facing move must refuse an occupied one.
  *
  * `web_fetch` is the sole outbound tool and is always present. It was gated
  * behind an off-by-default setting until the capability review in #52: a tool
@@ -59,6 +64,15 @@ export function createObsidianTools(
 		createActiveNoteTool(app),
 		createMoveNoteTool(app),
 		createTrashNoteTool(app),
+		createOpenNoteTool(app),
+		createOpenSidePanelTool(app),
+		createInsertAtCursorTool(app),
+		createGotoLocationTool(app),
+		createNotifyTool(app),
+		// The question dialog is the one tool whose strings reach the user rather
+		// than the model, so it needs the interface language resolved the same way
+		// the rest of the UI does — from the vault host and the language setting.
+		createAskUserTool(app, getT(resolveLanguage(app.vault as LanguageHost, settings.language))),
 		createWebFetchTool(settings.networkTransport),
 	];
 	if (getSkills) {
