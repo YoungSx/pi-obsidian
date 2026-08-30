@@ -127,9 +127,16 @@ export function ChatComposer({
 }: ChatComposerProps): React.JSX.Element {
 	const t = useT();
 	const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+	const shellRef = useRef<HTMLDivElement | null>(null);
 	const onSendRef = useRef<() => void>(onSend);
 	const isBusy = isStreaming || isCompacting;
 	const [menuOpen, setMenuOpen] = useState(false);
+	/*
+	 * Whether the reader is mid-compose, which is what shows the send row on a
+	 * phone. Latched rather than derived from focus: see the release effect below
+	 * the press guard for why `:focus-within` could not do it.
+	 */
+	const [isComposing, setIsComposing] = useState(false);
 	// Per-instance rather than a constant: Obsidian allows several leaves of one
 	// view type, so two open chat panels would otherwise share one id and the
 	// skip link in each would jump to whichever mounted first.
@@ -205,16 +212,18 @@ export function ChatComposer({
 	/*
 	 * A touch press anywhere in the shell must not end the composing session.
 	 *
-	 * On a phone the send row only exists while the shell holds focus
-	 * (`:focus-within` in the stylesheet), and a tap on a button does not move
-	 * focus on iOS — the textarea blurs, nothing inside the shell takes focus
-	 * back, and the row collapses under the finger before the tap can land: the
-	 * tap that opens the model menu, the ring popover, or Send itself would hit
-	 * a row that is already gone. Cancelling the `pointerdown` stops the
-	 * browser's default action — moving focus — so the draft keeps the caret and
-	 * the keyboard. The press still activates what was pressed: a cancelled
-	 * `pointerdown` suppresses the compatibility mouse events, but `click` is
-	 * exempt and fires as normal.
+	 * On a phone the send row is hidden until the composer is in use, and a tap
+	 * on a button does not focus it on iOS — so the row has to survive a press
+	 * that takes focus away from the draft. This cancels the press's default
+	 * action, which is what would move focus, so in a browser that only moves
+	 * focus as that default action the caret and the keyboard both stay put.
+	 *
+	 * It is a comfort, not the guarantee. iOS Safari also drops the field's
+	 * focus as part of its own tap handling, which is not a default action and
+	 * so cannot be cancelled: the trace shows `pointerdown` arriving with
+	 * `defaultPrevented` true and the `focusout` landing anyway. What keeps the
+	 * row up in that case is {@link isComposing} below, which is why the
+	 * stylesheet keys the row on a latched class rather than on `:focus-within`.
 	 *
 	 * Two exemptions. A press on the textarea passes through, because focusing
 	 * it — and placing the caret — is precisely what that press is for. A mouse
@@ -227,6 +236,71 @@ export function ChatComposer({
 			return;
 		}
 		event.preventDefault();
+	};
+
+	/*
+	 * What releases the latch: a press that lands outside the shell.
+	 *
+	 * The row used to be keyed on `:focus-within` alone, which tied its existence
+	 * to focus surviving a tap on the row itself — and on iOS it does not. The
+	 * failure was total rather than cosmetic: the row collapsed between
+	 * `pointerdown` and `touchend`, so the pressed control was out of the layout
+	 * by the time the tap resolved and the `click` landed on whatever had moved
+	 * into that spot. The button never fired at all, which is exactly the "tap it
+	 * and it vanishes, nothing works" report. The latch answers a different
+	 * question — is the reader mid-compose, which a tap on the composer's own
+	 * controls is part of rather than the end of.
+	 *
+	 * A blur cannot decide when that ends. iOS reports `relatedTarget` null for
+	 * the blur it performs during tap handling, which is indistinguishable from
+	 * the tap that dismisses the keyboard: holding the latch on null pins the row
+	 * open forever, and releasing on it restores the original bug. A press says
+	 * where the finger went next, which is unambiguous — the same reading
+	 * {@link ContextGauge} uses to dismiss its popover.
+	 *
+	 * Capture phase, so the release is settled before the press activates
+	 * anything. Bound to the shell's own document, not the global one: this view
+	 * can be moved to an Obsidian popout window, where a listener on the main
+	 * document would never fire and the row would stay up for good. Registered
+	 * only while latched, so the resting panel carries no listener.
+	 *
+	 * A press is not the only way to leave: see {@link releaseOnFocusLeaving} for
+	 * the keyboard's route out, which this cannot cover because tabbing away
+	 * presses nothing.
+	 */
+	useEffect(() => {
+		const shell = shellRef.current;
+		if (!isComposing || !shell) {
+			return undefined;
+		}
+		const owner = shell.ownerDocument;
+		const handlePointerDown = (event: PointerEvent): void => {
+			if (!shellRef.current?.contains(event.target as Node | null)) {
+				setIsComposing(false);
+			}
+		};
+		owner.addEventListener("pointerdown", handlePointerDown, { capture: true });
+		return () => {
+			owner.removeEventListener("pointerdown", handlePointerDown, { capture: true });
+		};
+	}, [isComposing]);
+
+	/*
+	 * The keyboard's route out: focus moving to a named element outside the shell.
+	 *
+	 * A tablet with a hardware keyboard is a coarse-pointer device, so it hides
+	 * the row — and a reader who tabs out of the composer presses nothing, so the
+	 * release above never fires and the row would stay up for the rest of the
+	 * session. This closes that path without reopening the bug, because it turns
+	 * on `relatedTarget` being *named*: null is the ambiguous report iOS gives for
+	 * its own mid-tap blur, and null keeps the latch. Only a browser that says
+	 * where focus went is trusted to end the session.
+	 */
+	const releaseOnFocusLeaving = (event: React.FocusEvent<HTMLDivElement>): void => {
+		const next = event.relatedTarget as Node | null;
+		if (next && !event.currentTarget.contains(next)) {
+			setIsComposing(false);
+		}
 	};
 
 	/*
@@ -286,7 +360,13 @@ export function ChatComposer({
 
 	return (
 		<footer className="piem-chat__composer">
-			<div className="piem-chat__composer-shell" onPointerDown={keepFocusOnPress}>
+			<div
+				ref={shellRef}
+				className={`piem-chat__composer-shell${isComposing ? " is-composing" : ""}`}
+				onPointerDown={keepFocusOnPress}
+				onFocus={() => setIsComposing(true)}
+				onBlur={releaseOnFocusLeaving}
+			>
 				{contextRow}
 				{pendingImages && pendingImages.length > 0 ? (
 					<ul className="piem-chat__pending-images">
