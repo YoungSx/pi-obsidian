@@ -2057,6 +2057,23 @@ describe("quick-action suggestions", () => {
 		expect(await first).toBeNull();
 	});
 
+	it("aborts an in-flight suggestion the moment a real send starts", async () => {
+		let releaseFirst!: () => void;
+		const gate = new Promise<void>((resolve) => {
+			releaseFirst = resolve;
+		});
+		const { service } = createServiceWithSettings(new MemoryAdapter(), { streamFn: suggestionReplyStreamFn(SUGGESTION_JSON, gate) });
+		await service.initialize();
+
+		const pending = service.suggestQuickActions("empty");
+		// The send is a new turn; the suggestion asked for by the previous one is
+		// dead weight, so sendPrompt must cancel it rather than let it finish.
+		await service.sendPrompt("Hello");
+		releaseFirst();
+
+		expect(await pending).toBeNull();
+	});
+
 	it("declines to ask when the target has no credential", async () => {
 		const { service, settings } = createServiceWithSettings(new MemoryAdapter(), { streamFn: suggestionReplyStreamFn(SUGGESTION_JSON) });
 		await service.initialize();
