@@ -13,7 +13,8 @@ import {
 	type VaultTask,
 } from "../vault/tasks";
 import { maxResultsParameter, vaultScopeParameter } from "./parameters";
-import { compareFiles, textResult, throwIfAborted } from "./toolResult";
+import { compareFiles } from "./vaultFiles";
+import { textResult, throwIfAborted } from "./toolResult";
 
 /**
  * The status filter, built per tool because only the default differs.

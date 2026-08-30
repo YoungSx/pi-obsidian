@@ -5,7 +5,8 @@ import { normalizeFolderPath } from "../vault/path";
 import { formatGrepMatches, grepContent, matchesFindPattern, type GrepMatch } from "../vault/search";
 import { truncateToolOutput } from "../vault/truncate";
 import { maxResultsParameter, vaultScopeParameter } from "./parameters";
-import { compareFiles, TEXT_EXTENSIONS, textResult, throwIfAborted } from "./toolResult";
+import { TEXT_EXTENSIONS, compareFiles } from "./vaultFiles";
+import { textResult, throwIfAborted } from "./toolResult";
 
 const LsParameters = Type.Object({
 	path: vaultScopeParameter("Folder to list."),
