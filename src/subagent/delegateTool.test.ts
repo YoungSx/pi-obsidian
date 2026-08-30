@@ -52,7 +52,12 @@ function scriptedStreamFn(script: Array<{ toolCall?: { id: string; name: string 
 		if (step.toolCall) {
 			const message: AssistantMessage = {
 				...base,
-				content: [{ type: "toolCall", id: step.toolCall.id, name: step.toolCall.name, arguments: {} }],
+				// A real model often prefixes a tool call with text; keep it so the
+				// runner's report-extraction can be tested against a mixed message.
+				content: [
+					...(step.text ? [{ type: "text" as const, text: step.text }] : []),
+					{ type: "toolCall", id: step.toolCall.id, name: step.toolCall.name, arguments: {} },
+				],
 				stopReason: "toolUse",
 			};
 			stream.push({ type: "done", reason: "toolUse", message });
@@ -248,6 +253,21 @@ describe("runSubagent", () => {
 		expect(run).rejects.toThrow("timed out");
 	});
 
+	it("refuses to start when the parent signal is already aborted", async () => {
+		const controller = new AbortController();
+		controller.abort();
+		const run = runSubagent({
+			task: "t",
+			role,
+			tools: [],
+			model: MODEL,
+			streamFn: scriptedStreamFn([{ text: "never reached" }]),
+			thinkingLevel: "off" as never,
+			signal: controller.signal,
+		});
+		expect(run).rejects.toThrow("Subagent aborted");
+	});
+
 	it("throws instead of returning an empty success when the run stopped on a tool error", async () => {
 		const failing: AgentTool = {
 			name: "grep",
@@ -265,6 +285,32 @@ describe("runSubagent", () => {
 				tools: [failing],
 				model: MODEL,
 				streamFn: scriptedStreamFn([{ toolCall: { id: "call_1", name: "grep" } }]),
+				thinkingLevel: "off" as never,
+			}),
+		).rejects.toThrow("Subagent failed: grep: vault exploded");
+	});
+
+	it("does not mistake prefatory text for a report when the run stopped on a tool error", async () => {
+		const failing: AgentTool = {
+			name: "grep",
+			label: "grep",
+			description: "fails",
+			parameters: Type.Object({}),
+			execute: async () => {
+				throw new Error("vault exploded");
+			},
+		};
+		// The model prefixed its doomed tool call with prose; that prose must not
+		// come back to the parent as the deliverable.
+		expect(
+			runSubagent({
+				task: "t",
+				role,
+				tools: [failing],
+				model: MODEL,
+				streamFn: scriptedStreamFn([
+					{ toolCall: { id: "call_1", name: "grep" }, text: "Let me search for that." },
+				]),
 				thinkingLevel: "off" as never,
 			}),
 		).rejects.toThrow("Subagent failed: grep: vault exploded");

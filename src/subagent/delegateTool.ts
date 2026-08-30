@@ -35,10 +35,11 @@ const DelegateParameters = Type.Object({
 		Type.Union(
 			// `Union` computes its `Static` only from a tuple; `.map` alone widens
 			// the members to an array and the parameter type collapses to never.
+			// The variadic tail keeps the static type honest whatever the role
+			// count grows to — a fixed-length cast would go stale on the next role.
 			SUBAGENT_ROLES.map((role) => Type.Literal(role.name)) as [
 				TLiteral<SubagentRoleName>,
-				TLiteral<SubagentRoleName>,
-				TLiteral<SubagentRoleName>,
+				...TLiteral<SubagentRoleName>[],
 			],
 			{ description: "Worker profile to run the task under. Defaults to general." },
 		),
