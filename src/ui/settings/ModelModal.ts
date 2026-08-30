@@ -115,7 +115,9 @@ export function buildModelSuggestions(listings: readonly ProviderListing[] = [])
  *
  * Both answers come from the same data models.dev publishes, so one lookup
  * serves every capability control the form renders. The numeric fields are
- * present only when the answering entry published a limit.
+ * present only when the answering entry published a limit. Which source
+ * answered is deliberately absent: that is pipeline detail, not something the
+ * form should narrate.
  */
 export interface CatalogCapabilityHint {
 	/** Whether the entry advertises reasoning parameters. */
@@ -126,15 +128,7 @@ export interface CatalogCapabilityHint {
 	contextWindow?: number;
 	/** Cap on output tokens, when the answering entry published one. */
 	maxTokens?: number;
-	/**
-	 * Where the claim came from, structured so the form can name it in the
-	 * user's language rather than a string baked in at lookup time.
-	 */
-	source: CapabilityHintSource;
 }
-
-/** Which recommendation source answered: the shipped snapshot, or the live models.dev fetch. */
-export type CapabilityHintSource = { kind: "builtin"; provider: string } | { kind: "models-dev" };
 
 /**
  * Looks one model id up across the recommendation sources and reports its
@@ -145,9 +139,9 @@ export type CapabilityHintSource = { kind: "builtin"; provider: string } | { kin
  * snapshot fills in when the fetch has not landed or cannot — offline, or
  * models.dev reshaped. Within each source, matching is exact first: ids are
  * commonly namespaced by the gateway in front — an OpenRouter-style endpoint
- * serves `anthropic/claude-…` — so the final path segment matches too, and the
- * hint names the source that knew the tail, since that is where the claim came
- * from.
+ * serves `anthropic/claude-…` — so the final path segment matches too. Which of
+ * the two answered is not reported; the form narrates the recommendation, not
+ * the plumbing behind it.
  *
  * Neither source probes the user's endpoint. A listing response carries no
  * capability data, and the only live way to learn what a server accepts is to
@@ -164,7 +158,7 @@ export function findCatalogCapabilityHint(modelApiId: string, live?: ModelsDevIn
 	if (live) {
 		const exact = live.exact.get(id);
 		if (exact) {
-			return { ...exact, source: MODELS_DEV_SOURCE };
+			return { ...exact };
 		}
 	}
 	const exactSnapshot = findCatalogModel(id);
@@ -174,7 +168,7 @@ export function findCatalogCapabilityHint(modelApiId: string, live?: ModelsDevIn
 	if (live && tail !== id) {
 		const namespaced = live.tail.get(tail);
 		if (namespaced) {
-			return { ...namespaced, source: MODELS_DEV_SOURCE };
+			return { ...namespaced };
 		}
 	}
 	if (tail !== id) {
@@ -186,11 +180,8 @@ export function findCatalogCapabilityHint(modelApiId: string, live?: ModelsDevIn
 	return undefined;
 }
 
-/** Provenance label for an answer that came from the live models.dev fetch. */
-const MODELS_DEV_SOURCE: CapabilityHintSource = { kind: "models-dev" };
-
 /** One snapshot entry, carrying the catalog section that knew it. */
-type SnapshotEntry = Omit<CatalogCapabilityHint, "source"> & { provider: string };
+type SnapshotEntry = CatalogCapabilityHint & { provider: string };
 
 /** Widens a snapshot entry into a hint, attributing it to the catalog section that knew it. */
 function hintFromSnapshot(entry: SnapshotEntry): CatalogCapabilityHint {
@@ -199,7 +190,6 @@ function hintFromSnapshot(entry: SnapshotEntry): CatalogCapabilityHint {
 		images: entry.images,
 		contextWindow: entry.contextWindow,
 		maxTokens: entry.maxTokens,
-		source: { kind: "builtin", provider: entry.provider },
 	};
 }
 function findCatalogModel(id: string): SnapshotEntry | undefined {
@@ -216,13 +206,6 @@ function findCatalogModel(id: string): SnapshotEntry | undefined {
 		}
 	}
 	return undefined;
-}
-
-/** Names a hint's provenance in the user's language, for the hint lines. */
-function describeHintSource(source: CapabilityHintSource, t: Translator): string {
-	return source.kind === "builtin"
-		? t.t("modelModal.sourceBuiltin", { catalog: source.provider })
-		: t.t("modelModal.sourceModelsDev");
 }
 
 /**
@@ -467,20 +450,11 @@ export class ModelModal extends Modal {
 	private refreshCatalogRecommendation(apply: boolean): void {
 		const { t } = this.options;
 		const hint = findCatalogCapabilityHint(this.draft.modelApiId, this.modelsDevIndex);
-		const source = hint ? describeHintSource(hint.source, t) : "";
 		this.thinkingHint?.setText(
-			hint
-				? t.t(hint.reasoning ? "modelModal.thinkingHintSupported" : "modelModal.thinkingHintUnsupported", {
-						source,
-					})
-				: "",
+			hint ? t.t(hint.reasoning ? "modelModal.thinkingHintSupported" : "modelModal.thinkingHintUnsupported") : "",
 		);
 		this.imageHint?.setText(
-			hint
-				? t.t(hint.images ? "modelModal.imagesHintSupported" : "modelModal.imagesHintUnsupported", {
-						source,
-					})
-				: "",
+			hint ? t.t(hint.images ? "modelModal.imagesHintSupported" : "modelModal.imagesHintUnsupported") : "",
 		);
 		if (hint?.contextWindow !== undefined && this.draft.contextWindow === undefined) {
 			this.draft.contextWindow = hint.contextWindow;
