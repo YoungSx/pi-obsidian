@@ -1051,6 +1051,38 @@ button.piem-settings-tab {
 	}
 }
 
+/*
+ * The prose block the model is still writing gets a blinking caret after its
+ * last character — the same signal the thinking row's spinner gives, in
+ * sentence form. The class only ever reaches a live message, whose markdown
+ * policy forces the plain `<pre>` face, so the ::after stays inline and trails
+ * the text instead of hanging under a block-level container. Settled blocks
+ * never carry the class, so the caret disappears with the answer.
+ */
+.piem-chat__block--live::after {
+	content: "";
+	display: inline-block;
+	width: 0.5em;
+	height: 1em;
+	margin-inline-start: 2px;
+	background: currentColor;
+	vertical-align: text-bottom;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+
+	.piem-chat__block--live::after {
+		animation: pi-caret 1.1s ease-in-out infinite;
+	}
+}
+
+@keyframes pi-caret {
+
+	50% {
+		opacity: 0;
+	}
+}
+
 .piem-chat__trace-body {
 	border-left: 1px solid var(--background-modifier-border);
 	margin-left: var(--size-4-2);
