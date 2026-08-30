@@ -1506,11 +1506,55 @@ describe("language in the snapshot", () => {
 });
 
 describe("prompt commands", () => {
+	it("picks up a template saved after the conversation started, on the next send", async () => {
+		// Templates used to load once, in `initializeAgent`, so a file saved on disk
+		// did nothing until the plugin was reloaded — while an edited *skill* took
+		// effect on the very next message. Both are `.md` under a vault folder and
+		// both are `/name` commands in the same autocomplete menu, so there was no
+		// story that made the difference explicable to anyone.
+		// `createVaultAppWithSkills` rather than the `vaultFiles` option: that one
+		// snapshots at construction, so a file added mid-test would be invisible to
+		// the stub regardless of what the service does. This one derives its file
+		// list per call, which is what lets the assertion be about the reload.
+		const contexts: Context[] = [];
+		const vaultFiles: Record<string, string> = {};
+		const service = new ObsidianAgentService(
+			createVaultAppWithSkills(vaultFiles),
+			() => defaultTestSettings(),
+			new ObsidianSessionManager(asDataAdapter(new MemoryAdapter()), SESSION_DIR, "obsidian-vault:Test"),
+			{ streamFn: createCapturingStreamFn(contexts), loadUserSkills: NO_USER_SKILLS },
+		);
+
+		await service.sendPrompt("Hello");
+		vaultFiles["Piem/prompts/fresh.md"] = "FRESH TEMPLATE BODY: $ARGUMENTS";
+
+		expect(await service.sendPrompt("/fresh with detail")).toBe(true);
+		const sent = JSON.stringify(contexts.at(-1)?.messages.at(-1)?.content);
+		expect(sent).toContain("FRESH TEMPLATE BODY: with detail");
+	});
+
+	it("keeps template load problems out of the chat panel", async () => {
+		// Same rule as skills: a malformed file of the user's own is not a chat
+		// failure, and this load runs on every send, so the banner would re-raise it
+		// once per message with nothing beside it that could act on the problem.
+		const service = createService(new MemoryAdapter(), {
+			vaultFiles: { "Piem/prompts/bad.md": "---\ndescription: : :\n---\nbody" },
+		});
+
+		await service.sendPrompt("Hello");
+
+		expect(service.getSnapshot().noticeMessage).toBeUndefined();
+		expect(service.getSnapshot().errorMessage).toBeUndefined();
+		// Stored for the settings surface instead, on the same report the skill
+		// layers use — they load together and are reported on as one thing.
+		expect(service.getSkillLoad().templates.length).toBeGreaterThan(0);
+	});
+
 	it("sends the expanded template body, not the /name the user typed", async () => {
 		const contexts: Context[] = [];
 		const service = createService(new MemoryAdapter(), {
 			streamFn: createCapturingStreamFn(contexts),
-			vaultFiles: { ".piem/prompts/echo.md": "---\ndescription: Echo it back\n---\nRepeat this verbatim: $ARGUMENTS" },
+			vaultFiles: { "Piem/prompts/echo.md": "---\ndescription: Echo it back\n---\nRepeat this verbatim: $ARGUMENTS" },
 		});
 
 		expect(await service.sendPrompt("/echo hello world")).toBe(true);
@@ -1526,7 +1570,7 @@ describe("prompt commands", () => {
 		const contexts: Context[] = [];
 		const service = createService(new MemoryAdapter(), {
 			streamFn: createCapturingStreamFn(contexts),
-			vaultFiles: { ".piem/prompts/pair.md": "First is $1 and second is $2." },
+			vaultFiles: { "Piem/prompts/pair.md": "First is $1 and second is $2." },
 		});
 
 		await service.sendPrompt('/pair one "two three"');
@@ -1561,7 +1605,7 @@ describe("prompt commands", () => {
 
 	it("offers builtins and vault templates together for autocomplete", async () => {
 		const service = createService(new MemoryAdapter(), {
-			vaultFiles: { ".piem/prompts/echo.md": "---\ndescription: Echo it back\n---\nRepeat: $ARGUMENTS" },
+			vaultFiles: { "Piem/prompts/echo.md": "---\ndescription: Echo it back\n---\nRepeat: $ARGUMENTS" },
 		});
 		await service.initialize();
 
@@ -1582,7 +1626,7 @@ describe("prompt commands", () => {
 		const service = createService(new MemoryAdapter(), {
 			streamFn: createCapturingStreamFn(contexts),
 			vaultFiles: {
-				".piem/prompts/review.md": "PROMPT VERSION: $ARGUMENTS",
+				"Piem/prompts/review.md": "PROMPT VERSION: $ARGUMENTS",
 				"Piem/skills/review/SKILL.md": "---\nname: review\ndescription: Skill version\n---\nSKILL VERSION",
 			},
 		});
@@ -1635,7 +1679,7 @@ describe("vault skills", () => {
 		// what it would otherwise render.
 		const service = createSkillsService(createVaultAppWithSkills({}), []);
 
-		expect(service.getSkillLoad()).toEqual({ vault: [], user: { skills: [], diagnostics: [], searched: [] } });
+		expect(service.getSkillLoad()).toEqual({ vault: [], user: { skills: [], diagnostics: [], searched: [] }, templates: [] });
 	});
 
 	it("makes the load current for a caller that awaits refreshSkills", async () => {
@@ -1678,7 +1722,7 @@ describe("vault skills", () => {
 		const warned = records.find((record) => record.level === "warn");
 		expect(warned?.detail?.code).toBe("invalid_metadata");
 		expect(warned?.detail?.path).toContain("bad/SKILL.md");
-		expect(warned?.detail?.layer).toBe("vault");
+		expect(warned?.detail?.layer).toBe("vault-skills");
 	});
 
 	it("logs again once the problems on disk actually change", async () => {

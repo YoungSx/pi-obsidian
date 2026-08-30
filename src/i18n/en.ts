@@ -160,7 +160,6 @@ export const en = {
 		/** A template keeps the short name; the skill remains reachable explicitly. */
 		commandConflict: "Both a prompt and skill use /{name}. Used the prompt; use /skill:{name} for the skill.",
 		/** Notice summarizing non-fatal warnings from loading prompt templates. */
-		templatesLoadedWithWarnings: "Loaded prompt commands with {count} warning(s).",
 		/**
 		 * Outcome of an on-demand tidy that found nothing worth summarizing.
 		 *

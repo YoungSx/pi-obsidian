@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import type { SkillDiagnostic } from "@earendil-works/pi-agent-core";
+import type { PromptTemplateDiagnostic, SkillDiagnostic } from "@earendil-works/pi-agent-core";
 import { getT } from "../../i18n";
 import {
 	countSkillProblems,
@@ -29,9 +29,14 @@ import type { SkillLoadReport } from "../../agent/skillLoader";
 const en = getT("en");
 const zh = getT("zh-cn");
 
-/** A report with the given problem counts, and nothing else worth varying. */
-function report(vault: number, user: number): SkillLoadReport {
-	const diagnostic = (index: number): SkillDiagnostic => ({
+/**
+ * A report with the given problem counts, and nothing else worth varying.
+ *
+ * `file_info_failed` is deliberate: it is the one code both diagnostic unions
+ * share, so a single factory serves the skill layers and the template layer.
+ */
+function report(vault: number, user: number, templates = 0): SkillLoadReport {
+	const diagnostic = (index: number): SkillDiagnostic & PromptTemplateDiagnostic => ({
 		type: "warning",
 		code: "file_info_failed",
 		message: `problem ${index}`,
@@ -44,6 +49,7 @@ function report(vault: number, user: number): SkillLoadReport {
 			diagnostics: Array.from({ length: user }, (_, index) => diagnostic(index)),
 			searched: [],
 		},
+		templates: Array.from({ length: templates }, (_, index) => diagnostic(index)),
 	};
 }
 

@@ -8,14 +8,14 @@ installObsidianStub();
 // Dynamic imports so the mocked `obsidian` module wins over any cached real one.
 // Runtime classes come from the mocked module; types stay type-only.
 const { TFile: TFileClass, TFolder: TFolderClass } = await import("obsidian");
-const { loadVaultPromptTemplates, parsePromptCommand, expandPromptTemplate, findPromptTemplate } = await import(
+const { loadVaultPromptTemplates, parsePromptCommand, expandPromptTemplate, findPromptTemplate, VAULT_PROMPT_TEMPLATES_DIR } = await import(
 	"./promptTemplates"
 );
 const { BUILTIN_PROMPT_TEMPLATES } = await import("./builtinTemplates");
 const { VaultExecutionEnv } = await import("../vault/VaultExecutionEnv");
 
 /*
- * A vault that lives in memory, so a test can stage `.piem/prompts/*.md` files
+ * A vault that lives in memory, so a test can stage `Piem/prompts/*.md` files
  * without touching disk. It mirrors the same `App` surface `VaultExecutionEnv`
  * reads through — `getFileByPath` / `getFolderByPath` / `getRoot` / `read` — so
  * the loader exercises the same path normalisation the production env does.
@@ -93,12 +93,12 @@ function baseName(path: string): string {
 	return index === -1 ? path : path.slice(index + 1);
 }
 
-/** Stages templates under `.piem/prompts/` and returns an env over them. */
+/** Stages templates under `Piem/prompts/` and returns an env over them. */
 function envWithTemplates(files: Record<string, string>): ExecutionEnv {
 	const vault = new InMemoryVault();
-	vault.ensureFolder(".piem/prompts");
+	vault.ensureFolder("Piem/prompts");
 	for (const [name, body] of Object.entries(files)) {
-		vault.write(`.piem/prompts/${name}`, body);
+		vault.write(`Piem/prompts/${name}`, body);
 	}
 	return new VaultExecutionEnv(vault.asApp());
 }
@@ -151,7 +151,7 @@ describe("parsePromptCommand", () => {
 });
 
 describe("loadVaultPromptTemplates", () => {
-	it("loads a template from .piem/prompts with its name, description, and body", async () => {
+	it("loads a template from Piem/prompts with its name, description, and body", async () => {
 		const env = envWithTemplates({
 			"echo.md": ["---", "description: Echo the arguments back", "---", "", "Echo back: $@"].join("\n"),
 		});
@@ -165,7 +165,7 @@ describe("loadVaultPromptTemplates", () => {
 		expect(templates[0]?.content).toContain("Echo back: $@");
 	});
 
-	it("yields no templates and no diagnostics when the vault has no .piem/prompts folder", async () => {
+	it("yields no templates and no diagnostics when the vault has no Piem/prompts folder", async () => {
 		// A missing folder is the normal first-run state. pi's loader skips
 		// not_found paths rather than reporting them, so the result is empty —
 		// not an error a panel would have to surface.
@@ -176,6 +176,27 @@ describe("loadVaultPromptTemplates", () => {
 
 		expect(templates).toEqual([]);
 		expect(diagnostics).toEqual([]);
+	});
+
+	it("looks in a folder Obsidian will actually index", async () => {
+		// The defect this pins is a silent one, and it shipped. The folder used to be
+		// `.piem/prompts`, and Obsidian does not index dot-directories: every path
+		// `VaultExecutionEnv` resolves goes through `getFileByPath` /
+		// `getFolderByPath`, both of which return null there, which the env reports
+		// as `not_found` — and pi's loader skips a `not_found` path *without a
+		// diagnostic*, correctly, since a missing folder is the ordinary state of a
+		// vault that defines no templates. The two behaviours composed into silence:
+		// no template ever loaded, no warning was ever raised, and the notice this
+		// plugin showed about template warnings was unreachable.
+		//
+		// The in-memory vault below registers any path it is handed, so it cannot
+		// reproduce Obsidian's indexing rule — which is exactly why every test here
+		// passed against the broken path. So this asserts the constant instead, in
+		// the one way a unit test can: no leading dot on any segment.
+		expect(VAULT_PROMPT_TEMPLATES_DIR).toBe("/Piem/prompts");
+		for (const segment of VAULT_PROMPT_TEMPLATES_DIR.split("/")) {
+			expect(segment.startsWith(".")).toBe(false);
+		}
 	});
 
 	it("reports a warning diagnostic for a template whose frontmatter will not parse", async () => {

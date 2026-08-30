@@ -7,12 +7,12 @@ import type { PromptTemplate } from "@earendil-works/pi-agent-core";
  * reads files from an {@link ExecutionEnv}, and the vault env has no writable
  * temp space to stage builtins in. Constants are simpler, need no diagnostics,
  * and keep the builtin set auditable in one place. The vault's own
- * `.piem/prompts` folder is where user-defined templates live; builtins are the
+ * `Piem/prompts` folder is where user-defined templates live; builtins are the
  * floor that ships regardless.
  *
  * Template `content` is the English prompt sent to the model, not UI copy — it
  * does not go through i18n. A user who wants it in another language defines
- * their own in `.piem/prompts`.
+ * their own in `Piem/prompts`.
  */
 export const BUILTIN_PROMPT_TEMPLATES: PromptTemplate[] = [
 	{
