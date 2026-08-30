@@ -537,6 +537,11 @@ button.piem-settings-tab {
 
 .piem-chat__banner-icon {
 	flex-shrink: 0;
+	/* Optical alignment with one line of --font-ui-smaller text: the icon box is
+	 * taller than the glyphs, so a bare `align-items: flex-start` leaves it
+	 * floating high. Two pixels is tuned for the default theme's metrics; px on
+	 * purpose — an em value would scale off the icon's own font size and drift
+	 * across themes. */
 	margin-top: 2px;
 }
 
@@ -545,6 +550,13 @@ button.piem-settings-tab {
 	font-size: var(--font-ui-smaller);
 	min-width: 0;
 	overflow-wrap: anywhere;
+	/* Skill diagnostics arrive as multi-line strings joined with `\n`; without
+	 * this they collapse into one unreadable run-on sentence. */
+	white-space: pre-line;
+	/* Cap at roughly six lines. A provider error dump otherwise grows without
+	 * bound and pushes the whole conversation out of a sidebar pane. */
+	max-height: 9em;
+	overflow-y: auto;
 }
 
 /* Action where the old copy printed a settings path in prose. */
@@ -2030,6 +2042,17 @@ button.piem-chat__latest {
 	 */
 	.piem-chat__quick-action {
 		min-height: var(--size-4-9);
+	}
+
+	/*
+	 * The settings action on a failure banner is a bare <button> like
+	 * `.piem-chat__latest`, so the shared selector above never reaches it. It is
+	 * also the banner's only error-recovery control — on a missing API key the
+	 * reader's next step lives inside this target — so 32px in the thumb zone is
+	 * exactly the gap the coarse block exists to close.
+	 */
+	.piem-chat__banner-action {
+		min-height: var(--size-4-12);
 	}
 }
 
