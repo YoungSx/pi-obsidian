@@ -11,6 +11,7 @@ import { getBuiltinModels, getBuiltinProviders } from "../../net/builtinCatalog"
 import type { ProviderListing } from "../../net/modelListingCache";
 import type { ModelsDevIndex } from "../../net/modelsDev";
 import { CatalogSuggest, type CatalogSuggestion } from "./CatalogSuggest";
+import { createCollapsibleSection } from "./collapsibleSection";
 import type { Translator } from "../../i18n";
 import { attachTestButton, type TestRowHandle } from "./testResult";
 
@@ -259,6 +260,8 @@ export class ModelModal extends Modal {
 	/** Input fields for the numeric limits, so a recommendation can fill a blank one. */
 	private contextWindowInput: TextComponent | null = null;
 	private maxTokensInput: TextComponent | null = null;
+	/** The collapsible holding the capability fields, so a catalog answer landing in it can open it. */
+	private capabilityGroup: HTMLDetailsElement | null = null;
 
 	constructor(options: ModelModalOptions) {
 		super(options.app);
@@ -345,7 +348,25 @@ export class ModelModal extends Modal {
 				});
 			});
 
-		const contextWindowSetting = new Setting(contentEl)
+		// The four capability fields fold behind the identity three (provider, ID,
+		// display name), which stay flat: a new model cannot be saved without them,
+		// so hiding anything required would trade one scroll for a click and a
+		// hunt. Collapsed only when there is nothing to read — a new model starts
+		// with every capability open to recommendation, and an edit starts open
+		// when any stored value leaves the default.
+		const capabilityBody = createCollapsibleSection(contentEl, {
+			label: t.t("modelModal.capabilityGroup"),
+			description: t.t("modelModal.capabilityGroupHint"),
+			open:
+				this.isNew ||
+				this.draft.contextWindow !== undefined ||
+				this.draft.maxTokens !== undefined ||
+				this.draft.reasoning ||
+				this.draft.supportsImages,
+		});
+		this.capabilityGroup = capabilityBody.parentElement as HTMLDetailsElement;
+
+		const contextWindowSetting = new Setting(capabilityBody)
 			.setName(t.t("modelModal.contextWindow"))
 			.setDesc(t.t("modelModal.contextWindowDesc"));
 		contextWindowSetting.addText((text) => {
@@ -359,7 +380,7 @@ export class ModelModal extends Modal {
 			});
 		});
 
-		const maxTokensSetting = new Setting(contentEl)
+		const maxTokensSetting = new Setting(capabilityBody)
 			.setName(t.t("modelModal.maxTokens"))
 			.setDesc(t.t("modelModal.maxTokensDesc"));
 		maxTokensSetting.addText((text) => {
@@ -373,7 +394,7 @@ export class ModelModal extends Modal {
 			});
 		});
 
-		const thinkingSetting = new Setting(contentEl)
+		const thinkingSetting = new Setting(capabilityBody)
 			.setName(t.t("modelModal.supportsThinking"))
 			.setDesc(t.t("modelModal.supportsThinkingDesc"));
 		// Appended after `setDesc`, which replaces the description's contents. Its
@@ -392,7 +413,7 @@ export class ModelModal extends Modal {
 			});
 		});
 
-		const imagesSetting = new Setting(contentEl)
+		const imagesSetting = new Setting(capabilityBody)
 			.setName(t.t("modelModal.supportsImages"))
 			.setDesc(t.t("modelModal.supportsImagesDesc"));
 		this.imageHint = imagesSetting.descEl.createDiv({ cls: "piem-settings-effect" });
@@ -412,7 +433,10 @@ export class ModelModal extends Modal {
 			.setDesc(t.t("modelModal.connectionDesc"));
 		this.testRow = attachTestButton(testSetting, t, () => this.runTest());
 
+		// Sticks to the modal's bottom edge so the save row stays reachable however
+		// far the body has scrolled.
 		new Setting(contentEl)
+			.setClass("piem-settings-modal-footer")
 			.addButton((button) => {
 				button.setButtonText(t.t("modelModal.cancel"));
 				button.onClick(() => this.close());
@@ -447,6 +471,13 @@ export class ModelModal extends Modal {
 	 * never overwrite a stored or hand-typed value — which is why it happens
 	 * regardless of `apply`.
 	 */
+	/** Opens the capability group when a catalog answer has just landed in it, so the filled field is seen rather than hidden. */
+	private revealCapabilityGroup(): void {
+		if (this.capabilityGroup && !this.capabilityGroup.open) {
+			this.capabilityGroup.open = true;
+		}
+	}
+
 	private refreshCatalogRecommendation(apply: boolean): void {
 		const { t } = this.options;
 		const hint = findCatalogCapabilityHint(this.draft.modelApiId, this.modelsDevIndex);
@@ -459,10 +490,13 @@ export class ModelModal extends Modal {
 		if (hint?.contextWindow !== undefined && this.draft.contextWindow === undefined) {
 			this.draft.contextWindow = hint.contextWindow;
 			this.contextWindowInput?.setValue(String(hint.contextWindow));
+			// The group holds what was just filled; opening it is the report.
+			this.revealCapabilityGroup();
 		}
 		if (hint?.maxTokens !== undefined && this.draft.maxTokens === undefined) {
 			this.draft.maxTokens = hint.maxTokens;
 			this.maxTokensInput?.setValue(String(hint.maxTokens));
+			this.revealCapabilityGroup();
 		}
 		if (hint && apply) {
 			if (!this.reasoningTouched) {

@@ -119,7 +119,10 @@ export class ProviderModal extends Modal {
 			return this.options.test(this.normalizedDraft());
 		});
 
+		// Sticks to the modal's bottom edge so the save row stays reachable however
+		// far the body has scrolled.
 		new Setting(contentEl)
+			.setClass("piem-settings-modal-footer")
 			.addButton((button) => {
 				button.setButtonText(t.t("providerModal.cancel"));
 				button.onClick(() => this.close());

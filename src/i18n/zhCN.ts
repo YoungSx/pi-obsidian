@@ -292,19 +292,31 @@ export const zhCN: DeepPartial<EnCopy> = {
 	},
 
 	settings: {
+		// 四个页签。原来的「历史」「日志」各只有两三行，撑不起一个页签，
+		// 于是并进回答同一问题的那一页：聊天存储属于它存的对话，
+		// 日志级别则和语言一样，属于「调教插件」这件事。
 		tabModels: "模型",
 		tabChat: "对话",
-		tabSessions: "历史",
 		tabExtensions: "扩展能力",
 		tabGeneral: "通用",
-		tabLogs: "日志",
 
 		logLevelHeading: "日志级别",
 		logLevelDesc:
 			"插件往日志里写多少内容。日常使用“警告”就够；排查问题时调成“调试”，看完再调回去。",
+		logsHeading: "日志",
+		// 这一行得有名字：光秃秃一个按钮像个走丢的控件，屏幕阅读器
+		// 单独念它时也得知道它打开的是什么。
+		logViewerName: "日志查看器",
+		logViewerDesc: "插件写下的全部日志，可搜索、可按级别过滤。",
 
 		languageHeading: "语言",
 		languageDesc: "界面使用的语言。“自动”会跟随笔记库的语言。",
+
+		shortcutsHeading: "快捷键",
+		// 挂在通用页的「快捷键」小节下。全插件只有这一个键盘设置，
+		// 撑不起独立一节；但有了节名，读者按「快捷键」这个词找就能找到，
+		// 不用记住它在哪个页签。
+		sendShortcut: "发送消息用",
 
 		statusActiveModel: "当前模型",
 		providersHeading: "提供方",
@@ -328,15 +340,23 @@ export const zhCN: DeepPartial<EnCopy> = {
 		noKey: "无密钥",
 		modelCount: "{count} 个模型",
 		modelsCount: "{count} 个模型",
+		// 模型列表上方的筛选行。超过一屏行数才出现——扫几行比打字快，
+		// 控件得先挣到自己的位置。
+		modelsFilterLabel: "筛选",
+		modelsFilterPlaceholder: "输入名称、ID 或提供方以筛选…",
+		modelsFilterEmpty: "没有匹配的模型。",
 		providerMissing: "提供方缺失",
 		activeSuffix: " · 当前",
 		showAgentDetails: "显示代理详情",
 		showAgentDetailsDesc: "在对话面板中显示 token 数、花费和原始工具参数。",
-		sendShortcut: "发送方式",
 		sendShortcutDesc: "用哪个键发送消息。无论选哪项，Ctrl+回车 和 ⌘+回车 都能发送。",
 		sendShortcutEnter: "回车（Shift+回车 换行）",
 		sendShortcutModEnter: "Ctrl+回车 或 ⌘+回车（回车用于换行）",
 		sendShortcutMobileNote: "在手机上回车一律换行——软键盘没有 Shift+回车——请用发送按钮。",
+		// 对话页的小节标题，把「行为」和「存放」隔开。用标题而不用折叠：
+		// 存储不是高级配置，长期用户迟早要找，不该点开才看得见。
+		chatHistoryHeading: "聊天记录",
+		chatHistoryDesc: "聊天记录存放的位置，以及旧的保留多少条。",
 		networkHeading: "网络",
 		networkHeadingDesc: "请求如何离开笔记库。",
 		networkTransport: "网络传输",
@@ -596,6 +616,10 @@ export const zhCN: DeepPartial<EnCopy> = {
 	modelModal: {
 		addTitle: "添加模型",
 		editTitle: "编辑模型",
+		// 四个能力字段的折叠组。身份三件套（提供方、ID、显示名称）保持平铺：
+		// 新模型不填它们存不了，把必填项藏起来只是把一屏滚动换成一次点击加一场寻找。
+		capabilityGroup: "能力与限制",
+		capabilityGroupHint: "上下文窗口、输出上限，以及模型接受什么。",
 		provider: "提供方",
 		providerDesc: "哪个已配置的端点为此模型提供服务。",
 		modelId: "模型 ID",
