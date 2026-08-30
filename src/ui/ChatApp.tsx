@@ -2,6 +2,8 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { flushSync } from "react-dom";
 import type { Component } from "obsidian";
 import type { ChatSnapshot, ObsidianAgentService } from "../agent/ObsidianAgentService";
+import type { SuggestionScope } from "../agent/quickActionSuggestionRequest";
+import type { QuickAction } from "./quickActionSuggestions";
 import type { ActiveSessionInfo } from "../session/ObsidianSessionManager";
 import type { DraftStore } from "../session/DraftStore";
 import type { ChatInputController } from "./ChatInputController";
@@ -48,6 +50,25 @@ export function ChatApp({ service, inputController, component, draftStore }: Cha
 	// never enter the DraftStore, which persists text per session, so they live
 	// only for the turn the user is composing and clear on a successful send.
 	const [pendingImages, setPendingImages] = useState<PendingImage[]>([]);
+	/**
+	 * The model-generated quick actions for whichever placement asked last, tagged
+	 * with the session they belong to. An empty `actions` means "nothing yet" —
+	 * the empty screen keeps its built-in chips in MessageList, the post-reply
+	 * row simply stays hidden. Tagged rather than cleared on a session switch
+	 * because a clearing effect would race the very fetch this state exists to
+	 * serve; hiding by revision comparison cannot.
+	 */
+	const [suggestions, setSuggestions] = useState<{ revision: number; scope: SuggestionScope; actions: QuickAction[] }>(() => ({
+		revision: snapshot.sessionRevision,
+		scope: "empty" as SuggestionScope,
+		actions: [],
+	}));
+	// Serializes suggestion requests: the newest call wins, an older one landing
+	// late is dropped rather than overwriting it.
+	const suggestionRequestRef = useRef(0);
+	// The reply row is fetched on a witnessed streaming→settled transition, so
+	// opening an old session — already settled — never fires a speculative request.
+	const prevStreamingRef = useRef(snapshot.isStreaming);
 	const sendPromptRef = useRef<() => void>(() => undefined);
 	// Read inside the prefill handler, which is registered once and must not
 	// re-register on every keystroke just to see the current draft.
@@ -62,6 +83,7 @@ export function ChatApp({ service, inputController, component, draftStore }: Cha
 	// What the model is told about is `snapshot.contextRefs`, not this.
 	const sourcePath = getActiveNotePath(app);
 	const canOpenSettings = canOpenPluginSettings(app);
+	const hasActiveNote = snapshot.contextRefs.some((ref) => ref.kind === "active");
 
 	useEffect(() => {
 		const unsubscribe = service.subscribe(setSnapshot);
@@ -89,6 +111,64 @@ export function ChatApp({ service, inputController, component, draftStore }: Cha
 		// Keyed on the revision rather than the active session: deleting or renaming
 		// a different chat leaves `session.id` untouched, so the list would go stale.
 	}, [service, snapshot.sessionRevision]);
+
+	/*
+	 * Empty screen: ask the model for chips the moment a blank, settled, configured
+	 * panel appears. The built-in chips are already on screen — MessageList falls
+	 * back to them — so a failure here changes nothing visible, exactly the
+	 * contract that placement was given.
+	 */
+	useEffect(() => {
+		if (!(snapshot.isConfigured ?? false) || isInitializing || snapshot.isStreaming || snapshot.messages.length > 0) {
+			return;
+		}
+		const request = ++suggestionRequestRef.current;
+		void service.suggestQuickActions("empty").then((actions) => {
+			if (request !== suggestionRequestRef.current) {
+				return;
+			}
+			setSuggestions({ revision: snapshot.sessionRevision, scope: "empty", actions: actions ?? [] });
+		});
+		// Re-runs per session and per active-note flip, both of which change what
+		// the suggestions should be about; the guard above keeps it off a live turn.
+	}, [service, snapshot.isConfigured, snapshot.isStreaming, snapshot.messages.length, snapshot.sessionRevision, hasActiveNote, isInitializing]);
+
+	/*
+	 * Settled reply: clear whatever the previous reply suggested and fetch the
+	 * model's follow-ups. A failure resolves to null and stores `[]`, leaving the
+	 * row hidden — this placement has no fallback and wants none: a suggestion
+	 * after a reply is a nicety, and an empty row states that honestly.
+	 */
+	useEffect(() => {
+		const wasStreaming = prevStreamingRef.current;
+		prevStreamingRef.current = snapshot.isStreaming;
+		if (!wasStreaming || snapshot.isStreaming || snapshot.isCompacting || snapshot.pendingToolCalls.length > 0 || snapshot.messages.length === 0) {
+			return;
+		}
+		const request = ++suggestionRequestRef.current;
+		setSuggestions({ revision: snapshot.sessionRevision, scope: "reply", actions: [] });
+		void service.suggestQuickActions("reply").then((actions) => {
+			if (request !== suggestionRequestRef.current) {
+				return;
+			}
+			setSuggestions({ revision: snapshot.sessionRevision, scope: "reply", actions: actions ?? [] });
+		});
+	}, [service, snapshot.isStreaming, snapshot.isCompacting, snapshot.pendingToolCalls.length, snapshot.messages.length, snapshot.sessionRevision]);
+
+	/*
+	 * The live placement's chips only: the same `actions` would leak a previous
+	 * conversation's row across a session switch (revision tag) or an empty
+	 * screen's row into a conversation (scope check), so the pass-through
+	 * resolves which placement is on screen before handing anything over.
+	 */
+	const suggestedActions = useMemo(() => {
+		if (suggestions.revision !== snapshot.sessionRevision) {
+			return [];
+		}
+		const emptyPlacement = snapshot.messages.length === 0 && suggestions.scope === "empty";
+		const replyPlacement = snapshot.messages.length > 0 && suggestions.scope === "reply";
+		return emptyPlacement || replyPlacement ? suggestions.actions : [];
+	}, [suggestions, snapshot.messages.length, snapshot.sessionRevision]);
 
 	const visibleMessages = useMemo(() => {
 		if (!snapshot.streamingMessage) {
@@ -234,9 +314,10 @@ export function ChatApp({ service, inputController, component, draftStore }: Cha
 					component={component}
 					sourcePath={sourcePath}
 					composerAnchorId={composerAnchorId}
-					hasActiveNote={snapshot.contextRefs.some((ref) => ref.kind === "active")}
+					hasActiveNote={hasActiveNote}
 					isCompacting={snapshot.isCompacting}
 					onQuickAction={handleQuickAction}
+					suggestedActions={suggestedActions}
 				/>
 
 				{/*
