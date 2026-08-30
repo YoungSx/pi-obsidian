@@ -1,9 +1,23 @@
 import { Type, type TLiteral } from "typebox";
-import type { AgentTool, StreamFn, ThinkingLevel } from "@earendil-works/pi-agent-core";
+import type { AgentTool, Skill, StreamFn, ThinkingLevel } from "@earendil-works/pi-agent-core";
 import type { Model } from "@earendil-works/pi-ai";
 import { textResult, throwIfAborted } from "../tools/toolResult";
 import { DEFAULT_SUBAGENT_TIMEOUT_MS, runSubagent } from "./runner";
-import { DEFAULT_SUBAGENT_ROLE_NAME, SUBAGENT_ROLES, findSubagentRole, filterToolsForSubagent, type SubagentRoleName } from "./roles";
+import { DEFAULT_SUBAGENT_ROLE_NAME, SUBAGENT_ROLES, findSubagentRole, type SubagentRoleName } from "./roles";
+
+/**
+ * How deep delegation may nest, counting levels that may spawn children.
+ *
+ * The parent (depth 0) and its delegate (depth 1) both get the `delegate`
+ * tool, so a child can hand off a subtask; a grandchild (depth 2) does not —
+ * the tree is capped at parent → child → grandchild. The limit lives here
+ * rather than in the service because it is delegation policy, and the cap
+ * matters for the same reason Claude Code's nesting does: each level replays
+ * the full tool set and system prompt, so unbounded trees burn tokens
+ * silently. Enforced by construction — the depth-2 tool set simply never
+ * contains the tool — not by prompt-begging.
+ */
+export const SUBAGENT_DEPTH_LIMIT = 2;
 
 /**
  * Everything the delegate tool reaches for at execution time, resolved lazily.
@@ -18,10 +32,12 @@ export interface DelegateToolContext {
 	getStreamFn: () => StreamFn;
 	getThinkingLevel: () => ThinkingLevel;
 	getApiKey?: (provider: string) => Promise<string | undefined> | string | undefined;
+	/** Skills the subagent's prompt lists and its `read_skill` tool serves. */
+	getSkills: () => readonly Skill[];
 	/**
-	 * Builds the tool set the subagent runs with. Called per run so role
-	 * filtering and tool refreshes compose, and so the set provably excludes
-	 * this very tool — no nesting, enforced at construction.
+	 * Builds the tool set the subagent runs with. Called per run so tool
+	 * refreshes compose. Depth-aware on the service side: the child set carries
+	 * `delegate` one level down and then stops, per {@link SUBAGENT_DEPTH_LIMIT}.
 	 */
 	createChildTools: () => AgentTool[];
 }
@@ -53,15 +69,16 @@ const ROLE_NAMES = SUBAGENT_ROLES.map((role) => role.name).join(", ");
  *
  * The subagent runs on the same model and transport as the parent but an
  * isolated, in-memory transcript — nothing it does lands in the session log,
- * and its only output is the report returned here. Tool-set exclusion of
- * `delegate` itself is what makes recursion structurally impossible; see
- * {@link filterToolsForSubagent}.
+ * and its only output is the report returned here. Nesting is capped by
+ * construction: the service hands this tool only to sets at depth
+ * {@link SUBAGENT_DEPTH_LIMIT} allows, and a grandchild's set never contains
+ * it, so the tree cannot grow past that floor.
  */
 export function createDelegateTool(context: DelegateToolContext): AgentTool<typeof DelegateParameters> {
 	return {
 		name: "delegate",
 		label: "Delegate task",
-		description: `Delegate one self-contained task to a subagent that runs with this vault's tools and returns a report. Use it when a task is better worked in isolation — a broad vault sweep, a critique, a summary — or when the intermediate tool output would flood this conversation. Roles: ${ROLE_NAMES}. The subagent cannot ask questions and cannot delegate further; its reply is its only output, so a good task leaves nothing unsaid.`,
+		description: `Delegate one self-contained task to a subagent that runs with this vault's tools and returns a report. Use it when a task is better worked in isolation — a broad vault sweep, a critique, a summary — or when the intermediate tool output would flood this conversation. Roles: ${ROLE_NAMES}. The subagent cannot ask questions; its reply is its only output, so a good task leaves nothing unsaid. It may delegate one further level down, but no deeper.`,
 		parameters: DelegateParameters,
 		execute: async (_toolCallId, params, signal) => {
 			throwIfAborted(signal);
@@ -74,7 +91,8 @@ export function createDelegateTool(context: DelegateToolContext): AgentTool<type
 			const result = await runSubagent({
 				task: params.task,
 				role,
-				tools: filterToolsForSubagent(context.createChildTools(), role),
+				tools: context.createChildTools(),
+				skills: context.getSkills(),
 				model: context.getModel(),
 				streamFn: context.getStreamFn(),
 				thinkingLevel: context.getThinkingLevel(),

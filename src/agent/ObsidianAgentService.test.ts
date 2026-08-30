@@ -150,13 +150,63 @@ describe("ObsidianAgentService", () => {
 		expect(last?.role).toBe("assistant");
 		expect(JSON.stringify(last)).toContain("Nothing needs organizing.");
 
-		// The child ran with the vault tool set minus what a subagent must never
-		// hold: no recursion (delegate) and, for the scout role, no mutators.
+		// The child runs on the full vault set — mutators and the skill reader
+		// included, since roles no longer strip anything — and may itself
+		// delegate one further level (the cap is the next test's job).
 		expect(childToolNames).toHaveLength(1);
-		expect(childToolNames[0]).not.toContain("delegate");
-		expect(childToolNames[0]).not.toContain("read_skill");
-		expect(childToolNames[0]).not.toContain("write");
+		expect(childToolNames[0]).toContain("delegate");
+		expect(childToolNames[0]).toContain("read_skill");
+		expect(childToolNames[0]).toContain("write");
 		expect(childToolNames[0]).toContain("grep");
+	});
+
+	it("lets a child delegate once more and caps the tree below that", async () => {
+		// Same scripted streamFn plays three agents. A subagent whose tool set
+		// still carries `delegate` is answered with one more delegation; a set
+		// without it has hit the depth floor and must produce the report. The
+		// child is the only agent at depth ≤ 1, so counting its requests tells
+		// its first turn (delegate) from its second (final report).
+		const childToolNames: string[][] = [];
+		const grandchildToolNames: string[][] = [];
+		let childRequests = 0;
+		let parentCalled = false;
+		const scripted: StreamFn = (model, context, options) => {
+			const isSubagent = context.systemPrompt?.includes("delegated task") ?? false;
+			if (!isSubagent) {
+				if (!parentCalled) {
+					parentCalled = true;
+					return scriptedToolCallStream(model, "delegate_1", "delegate", {
+						task: "Sweep the vault",
+						role: "general",
+					});
+				}
+				return scriptedTextStream(model, "Folded in.");
+			}
+			const names = (context.tools ?? []).map((tool) => tool.name);
+			if (names.includes("delegate")) {
+				childToolNames.push(names);
+				childRequests += 1;
+				if (childRequests === 1) {
+					return scriptedToolCallStream(model, "delegate_2", "delegate", { task: "Narrow sweep" });
+				}
+				return scriptedTextStream(model, "Child report: all clear.");
+			}
+			grandchildToolNames.push(names);
+			return scriptedTextStream(model, "Floor report: all clear.");
+		};
+
+		const service = createService(new MemoryAdapter(), { streamFn: scripted });
+		await service.sendPrompt("Two-level sweep, please");
+
+		const snapshot = service.getSnapshot();
+		expect(snapshot.errorMessage).toBeUndefined();
+		const last = snapshot.messages[snapshot.messages.length - 1];
+		expect(JSON.stringify(last)).toContain("Folded in.");
+		// The grandchild ran on a real tool set with no way to recurse further.
+		expect(grandchildToolNames).toHaveLength(1);
+		expect(grandchildToolNames[0]).not.toContain("delegate");
+		expect(grandchildToolNames[0]).toContain("grep");
+		expect(childToolNames).toHaveLength(2);
 	});
 
 	it("reports usage once the provider has charged for a turn", async () => {

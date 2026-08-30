@@ -1,13 +1,13 @@
-import type { AgentTool } from "@earendil-works/pi-agent-core";
-
 /**
  * Named worker profiles a parent agent can delegate to.
  *
- * A role is a system-prompt appendix plus a tool policy — nothing more. That
- * deliberately mirrors how @bacnh85/pi-subagent structures roles as markdown
- * files, minus the file loading: these are constants compiled into the bundle,
- * so a subagent needs no vault read to know what it is.
+ * A role is a system-prompt appendix plus nothing else — no tool policy. That
+ * deliberately mirrors how Claude Code shapes agents: tool access is inherited
+ * whole, and read-only-ness lives in the role's instructions rather than in a
+ * stripped tool set. The one structural boundary left is depth (see
+ * `SUBAGENT_DEPTH_LIMIT` in `delegateTool.ts`), which no prompt can fake.
  */
+
 /**
  * Stable identifiers the `delegate` tool's schema advertises.
  *
@@ -24,12 +24,6 @@ export interface SubagentRole {
 	description: string;
 	/** Extra instructions appended after the subagent base prompt. */
 	instructions: string;
-	/**
-	 * When true the subagent gets no mutating tools (write, edit, move, trash).
-	 * A read-only role is the cheapest safety boundary there is: it is enforced
-	 * by tool-set construction, not by hoping the model follows its prompt.
-	 */
-	readOnly?: boolean;
 }
 
 export const SUBAGENT_ROLES: readonly SubagentRole[] = [
@@ -41,17 +35,15 @@ export const SUBAGENT_ROLES: readonly SubagentRole[] = [
 	},
 	{
 		name: "scout",
-		description: "Read-only research across the vault; returns findings, changes nothing.",
-		readOnly: true,
+		description: "Research-oriented sweep across the vault; returns findings.",
 		instructions:
-			"Research only. You have no tools that modify the vault, so never promise an edit. Report what you found, where it lives, and what remains uncertain.",
+			"Research first. Your deliverable is a report of findings, not edits — leave the vault unchanged unless the task explicitly asks for changes. Report what you found, where it lives, and what remains uncertain.",
 	},
 	{
 		name: "reviewer",
-		description: "Read-only critique of notes or a plan; returns an assessment.",
-		readOnly: true,
+		description: "Critique of notes or a plan; returns an assessment.",
 		instructions:
-			"Assess, do not fix. Name concrete strengths and problems, quote the note text you are judging, and end with a short prioritized list of what to change.",
+			"Assess, do not fix: your deliverable is the assessment itself, not the fixed note. Name concrete strengths and problems, quote the note text you are judging, and end with a short prioritized list of what to change.",
 	},
 ];
 
@@ -78,31 +70,4 @@ const SUBAGENT_BASE_PROMPT = [
 
 export function composeSubagentPrompt(role: SubagentRole): string {
 	return `${SUBAGENT_BASE_PROMPT}\n\nRole — ${role.name}: ${role.instructions}`;
-}
-
-/**
- * Tool names a subagent must never receive, whoever it is.
- *
- * `delegate` is the anti-recursion rule: a subagent that can spawn subagents
- * turns one request into an unbounded tree, so the exclusion is structural
- * (the child tool set simply does not contain it) rather than prompt-begging.
- * `read_skill` serves the parent's `<available_skills>` block, which a
- * subagent's prompt does not include — a tool pointing at a list the model was
- * never shown is a dead end.
- */
-const ALWAYS_EXCLUDED = new Set(["delegate", "read_skill"]);
-
-/**
- * Tool names that change the vault; a read-only role drops all of them.
- *
- * Exported because the boundary is only as strong as its worst typo: a name
- * here that no longer matches a registered tool would hand a read-only
- * subagent a mutator, silently. `obsidianTools.test.ts` pins every name in
- * this set against the real registration.
- */
-export const MUTATING_TOOLS = new Set(["write", "edit", "move_note", "trash_note"]);
-
-export function filterToolsForSubagent(tools: readonly AgentTool[], role: SubagentRole): AgentTool[] {
-	const excluded = role.readOnly ? new Set([...ALWAYS_EXCLUDED, ...MUTATING_TOOLS]) : ALWAYS_EXCLUDED;
-	return tools.filter((tool) => !excluded.has(tool.name));
 }
