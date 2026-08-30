@@ -107,7 +107,11 @@ function hasSendModifier(event: SendShortcutEvent): boolean {
  * `keyCode: 229` arrives instead. Both are checked because getting this wrong
  * sends a half-typed Chinese sentence the moment the writer picks a word — the
  * one failure bare-Enter sending could otherwise introduce.
+ *
+ * Exported because the command menu's document-level key handler must yield the
+ * same keys: during composition, Enter accepts the candidate and Escape cancels
+ * it, and a menu that completes a command on either hijacks the input method.
  */
-function isComposing(event: SendShortcutEvent): boolean {
+export function isComposing(event: SendShortcutEvent): boolean {
 	return event.isComposing === true || event.keyCode === 229;
 }

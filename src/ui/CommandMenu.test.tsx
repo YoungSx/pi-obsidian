@@ -36,6 +36,8 @@ interface Rendered {
 	 * close assertion would pass vacuously.
 	 */
 	closeCount: () => number;
+	/** Every id reported through `onActiveChange`, oldest first. */
+	activeReports: (string | null)[];
 	rerender: (query: string) => Promise<void>;
 }
 
@@ -43,6 +45,7 @@ async function renderMenu(query: string, commands: CommandEntry[] = COMMANDS): P
 	const host = document.createElement("div");
 	document.body.appendChild(host);
 	const onSelectCalls: string[] = [];
+	const activeReports: (string | null)[] = [];
 	let onCloseCalls = 0;
 	const root = createRoot(host);
 	liveRoots.push(root);
@@ -51,6 +54,8 @@ async function renderMenu(query: string, commands: CommandEntry[] = COMMANDS): P
 			<CommandMenu
 				commands={commands}
 				query={q}
+				menuId="piem-test-menu"
+				onActiveChange={(id) => activeReports.push(id)}
 					onSelect={(command) => onSelectCalls.push(command.invocation)}
 				onClose={() => {
 					onCloseCalls += 1;
@@ -63,6 +68,7 @@ async function renderMenu(query: string, commands: CommandEntry[] = COMMANDS): P
 		host,
 		onSelectCalls,
 		closeCount: () => onCloseCalls,
+		activeReports,
 		rerender: async (q: string) => {
 			render(q);
 			await flushRender();
@@ -241,5 +247,88 @@ describe("CommandMenu", () => {
 
 		expect(host.querySelectorAll(".piem-chat__command-menu-item")).toHaveLength(1);
 		expect(host.querySelector('[aria-selected="true"] .piem-chat__command-menu-name')?.textContent).toBe("/summarize");
+	});
+
+	it("wears the composer's menu id, and each option an id derived from it", async () => {
+		// The composer quotes these ids in `aria-controls` and
+		// `aria-activedescendant`; they only resolve if the listbox and its options
+		// carry exactly the ids the combobox names.
+		const { host } = await renderMenu("");
+
+		expect(host.querySelector(".piem-chat__command-menu")?.id).toBe("piem-test-menu");
+		const options = Array.from(host.querySelectorAll('[role="option"]'));
+		expect(options.map((option) => option.id)).toEqual([
+			"piem-test-menu-option-0",
+			"piem-test-menu-option-1",
+			"piem-test-menu-option-2",
+		]);
+	});
+
+	it("reports the highlighted option's id upward, and null when it has none", async () => {
+		// `onActiveChange` is the channel the composer mirrors onto the textarea's
+		// `aria-activedescendant`; the reports must be ids that resolve, and must
+		// clear to null the moment no option is highlighted.
+		const { activeReports, rerender } = await renderMenu("");
+
+		// The first render already reports the initial highlight.
+		expect(activeReports.at(-1)).toBe("piem-test-menu-option-0");
+
+		pressKey("ArrowDown");
+		await flushRender();
+		expect(activeReports.at(-1)).toBe("piem-test-menu-option-1");
+
+		// Narrow to no matches: the menu renders nothing, so nothing is active.
+		await rerender("nope");
+		expect(activeReports.at(-1)).toBeNull();
+	});
+
+	it("never reports an id for a highlight that points past the filtered set", async () => {
+		// The reset effect clears the index one render *after* the query narrows;
+		// the id lookup guards the gap frame, where the stale index would otherwise
+		// dangle a nonexistent option in front of a screen reader.
+		const { activeReports, rerender } = await renderMenu("");
+
+		pressKey("ArrowDown");
+		pressKey("ArrowDown");
+		await flushRender();
+		await rerender("su");
+
+		// One item left, highlight reset to it — never an option-2 of a list of one.
+		expect(activeReports.at(-1)).toBe("piem-test-menu-option-0");
+	});
+
+	it("ignores Enter, Escape and the arrows while an input method is composing", async () => {
+		// During composition the IME owns these keys: Enter accepts a candidate,
+		// Escape cancels it, the arrows page the candidate list. Completing or
+		// closing on any of them hijacks the input method mid-word.
+		const { host, onSelectCalls, closeCount } = await renderMenu("");
+		const composing = { isComposing: true } satisfies KeyboardEventInit;
+
+		expect(pressKey("ArrowDown", composing).defaultPrevented).toBe(false);
+		expect(pressKey("ArrowUp", composing).defaultPrevented).toBe(false);
+		expect(pressKey("Enter", composing).defaultPrevented).toBe(false);
+		expect(pressKey("Escape", composing).defaultPrevented).toBe(false);
+		await flushRender();
+
+		expect(onSelectCalls).toEqual([]);
+		expect(closeCount()).toBe(0);
+		// The highlight never moved either: the first row stayed active.
+		expect(host.querySelector('[aria-selected="true"] .piem-chat__command-menu-name')?.textContent).toBe("/summarize");
+	});
+
+	it("lets the legacy keyCode 229 composition signal through the same guard", async () => {
+		// Some webviews ship no `isComposing` on the candidate-accepting Enter,
+		// only the legacy `keyCode: 229`; the guard reads both, and this is the
+		// webview the failure was reported on. `keyCode` is not constructible
+		// through KeyboardEventInit, so it is stamped onto the event directly.
+		const { onSelectCalls } = await renderMenu("");
+
+		const event = new domWindow.KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true });
+		Object.defineProperty(event, "keyCode", { value: 229 });
+		document.dispatchEvent(event);
+		await flushRender();
+
+		expect(event.defaultPrevented).toBe(false);
+		expect(onSelectCalls).toEqual([]);
 	});
 });
