@@ -10,6 +10,8 @@
  *   doing nothing while the pointer hunts for the save button.
  */
 
+import { createEffectLine } from "./effectLine";
+
 /** The inline status line a form owns, created between its fields and its footer. */
 export interface ModalStatus {
 	/** The line itself, for tests and for callers that need the element. */
@@ -28,7 +30,7 @@ export interface ModalStatus {
  * failing verdict is read before the user reaches for save.
  */
 export function createModalStatus(contentEl: HTMLElement): ModalStatus {
-	const el = contentEl.createEl("p", { cls: "piem-settings-effect" });
+	const el = createEffectLine(contentEl);
 	return {
 		el,
 		show: (text) => {

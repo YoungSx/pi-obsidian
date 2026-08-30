@@ -88,6 +88,15 @@ export default tseslint.config(
 		},
 	},
 	{
+		// Same mechanism as the panel a11y gate one block up: these tests read
+		// sibling sources off disk to pin structural invariants (the verdict-line
+		// class is only created in one file). The files never reach the bundle.
+		files: ["src/ui/settings/effectLine.test.ts"],
+		rules: {
+			"import/no-nodejs-modules": "off",
+		},
+	},
+	{
 		// The SDK shims (issue #92) reproduce the two provider SDKs' HTTP surface
 		// so the real packages stay out of the bundle. Their contract tests spin
 		// a local node:http server to pin the wire shape, and deliberately

@@ -30,6 +30,61 @@ export const requestUrlMock = mock<(params: unknown) => Promise<unknown>>();
 export const addIconMock = mock<(iconId: string, svgContent: string) => void>();
 
 /**
+ * The button handed to `Setting.addButton`, rendered as a real `<button>` so
+ * assertions read the DOM rather than a private recording. `setWarning` maps
+ * to Obsidian's `mod-warning` class — that class is how the destructive
+ * styling reaches the screen, so it is exactly what a test should pin.
+ */
+export class SettingButtonStub {
+	text: string | undefined;
+	warning = false;
+	onClickHandler: (() => unknown) | undefined;
+	private elRef: HTMLButtonElement | undefined;
+
+	constructor(private readonly parent: HTMLElement) {}
+
+	setButtonText(text: string): this {
+		this.text = text;
+		this.render().textContent = text;
+		return this;
+	}
+
+	setWarning(): this {
+		this.warning = true;
+		this.render().classList.add("mod-warning");
+		return this;
+	}
+
+	onClick(handler: () => unknown): this {
+		this.onClickHandler = handler;
+		this.render().addEventListener("click", () => {
+			void handler();
+		});
+		return this;
+	}
+
+	setDisabled(disabled: boolean): this {
+		this.render().disabled = disabled;
+		return this;
+	}
+
+	// A button element is only created on first use: an `addButton` whose builder
+	// never configures anything produces no dead `<button>` in the DOM.
+	private render(): HTMLButtonElement {
+		if (!this.elRef) {
+			this.elRef = this.parent.ownerDocument.createElement("button");
+			this.parent.appendChild(this.elRef);
+		}
+		return this.elRef;
+	}
+
+	/** Programmatic click for tests; goes through the same listener a real click would. */
+	click(): void {
+		this.render().click();
+	}
+}
+
+/**
  * Mutable handle for the stubbed `Platform` flags.
  *
  * Tests that exercise desktop/mobile branching reconfigure these instead of
@@ -448,8 +503,51 @@ const obsidianStub = {
 	AbstractInputSuggest: class AbstractInputSuggest {
 		constructor(_app: unknown, _inputEl: unknown) {}
 	},
-	PluginSettingTab: class PluginSettingTab {},
-	Setting: class Setting {},
+	// DOM-backed row builder, like the Modal above: the elements land in the
+	// document so a test can assert on the markup production code produced.
+	// Only the members exercised so far are implemented — a method that is
+	// called and missing fails loudly as `undefined is not a function`, which
+	// is the right signal to extend the stub rather than silently no-op it.
+	Setting: class Setting {
+		nameEl: HTMLElement;
+		descEl: HTMLElement;
+		controlsEl: HTMLElement;
+
+		constructor(controlEl: HTMLElement) {
+			const doc = globalThis.document;
+			if (!doc) {
+				throw new Error("installDom() must run before a Setting can be constructed in tests");
+			}
+			const row = controlEl.createDiv({ cls: "setting-item" });
+			const info = row.createDiv({ cls: "setting-item-info" });
+			this.nameEl = info.createDiv({ cls: "setting-item-name" });
+			this.descEl = info.createDiv({ cls: "setting-item-description" });
+			this.controlsEl = row.createDiv({ cls: "setting-item-control" });
+		}
+
+		setName(name: string | DocumentFragment): this {
+			if (typeof name === "string") {
+				this.nameEl.textContent = name;
+			} else {
+				this.nameEl.append(name);
+			}
+			return this;
+		}
+
+		setDesc(desc: string | DocumentFragment): this {
+			if (typeof desc === "string") {
+				this.descEl.textContent = desc;
+			} else {
+				this.descEl.append(desc);
+			}
+			return this;
+		}
+
+		addButton(build: (button: SettingButtonStub) => unknown): this {
+			build(new SettingButtonStub(this.controlsEl));
+			return this;
+		}
+	},
 	Notice: class Notice {
 		constructor(message: string | DocumentFragment, timeout?: number) {
 			shownNotices.push({ message: typeof message === "string" ? message : message.textContent ?? "", timeout });

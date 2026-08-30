@@ -15,6 +15,7 @@ import { createCollapsibleSection } from "./collapsibleSection";
 import type { Translator } from "../../i18n";
 import { attachTestButton, type TestRowHandle } from "./testResult";
 import { createModalStatus, DiscardGuard, submitOnEnter, type ModalStatus } from "./modalGuards";
+import { createEffectLine } from "./effectLine";
 
 /**
  * Add/edit form for one configured model.
@@ -388,7 +389,7 @@ export class ModelModal extends Modal {
 		// A number this field will silently drop — 0, negative, or not a number —
 		// has to say so where the typing happened, not after a save that never
 		// picked the value up.
-		const contextWindowHint = contextWindowSetting.descEl.createDiv({ cls: "piem-settings-effect" });
+		const contextWindowHint = createEffectLine(contextWindowSetting.descEl);
 		contextWindowSetting.addText((text) => {
 			text.inputEl.type = "number";
 			text.setPlaceholder(t.t("modelModal.contextWindowPlaceholder"));
@@ -407,7 +408,7 @@ export class ModelModal extends Modal {
 		const maxTokensSetting = new Setting(capabilityBody)
 			.setName(t.t("modelModal.maxTokens"))
 			.setDesc(t.t("modelModal.maxTokensDesc"));
-		const maxTokensHint = maxTokensSetting.descEl.createDiv({ cls: "piem-settings-effect" });
+		const maxTokensHint = createEffectLine(maxTokensSetting.descEl);
 		maxTokensSetting.addText((text) => {
 			text.inputEl.type = "number";
 			text.setPlaceholder(t.t("modelModal.maxTokensPlaceholder"));
@@ -429,7 +430,7 @@ export class ModelModal extends Modal {
 		// Appended after `setDesc`, which replaces the description's contents. Its
 		// own element so the line can be rewritten as the id changes without
 		// re-rendering the form, which would throw focus out of the field.
-		this.thinkingHint = thinkingSetting.descEl.createDiv({ cls: "piem-settings-effect" });
+		this.thinkingHint = createEffectLine(thinkingSetting.descEl);
 		thinkingSetting.addToggle((toggle) => {
 			this.reasoningToggle = toggle;
 			toggle.setValue(this.draft.reasoning);
@@ -446,7 +447,7 @@ export class ModelModal extends Modal {
 		const imagesSetting = new Setting(capabilityBody)
 			.setName(t.t("modelModal.supportsImages"))
 			.setDesc(t.t("modelModal.supportsImagesDesc"));
-		this.imageHint = imagesSetting.descEl.createDiv({ cls: "piem-settings-effect" });
+		this.imageHint = createEffectLine(imagesSetting.descEl);
 		imagesSetting.addToggle((toggle) => {
 			this.imagesToggle = toggle;
 			toggle.setValue(this.draft.supportsImages);

@@ -740,6 +740,8 @@ export const en = {
 		// on a stale verdict while the network round trip runs.
 		statusConnecting: "Connecting…",
 		statusDisabled: "Disabled. Turn it on to connect.",
+		disableConsequenceTools: "This server's tools leave chat immediately.",
+		disableConsequenceToken: "Its token stays in the config; turning it back on restores it.",
 		statusUntested: "Not connected yet. Saving settings or reloading the plugin connects it.",
 		testTitle: "Connection",
 		testOk: "Reached the server; {tools} tools available.",
@@ -908,6 +910,8 @@ export const en = {
 		title: "Delete {subject}?",
 		cancel: "Cancel",
 		delete: "Delete",
+		disableTitle: "Disable {subject}?",
+		disable: "Disable",
 		providerSubject: 'provider "{name}"',
 		modelSubject: 'model "{name}"',
 		skillSubject: 'skill "{name}"',
