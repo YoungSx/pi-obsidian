@@ -4,7 +4,8 @@ import type { AgentTool } from "@earendil-works/pi-agent-core";
 import { Type } from "typebox";
 import { normalizeVaultPath } from "../vault/path";
 import { maxResultsParameter, vaultPathParameter } from "./parameters";
-import { getVaultFile, textResult, throwIfAborted } from "./toolResult";
+import { getVaultFile } from "./vaultFiles";
+import { textResult, throwIfAborted } from "./toolResult";
 
 const LinkDirectionParameter = Type.Optional(
 	// Only the default is stated. The tool description already names outgoing links,

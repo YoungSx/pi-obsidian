@@ -4,7 +4,8 @@ import { Type } from "typebox";
 import { normalizeVaultPath } from "../vault/path";
 import { hasFileManager, trashOrDelete } from "../vault/trash";
 import { vaultPathParameter } from "./parameters";
-import { ensureParentFolders, textResult, throwIfAborted } from "./toolResult";
+import { ensureParentFolders } from "./vaultFiles";
+import { textResult, throwIfAborted } from "./toolResult";
 
 /**
  * Reorganizing tools: move/rename and trash.
