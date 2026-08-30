@@ -119,6 +119,8 @@ export function isUndecryptableSecret(stored: string, unsealed: string): boolean
 	return stored.startsWith(SEALED_PREFIX) && unsealed === "";
 }
 
+import type { McpServerConfig } from "./mcp/mcpConfig";
+
 export interface SealedKeyMap {
 	[provider: string]: string;
 }
@@ -170,6 +172,46 @@ export function unsealCustomEndpointApiKey(apiKey: unknown, codec: SecretCodec):
 		return "";
 	}
 	return codec.unseal(apiKey) ?? "";
+}
+
+/**
+ * Seals each configured MCP server's token, leaving already-sealed values alone.
+ *
+ * Empty tokens stay empty — an open server carries no secret to protect. The
+ * sealed-passthrough guard makes the operation idempotent, matching the
+ * discipline `normalizeMcpServer` keeps of never mangling an `enc:v1:` string.
+ */
+export function sealMcpServerTokens(servers: readonly McpServerConfig[], codec: SecretCodec): McpServerConfig[] {
+	return servers.map((server) => ({
+		...server,
+		token: server.token === "" || isSealedSecret(server.token) ? server.token : codec.seal(server.token),
+	}));
+}
+
+/**
+ * Opens each persisted MCP server's token in place.
+ *
+ * Operates on the raw stored array — entries are not normalized here, only
+ * their token field swapped for plaintext before `normalizeSettings` runs.
+ * A token this keychain cannot open is dropped to empty (the value is dead on
+ * this device); plaintext values pass through untouched so a vault synced from
+ * an unencrypted device still loads.
+ */
+export function unsealMcpServerTokens(servers: unknown, codec: SecretCodec): unknown[] {
+	if (!Array.isArray(servers)) {
+		return [];
+	}
+	return servers.map((entry) => {
+		if (!entry || typeof entry !== "object") {
+			return entry;
+		}
+		const token = (entry as Record<string, unknown>).token;
+		if (typeof token !== "string" || token === "") {
+			return entry;
+		}
+		const plain = codec.unseal(token);
+		return plain === undefined ? { ...entry, token: "" } : { ...entry, token: plain };
+	});
 }
 
 /**
