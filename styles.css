@@ -2157,30 +2157,33 @@ button.piem-chat__latest {
 	 * taps the textarea makes every saved pixel twice as valuable — the
 	 * transcript above is what is left to read. The switches:
 	 *
-	 * `:focus-within` on the shell covers composing, and stays true while focus
-	 * moves to the switcher or Send inside the bar. `aria-busy` covers the turn
+	 * `.is-composing` on the shell covers composing. `aria-busy` covers the turn
 	 * itself, so Stop stays reachable from a blurred composer — a tap that
 	 * dismisses the keyboard also blurs the textarea, and a Stop button that
 	 * vanished with focus would strand a running request. The attribute is
-	 * already maintained by `ChatApp` for exactly the busy states, so this
-	 * costs no new state and no JS.
+	 * already maintained by `ChatApp` for exactly the busy states.
 	 *
 	 * `display` rather than `visibility`/`opacity`: the row must actually give
 	 * its height back, or nothing above moves.
 	 *
-	 * The switch has a guard in `ChatComposer`, not here: a tap on a button
-	 * does not move focus on iOS, so the tap that opens a control in this row
-	 * would also blur the textarea and take the row with it before the click
-	 * could land. The composer cancels a non-mouse `pointerdown` inside the
-	 * shell — focus stays with the draft, and the row stays up to receive the
-	 * click. CSS cannot express "keep the focus you had", so the pairing lives
-	 * half here and half there.
+	 * Why a latched class and not `:focus-within`, which needs no JS at all:
+	 * `:focus-within` ties the row's existence to focus surviving a tap on the
+	 * row itself, and on iOS Safari it does not — Safari drops the field's focus
+	 * as part of tap handling, which is not a default action, so the composer's
+	 * `preventDefault` on the press cannot stop it (verified in Chromium with
+	 * that blur simulated: `pointerdown` arrives already cancelled and the
+	 * `focusout` lands anyway). The row then collapsed between `pointerdown` and
+	 * `touchend`, which took the pressed control out of the layout before the tap
+	 * resolved: the `click` went to whatever moved into that spot and the button
+	 * never fired. `ChatComposer` latches the class on focus entering the shell
+	 * and releases it only when focus lands outside, so a tap on the composer's
+	 * own controls reads as part of composing rather than the end of it.
 	 */
 	.piem-chat__composer-bar {
 		display: none;
 	}
 
-	.piem-chat__composer-shell:focus-within .piem-chat__composer-bar,
+	.piem-chat__composer-shell.is-composing .piem-chat__composer-bar,
 	.piem-chat[aria-busy="true"] .piem-chat__composer-bar {
 		display: flex;
 	}
