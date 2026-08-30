@@ -284,6 +284,29 @@ describe("touch targets (WCAG 2.5.5 / 2.5.8)", () => {
 		expect(rule?.[1]).toContain("min-width: 0");
 	});
 
+	it("grows the command menu rows, by height only", () => {
+		// The rows are bare <button>s, so the shared icon-button selector never
+		// reached them either — a desc-less row measured ~28px in the thumb zone.
+		// Width comes from the menu itself, so no floor is declared.
+		const coarse = styles.slice(styles.lastIndexOf("@media (any-pointer: coarse)"));
+		const rule = coarse.match(/\.piem-chat__command-menu-button\s*\{([^}]*)\}/);
+		expect(rule).not.toBeNull();
+		expect(rule?.[1]).toContain("min-height: var(--size-4-12)");
+		expect(declarations(rule?.[1] ?? "")).not.toContain("min-width");
+	});
+
+	it("buys back list height for the taller command rows on a coarse pointer", () => {
+		// 48px rows carve the shared 40vh ceiling into fewer visible choices, so
+		// the coarse block lifts the ceiling — keyed on any-pointer like every
+		// other touch rule, and absent from the base rule, which keeps 40vh.
+		const base = ruleBody(".piem-chat__command-menu");
+		expect(base).toContain("max-height: 40vh");
+		const coarse = styles.slice(styles.lastIndexOf("@media (any-pointer: coarse)"));
+		const rule = coarse.match(/\.piem-chat__command-menu\s*\{([^}]*)\}/);
+		expect(rule).not.toBeNull();
+		expect(rule?.[1]).toContain("max-height: 50vh");
+	});
+
 	it("leaves the in-chip buttons at 32px, which is a reasoned trade-off", () => {
 		// Growing these to 48px would leave a 300px sidebar no room for the label;
 		// they already clear the 24px WCAG 2.5.8 floor and sit inside a row that is

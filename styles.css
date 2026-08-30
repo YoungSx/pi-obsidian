@@ -1691,7 +1691,11 @@ button.piem-chat__latest {
 }
 
 .piem-chat__command-menu-kind {
-	color: var(--text-faint);
+	/* `--text-muted`, not the fainter tier this slot wore: the kind tag is small
+	 * text against `--background-primary`, and `--text-faint` falls below the
+	 * 4.5:1 body-text floor in most themes. The description already reads in
+	 * `--text-muted`, so the row's two secondary strings now agree, too. */
+	color: var(--text-muted);
 	flex-shrink: 0;
 	font-family: var(--font-interface);
 	font-size: var(--font-ui-smaller);
@@ -2030,6 +2034,26 @@ button.piem-chat__latest {
 	.piem-chat__trace-summary,
 	.piem-chat__trace--flat {
 		min-height: var(--size-4-9);
+	}
+
+	/*
+	 * The command menu's rows are bare <button>s wearing a class, so the shared
+	 * icon-button selector never reaches them — the same gap that left the
+	 * jump-to-latest button and the context ring in the thumb zone. Each row is
+	 * a two-line stack (name and description), so height is what the thumb aims
+	 * at; the width comes from the menu and needs no floor.
+	 */
+	.piem-chat__command-menu-button {
+		min-height: var(--size-4-12);
+	}
+
+	/*
+	 * Rows that just grew to 48px carve the 40vh list into fewer visible
+	 * choices — on a phone, where the composer already owns the bottom third.
+	 * The extra tenth of the viewport buys back a row or two of scan room.
+	 */
+	.piem-chat__command-menu {
+		max-height: 50vh;
 	}
 
 	/*
