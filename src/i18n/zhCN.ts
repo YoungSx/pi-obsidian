@@ -73,6 +73,8 @@ export const zhCN: DeepPartial<EnCopy> = {
 		you: "你",
 		agent: "Piem",
 		thoughtItThrough: "思考了一下",
+		/** 思考行仍在流式生成时；落定后读「思考了一下」。 */
+		thinkingNow: "正在思考…",
 		compactedAria: "已总结的历史",
 		earlierSummarized: "较早的历史已被总结，以适应上下文窗口。",
 		imagePlaceholder: "[图片：{mimeType}]",
