@@ -250,14 +250,17 @@ button.piem-settings-tab {
 	display: inline-flex;
 	flex-shrink: 0;
 	/*
-	 * No auto margin: the ring sits immediately before Send, and the model
-	 * switcher is what holds the bar's leading edge (with `margin-right: auto`).
-	 * This rule used to push Send to the trailing edge itself, from a time when
-	 * the ring was the only thing to the left of it; keeping that here would win
-	 * the argument by flex order and collapse the switcher's claim.
+	 * Claims the bar's trailing cluster for the ring and Send: the auto margin
+	 * pushes both against the corner, leaving the switcher and the thinking
+	 * selector at the leading edge. The margin lives here rather than on the
+	 * bar's last child because the ring is what answers "is there room for the
+	 * thing about to be sent" — it belongs beside the action it qualifies, not
+	 * beside the message's other settings. When the ring is absent (nothing
+	 * measured yet), `flex-end` alone parks Send in the corner regardless.
 	 */
 	/* Anchors the popover to the ring rather than to the composer shell, which is
 	 * also positioned (for the command menu) and sits a textarea away. */
+	margin-left: auto;
 	position: relative;
 }
 
@@ -1789,14 +1792,13 @@ button.piem-chat__latest {
  * is, and Send.
  *
  * `flex-end` rather than `space-between`, even though the row now has four
- * occupants. The trailing control claims the corner through one `margin-left:
- * auto` on the bar's last child — the one item that is never absent — so
- * everything before it collects toward the leading edge and the switcher and
- * the thinking selector sit together as one cluster: two questions about the
- * same outgoing message. Anchoring the auto margin on a leading control instead
- * would let whichever middle control is absent (the thinking selector on a
- * model without reasoning, the ring before the first measurement) drag Send
- * away from the corner.
+ * occupants. The trailing cluster — the context ring and Send, a question about
+ * room followed by the action it qualifies — claims the corner through one
+ * `margin-left: auto` on the ring's wrapper (see `.piem-chat__context`), so the
+ * switcher and the thinking selector sit together at the leading edge: two
+ * questions about the same outgoing message. `flex-end` is the backstop for
+ * every absence: with no ring measured yet, or no thinking selector, the
+ * remaining items still collect against the corner Send lives in.
  *
  * `space-between` would distribute instead, and the row is not always full: with
  * no model configured and nothing measured yet it holds a lone Send, which
@@ -1808,10 +1810,6 @@ button.piem-chat__latest {
 	display: flex;
 	gap: var(--size-4-2);
 	justify-content: flex-end;
-}
-
-.piem-chat__composer-bar > :last-child {
-	margin-left: auto;
 }
 
 /*
@@ -1869,8 +1867,9 @@ button.piem-chat__latest {
  *
  * Shares the switcher's quiet tier — Send must stay the row's only emphasized
  * control — and the same colour-token reasoning recorded there. It carries no
- * auto margin: the bar's corner is claimed by the terminal control instead, so
- * this one sits against the switcher as its cluster-mate and stays there.
+ * auto margin: the bar's trailing cluster is claimed by the context ring (see
+ * `.piem-chat__context`), so this one sits against the switcher as its
+ * cluster-mate and stays there.
  */
 .piem-chat__thinking-switcher {
 	--icon-color: var(--text-muted);
