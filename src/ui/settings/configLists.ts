@@ -86,7 +86,15 @@ export function describeProviderDeletion(boundModels: readonly ModelConfig[], t:
 export function describeModelDeletion(lists: ConfigLists, model: ModelConfig, t: Translator): string[] {
 	const lines = [t.t("deletion.modelProviderStays")];
 	if (lists.activeModelId === model.id) {
-		lines.push(t.t("deletion.modelWasActive"));
+		// Name the successor: "another one is selected" makes the reader guess.
+		// reassignActiveModel picks the first surviving model, so that is exactly
+		// who takes over — and when none survives, say that plainly instead.
+		const successor = lists.models.find((candidate) => candidate.id !== model.id);
+		lines.push(
+			successor
+				? t.t("deletion.modelWasActive", { model: describeModelConfig(successor) })
+				: t.t("deletion.modelWasLast"),
+		);
 	}
 	return lines;
 }

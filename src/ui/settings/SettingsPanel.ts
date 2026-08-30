@@ -1,4 +1,4 @@
-import { ButtonComponent, Notice, Platform, Setting, TFile, type App } from "obsidian";
+import { ButtonComponent, ExtraButtonComponent, Notice, Platform, Setting, TFile, type App } from "obsidian";
 import type { ConnectionTestResult } from "../../connectionTest";
 import { testModelConnection, testProviderConnection } from "../../connectionTest";
 import {
@@ -261,6 +261,17 @@ const RETIRED_TAB_IDS: Record<string, string> = { sessions: "chat", logs: "gener
  */
 const MODEL_FILTER_MIN_ROWS = 8;
 
+/**
+ * One icon button in a row's control slot, labelled the same way for eyes and
+ * screen readers: the tooltip is a visual title, so the accessible name has to
+ * be set separately or the button reads as blank to assistive technology.
+ */
+function rowAction(button: ExtraButtonComponent, icon: string, label: string): void {
+	button.setIcon(icon);
+	button.setTooltip(label);
+	button.extraSettingsEl.setAttribute("aria-label", label);
+}
+
 export function renderSettingsPanel(containerEl: HTMLElement, host: SettingsPanelHost): void {
 	containerEl.empty();
 
@@ -367,8 +378,7 @@ function renderProviderList(containerEl: HTMLElement, host: SettingsPanelHost, r
 			.setDesc(describeProviderRow(provider, boundModels.length, t));
 
 		setting.addExtraButton((button) => {
-			button.setIcon("pencil");
-			button.setTooltip(t.t("settings.editProvider"));
+			rowAction(button, "pencil", t.t("settings.editProvider"));
 			button.onClick(() => {
 				new ProviderModal({
 					app: host.app,
@@ -386,8 +396,7 @@ function renderProviderList(containerEl: HTMLElement, host: SettingsPanelHost, r
 		});
 
 		setting.addExtraButton((button) => {
-			button.setIcon("trash-2");
-			button.setTooltip(t.t("settings.deleteProvider"));
+			rowAction(button, "trash-2", t.t("settings.deleteProvider"));
 			button.onClick(() => {
 				openConfirmDelete(host.app, {
 					subject: t.t("confirmDelete.providerSubject", { name: describeProviderConfig(provider) }),
@@ -504,8 +513,7 @@ function renderModelList(containerEl: HTMLElement, host: SettingsPanelHost, refr
 		modelRows.push({ model, descEl: setting.descEl });
 
 		setting.addExtraButton((button) => {
-			button.setIcon("pencil");
-			button.setTooltip(t.t("settings.editModel"));
+			rowAction(button, "pencil", t.t("settings.editModel"));
 			button.onClick(() => {
 				new ModelModal({
 					app: host.app,
@@ -527,8 +535,7 @@ function renderModelList(containerEl: HTMLElement, host: SettingsPanelHost, refr
 		});
 
 		setting.addExtraButton((button) => {
-			button.setIcon("trash-2");
-			button.setTooltip(t.t("settings.deleteModel"));
+			rowAction(button, "trash-2", t.t("settings.deleteModel"));
 			button.onClick(() => {
 				openConfirmDelete(host.app, {
 					subject: t.t("confirmDelete.modelSubject", { name: describeModelConfig(model) }),

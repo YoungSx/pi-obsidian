@@ -14,7 +14,7 @@ import { CatalogSuggest, type CatalogSuggestion } from "./CatalogSuggest";
 import { createCollapsibleSection } from "./collapsibleSection";
 import type { Translator } from "../../i18n";
 import { attachTestButton, type TestRowHandle } from "./testResult";
-import { createModalStatus, DiscardGuard, type ModalStatus } from "./modalGuards";
+import { createModalStatus, DiscardGuard, submitOnEnter, type ModalStatus } from "./modalGuards";
 
 /**
  * Add/edit form for one configured model.
@@ -361,6 +361,7 @@ export class ModelModal extends Modal {
 					this.draft.displayName = value;
 					this.onEdit();
 				});
+				submitOnEnter(text.inputEl, () => void this.submit());
 			});
 
 		// The four capability fields fold behind the identity three (provider, ID,
@@ -400,6 +401,7 @@ export class ModelModal extends Modal {
 				contextWindowHint.setText(value.trim() !== "" && !valid ? t.t("modelModal.positiveNumberHint") : "");
 				this.onEdit();
 			});
+			submitOnEnter(text.inputEl, () => void this.submit());
 		});
 
 		const maxTokensSetting = new Setting(capabilityBody)
@@ -418,6 +420,7 @@ export class ModelModal extends Modal {
 				maxTokensHint.setText(value.trim() !== "" && !valid ? t.t("modelModal.positiveNumberHint") : "");
 				this.onEdit();
 			});
+			submitOnEnter(text.inputEl, () => void this.submit());
 		});
 
 		const thinkingSetting = new Setting(capabilityBody)

@@ -2399,6 +2399,7 @@ button.piem-chat__latest {
 	color: var(--text-muted);
 	font-size: var(--font-ui-small);
 	margin: 0 0 var(--size-4-4);
+	overflow-wrap: anywhere;
 }
 
 /*
@@ -2463,6 +2464,7 @@ button.piem-chat__latest {
 	color: var(--text-muted);
 	font-size: var(--font-ui-smaller);
 	margin-top: var(--size-4-1);
+	overflow-wrap: anywhere;
 }
 
 .piem-settings-effect:empty {
@@ -2489,6 +2491,7 @@ button.piem-chat__latest {
 	color: var(--text-muted);
 	font-size: var(--font-ui-small);
 	margin: var(--size-4-4) 0 0;
+	overflow-wrap: anywhere;
 }
 
 .piem-settings-legacy:empty {

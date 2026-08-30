@@ -2,7 +2,7 @@ import { Modal, Notice, Setting, type App } from "obsidian";
 import { generateMcpServerId, type McpServerConfig } from "../../mcp/mcpConfig";
 import type { Translator } from "../../i18n";
 import { attachTestButton } from "./testResult";
-import { createModalStatus, DiscardGuard, type ModalStatus } from "./modalGuards";
+import { createModalStatus, DiscardGuard, submitOnEnter, type ModalStatus } from "./modalGuards";
 
 export interface McpServerModalOptions {
 	app: App;
@@ -70,6 +70,7 @@ export class McpServerModal extends Modal {
 					this.onEdit();
 					this.testRow?.reset();
 				});
+				submitOnEnter(text.inputEl, () => void this.submit());
 			});
 
 		new Setting(contentEl)
@@ -83,6 +84,7 @@ export class McpServerModal extends Modal {
 					this.onEdit();
 					this.testRow?.reset();
 				});
+				submitOnEnter(text.inputEl, () => void this.submit());
 			});
 
 		new Setting(contentEl)
@@ -96,6 +98,7 @@ export class McpServerModal extends Modal {
 					this.onEdit();
 					this.testRow?.reset();
 				});
+				submitOnEnter(text.inputEl, () => void this.submit());
 			});
 
 		// Placed before the save row so a failing verdict is read before
