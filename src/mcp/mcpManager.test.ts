@@ -136,7 +136,7 @@ describe("McpManager", () => {
 			if ((init?.method ?? "GET").toUpperCase() === "GET") {
 				return new Response(null, { status: 405 });
 			}
-			const body = String(init?.body ?? "");
+			const body = typeof init?.body === "string" ? init.body : "";
 			if (body.includes('"method":"initialize"')) {
 				return handshakeResponses("session-1")[0]!;
 			}
@@ -176,7 +176,7 @@ describe("McpManager", () => {
 			}
 			const headers = new Headers(init?.headers);
 			seenAuth.push(headers.get("authorization") ?? "");
-			const body = String(init?.body ?? "");
+			const body = typeof init?.body === "string" ? init.body : "";
 			if (body.includes('"method":"initialize"')) {
 				return handshakeResponses("session-1")[0]!;
 			}
@@ -220,7 +220,7 @@ describe("McpManager", () => {
 				return new Response(null, { status: 405 });
 			}
 			postCount++;
-			const body = String(init?.body ?? "");
+			const body = typeof init?.body === "string" ? init.body : "";
 			if (body.includes('"method":"initialize"')) {
 				return handshakeResponses("session-1")[0]!;
 			}

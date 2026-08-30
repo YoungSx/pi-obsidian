@@ -56,26 +56,6 @@ export function slugifyServerName(name: string): string {
 	return slug === "" ? "server" : slug;
 }
 
-/**
- * Picks a slug that does not collide with `taken`.
- *
- * Two servers named "GitHub" and "github!" would otherwise both register
- * `mcp_github_*` tools; the second gets `github_2`. `_1` is skipped so the
- * first claim keeps the clean name.
- */
-export function uniqueServerSlug(name: string, taken: ReadonlySet<string>): string {
-	const base = slugifyServerName(name);
-	if (!taken.has(base)) {
-		return base;
-	}
-	for (let n = 2; ; n++) {
-		const candidate = `${base}_${n}`;
-		if (!taken.has(candidate)) {
-			return candidate;
-		}
-	}
-}
-
 /** Creates a server entry with a fresh id, filling the fields a modal leaves blank. */
 export function createMcpServerConfig(partial: Partial<McpServerConfig> = {}): McpServerConfig | null {
 	return normalizeMcpServer({

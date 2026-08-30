@@ -7,7 +7,7 @@ import { createFetchForTransport, type NetworkTransport } from "../net/obsidianF
 import { throwIfAborted } from "../tools/toolResult";
 import { truncateToolOutput } from "../vault/truncate";
 import { toAgentToolResult } from "./mcpContent";
-import { slugifyServerName, uniqueServerSlug, type McpServerConfig } from "./mcpConfig";
+import { slugifyServerName, type McpServerConfig } from "./mcpConfig";
 
 /**
  * The bridge between configured MCP servers and pi's tool list.

@@ -1893,6 +1893,7 @@ function createServiceWithMultimodalModel(
 		sessionRetention: DEFAULT_SESSION_RETENTION,
 		sessionDir: DEFAULT_SESSION_DIR,
 		userSkillsDir: "",
+		mcpServers: [],
 		logLevel: DEFAULT_LOG_LEVEL,
 	};
 	const sessionManager = new ObsidianSessionManager(adapter, SESSION_DIR, "obsidian-vault:Test");

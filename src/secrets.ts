@@ -201,7 +201,10 @@ export function unsealMcpServerTokens(servers: unknown, codec: SecretCodec): unk
 	if (!Array.isArray(servers)) {
 		return [];
 	}
-	return servers.map((entry) => {
+	// The callback parameter is annotated because `servers` is `unknown[]` —
+	// without it the callback's `entry` widens to `any` and every return trips
+	// the unsafe-return rule.
+	return servers.map((entry: unknown) => {
 		if (!entry || typeof entry !== "object") {
 			return entry;
 		}

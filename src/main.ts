@@ -1,5 +1,6 @@
 import { Notice, Plugin, type DataAdapter, type Editor, type WorkspaceLeaf } from "obsidian";
 import { PiemSettingTab, normalizeSettings, type PiemSettings } from "./settings";
+import type { McpServerConfig } from "./mcp/mcpConfig";
 import { normalizeCustomEndpoint } from "./customEndpoint";
 import { VIEW_TYPE_PIEM_CHAT, VIEW_TYPE_PIEM_LOGS, PLUGIN_ID } from "./constants";
 import { createPluginLogger, type PluginLogger } from "./logging/pluginLogger";
@@ -12,8 +13,10 @@ import {
 	persistedFormChanged,
 	sealApiKeyMap,
 	sealCustomEndpointApiKey,
+	sealMcpServerTokens,
 	unsealApiKeyMap,
 	unsealCustomEndpointApiKey,
+	unsealMcpServerTokens,
 	type PersistedSecrets,
 } from "./secrets";
 import { NOOP_LOGGER, type LoggerLike } from "./logging/Logger";
@@ -22,6 +25,7 @@ import { DraftStore } from "./session/DraftStore";
 import { ObsidianSessionManager } from "./session/ObsidianSessionManager";
 import { getLegacySessionDir, isLegacySessionDir } from "./session/sessionDir";
 import { ObsidianAgentService } from "./agent/ObsidianAgentService";
+import { McpManager } from "./mcp/mcpManager";
 import { PiemChatView } from "./ui/PiemChatView";
 import { requestNoteReference, warnIfTruncated } from "./ui/noteReferenceCommand";
 import { getT, resolveLanguage, type LanguageHost, type Translator } from "./i18n";
@@ -36,6 +40,7 @@ function sealCurrentSettings(settings: PiemSettings, codec: SecretCodec): Partia
 		providers: settings.providers.map((provider) => ({ ...provider, apiKey: sealCustomEndpointApiKey(provider.apiKey, codec) })),
 		providerApiKeys: sealApiKeyMap(settings.providerApiKeys, codec),
 		customEndpoint,
+		mcpServers: sealMcpServerTokens(settings.mcpServers, codec),
 	};
 }
 
@@ -84,6 +89,22 @@ export default class PiemPlugin extends Plugin {
 	 * `loadData`/`saveData` boundary.
 	 */
 	private secretEnvironment: SecretEnvironment | null = null;
+	/**
+	 * The MCP client bridge, created on first ask rather than at load.
+	 *
+	 * Most sessions configure no server: a manager over an empty list connects
+	 * to nothing and builds no tools, so eagerly constructing one on every load
+	 * would buy nothing. Reads the server list and the transport through
+	 * closures, so a settings change reaches the next connect without
+	 * rebuilding the manager or dropping live connections.
+	 */
+	private mcpBridge: McpManager | null = null;
+
+	/** The MCP bridge, constructing it on first use. */
+	get mcpManager(): McpManager {
+		this.mcpBridge ??= new McpManager(() => this.settings.mcpServers, () => this.settings.networkTransport);
+		return this.mcpBridge;
+	}
 
 	/**
 	 * Detection is synchronous and total, so the resolved environment is cached
@@ -253,6 +274,10 @@ export default class PiemPlugin extends Plugin {
 		// that would otherwise fire against an unloaded plugin.
 		this.draftStore?.dispose();
 		this.draftStore = null;
+		// Fire-and-forget: closing an SSE-less HTTP client does not reject, and
+		// the plugin is going away either way.
+		void this.mcpBridge?.dispose();
+		this.mcpBridge = null;
 		this.sessionManager = null;
 	}
 
@@ -337,6 +362,10 @@ export default class PiemPlugin extends Plugin {
 			providers: unsealedProviders,
 			providerApiKeys: unsealedKeyMap,
 			customEndpoint: unsealedCustomEndpoint,
+			// The unseal pass repairs tokens over raw entries and leaves junk
+			// shapes untouched — typed as configs only because the very next
+			// step, normalizeSettings, drops anything it cannot read.
+			mcpServers: unsealMcpServerTokens(raw?.mcpServers, codec) as McpServerConfig[],
 		});
 
 		this.warnUndecryptableSecrets(

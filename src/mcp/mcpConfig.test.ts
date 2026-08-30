@@ -4,7 +4,6 @@ import {
 	normalizeMcpServer,
 	normalizeMcpServers,
 	slugifyServerName,
-	uniqueServerSlug,
 } from "./mcpConfig";
 
 describe("slugifyServerName", () => {
@@ -19,20 +18,6 @@ describe("slugifyServerName", () => {
 
 	it("trims leading and trailing underscores", () => {
 		expect(slugifyServerName("--notes-db--")).toBe("notes_db");
-	});
-});
-
-describe("uniqueServerSlug", () => {
-	it("keeps the clean slug when free", () => {
-		expect(uniqueServerSlug("GitHub", new Set())).toBe("github");
-	});
-
-	it("suffixes the first collision starting at _2", () => {
-		expect(uniqueServerSlug("github!", new Set(["github"]))).toBe("github_2");
-	});
-
-	it("skips suffixes already claimed", () => {
-		expect(uniqueServerSlug("GitHub", new Set(["github", "github_2"]))).toBe("github_3");
 	});
 });
 
