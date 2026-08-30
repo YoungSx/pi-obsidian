@@ -426,11 +426,11 @@ export function ChatComposer({
 						 * then the send control itself.
 						 *
 						 * The switcher and the thinking selector form the bar's leading
-						 * cluster — two questions about the same outgoing message — and the
-						 * terminal control claims the corner through `margin-left: auto` on
-						 * the bar's last child (see the stylesheet): every other member of
-						 * the bar can be absent, so an auto margin anchored anywhere else
-						 * would let Send drift from the corner every send button lives in.
+						 * cluster — two questions about the same outgoing message — while
+						 * the context ring and the terminal control form the trailing one:
+						 * the ring's wrapper claims the corner through `margin-left: auto`
+						 * (see the stylesheet), so the gauge always sits beside the action
+						 * its reading qualifies.
 						 */}
 						{modelSwitcher}
 						{thinkingSelector}

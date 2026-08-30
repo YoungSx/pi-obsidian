@@ -216,6 +216,16 @@ export function ContextGauge({
 			ref={wrapperRef}
 			onPointerEnter={openOnHover}
 			onPointerLeave={closeOnLeave}
+			/*
+			 * Swallows the one-line tooltip Obsidian hangs off every `aria-label`
+			 * on hover. The popover already carries the full readout — same numbers,
+			 * plus the level, the caveat and the tidy action — and on a pointer
+			 * device both would open at once, the tooltip crowding the panel it
+			 * duplicates. The accessible name survives: this stops the event from
+			 * reaching Obsidian's delegated listener, it never touches the
+			 * attribute.
+			 */
+			onMouseOver={(event) => event.stopPropagation()}
 			// Keyboard focus pins, like a press: there is no pointer to leave, so a
 			// hover-style open would have nothing to close it.
 			onFocus={() => setOpenedBy("press")}
