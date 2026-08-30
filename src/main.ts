@@ -7,18 +7,18 @@ import { createPluginLogger, type PluginLogger } from "./logging/pluginLogger";
 import { getLogFilePath } from "./logging/logFile";
 import { PiemLogView } from "./logging/logView";
 import type { SecretCodec } from "./secrets";
+import { isUndecryptableSecret } from "./secrets";
 import {
 	hasPersistedPlaintextSecrets,
-	isUndecryptableSecret,
 	persistedFormChanged,
-	sealApiKeyMap,
-	sealCustomEndpointApiKey,
-	sealMcpServerTokens,
+	readPersistedSecrets,
+	sealCurrentSettings,
+	sealedSecretsOf,
 	unsealApiKeyMap,
 	unsealCustomEndpointApiKey,
 	unsealMcpServerTokens,
 	type PersistedSecrets,
-} from "./secrets";
+} from "./settingsSecrets";
 import { NOOP_LOGGER, type LoggerLike } from "./logging/Logger";
 import { createSecretEnvironment, type SecretEnvironment } from "./secretsStore";
 import { DraftStore } from "./session/DraftStore";
@@ -31,31 +31,6 @@ import { PiemChatView } from "./ui/PiemChatView";
 import { requestNoteReference, warnIfTruncated } from "./ui/noteReferenceCommand";
 import { BRAND_ICON_ID, registerBrandIcon } from "./brandIcon";
 import { getT, resolveLanguage, type LanguageHost, type Translator } from "./i18n";
-
-/** Persists `settings` with every non-empty secret sealed through `codec`. */
-function sealCurrentSettings(settings: PiemSettings, codec: SecretCodec): Partial<PiemSettings> {
-	const customEndpoint = settings.customEndpoint
-		? { ...settings.customEndpoint, apiKey: sealCustomEndpointApiKey(settings.customEndpoint.apiKey, codec) }
-		: undefined;
-	return {
-		...settings,
-		providers: settings.providers.map((provider) => ({ ...provider, apiKey: sealCustomEndpointApiKey(provider.apiKey, codec) })),
-		providerApiKeys: sealApiKeyMap(settings.providerApiKeys, codec),
-		customEndpoint,
-		mcpServers: sealMcpServerTokens(settings.mcpServers, codec),
-	};
-}
-
-/** Reads the raw persisted secret of each configured provider, keyed by id. */
-function readPersistedProviderKeys(raw: Partial<PiemSettings> | null): Record<string, string> {
-	const keys: Record<string, string> = {};
-	for (const provider of Array.isArray(raw?.providers) ? raw.providers : []) {
-		if (provider && typeof provider === "object" && typeof provider.id === "string" && typeof provider.apiKey === "string") {
-			keys[provider.id] = provider.apiKey;
-		}
-	}
-	return keys;
-}
 
 export default class PiemPlugin extends Plugin {
 	// Fresh defaults until `onload` loads persisted data; `normalizeSettings` deep-copies
@@ -348,24 +323,17 @@ export default class PiemPlugin extends Plugin {
 
 		// Snapshot the persisted secret values verbatim: migration compares
 		// its output against these, not against the normalized settings.
-		const loadedProviderApiKeys: Record<string, string> = {};
-		for (const [provider, value] of Object.entries(raw?.providerApiKeys ?? {})) {
-			if (typeof value === "string") {
-				loadedProviderApiKeys[provider] = value;
-			}
-		}
-		const loadedEndpointApiKey = raw?.customEndpoint && typeof raw.customEndpoint.apiKey === "string" ? raw.customEndpoint.apiKey : "";
-		const loadedConfiguredProviderKeys = readPersistedProviderKeys(raw);
+		const loaded = readPersistedSecrets(raw);
 
 		const customEndpoint = normalizeCustomEndpoint(raw?.customEndpoint);
 		const unsealedCustomEndpoint = customEndpoint
-			? { ...customEndpoint, apiKey: unsealCustomEndpointApiKey(loadedEndpointApiKey, codec) }
+			? { ...customEndpoint, apiKey: unsealCustomEndpointApiKey(loaded.customEndpointApiKey, codec) }
 			: undefined;
 		const unsealedProviders = (Array.isArray(raw?.providers) ? raw.providers : []).map((provider) => ({
 			...provider,
 			apiKey: unsealCustomEndpointApiKey(provider?.apiKey, codec),
 		}));
-		const unsealedKeyMap = unsealApiKeyMap(loadedProviderApiKeys, codec);
+		const unsealedKeyMap = unsealApiKeyMap(loaded.providerApiKeys, codec);
 		this.settings = normalizeSettings({
 			...raw,
 			providers: unsealedProviders,
@@ -377,24 +345,13 @@ export default class PiemPlugin extends Plugin {
 			mcpServers: unsealMcpServerTokens(raw?.mcpServers, codec) as McpServerConfig[],
 		});
 
-		this.warnUndecryptableSecrets(
-			{
-				providerApiKeys: loadedProviderApiKeys,
-				customEndpointApiKey: loadedEndpointApiKey,
-				configuredProviderApiKeys: loadedConfiguredProviderKeys,
-			},
-			{
-				providerApiKeys: unsealedKeyMap,
-				customEndpointApiKey: unsealedCustomEndpoint?.apiKey ?? "",
-				configuredProviderApiKeys: Object.fromEntries(unsealedProviders.map((provider) => [provider.id, provider.apiKey])),
-			},
-		);
-
-		await this.migratePlaintextSecrets(codec, {
-			providerApiKeys: loadedProviderApiKeys,
-			customEndpointApiKey: loadedEndpointApiKey,
-			configuredProviderApiKeys: loadedConfiguredProviderKeys,
+		this.warnUndecryptableSecrets(loaded, {
+			providerApiKeys: unsealedKeyMap,
+			customEndpointApiKey: unsealedCustomEndpoint?.apiKey ?? "",
+			configuredProviderApiKeys: Object.fromEntries(unsealedProviders.map((provider) => [provider.id, provider.apiKey])),
 		});
+
+		await this.migratePlaintextSecrets(codec, loaded);
 	}
 
 	/**
@@ -439,12 +396,7 @@ export default class PiemPlugin extends Plugin {
 		}
 		try {
 			const sealed = sealCurrentSettings(this.settings, codec);
-			const sealedSecrets: PersistedSecrets = {
-				providerApiKeys: sealed.providerApiKeys ?? {},
-				customEndpointApiKey: sealed.customEndpoint?.apiKey ?? "",
-				configuredProviderApiKeys: Object.fromEntries((sealed.providers ?? []).map((provider) => [provider.id, provider.apiKey])),
-			};
-			if (persistedFormChanged(sealedSecrets, loaded)) {
+			if (persistedFormChanged(sealedSecretsOf(sealed), loaded)) {
 				await this.saveData(sealed);
 			}
 		} catch (error) {
