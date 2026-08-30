@@ -1359,8 +1359,8 @@ function configureTwoModels(settings: PiemSettings): void {
 		{ id: "p1", name: "My gateway", baseUrl: "https://gw/v1", protocol: "openai-completions", apiKey: "gw-key", source: "user" },
 	];
 	settings.models = [
-		{ id: "m1", providerId: "p1", modelApiId: "qwen-plus", displayName: "Qwen Plus", reasoning: false },
-		{ id: "m2", providerId: "p1", modelApiId: "llama-4-maverick", displayName: "Llama 4", reasoning: false },
+		{ id: "m1", providerId: "p1", modelApiId: "qwen-plus", displayName: "Qwen Plus", reasoning: false, supportsImages: false },
+		{ id: "m2", providerId: "p1", modelApiId: "llama-4-maverick", displayName: "Llama 4", reasoning: false, supportsImages: false },
 	];
 	settings.activeModelId = "m1";
 }

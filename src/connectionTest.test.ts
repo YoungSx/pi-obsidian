@@ -37,7 +37,7 @@ function provider(overrides: Partial<ProviderConfig> = {}): ProviderConfig {
 }
 
 function model(overrides: Partial<ModelConfig> = {}): ModelConfig {
-	return { id: "m1", providerId: "prov-1", modelApiId: "probe-model", displayName: "Probe", reasoning: false, ...overrides };
+	return { id: "m1", providerId: "prov-1", modelApiId: "probe-model", displayName: "Probe", reasoning: false, supportsImages: false, ...overrides };
 }
 
 /** The URL a recorded request targeted, whichever `fetch` input shape it used. */

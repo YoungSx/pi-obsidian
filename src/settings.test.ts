@@ -29,8 +29,8 @@ function configured(): PiemSettings {
 	return normalizeSettings({
 		providers: [{ id: "p1", name: "My gateway", baseUrl: "https://gw/v1", protocol: "openai-completions", apiKey: "", source: "user" }],
 		models: [
-			{ id: "m1", providerId: "p1", modelApiId: "qwen-token-plan-individual", displayName: "Qwen Plus", reasoning: false },
-			{ id: "m2", providerId: "p1", modelApiId: "raw-id", displayName: "", reasoning: false },
+			{ id: "m1", providerId: "p1", modelApiId: "qwen-token-plan-individual", displayName: "Qwen Plus", reasoning: false, supportsImages: false },
+			{ id: "m2", providerId: "p1", modelApiId: "raw-id", displayName: "", reasoning: false, supportsImages: false },
 		],
 		activeModelId: "m1",
 	});
@@ -235,7 +235,7 @@ describe("normalizeSettings with configured providers", () => {
 		apiKey: "sk-1",
 		source: "user",
 	};
-	const model: ModelConfig = { id: "m1", providerId: "p1", modelApiId: "deepseek-v4-pro", displayName: "DeepSeek V4 Pro", reasoning: true };
+	const model: ModelConfig = { id: "m1", providerId: "p1", modelApiId: "deepseek-v4-pro", displayName: "DeepSeek V4 Pro", reasoning: true, supportsImages: false };
 
 	it("keeps a valid provider/model pair and its selection", () => {
 		const settings = normalizeSettings({ providers: [provider], models: [model], activeModelId: "m1" });
@@ -271,7 +271,7 @@ describe("getSelectedModel for configured providers", () => {
 	function configured(protocol: WireProtocol) {
 		return normalizeSettings({
 			providers: [{ id: "p1", name: "Gateway", baseUrl: "https://gw.internal/v1", protocol, apiKey: "sk-1", source: "user" }],
-			models: [{ id: "m1", providerId: "p1", modelApiId: "some-model", displayName: "Some Model", reasoning: false }],
+			models: [{ id: "m1", providerId: "p1", modelApiId: "some-model", displayName: "Some Model", reasoning: false, supportsImages: false }],
 			activeModelId: "m1",
 		});
 	}
@@ -287,7 +287,7 @@ describe("getSelectedModel for configured providers", () => {
 			provider: "anthropic",
 			modelId: "claude-something",
 			providers: [{ id: "p1", name: "GW", baseUrl: "https://gw/v1", protocol: "openai-responses", apiKey: "", source: "user" }],
-			models: [{ id: "m1", providerId: "p1", modelApiId: "m", displayName: "", reasoning: false }],
+			models: [{ id: "m1", providerId: "p1", modelApiId: "m", displayName: "", reasoning: false, supportsImages: false }],
 			activeModelId: "m1",
 		});
 		expect(getSelectedModel(settings).provider).toBe("p1");
@@ -303,7 +303,7 @@ describe("getApiKeyForProvider", () => {
 	const settings = () =>
 		normalizeSettings({
 			providers: [{ id: "p1", name: "GW", baseUrl: "https://gw/v1", protocol: "openai-completions", apiKey: "configured-key", source: "user" }],
-			models: [{ id: "m1", providerId: "p1", modelApiId: "m", displayName: "", reasoning: false }],
+			models: [{ id: "m1", providerId: "p1", modelApiId: "m", displayName: "", reasoning: false, supportsImages: false }],
 			activeModelId: "m1",
 			providerApiKeys: { deepseek: "builtin-key" },
 		});
@@ -325,7 +325,7 @@ describe("describeModelTarget for configured providers", () => {
 	it("names the model and provider a user recognises, not internal ids", () => {
 		const settings = normalizeSettings({
 			providers: [{ id: "p1", name: "My gateway", baseUrl: "https://gw/v1", protocol: "openai-completions", apiKey: "", source: "user" }],
-			models: [{ id: "m1", providerId: "p1", modelApiId: "qwen-token-plan-individual", displayName: "Qwen Plus", reasoning: false }],
+			models: [{ id: "m1", providerId: "p1", modelApiId: "qwen-token-plan-individual", displayName: "Qwen Plus", reasoning: false, supportsImages: false }],
 			activeModelId: "m1",
 		});
 		expect(describeModelTarget(settings, t)).toBe("Qwen Plus (My gateway)");
@@ -334,7 +334,7 @@ describe("describeModelTarget for configured providers", () => {
 	it("falls back to the raw model id when no display name was given", () => {
 		const settings = normalizeSettings({
 			providers: [{ id: "p1", name: "", baseUrl: "https://gw/v1", protocol: "openai-completions", apiKey: "", source: "user" }],
-			models: [{ id: "m1", providerId: "p1", modelApiId: "raw-id", displayName: "", reasoning: false }],
+			models: [{ id: "m1", providerId: "p1", modelApiId: "raw-id", displayName: "", reasoning: false, supportsImages: false }],
 			activeModelId: "m1",
 		});
 		expect(describeModelTarget(settings, t)).toBe("raw-id (https://gw/v1)");
@@ -349,7 +349,7 @@ describe("getActiveConfiguration", () => {
 	it("pairs the active model with the provider that serves it", () => {
 		const settings = normalizeSettings({
 			providers: [{ id: "p1", name: "GW", baseUrl: "https://gw/v1", protocol: "openai-completions", apiKey: "", source: "user" }],
-			models: [{ id: "m1", providerId: "p1", modelApiId: "m", displayName: "", reasoning: false }],
+			models: [{ id: "m1", providerId: "p1", modelApiId: "m", displayName: "", reasoning: false, supportsImages: false }],
 			activeModelId: "m1",
 		});
 		const active = getActiveConfiguration(settings);
