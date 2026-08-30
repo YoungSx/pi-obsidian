@@ -16,6 +16,7 @@ import {
 	type ProviderConfig,
 } from "./modelConfig";
 import { normalizeCompactionConfig, type CompactionConfig } from "./agent/compactionSettings";
+import { normalizeMcpServers, type McpServerConfig } from "./mcp/mcpConfig";
 import { DEFAULT_SESSION_RETENTION, readRetentionLimit } from "./session/retention";
 import { DEFAULT_SESSION_DIR, normalizeSessionDir } from "./session/sessionDir";
 import { DEFAULT_LOG_LEVEL, readLogLevel, type LogLevelSetting } from "./logging/logLevel";
@@ -129,6 +130,8 @@ export interface PiemSettings {
 	 * drops the field once rollback is no longer a concern.
 	 */
 	customEndpoint?: CustomEndpointConfig;
+	/** Configured MCP servers; empty means no remote tools join the agent. */
+	mcpServers: McpServerConfig[];
 }
 
 export const DEFAULT_SETTINGS: PiemSettings = {
@@ -145,6 +148,7 @@ export const DEFAULT_SETTINGS: PiemSettings = {
 	sessionDir: DEFAULT_SESSION_DIR,
 	userSkillsDir: "",
 	logLevel: DEFAULT_LOG_LEVEL,
+	mcpServers: [],
 };
 
 /**
@@ -233,6 +237,7 @@ export function normalizeSettings(data: Partial<PiemSettings> | null | undefined
 		// throwing, matching how every other enum-typed setting is repaired.
 		logLevel: readLogLevel(data?.logLevel),
 		customEndpoint,
+		mcpServers: normalizeMcpServers(data?.mcpServers),
 	};
 	if (activeModelId) {
 		settings.activeModelId = activeModelId;
@@ -515,6 +520,13 @@ export class PiemSettingTab extends PluginSettingTab {
 					userSkillsAvailable: userSkillsSupported(),
 				};
 			})(),
+			mcp: {
+				// Read at call time, not captured: the manager reads settings
+				// through closures, so a row the user just toggled is what the
+				// next states() reports.
+				states: () => this.plugin.mcpManager.getServerStates(),
+				test: (server) => this.plugin.mcpManager.testServer(server),
+			},
 		});
 	}
 }

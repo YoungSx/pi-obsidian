@@ -15,6 +15,8 @@ import { createObsidianModels } from "../../net/streamFn";
 import { createFetchForTransport, type NetworkTransport } from "../../net/obsidianFetch";
 import { fetchModelsDevIndex } from "../../net/modelsDev";
 import { ModelListingCache } from "../../net/modelListingCache";
+import { createMcpServerConfig, type McpServerConfig } from "../../mcp/mcpConfig";
+import type { McpServerState } from "../../mcp/mcpManager";
 import {
 	describeModelDeletion,
 	describeProviderDeletion,
@@ -24,6 +26,7 @@ import {
 } from "./configLists";
 import { openConfirmDelete } from "./confirmDelete";
 import { ModelModal } from "./ModelModal";
+import { McpServerModal } from "./McpServerModal";
 import { ProviderModal } from "./ProviderModal";
 import { describeSecretStorage, type SecretStorageState } from "./secretStorageCopy";
 import {
@@ -144,6 +147,26 @@ export interface SettingsPanelHost {
 	manifest: { version: string };
 	/** Vault skill operations for the Skills tab. */
 	skills: SkillsHost;
+	/** MCP server operations for the Extensions tab. */
+	mcp: McpHost;
+}
+
+/**
+ * What the MCP section of the Extensions tab needs from the plugin.
+ *
+ * Config itself lives in {@link SettingsPanelSettings.mcpServers} and is saved
+ * like any other setting; this carries only the live half the settings object
+ * cannot know — the connection states of the running manager, and a probe that
+ * tests a draft without touching those connections.
+ */
+export interface McpHost {
+	/** Per-server status after the most recent connect attempt, in config order. */
+	states(): McpServerState[];
+	/**
+	 * Probes one candidate configuration; resolves to the tool count it serves.
+	 * Throws on failure — the test row renders the throw as a failed verdict.
+	 */
+	test(server: McpServerConfig): Promise<number>;
 }
 
 /**
@@ -199,6 +222,7 @@ export interface SettingsPanelSettings {
 	sessionRetention: number;
 	sessionDir: string;
 	userSkillsDir: string;
+	mcpServers: McpServerConfig[];
 	logLevel: LogLevelSetting;
 }
 
@@ -220,7 +244,7 @@ export function renderSettingsPanel(containerEl: HTMLElement, host: SettingsPane
 		// a chat, and the tab strip is the wrong place to teach a reader a second word
 		// for their own conversations.
 		{ id: "sessions", label: t.t("settings.tabSessions"), render: (el) => renderSessionsTab(el, host) },
-		{ id: "skills", label: t.t("settings.tabSkills"), render: (el) => renderSkillsTab(el, host) },
+		{ id: "extensions", label: t.t("settings.tabExtensions"), render: (el) => renderExtensionsTab(el, host) },
 		{ id: "logs", label: t.t("settings.tabLogs"), render: (el) => renderLogsTab(el, host) },
 		// Language and About each held one or two rows and no control that changed
 		// behaviour; merged because a reader reaching for either is doing the same
@@ -949,6 +973,152 @@ function renderSkillsTab(containerEl: HTMLElement, host: SettingsPanelHost): voi
 	};
 
 	void reload();
+}
+
+/**
+ * The Extensions tab: capabilities beyond the built-in tools.
+ *
+ * Skills came first and keep their section untouched; MCP servers join them
+ * here because both answer the same question — what else can the agent reach —
+ * and splitting them across tabs would make "扩展能力" a promise the tab
+ * strip does not keep.
+ */
+function renderExtensionsTab(containerEl: HTMLElement, host: SettingsPanelHost): void {
+	renderSkillsTab(containerEl, host);
+	renderMcpSection(containerEl, host);
+}
+
+/**
+ * The MCP servers section: what remote tools the agent is offered.
+ *
+ * Same sync-containers-then-async-fill shape as the skills tab, so a slow
+ * status refresh can never reorder the section. Saving — not a private
+ * reconnect call — is what reconnects: `host.save()` reaches the running
+ * agent's configuration, and the connect happens on that path, so there is one
+ * road from "config changed" to "agent sees the new tools".
+ */
+function renderMcpSection(containerEl: HTMLElement, host: SettingsPanelHost): void {
+	const { t } = host;
+
+	new Setting(containerEl)
+		.setName(t.t("mcp.heading"))
+		.setHeading()
+		.setDesc(t.t("mcp.desc"))
+		.addButton((button) => {
+			button.setButtonText(t.t("mcp.add"));
+			button.setCta();
+			button.onClick(() => {
+				openMcpServerModal(host, undefined, afterMutation);
+			});
+		});
+
+	const listEl = containerEl.createDiv();
+
+	const reload = async (): Promise<void> => {
+		const states = host.mcp.states();
+		listEl.empty();
+		if (states.length === 0) {
+			listEl.createEl("p", { cls: "piem-settings-empty", text: t.t("mcp.empty") });
+		}
+		for (const state of states) {
+			renderMcpRow(listEl, host, state, afterMutation);
+		}
+	};
+
+	const afterMutation = async (): Promise<void> => {
+		await host.save();
+		await reload();
+	};
+
+	void reload();
+}
+
+/** Opens the add/edit form and hands the finished row to the section's mutation path. */
+function openMcpServerModal(
+	host: SettingsPanelHost,
+	server: McpServerConfig | undefined,
+	afterMutation: () => Promise<void>,
+): void {
+	new McpServerModal({
+		app: host.app,
+		t: host.t,
+		server,
+		test: (draft) => host.mcp.test(draft),
+		onSubmit: async (draft) => {
+			// Re-created through the config factory so the row lands normalized;
+			// the modal's draft already carries a stable id, which makes this an
+			// upsert and lets add and edit share one path.
+			const normalized = createMcpServerConfig(draft);
+			if (normalized === null) {
+				return;
+			}
+			const existing = host.settings.mcpServers.findIndex((row) => row.id === normalized.id);
+			if (existing >= 0) {
+				host.settings.mcpServers[existing] = normalized;
+			} else {
+				host.settings.mcpServers.push(normalized);
+			}
+			await afterMutation();
+		},
+	}).open();
+}
+
+function renderMcpRow(containerEl: HTMLElement, host: SettingsPanelHost, state: McpServerState, afterMutation: () => Promise<void>): void {
+	const { t } = host;
+	// The URL is the address requests leave to, so it reads as the row's main
+	// description; the connection verdict hangs beneath it as an effect line,
+	// the same slot every other async status in this panel uses.
+	const setting = new Setting(containerEl).setName(state.name).setDesc(state.url);
+	setting.descEl.createDiv({ cls: "piem-settings-effect", text: describeMcpRow(state, t) });
+
+	// The toggle writes the enabled flag and saves; whether the server connects
+	// or disconnects is decided on the save path, not here.
+	setting.addToggle((toggle) => {
+		toggle.setValue(state.enabled);
+		toggle.onChange(async (enabled) => {
+			const server = host.settings.mcpServers.find((row) => row.id === state.id);
+			if (server) {
+				server.enabled = enabled;
+			}
+			await afterMutation();
+		});
+	});
+
+	setting.addButton((button) => {
+		button.setButtonText(t.t("mcp.edit"));
+		button.onClick(() => {
+			const server = host.settings.mcpServers.find((row) => row.id === state.id);
+			if (server) {
+				openMcpServerModal(host, server, afterMutation);
+			}
+		});
+	});
+
+	setting.addButton((button) => {
+		button.setButtonText(t.t("skills.delete"));
+		button.onClick(() => {
+			openConfirmDelete(host.app, {
+				subject: t.t("confirmDelete.mcpServerSubject", { name: state.name }),
+				consequences: [t.t("deletion.mcpServer")],
+				t,
+				onConfirm: async () => {
+					host.settings.mcpServers = host.settings.mcpServers.filter((row) => row.id !== state.id);
+					await afterMutation();
+				},
+			});
+		});
+	});
+}
+
+/** The connection verdict, as one sentence. */
+function describeMcpRow(state: McpServerState, t: Translator): string {
+	return state.enabled
+		? state.status === "ok"
+			? t.t("mcp.statusOk", { tools: state.toolCount })
+			: state.status === "error"
+				? t.t("mcp.statusError", { error: state.error ?? "" })
+				: t.t("mcp.statusUntested")
+		: t.t("mcp.statusDisabled");
 }
 
 function renderSkillRow(containerEl: HTMLElement, host: SettingsPanelHost, row: SkillRow, afterMutation: () => Promise<void>): void {

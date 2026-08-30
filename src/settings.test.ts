@@ -377,3 +377,33 @@ describe("normalizeSettings with the send shortcut", () => {
 		expect(normalizeSettings({ sendShortcut: null as never }).sendShortcut).toBe("enter");
 	});
 });
+
+describe("normalizeSettings with mcpServers", () => {
+	it("gives a vault written before the setting existed an empty list", () => {
+		expect(normalizeSettings({}).mcpServers).toEqual([]);
+	});
+
+	it("keeps a stored server whole: token passes untrimmed, order preserved", () => {
+		const settings = normalizeSettings({
+			mcpServers: [
+				{ id: "srv-1", name: " GitHub ", url: " https://gh.example.com/mcp ", token: "enc:v1:AAAA", enabled: false },
+			],
+		});
+		expect(settings.mcpServers).toEqual([
+			{ id: "srv-1", name: "GitHub", url: "https://gh.example.com/mcp", token: "enc:v1:AAAA", enabled: false },
+		]);
+	});
+
+	it("drops unusable rows so a junk entry cannot join the agent's tools", () => {
+		// Cast rather than shaped: the junk here is exactly what the raw
+		// persisted array can hold, and normalizeSettings is what must reject it.
+		const settings = normalizeSettings({
+			mcpServers: [
+				{ id: "srv-2", name: "No url", url: "not-a-url", token: "", enabled: true },
+				{ name: "No id", url: "https://x.example.com", token: "", enabled: true },
+				"garbage",
+			] as never,
+		});
+		expect(settings.mcpServers).toEqual([]);
+	});
+});

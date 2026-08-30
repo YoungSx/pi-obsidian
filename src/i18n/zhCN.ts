@@ -295,7 +295,7 @@ export const zhCN: DeepPartial<EnCopy> = {
 		tabModels: "模型",
 		tabChat: "对话",
 		tabSessions: "历史",
-		tabSkills: "技能",
+		tabExtensions: "扩展能力",
 		tabGeneral: "通用",
 		tabLogs: "日志",
 
@@ -412,6 +412,41 @@ export const zhCN: DeepPartial<EnCopy> = {
 		installed: "已导入 {count} 个。",
 	},
 
+	/**
+	 * 「扩展能力」页的 MCP 服务器区块。
+	 *
+	 * 描述先把出境说清：配置一个服务器，就意味着请求会离开笔记库、发往该
+	 * URL。状态行一律写成完整的句子，不写光秃秃的「错误」——报错原文就在
+	 * 本行里，不该让读者再去别处找。
+	 */
+	mcp: {
+		heading: "MCP 服务器",
+		desc: "接入远程 MCP（Model Context Protocol）服务器提供的工具。这些工具会以 mcp_ 前缀出现在对话中；请求会离开笔记库，发往你填写的地址。",
+		add: "添加服务器",
+		edit: "编辑",
+		empty: "还没有配置 MCP 服务器。添加一个，即可让它的工具进入对话。",
+		statusOk: "已连接；{tools} 个工具可用。",
+		statusError: "上次连接失败：{error}",
+		statusDisabled: "已停用。开启后才会连接。",
+		statusUntested: "尚未连接。保存设置或重新加载插件时会连接。",
+		testTitle: "连接",
+		testOk: "已连上服务器；{tools} 个工具可用。",
+		name: "名称",
+		namePlaceholder: "GitHub",
+		nameRequired: "给服务器起个名字。",
+		urlName: "地址",
+		urlDesc: "服务器的 MCP 端点。请求会离开笔记库，发往这个地址。",
+		urlPlaceholder: "https://example.com/mcp",
+		urlRequired: "请填写 http(s) 地址。",
+		tokenName: "Bearer 令牌",
+		tokenDesc: "每次请求都会作为 Authorization 头发给这台服务器。公开服务器可留空。",
+		addTitle: "添加 MCP 服务器",
+		editTitle: "编辑 MCP 服务器",
+		addButton: "添加",
+		saveButton: "保存",
+		cancelButton: "取消",
+	},
+
 	about: {
 		version: "版本 {version}",
 		sourceName: "源代码",
@@ -496,6 +531,7 @@ export const zhCN: DeepPartial<EnCopy> = {
 		providerSubject: "提供方“{name}”",
 		modelSubject: "模型“{name}”",
 		skillSubject: "技能“{name}”",
+		mcpServerSubject: "MCP 服务器“{name}”",
 	},
 
 	deletion: {
@@ -505,6 +541,7 @@ export const zhCN: DeepPartial<EnCopy> = {
 		modelProviderStays: "提供方及其密钥会保留，其他模型仍可正常使用。",
 		modelWasActive: "它是当前模型，移除后会自动选择另一个。",
 		skillFiles: "技能的文件会移入回收站，并不再对代理可用。",
+		mcpServer: "它的工具不再提供给代理。为它保存的令牌会从此笔记库的配置中移除。",
 	},
 
 	test: {

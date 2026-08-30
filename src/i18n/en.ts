@@ -462,7 +462,7 @@ export const en = {
 		tabModels: "Models",
 		tabChat: "Chat",
 		tabSessions: "History",
-		tabSkills: "Skills",
+		tabExtensions: "Extensions",
 		tabGeneral: "General",
 		tabLogs: "Logs",
 
@@ -639,6 +639,42 @@ export const en = {
 	},
 
 	/**
+	 * The MCP servers section of the Extensions tab.
+	 *
+	 * The description states the outbound truth up front: configuring a server
+	 * means requests leave the vault to that URL, and its tools run in chat.
+	 * Every status line is a sentence, not a bare word, because "error" alone
+	 * sends a reader hunting for the message this row already holds.
+	 */
+	mcp: {
+		heading: "MCP servers",
+		desc: "Connect tools served by remote MCP (Model Context Protocol) servers. Their tools appear in chat with an mcp_ prefix; requests leave the vault to the URL you enter.",
+		add: "Add server",
+		edit: "Edit",
+		empty: "No MCP servers configured yet. Add one to bring its tools into chat.",
+		statusOk: "Connected; {tools} tools available.",
+		statusError: "Last connection failed: {error}",
+		statusDisabled: "Disabled. Turn it on to connect.",
+		statusUntested: "Not connected yet. Saving settings or reloading the plugin connects it.",
+		testTitle: "Connection",
+		testOk: "Reached the server; {tools} tools available.",
+		name: "Name",
+		namePlaceholder: "GitHub",
+		nameRequired: "Give the server a name.",
+		urlName: "URL",
+		urlDesc: "The server's MCP endpoint. Requests leave the vault to this address.",
+		urlPlaceholder: "https://example.com/mcp",
+		urlRequired: "Enter an http(s) URL.",
+		tokenName: "Bearer token",
+		tokenDesc: "Sent as an Authorization header with every request to this server. Leave it empty for open servers.",
+		addTitle: "Add MCP server",
+		editTitle: "Edit MCP server",
+		addButton: "Add",
+		saveButton: "Save",
+		cancelButton: "Cancel",
+	},
+
+	/**
 	 * About tab rows. The hrefs live in `aboutCopy.ts` — only the wording is here.
 	 *
 	 * Each row's label has to read on its own, because assistive technology can
@@ -790,6 +826,7 @@ export const en = {
 		providerSubject: 'provider "{name}"',
 		modelSubject: 'model "{name}"',
 		skillSubject: 'skill "{name}"',
+		mcpServerSubject: 'MCP server "{name}"',
 	},
 
 	/** Consequences stated before a delete is confirmed. */
@@ -800,6 +837,7 @@ export const en = {
 		modelProviderStays: "The provider and its key stay, so other models keep working.",
 		modelWasActive: "It is the active model, so another one is selected after it goes.",
 		skillFiles: "The skill's files move to the trash and stop being available to the agent.",
+		mcpServer: "Its tools stop being offered to the agent. The token stored for it is removed from this vault's config.",
 	},
 
 	/** Connection-test row. */
