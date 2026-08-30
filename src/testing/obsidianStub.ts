@@ -26,6 +26,9 @@ export function installObsidianStub(): void {
 /** Mutable handle so a test can assert on or reconfigure `requestUrl`. */
 export const requestUrlMock = mock<(params: unknown) => Promise<unknown>>();
 
+/** Mutable handle recording brand-icon registrations from src/brandIcon.ts. */
+export const addIconMock = mock<(iconId: string, svgContent: string) => void>();
+
 /**
  * Mutable handle for the stubbed `Platform` flags.
  *
@@ -464,6 +467,11 @@ const obsidianStub = {
 	TFile: class TFile {},
 	TFolder: class TFolder {},
 	Platform: platformMock,
+	// Brand icon registration (src/brandIcon.ts). Recorded rather than dropped
+	// so a test can assert the mark got registered under its id.
+	addIcon: (iconId: string, svgContent: string): void => {
+		addIconMock(iconId, svgContent);
+	},
 	requestUrl: async (params: unknown): Promise<unknown> => await requestUrlMock(params),
 	setIcon: () => undefined,
 	setTooltip: (element: HTMLElement, tooltip: string): void => setTooltipMock(element, tooltip),

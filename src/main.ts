@@ -28,6 +28,7 @@ import { ObsidianAgentService } from "./agent/ObsidianAgentService";
 import { McpManager } from "./mcp/mcpManager";
 import { PiemChatView } from "./ui/PiemChatView";
 import { requestNoteReference, warnIfTruncated } from "./ui/noteReferenceCommand";
+import { BRAND_ICON_ID, registerBrandIcon } from "./brandIcon";
 import { getT, resolveLanguage, type LanguageHost, type Translator } from "./i18n";
 
 /** Persists `settings` with every non-empty secret sealed through `codec`. */
@@ -135,6 +136,7 @@ export default class PiemPlugin extends Plugin {
 		// catch blocks that report those failures need a logger that already
 		// exists. The level closure reads `this.settings`, so it sees the
 		// persisted value the moment `loadSettings` assigns it.
+		registerBrandIcon();
 		this.pluginLogger = createPluginLogger({
 			adapter: this.app.vault.adapter,
 			configDir: this.app.vault.configDir,
@@ -248,7 +250,7 @@ export default class PiemPlugin extends Plugin {
 				void this.askPiemAboutSelection(editor, info.file?.path ?? null, { selectionOnly: false });
 			},
 		});
-		this.addRibbonIcon("bot", t.t("commands.ribbonOpenChat"), () => {
+		this.addRibbonIcon(BRAND_ICON_ID, t.t("commands.ribbonOpenChat"), () => {
 			void this.activateChatView();
 		});
 		this.registerEvent(
@@ -260,7 +262,7 @@ export default class PiemPlugin extends Plugin {
 				menu.addItem((item) =>
 					item
 						.setTitle(t.t("commands.menuAskAboutSelection"))
-						.setIcon("bot")
+						.setIcon(BRAND_ICON_ID)
 						.onClick(() => {
 							void this.askPiemAboutSelection(editor, path);
 						}),

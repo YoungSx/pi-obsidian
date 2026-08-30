@@ -19,7 +19,7 @@ import { createObsidianHostModule, createStubApp, loadPluginBundle, type PluginH
 installDom();
 
 function emptyRecord(): PluginHostRecord {
-	return { views: [], commands: [], ribbonIcons: [], settingTabs: 0, savedData: [] };
+	return { views: [], commands: [], ribbonIcons: [], icons: new Map(), settingTabs: 0, savedData: [] };
 }
 
 const DESKTOP = { isDesktop: true, isDesktopApp: true, isMobile: false, isMobileApp: false, isIosApp: false, isAndroidApp: false };
@@ -155,5 +155,22 @@ describe("built bundle loads under Obsidian's loader", () => {
 		await plugin.onload();
 
 		expect(record.ribbonIcons.length).toBeGreaterThan(0);
+	});
+
+	it("registers the brand icon and points every brand mark at it", async () => {
+		// A ribbon button rendering a name nothing registered shows a blank slot,
+		// which no other gate can see — the load succeeds, the tests pass, only
+		// the corner of the UI is empty. This pins the contract: the brand icon
+		// is registered, and every icon slot `onload` fills resolves to a
+		// registered id. The id is a literal because this file imports no src
+		// modules; a rename here failing the test is the point.
+		const { plugin, record } = instantiate({ platform: MOBILE, exposeGlobalRequire: false });
+
+		await plugin.onload();
+
+		expect(record.icons.get("piem-brand") ?? "").toContain("<svg");
+		for (const icon of record.ribbonIcons) {
+			expect(record.icons.has(icon)).toBe(true);
+		}
 	});
 });
