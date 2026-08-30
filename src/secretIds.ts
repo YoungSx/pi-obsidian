@@ -31,12 +31,13 @@ const VALID_ID = /^[a-z0-9-]+$/;
  * Which family of credential an id names.
  *
  * `builtin` keys a provider from the shipped catalog (by pi-ai's own slug);
- * `provider` keys a user-configured endpoint (by its `ProviderConfig.id`).
- * They are separate families rather than one flat space because a catalog slug
- * and a configured-provider id are allocated by different authorities and could
- * in principle collide.
+ * `provider` keys a user-configured endpoint (by its `ProviderConfig.id`); `mcp`
+ * keys an MCP server's bearer token (by its `McpServerConfig.id`). They are
+ * separate families rather than one flat space because a catalog slug, a
+ * configured-provider id, and a server id are allocated by different authorities
+ * and could in principle collide.
  */
-export type SecretKind = "builtin" | "provider";
+export type SecretKind = "builtin" | "provider" | "mcp";
 
 /**
  * 32-bit FNV-1a, as 8 lowercase hex digits.
@@ -106,5 +107,5 @@ export function secretIdFor(kind: SecretKind, key: string): string {
  * recognized as ours, or a sweep would leave it behind forever.
  */
 export function isPiemSecretId(id: string): boolean {
-	return id.startsWith(`${PREFIX}-builtin-`) || id.startsWith(`${PREFIX}-provider-`);
+	return id.startsWith(`${PREFIX}-builtin-`) || id.startsWith(`${PREFIX}-provider-`) || id.startsWith(`${PREFIX}-mcp-`);
 }

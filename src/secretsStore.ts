@@ -1,157 +1,106 @@
-import { Platform } from "obsidian";
-import type { SecretCodec, SafeStorageLike } from "./secrets";
-import { PLAINTEXT_CODEC, createSafeStorageCodec } from "./secrets";
+/**
+ * Decides where this device keeps API keys, and hands back the store for it.
+ *
+ * Two tiers, resolved once per plugin load:
+ *
+ * - `vault` — Obsidian's own `app.secretStorage`, which is the OS keychain on
+ *   desktop and the platform keystore on mobile. Keys leave `data.json`.
+ * - `plaintext` — everything else. Keys stay in `data.json` as they always
+ *   have, and the settings panel says so.
+ *
+ * There used to be a third tier between them: the plugin encrypted keys itself
+ * through Electron's `safeStorage` and wrote the ciphertext into `data.json`.
+ * That is what issue #145 was about — the OS keychain only ever lent the lock,
+ * and the box stayed in the vault config. It is gone as a *write* path, but its
+ * decoder is not: ciphertext written by earlier releases is already on users'
+ * disks and cannot be re-entered by hand, so `loadSettings` still opens
+ * `enc:v1:` values through `secrets.ts` and relocates whatever it finds. The
+ * plugin never produces another one.
+ */
+
+import { Platform, requireApiVersion } from "obsidian";
+import { UNAVAILABLE_VAULT, type SecretVault } from "./secretVault";
+import { createObsidianSecretVault, type SecretStorageHost } from "./obsidianSecretVault";
 
 /**
- * The runtime `require` Obsidian's desktop shell injects into the page.
+ * The Obsidian release `app.secretStorage` became trustworthy on.
  *
- * Absent on mobile, where the plugin runs in a plain web view.
+ * `secretStorage` itself landed in 1.11.4, but on that exact build the desktop
+ * store kept its contents unencrypted; 1.11.5 is the first version where using
+ * it is not a downgrade from the `safeStorage` ciphertext this plugin used to
+ * write. Mobile is exempt: there the alternative is plaintext `data.json`, so
+ * any version of the platform keystore is an improvement.
  */
-export type HostRequire = (id: string) => unknown;
+const SECRET_STORAGE_MIN_VERSION = "1.11.5";
 
-/**
- * Environment-backed decision of whether OS-keychain encryption applies.
- *
- * `Platform.isDesktopApp` alone is not enough: a Linux desktop without a
- * running keyring service reports `isDesktopApp` but safeStorage silently
- * degrades to a hardcoded in-memory key. `isEncryptionAvailable()` is the
- * authority; the platform check only avoids even touching electron on mobile,
- * where the module does not exist.
- */
+/** Where keys land on this device, for the settings panel's copy. */
+export type SecretStorageTier = "vault" | "plaintext";
+
 export interface SecretEnvironment {
-	codec(): SecretCodec;
+	/** Which tier is in effect. Drives both control flow and panel copy. */
+	tier(): SecretStorageTier;
+	/**
+	 * The store for the resolved tier.
+	 *
+	 * {@link UNAVAILABLE_VAULT} on the `plaintext` tier, so callers can hand it
+	 * to the relocation rules unconditionally rather than branching first.
+	 */
+	vault(): SecretVault;
 }
 
 export interface CreateSecretStoreOptions {
-	/** Injectable for tests; defaults to whatever the host exposes. */
-	safeStorage?: SafeStorageLike;
-	/** Injectable for tests; defaults to Obsidian's `Platform`. */
-	isDesktopApp?: boolean;
 	/**
-	 * Injectable for tests; defaults to the host-injected global `require`.
-	 * Pass `null` to model a desktop shell that exposes no `require` at all.
+	 * The running `App`, which is where `secretStorage` lives.
+	 *
+	 * Required rather than read off a global: the plugin already holds its own
+	 * `this.app`, and reaching around it would make this module's dependency on
+	 * the host invisible at the call site.
 	 */
-	hostRequire?: HostRequire | null;
+	host: SecretStorageHost | null;
+	/** Injectable for tests; defaults to Obsidian's `Platform`. */
+	isMobileApp?: boolean;
+	/**
+	 * Injectable for tests; defaults to Obsidian's `requireApiVersion`. Decides
+	 * whether the running desktop build is new enough to be trusted.
+	 */
+	hasApiVersion?: (version: string) => boolean;
 	/**
 	 * Receives the reason this device fell back to plaintext storage. Injectable
-	 * so the pure module stays free of the logger; the plugin routes it to debug
-	 * level, where an "is my key encrypted?" question gets a direct answer.
+	 * so the module stays free of the logger; the plugin routes it to debug
+	 * level, where an "is my key in the keychain?" question gets a direct answer.
 	 */
 	log?: (message: string) => void;
 }
 
 /**
- * Reads the host-injected `require` off the global object.
+ * Resolves the tier for this device once per plugin load.
  *
- * Obsidian runs desktop plugins in an Electron renderer with node integration,
- * so a global `require` is the supported way in to electron. `import("electron")`
- * is NOT usable here: Obsidian evaluates `main.js` through an eval'd function
- * wrapper, and a dynamic import in that context has no owning script or module
- * to resolve a bare specifier against. Chromium rejects it outright with
- * `TypeError: Failed to resolve module specifier 'electron'` — which is exactly
- * what made 0.1.0-alpha.3 fail to load on desktop while still loading on
- * mobile, where the platform check short-circuits before reaching it.
- *
- * The property access (rather than a bare `require(...)` call) also keeps
- * esbuild from treating this as a module dependency to rewrite or bundle.
+ * Total by construction: every failure mode resolves to the plaintext tier and
+ * nothing propagates. Secret-storage capability detection runs on the `onload`
+ * path, so a throw here takes the whole plugin down with it; degrading to
+ * plaintext is always preferable to not loading.
  */
-function resolveHostRequire(): HostRequire | null {
-	const candidate = (globalThis as { require?: unknown }).require;
-	return typeof candidate === "function" ? (candidate as HostRequire) : null;
-}
-
-/**
- * Narrows an unknown value to `SafeStorageLike` only when the whole surface is
- * present.
- *
- * A partial object is treated as absent: calling into it would throw somewhere
- * deeper, where the failure is far less obvious than "encryption unavailable".
- */
-function asSafeStorage(candidate: unknown): SafeStorageLike | null {
-	if (!candidate || typeof candidate !== "object") {
-		return null;
-	}
-	const probe = candidate as Record<string, unknown>;
-	const complete =
-		typeof probe.isEncryptionAvailable === "function" &&
-		typeof probe.encryptString === "function" &&
-		typeof probe.decryptString === "function";
-	return complete ? (candidate as SafeStorageLike) : null;
-}
-
-/**
- * Finds a usable `safeStorage`, trying every shape a desktop shell might offer.
- *
- * `safeStorage` is a main-process module, so the renderer's own `electron`
- * export does not necessarily carry it; main-process modules are bridged
- * through `@electron/remote`, reachable either as `electron.remote` or as the
- * package itself. Which of the three is present has varied across Obsidian and
- * Electron versions, so all are attempted and each is allowed to fail on its
- * own — a shell missing a module throws on `require`, which must not abort the
- * remaining lookups.
- *
- * Returning `null` is a normal outcome, not an error: it just means this device
- * keeps the plaintext layout.
- */
-function probeSafeStorage(hostRequire: HostRequire): SafeStorageLike | null {
-	const lookups: (() => unknown)[] = [
-		() => (hostRequire("electron") as { safeStorage?: unknown }).safeStorage,
-		() => (hostRequire("electron") as { remote?: { safeStorage?: unknown } }).remote?.safeStorage,
-		() => (hostRequire("@electron/remote") as { safeStorage?: unknown }).safeStorage,
-	];
-	for (const lookup of lookups) {
-		try {
-			const candidate = asSafeStorage(lookup());
-			if (candidate) {
-				return candidate;
-			}
-		} catch {
-			// Module absent in this shell; the next shape may still resolve.
-		}
-	}
-	return null;
-}
-
-/**
- * Resolves the codec for this device once per plugin load.
- *
- * Desktop with working safeStorage gets ciphertext at rest; everything else —
- * mobile, a shell without node integration, or a desktop where encryption is
- * unavailable — keeps the plaintext layout rather than failing to persist keys
- * at all.
- *
- * This function is total: every failure mode resolves to the plaintext codec
- * and nothing propagates to the caller. Secret-storage capability detection
- * runs on the `onload` path, so a throw here takes the whole plugin down with
- * it; degrading to plaintext is always preferable to not loading.
- */
-export function createSecretEnvironment(options: CreateSecretStoreOptions = {}): SecretEnvironment {
-	const plaintext: SecretEnvironment = { codec: () => PLAINTEXT_CODEC };
-	const log = options.log ?? (() => {});
+export function createSecretEnvironment(options: CreateSecretStoreOptions): SecretEnvironment {
+	const plaintext: SecretEnvironment = { tier: () => "plaintext", vault: () => UNAVAILABLE_VAULT };
+	const log = options.log ?? ((): void => {});
 	try {
-		const isDesktopApp = options.isDesktopApp ?? Platform.isDesktopApp;
-		if (!isDesktopApp) {
-			log("Not a desktop app; storing secrets as plaintext.");
+		const isMobileApp = options.isMobileApp ?? Platform.isMobileApp;
+		const hasApiVersion = options.hasApiVersion ?? requireApiVersion;
+		// Mobile skips the version gate: the only alternative there is plaintext
+		// in `data.json`, so any keystore at all is the better of the two.
+		if (!isMobileApp && !hasApiVersion(SECRET_STORAGE_MIN_VERSION)) {
+			log(`Obsidian is older than ${SECRET_STORAGE_MIN_VERSION}; keys stay in this vault's plugin config.`);
 			return plaintext;
 		}
 
-		// `undefined` means "detect"; an explicit `null` means "there is none".
-		const hostRequire = options.hostRequire === undefined ? resolveHostRequire() : options.hostRequire;
-		const safeStorage = options.safeStorage ?? (hostRequire ? probeSafeStorage(hostRequire) : null);
-		if (!safeStorage) {
-			log("OS keychain (safeStorage) unavailable; storing secrets as plaintext.");
+		const vault = createObsidianSecretVault(options.host, { log });
+		if (!vault.available) {
+			// `createObsidianSecretVault` already logged why.
 			return plaintext;
 		}
-		if (!safeStorage.isEncryptionAvailable()) {
-			log("OS keychain reports encryption unavailable; storing secrets as plaintext.");
-			return plaintext;
-		}
-		// Built once: the codec is stateless, but resolving it per call would
-		// re-probe `isEncryptionAvailable` through its `canRoundTrip` getter.
-		const codec = createSafeStorageCodec(safeStorage);
-		return { codec: () => codec };
+		return { tier: () => "vault", vault: () => vault };
 	} catch (error) {
-		log(`Secret storage probe failed; storing secrets as plaintext. ${String(error)}`);
+		log(`Secret storage probe failed; keys stay in this vault's plugin config. ${String(error)}`);
 		return plaintext;
 	}
 }

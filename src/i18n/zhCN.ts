@@ -605,9 +605,10 @@ export const zhCN: DeepPartial<EnCopy> = {
 	},
 
 	secretStorage: {
-		encrypted: "存储在此笔记库的插件配置中，并使用操作系统的钥匙串加密。",
-		plaintext: "此设备没有可用的操作系统钥匙串，因此密钥以明文形式存储在此笔记库的插件配置中。",
+		vault: "存储在 Obsidian 的密钥存储中，也就是操作系统的钥匙串，不在此笔记库内。",
+		plaintext: "此版本的 Obsidian 没有密钥存储，因此密钥以明文形式存储在此笔记库的插件配置中。",
 		keyField: "仅发送给 {target}。{storage} 请使用受限、低限额的密钥。",
+		noSync: "密钥存储不会同步，因此每台设备都需要各自的一份密钥。在另一台设备上重新输入是正常的。",
 		providerTarget: "此提供方的基础 URL",
 	},
 

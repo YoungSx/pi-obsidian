@@ -1,10 +1,9 @@
-import { App, Platform, PluginSettingTab } from "obsidian";
-import { getSupportedThinkingLevels } from "@earendil-works/pi-ai";
+import { App, PluginSettingTab } from "obsidian";
 import { getBuiltinModels } from "./net/builtinCatalog";
 import type { Model } from "@earendil-works/pi-ai";
 import type PiemPlugin from "./main";
 import { CUSTOM_ENDPOINT_PROVIDER, DEFAULT_MODEL_ID, DEFAULT_PROVIDER } from "./constants";
-import type { SecretEnvironment } from "./secretsStore";
+import type { SecretEnvironment, SecretStorageTier } from "./secretsStore";
 import type { NetworkTransport } from "./net/obsidianFetch";
 import {
 	buildConfiguredModel,
@@ -488,10 +487,16 @@ export class PiemSettingTab extends PluginSettingTab {
 		this.secretEnvironment = secretEnvironment ?? null;
 	}
 
-	/** Whether this device can encrypt secrets at rest (OS keychain available). */
-	get encryptionAvailable(): boolean {
-		const codec = this.secretEnvironment?.codec();
-		return !!codec && codec.canRoundTrip;
+	/**
+	 * Where keys land on this device.
+	 *
+	 * Reads through to the resolved environment rather than caching, so the panel
+	 * and the storage layer can never disagree about which tier is in effect.
+	 * Defaults to `plaintext` when no environment was injected, which is the
+	 * honest answer for a tab constructed without one.
+	 */
+	get secretStorageTier(): SecretStorageTier {
+		return this.secretEnvironment?.tier() ?? "plaintext";
 	}
 
 	/**
@@ -522,7 +527,7 @@ export class PiemSettingTab extends PluginSettingTab {
 					this.display();
 				}
 			},
-			secretStorage: this.encryptionAvailable ? "encrypted" : "plaintext",
+			secretStorage: this.secretStorageTier,
 			openLogView: () => this.plugin.openLogView(),
 			describeTarget: () => describeModelTarget(this.plugin.settings, getT(language)),
 			t: getT(language),

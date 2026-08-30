@@ -1,176 +1,255 @@
 import { describe, expect, it } from "bun:test";
-import { installObsidianStub, SafeStorageLikeMock } from "./testing/obsidianStub";
+import {
+	installObsidianStub,
+	SafeStorageLikeMock,
+	sealForTest,
+	SecretStorageMock,
+} from "./testing/obsidianStub";
+import type PiemPluginType from "./main";
+import type { LoggerLike } from "./logging/Logger";
+import type { SafeStorageLike } from "./secrets";
+import type { SecretVault } from "./secretVault";
+import type { SecretEnvironment } from "./secretsStore";
 
 // `main.ts` pulls in obsidian at runtime; the shared stub must exist first.
 installObsidianStub();
 
-const { createSafeStorageCodec, PLAINTEXT_CODEC } = await import("./secrets");
 const { default: PiemPlugin } = await import("./main");
 const { normalizeSettings } = await import("./settings");
 const { NOOP_LOGGER } = await import("./logging/Logger");
 const { spyLogger } = await import("./testing/logSpy");
-import type { SecretCodec } from "./secrets";
-import type PiemPluginType from "./main";
-import type { LoggerLike } from "./logging/Logger";
+const { wrapSecretStorage } = await import("./obsidianSecretVault");
+const { UNAVAILABLE_VAULT } = await import("./secretVault");
+const { secretIdFor } = await import("./secretIds");
+const { CUSTOM_ENDPOINT_PROVIDER } = await import("./constants");
+
+type PluginInstance = InstanceType<typeof PiemPluginType>;
 
 interface StoredData {
 	data: unknown;
 }
 
+interface PluginOptions {
+	vault?: SecretVault;
+	legacySafeStorage?: SafeStorageLike | null;
+	log?: LoggerLike;
+}
+
+interface PluginHarness {
+	plugin: PluginInstance;
+	saved: () => { value: unknown; writes: number };
+}
+
 /**
- * A plugin instance with `loadData`/`saveData` backed by a map, so the
- * load-time migration can be exercised without Obsidian. The secret
- * environment is injected the same way `onload` resolves it on a real device.
- * `Object.create` skips field initializers, so the logger `loadSettings`
- * writes through must be handed in the way `onload` would have assigned it.
+ * A plugin instance with `loadData`/`saveData` backed by memory.
+ *
+ * `Object.create` deliberately skips Obsidian's constructor and this class's
+ * field initializers. The three collaborators reached by the persistence
+ * boundary are therefore injected exactly once, as `onload` would resolve them.
  */
-function pluginWithData(
-	initial: unknown,
-	mock: SafeStorageLikeMock,
-	log: LoggerLike = NOOP_LOGGER,
-): { plugin: InstanceType<typeof PiemPluginType>; saved: () => { value: unknown; writes: number } } {
+function pluginWithData(initial: unknown, options: PluginOptions = {}): PluginHarness {
 	const store: StoredData = { data: initial };
 	let writes = 0;
-	const plugin = Object.create(PiemPlugin.prototype) as InstanceType<typeof PiemPluginType>;
-	(plugin as unknown as { log: LoggerLike }).log = log;
+	const plugin = Object.create(PiemPlugin.prototype) as PluginInstance;
+	const vault = options.vault ?? UNAVAILABLE_VAULT;
+	const environment: SecretEnvironment = {
+		tier: () => (vault.available ? "vault" : "plaintext"),
+		vault: () => vault,
+	};
+
+	(plugin as unknown as { log: LoggerLike }).log = options.log ?? NOOP_LOGGER;
+	(plugin as unknown as { secretEnvironment: SecretEnvironment | null }).secretEnvironment = environment;
+	(plugin as unknown as { legacySafeStorage: SafeStorageLike | null | undefined }).legacySafeStorage =
+		options.legacySafeStorage ?? null;
 	(plugin as unknown as { loadData: () => Promise<unknown> }).loadData = async () => store.data;
 	(plugin as unknown as { saveData: (data: unknown) => Promise<void> }).saveData = async (data: unknown) => {
 		writes += 1;
 		store.data = data;
 	};
-	const environment = {
-		codec: (): SecretCodec => (mock.available ? createSafeStorageCodec(mock) : PLAINTEXT_CODEC),
-	};
-	// Matches the field's real shape: detection is synchronous and total, so the
-	// resolved environment is cached directly rather than as a Promise.
-	Object.defineProperty(plugin, "secretEnvironment", {
-		configurable: true,
-		get() {
-			return environment;
-		},
-	});
+
 	return { plugin, saved: () => ({ value: store.data, writes }) };
 }
 
+function vaultFor(storage: SecretStorageMock): SecretVault {
+	return wrapSecretStorage(storage);
+}
+
 describe("loadSettings migration", () => {
-	it("seals plaintext keys and rewrites data.json when encryption is available", async () => {
-		const mock = new SafeStorageLikeMock();
-		const { plugin, saved } = pluginWithData({ providerApiKeys: { deepseek: "sk-plain" } }, mock);
-
-		await plugin.loadSettings();
-		const persisted = saved().value as { providerApiKeys: Record<string, string> };
-		expect(persisted.providerApiKeys.deepseek).toMatch(/^enc:v1:/);
-		expect(plugin.settings.providerApiKeys.deepseek).toBe("sk-plain");
-		expect(mock.encryptStringCalls).toBe(1);
-	});
-
-	it("leaves data.json untouched when encryption is unavailable", async () => {
-		const mock = new SafeStorageLikeMock();
-		mock.available = false;
+	it("relocates a plaintext key but keeps the disk copy for the first session", async () => {
+		const id = secretIdFor("builtin", "deepseek");
 		const initial = { providerApiKeys: { deepseek: "sk-plain" } };
-		const { plugin, saved } = pluginWithData(structuredClone(initial), mock);
+		const storage = new SecretStorageMock();
+		const { plugin, saved } = pluginWithData(structuredClone(initial), { vault: vaultFor(storage) });
 
 		await plugin.loadSettings();
-		expect(saved().value).toEqual(initial);
-		expect(saved().writes).toBe(0);
+
+		expect(storage.setSecretCalls).toEqual([[id, "sk-plain"]]);
+		expect(storage.entries.get(id)).toBe("sk-plain");
+		expect(saved()).toEqual({ value: initial, writes: 0 });
 		expect(plugin.settings.providerApiKeys.deepseek).toBe("sk-plain");
 	});
 
-	it("does not rewrite an already-migrated vault", async () => {
-		const mock = new SafeStorageLikeMock();
-		const codec = createSafeStorageCodec(mock);
-		const sealedOnDisk = { providerApiKeys: { deepseek: codec.seal("sk-done") } };
-		const { plugin, saved } = pluginWithData(structuredClone(sealedOnDisk), mock);
-
-		await plugin.loadSettings();
-		expect(saved().value).toEqual(sealedOnDisk);
-		expect(saved().writes).toBe(0);
-		expect(plugin.settings.providerApiKeys.deepseek).toBe("sk-done");
-	});
-
-	it("keeps the plaintext file when sealing fails instead of destroying the key", async () => {
-		const mock = new SafeStorageLikeMock();
-		mock.encryptString = () => {
-			throw new Error("keychain locked");
-		};
-		const plaintext = { providerApiKeys: { deepseek: "sk-keep-me" }, customEndpoint: { baseUrl: "https://x/v1", apiKey: "ep", modelId: "m" } };
-		const { plugin, saved } = pluginWithData(structuredClone(plaintext), mock);
-
-		await plugin.loadSettings();
-		expect((saved().value as typeof plaintext).providerApiKeys.deepseek).toBe("sk-keep-me");
-		expect((saved().value as typeof plaintext).customEndpoint?.apiKey).toBe("ep");
-	});
-
-	it("warns when a sealed key came from another device's keychain and cannot be opened", async () => {
-		// Seal with one working keychain, then load with a second whose decrypt
-		// always fails — the stand-in for a vault synced between two machines.
-		const sealing = new SafeStorageLikeMock();
-		const sealedOnDisk = { providerApiKeys: { deepseek: createSafeStorageCodec(sealing).seal("sk-other-machine") } };
-		const mock = new SafeStorageLikeMock();
-		mock.decryptString = () => {
-			throw new Error("different keychain");
-		};
-		const { logger, records } = spyLogger();
-		const { plugin } = pluginWithData(structuredClone(sealedOnDisk), mock, logger);
-
-		await plugin.loadSettings();
-		expect(plugin.settings.providerApiKeys.deepseek).toBe("");
-		expect(records.some((record) => record.level === "warn" && record.message.includes("could not be decrypted"))).toBe(true);
-	});
-
-	it("does not warn for keys that decrypt fine", async () => {
-		const mock = new SafeStorageLikeMock();
-		const sealedOnDisk = { providerApiKeys: { deepseek: createSafeStorageCodec(mock).seal("sk-fine") } };
-		const { logger, records } = spyLogger();
-		const { plugin } = pluginWithData(structuredClone(sealedOnDisk), mock, logger);
-
-		await plugin.loadSettings();
-		expect(plugin.settings.providerApiKeys.deepseek).toBe("sk-fine");
-		expect(records.filter((record) => record.level === "warn")).toHaveLength(0);
-	});
-
-	it("migrates the custom endpoint key alongside provider keys", async () => {
-		const mock = new SafeStorageLikeMock();
+	it("clears the disk copy only after the vault returns it in a later session", async () => {
+		const id = secretIdFor("builtin", "deepseek");
+		const storage = new SecretStorageMock({ [id]: "sk-confirmed" });
 		const { plugin, saved } = pluginWithData(
-			{ providerApiKeys: {}, customEndpoint: { baseUrl: "https://gw/v1", apiKey: "sk-endpoint", modelId: "m" } },
-			mock,
+			{ providerApiKeys: { deepseek: "sk-confirmed" } },
+			{ vault: vaultFor(storage) },
 		);
 
 		await plugin.loadSettings();
-		const persisted = saved().value as { customEndpoint?: { apiKey: string } };
-		expect(persisted.customEndpoint?.apiKey).toMatch(/^enc:v1:/);
-		expect(plugin.settings.customEndpoint?.apiKey).toBe("sk-endpoint");
+
+		const persisted = saved().value as { providerApiKeys: Record<string, string> };
+		expect(persisted.providerApiKeys.deepseek).toBe("");
+		expect(saved().writes).toBe(1);
+		expect(storage.setSecretCalls).toEqual([]);
+		expect(plugin.settings.providerApiKeys.deepseek).toBe("sk-confirmed");
 	});
 
-	it("survives empty or malformed persisted data", async () => {
-		const mock = new SafeStorageLikeMock();
-		const { plugin, saved } = pluginWithData(null, mock);
+	it("adopts a relocated key without rewriting either store", async () => {
+		const id = secretIdFor("builtin", "deepseek");
+		const storage = new SecretStorageMock({ [id]: "sk-vaulted" });
+		const { plugin, saved } = pluginWithData(
+			{ providerApiKeys: { deepseek: "" } },
+			{ vault: vaultFor(storage) },
+		);
 
 		await plugin.loadSettings();
+
+		expect(plugin.settings.providerApiKeys.deepseek).toBe("sk-vaulted");
+		expect(storage.setSecretCalls).toEqual([]);
+		expect(saved().writes).toBe(0);
+	});
+
+	it("leaves plaintext untouched when secret storage is unavailable", async () => {
+		const initial = { providerApiKeys: { deepseek: "sk-plain" } };
+		const { plugin, saved } = pluginWithData(structuredClone(initial));
+
+		await plugin.loadSettings();
+
+		expect(saved()).toEqual({ value: initial, writes: 0 });
+		expect(plugin.settings.providerApiKeys.deepseek).toBe("sk-plain");
+	});
+
+	it("keeps the disk copy and warns when the secret store loses a write", async () => {
+		const initial = { providerApiKeys: { deepseek: "sk-keep-me" } };
+		const storage = new SecretStorageMock();
+		storage.swallowWrites = true;
+		const { logger, records } = spyLogger();
+		const { plugin, saved } = pluginWithData(structuredClone(initial), { vault: vaultFor(storage), log: logger });
+
+		await plugin.loadSettings();
+
+		expect(saved()).toEqual({ value: initial, writes: 0 });
+		expect(plugin.settings.providerApiKeys.deepseek).toBe("sk-keep-me");
+		expect(records.some((record) => record.level === "warn" && record.message.includes("Could not move"))).toBe(true);
+	});
+
+	it("opens legacy ciphertext, relocates the plaintext, and retires the ciphertext after confirmation", async () => {
+		const id = secretIdFor("builtin", "deepseek");
+		const legacySafeStorage = new SafeStorageLikeMock();
+		const sealed = sealForTest(legacySafeStorage, "sk-old");
+		const initial = { providerApiKeys: { deepseek: sealed } };
+		const storage = new SecretStorageMock();
+
+		const first = pluginWithData(structuredClone(initial), {
+			vault: vaultFor(storage),
+			legacySafeStorage,
+		});
+		await first.plugin.loadSettings();
+
+		expect(first.plugin.settings.providerApiKeys.deepseek).toBe("sk-old");
+		expect(storage.entries.get(id)).toBe("sk-old");
+		expect(first.saved()).toEqual({ value: initial, writes: 0 });
+
+		const second = pluginWithData(structuredClone(first.saved().value), {
+			vault: vaultFor(storage),
+			legacySafeStorage,
+		});
+		await second.plugin.loadSettings();
+
+		const persisted = second.saved().value as { providerApiKeys: Record<string, string> };
+		expect(second.plugin.settings.providerApiKeys.deepseek).toBe("sk-old");
+		expect(persisted.providerApiKeys.deepseek).toBe("");
+		expect(second.saved().writes).toBe(1);
+	});
+
+	it("warns and preserves foreign ciphertext when this device cannot open it", async () => {
+		const sealing = new SafeStorageLikeMock();
+		const sealed = sealForTest(sealing, "sk-other-machine");
+		const initial = { providerApiKeys: { deepseek: sealed } };
+		const storage = new SecretStorageMock();
+		const { logger, records } = spyLogger();
+		const { plugin, saved } = pluginWithData(structuredClone(initial), {
+			vault: vaultFor(storage),
+			legacySafeStorage: null,
+			log: logger,
+		});
+
+		await plugin.loadSettings();
+
+		expect(plugin.settings.providerApiKeys.deepseek).toBe("");
+		expect(saved()).toEqual({ value: initial, writes: 0 });
+		expect(storage.setSecretCalls).toEqual([]);
+		expect(records.some((record) => record.level === "warn" && record.message.includes("could not be decrypted"))).toBe(true);
+	});
+
+	it("relocates the legacy custom endpoint once and later clears both disk fields", async () => {
+		const id = secretIdFor("provider", CUSTOM_ENDPOINT_PROVIDER);
+		const initial = {
+			providerApiKeys: {},
+			customEndpoint: { baseUrl: "https://gw/v1", apiKey: "sk-endpoint", modelId: "m" },
+		};
+		const storage = new SecretStorageMock();
+		const first = pluginWithData(structuredClone(initial), { vault: vaultFor(storage) });
+
+		await first.plugin.loadSettings();
+
+		expect(storage.setSecretCalls).toEqual([[id, "sk-endpoint"]]);
+		expect(first.saved().writes).toBe(0);
+		expect(first.plugin.settings.customEndpoint?.apiKey).toBe("sk-endpoint");
+		expect(first.plugin.settings.providers.find((provider) => provider.id === CUSTOM_ENDPOINT_PROVIDER)?.apiKey).toBe("sk-endpoint");
+
+		const second = pluginWithData(structuredClone(first.saved().value), { vault: vaultFor(storage) });
+		await second.plugin.loadSettings();
+
+		const persisted = second.saved().value as {
+			customEndpoint?: { apiKey: string };
+			providers?: { id: string; apiKey: string }[];
+		};
+		expect(persisted.customEndpoint?.apiKey).toBe("");
+		expect(persisted.providers?.find((provider) => provider.id === CUSTOM_ENDPOINT_PROVIDER)?.apiKey).toBe("");
+		expect(second.saved().writes).toBe(1);
+	});
+
+	it("survives empty persisted data without provoking a write", async () => {
+		const { plugin, saved } = pluginWithData(null, { vault: vaultFor(new SecretStorageMock()) });
+
+		await plugin.loadSettings();
+
 		expect(plugin.settings).toEqual(normalizeSettings(null));
 		expect(saved().writes).toBe(0);
 	});
 });
 
 describe("saveSettings persistence boundary", () => {
-	it("writes sealed values while settings stay plaintext in memory", async () => {
-		const mock = new SafeStorageLikeMock();
-		const { plugin, saved } = pluginWithData({ providerApiKeys: {} }, mock);
+	it("writes a fresh key to secret storage and blanks only the persisted copy", async () => {
+		const id = secretIdFor("builtin", "deepseek");
+		const storage = new SecretStorageMock();
+		const { plugin, saved } = pluginWithData({ providerApiKeys: {} }, { vault: vaultFor(storage) });
 		await plugin.loadSettings();
 
 		plugin.settings.providerApiKeys.deepseek = "sk-fresh";
 		await plugin.saveSettings();
 
 		const persisted = saved().value as { providerApiKeys: Record<string, string> };
-		expect(persisted.providerApiKeys.deepseek).toMatch(/^enc:v1:/);
-		expect(createSafeStorageCodec(mock).unseal(persisted.providerApiKeys.deepseek ?? "")).toBe("sk-fresh");
+		expect(storage.entries.get(id)).toBe("sk-fresh");
+		expect(persisted.providerApiKeys.deepseek).toBe("");
 		expect(plugin.settings.providerApiKeys.deepseek).toBe("sk-fresh");
 	});
 
-	it("keeps the plaintext layout when this device cannot encrypt", async () => {
-		const mock = new SafeStorageLikeMock();
-		mock.available = false;
-		const { plugin, saved } = pluginWithData({ providerApiKeys: {} }, mock);
+	it("keeps the plaintext layout when this device has no secret store", async () => {
+		const { plugin, saved } = pluginWithData({ providerApiKeys: {} });
 		await plugin.loadSettings();
 
 		plugin.settings.providerApiKeys.deepseek = "sk-mobile";
@@ -178,5 +257,41 @@ describe("saveSettings persistence boundary", () => {
 
 		const persisted = saved().value as { providerApiKeys: Record<string, string> };
 		expect(persisted.providerApiKeys.deepseek).toBe("sk-mobile");
+	});
+
+	it("keeps plaintext and warns when a save-time vault write cannot be verified", async () => {
+		const storage = new SecretStorageMock();
+		storage.swallowWrites = true;
+		const { logger, records } = spyLogger();
+		const { plugin, saved } = pluginWithData({ providerApiKeys: {} }, { vault: vaultFor(storage), log: logger });
+		await plugin.loadSettings();
+
+		plugin.settings.providerApiKeys.deepseek = "sk-survivor";
+		await plugin.saveSettings();
+
+		const persisted = saved().value as { providerApiKeys: Record<string, string> };
+		expect(persisted.providerApiKeys.deepseek).toBe("sk-survivor");
+		expect(records.some((record) => record.level === "warn" && record.message.includes("Could not write"))).toBe(true);
+	});
+
+	it("stores a custom endpoint once and blanks both persisted aliases", async () => {
+		const id = secretIdFor("provider", CUSTOM_ENDPOINT_PROVIDER);
+		const storage = new SecretStorageMock();
+		const { plugin, saved } = pluginWithData(null, { vault: vaultFor(storage) });
+		await plugin.loadSettings();
+		plugin.settings = normalizeSettings({
+			customEndpoint: { baseUrl: "https://gw/v1", apiKey: "sk-endpoint", modelId: "m" },
+		});
+
+		await plugin.saveSettings();
+
+		const persisted = saved().value as {
+			customEndpoint?: { apiKey: string };
+			providers?: { id: string; apiKey: string }[];
+		};
+		expect(storage.setSecretCalls).toEqual([[id, "sk-endpoint"]]);
+		expect(persisted.customEndpoint?.apiKey).toBe("");
+		expect(persisted.providers?.find((provider) => provider.id === CUSTOM_ENDPOINT_PROVIDER)?.apiKey).toBe("");
+		expect(plugin.settings.customEndpoint?.apiKey).toBe("sk-endpoint");
 	});
 });

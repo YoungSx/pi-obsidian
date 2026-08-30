@@ -6,19 +6,19 @@ import { VIEW_TYPE_PIEM_CHAT, VIEW_TYPE_PIEM_LOGS, PLUGIN_ID } from "./constants
 import { createPluginLogger, type PluginLogger } from "./logging/pluginLogger";
 import { getLogFilePath } from "./logging/logFile";
 import { PiemLogView } from "./logging/logView";
-import type { SecretCodec } from "./secrets";
-import { isUndecryptableSecret } from "./secrets";
+import { isUndecryptableSecret, unsealPersistedSecret, type SafeStorageLike } from "./secrets";
+import { findLegacySafeStorage } from "./legacySafeStorage";
 import {
-	hasPersistedPlaintextSecrets,
-	persistedFormChanged,
+	applySecrets,
+	hasSealedSecrets,
+	persistedSettings,
 	readPersistedSecrets,
-	sealCurrentSettings,
-	sealedSecretsOf,
+	secretSlots,
 	unsealApiKeyMap,
-	unsealCustomEndpointApiKey,
 	unsealMcpServerTokens,
 	type PersistedSecrets,
 } from "./settingsSecrets";
+import { resolveSlot } from "./secretVault";
 import { NOOP_LOGGER, type LoggerLike } from "./logging/Logger";
 import { createSecretEnvironment, type SecretEnvironment } from "./secretsStore";
 import { DraftStore } from "./session/DraftStore";
@@ -62,8 +62,8 @@ export default class PiemPlugin extends Plugin {
 	private sessionManager: ObsidianSessionManager | null = null;
 	/**
 	 * Resolved once per load. In-memory settings always hold plaintext; this
-	 * codec is what converts to and from the persisted form at the
-	 * `loadData`/`saveData` boundary.
+	 * decides whether the persisted copy goes to Obsidian's secret store or
+	 * stays in `data.json`.
 	 */
 	private secretEnvironment: SecretEnvironment | null = null;
 	/**
@@ -84,13 +84,22 @@ export default class PiemPlugin extends Plugin {
 	}
 
 	/**
+	 * Decoder for ciphertext earlier releases wrote, resolved lazily.
+	 *
+	 * `undefined` means "not looked for yet"; `null` means "looked, none here".
+	 * Only reached when a vault actually holds an `enc:v1:` value, which is why
+	 * it is not resolved alongside the environment: most loads never need it.
+	 */
+	private legacySafeStorage: SafeStorageLike | null | undefined;
+
+	/**
 	 * Detection is synchronous and total, so the resolved environment is cached
 	 * directly. An earlier revision cached a Promise, which meant a rejection
 	 * during detection was memoised and re-thrown on every later access — and
 	 * because this sits on the `onload` path, that took the whole plugin down.
 	 */
 	private requireSecretEnvironment(): SecretEnvironment {
-		this.secretEnvironment ??= createSecretEnvironment({ log: (message) => this.log.debug(message) });
+		this.secretEnvironment ??= createSecretEnvironment({ host: this.app, log: (message) => this.log.debug(message) });
 		return this.secretEnvironment;
 	}
 
@@ -306,52 +315,121 @@ export default class PiemPlugin extends Plugin {
 	}
 
 	/**
-	 * Loads persisted settings, unsealing stored API keys into the plaintext
-	 * in-memory shape.
+	 * Loads persisted settings and resolves every API key into the plaintext
+	 * in-memory shape every reader expects.
 	 *
-	 * Migration is folded in here: a vault whose keys were written by an
-	 * older build (or by a device without encryption) holds plaintext. When
-	 * this device can encrypt, those keys are re-sealed and written back
-	 * immediately so no later save has to remember to do it. The rewrite is
-	 * skipped when anything about the loaded data looks wrong — a failed
-	 * migration keeps the old file rather than destroying it.
+	 * Three things happen in one pass, in this order for a reason:
+	 *
+	 * 1. Whatever `data.json` holds is decoded. That covers plaintext and the
+	 *    `enc:v1:` ciphertext earlier releases wrote — the decoder is looked for
+	 *    only when a sealed value is actually present.
+	 * 2. Each secret is resolved against Obsidian's secret store, which decides
+	 *    whether to adopt the store's copy, relocate the disk copy into it, or
+	 *    leave things alone. See `secretVault.ts` for why a freshly relocated key
+	 *    keeps its disk copy for one more session.
+	 * 3. `data.json` is rewritten only if at least one disk copy became
+	 *    redundant. A vault with nothing to relocate is not written at all.
 	 */
 	async loadSettings(): Promise<void> {
-		const environment = this.requireSecretEnvironment();
-		const codec = environment.codec();
 		const raw = await this.loadData() as Partial<PiemSettings> | null;
 
-		// Snapshot the persisted secret values verbatim: migration compares
-		// its output against these, not against the normalized settings.
+		// Snapshot the persisted values verbatim, before normalization trims or
+		// defaults them: the undecryptable-key warning compares against these.
 		const loaded = readPersistedSecrets(raw);
+		const safeStorage = hasSealedSecrets(loaded) ? this.requireLegacySafeStorage() : null;
 
 		const customEndpoint = normalizeCustomEndpoint(raw?.customEndpoint);
-		const unsealedCustomEndpoint = customEndpoint
-			? { ...customEndpoint, apiKey: unsealCustomEndpointApiKey(loaded.customEndpointApiKey, codec) }
+		const openedCustomEndpoint = customEndpoint
+			? { ...customEndpoint, apiKey: unsealPersistedSecret(loaded.customEndpointApiKey, safeStorage) }
 			: undefined;
-		const unsealedProviders = (Array.isArray(raw?.providers) ? raw.providers : []).map((provider) => ({
+		const openedProviders = (Array.isArray(raw?.providers) ? raw.providers : []).map((provider) => ({
 			...provider,
-			apiKey: unsealCustomEndpointApiKey(provider?.apiKey, codec),
+			apiKey: unsealPersistedSecret(provider?.apiKey, safeStorage),
 		}));
-		const unsealedKeyMap = unsealApiKeyMap(loaded.providerApiKeys, codec);
+		const openedKeyMap = unsealApiKeyMap(loaded.providerApiKeys, safeStorage);
 		this.settings = normalizeSettings({
 			...raw,
-			providers: unsealedProviders,
-			providerApiKeys: unsealedKeyMap,
-			customEndpoint: unsealedCustomEndpoint,
+			providers: openedProviders,
+			providerApiKeys: openedKeyMap,
+			customEndpoint: openedCustomEndpoint,
 			// The unseal pass repairs tokens over raw entries and leaves junk
 			// shapes untouched — typed as configs only because the very next
 			// step, normalizeSettings, drops anything it cannot read.
-			mcpServers: unsealMcpServerTokens(raw?.mcpServers, codec) as McpServerConfig[],
+			mcpServers: unsealMcpServerTokens(raw?.mcpServers, safeStorage) as McpServerConfig[],
 		});
 
 		this.warnUndecryptableSecrets(loaded, {
-			providerApiKeys: unsealedKeyMap,
-			customEndpointApiKey: unsealedCustomEndpoint?.apiKey ?? "",
-			configuredProviderApiKeys: Object.fromEntries(unsealedProviders.map((provider) => [provider.id, provider.apiKey])),
+			providerApiKeys: openedKeyMap,
+			customEndpointApiKey: openedCustomEndpoint?.apiKey ?? "",
+			configuredProviderApiKeys: Object.fromEntries(openedProviders.map((provider) => [provider.id, provider.apiKey])),
+			// Decoded a second time from the snapshot: the array pass above hands
+			// plaintext to `normalizeSettings`, but this warning needs the values
+			// keyed by server id to compare against what was persisted.
+			mcpServerTokens: Object.fromEntries(
+				Object.entries(loaded.mcpServerTokens).map(([id, token]) => [id, unsealPersistedSecret(token, safeStorage)]),
+			),
 		});
 
-		await this.migratePlaintextSecrets(codec, loaded);
+		await this.relocateSecrets();
+	}
+
+	/**
+	 * The decoder for legacy ciphertext, found at most once per load.
+	 *
+	 * Cached as `null` too: a vault that holds sealed values on a device with no
+	 * decoder would otherwise re-probe electron for every one of them.
+	 */
+	private requireLegacySafeStorage(): SafeStorageLike | null {
+		if (this.legacySafeStorage === undefined) {
+			this.legacySafeStorage = findLegacySafeStorage();
+			if (!this.legacySafeStorage) {
+				this.log.debug("Found stored ciphertext but no decoder on this device; those keys need re-entering.");
+			}
+		}
+		return this.legacySafeStorage;
+	}
+
+	/**
+	 * Moves in-memory secrets into Obsidian's secret store, and clears the disk
+	 * copies that have been proven redundant.
+	 *
+	 * Runs on every load and is idempotent: a fully relocated vault produces no
+	 * writes at all, in either store. Failure is swallowed — a key that could not
+	 * be relocated is still usable this session, and the disk copy that would
+	 * have been cleared is exactly what makes a retry possible next time.
+	 */
+	private async relocateSecrets(): Promise<void> {
+		const vault = this.requireSecretEnvironment().vault();
+		if (!vault.available) {
+			return;
+		}
+		try {
+			const resolved = new Map<string, string>();
+			const clearable = new Set<string>();
+			for (const slot of secretSlots(this.settings)) {
+				const resolution = resolveSlot({ id: slot.id, disk: slot.value }, vault);
+				resolved.set(slot.id, resolution.value);
+				if (resolution.clearable) {
+					clearable.add(slot.id);
+				}
+				if (resolution.writeFailed) {
+					// The vault took the write and lost it. Not fatal — the plaintext
+					// copy stays and the next load retries — but invisible otherwise.
+					this.log.warn("Could not move an API key into Obsidian's secret storage; it stays in this vault's config.", () => ({
+						secretId: slot.id,
+					}));
+				}
+			}
+			// Adopting a store value has to reach memory even when nothing is
+			// cleared: on a relocated vault this is the only thing that puts the
+			// key in front of the readers.
+			applySecrets(this.settings, resolved);
+			if (clearable.size > 0) {
+				await this.saveData(persistedSettings(this.settings, clearable));
+			}
+		} catch (error) {
+			this.log.warn("Failed to move API keys into Obsidian's secret storage; keeping the existing file", () => ({ error: String(error) }));
+		}
 	}
 
 	/**
@@ -369,6 +447,7 @@ export default class PiemPlugin extends Plugin {
 		const locations: [label: string, stored: Record<string, string>, opened: Record<string, string>][] = [
 			["providerApiKeys", loaded.providerApiKeys, unsealed.providerApiKeys],
 			["configuredProviderApiKeys", loaded.configuredProviderApiKeys, unsealed.configuredProviderApiKeys],
+			["mcpServerTokens", loaded.mcpServerTokens, unsealed.mcpServerTokens],
 		];
 		for (const [label, stored, opened] of locations) {
 			for (const [id, value] of Object.entries(stored)) {
@@ -383,37 +462,57 @@ export default class PiemPlugin extends Plugin {
 	}
 
 	/**
-	 * Re-seals plaintext secrets when this device can encrypt.
+	 * Persists settings, routing every secret to wherever this device keeps them.
 	 *
-	 * Runs once per load; idempotent because a vault whose secrets are all
-	 * already sealed produces byte-identical persisted values and is left
-	 * alone. Failure keeps the previous data.json — an unreadable keychain
-	 * must never cost the user their key.
+	 * On the `vault` tier each key is written to Obsidian's secret store and its
+	 * `data.json` field is blanked in the same pass — unlike the load path, which
+	 * defers clearing by a session, this is a value the user just typed, and the
+	 * in-memory copy remains authoritative until the next load. A write that fails
+	 * to read back keeps its disk field, so the key survives either way.
 	 */
-	private async migratePlaintextSecrets(codec: SecretCodec, loaded: PersistedSecrets): Promise<void> {
-		if (!codec.canRoundTrip || !hasPersistedPlaintextSecrets(loaded)) {
-			return;
-		}
-		try {
-			const sealed = sealCurrentSettings(this.settings, codec);
-			if (persistedFormChanged(sealedSecretsOf(sealed), loaded)) {
-				await this.saveData(sealed);
-			}
-		} catch (error) {
-			// Swallowed but logged: keeping the old plaintext file beats a failed
-			// write that destroys it. The next load retries; the warning is how a
-			// vault stuck on plaintext gets diagnosed instead of just observed.
-			this.log.warn("Failed to re-seal plaintext secrets; keeping the existing file", () => ({ error: String(error) }));
-		}
-	}
-
 	async saveSettings(): Promise<void> {
-		const environment = this.requireSecretEnvironment();
-		await this.saveData(sealCurrentSettings(this.settings, environment.codec()));
+		await this.saveData(persistedSettings(this.settings, this.storeSecrets()));
 		await this.agentService?.refreshConfiguration();
 		// The panel re-renders from the snapshot on its own, but the tab title is
 		// drawn by Obsidian outside React, so a language change needs this nudge.
 		this.findChatView()?.refreshHeader();
+	}
+
+	/**
+	 * Writes every in-memory secret to the store, returning the ids whose
+	 * `data.json` field may therefore be blanked.
+	 *
+	 * Empty on the plaintext tier, which is what makes the caller's single
+	 * `persistedSettings` call correct on both: nothing clearable means every key
+	 * keeps its field.
+	 */
+	private storeSecrets(): Set<string> {
+		const stored = new Set<string>();
+		const vault = this.requireSecretEnvironment().vault();
+		if (!vault.available) {
+			return stored;
+		}
+		for (const slot of secretSlots(this.settings)) {
+			try {
+				if (vault.write(slot.id, slot.value)) {
+					stored.add(slot.id);
+					continue;
+				}
+			} catch (error) {
+				// `SecretVault.write` is total by contract, so this is unreachable
+				// through the shipped adapter; caught anyway because losing a key to
+				// a throw on the save path is not a trade worth making.
+				this.log.warn("Writing an API key to Obsidian's secret storage threw; it stays in this vault's config.", () => ({
+					secretId: slot.id,
+					error: String(error),
+				}));
+				continue;
+			}
+			this.log.warn("Could not write an API key to Obsidian's secret storage; it stays in this vault's config.", () => ({
+				secretId: slot.id,
+			}));
+		}
+		return stored;
 	}
 
 	/**

@@ -30,7 +30,7 @@ import { createEffectLine } from "./effectLine";
 import { ModelModal } from "./ModelModal";
 import { McpServerModal } from "./McpServerModal";
 import { ProviderModal } from "./ProviderModal";
-import { describeSecretStorage, type SecretStorageState } from "./secretStorageCopy";
+import { describeSecretPortability, describeSecretStorage, type SecretStorageState } from "./secretStorageCopy";
 import {
 	describeUserSkillsDirProblem,
 	describeUserSkillsDirReading,
@@ -978,6 +978,12 @@ function renderAboutRows(containerEl: HTMLElement, host: SettingsPanelHost): voi
 
 	new Setting(containerEl).setName(t.t("settings.apiKeysHeading")).setHeading();
 	containerEl.createEl("p", { text: describeSecretStorage(host.secretStorage, t) });
+	// Empty on the plaintext tier, where keys do travel with the vault; a blank
+	// paragraph would read as a rendering fault, so the element is conditional.
+	const portability = describeSecretPortability(host.secretStorage, t);
+	if (portability) {
+		containerEl.createEl("p", { text: portability });
+	}
 	containerEl.createEl("p", { text: t.t("settings.restrictedKeyHint") });
 }
 

@@ -575,6 +575,14 @@ const obsidianStub = {
 		addIconMock(iconId, svgContent);
 	},
 	requestUrl: async (params: unknown): Promise<unknown> => await requestUrlMock(params),
+	/**
+	 * Reports every version as present.
+	 *
+	 * Production code gates the secret-storage tier on this, so a stub that said
+	 * "no" would silently route every test through the plaintext path. Tests that
+	 * care about the gate inject `hasApiVersion` instead of relying on this.
+	 */
+	requireApiVersion: (): boolean => true,
 	setIcon: () => undefined,
 	setTooltip: (element: HTMLElement, tooltip: string): void => setTooltipMock(element, tooltip),
 };
@@ -582,11 +590,15 @@ const obsidianStub = {
 /**
  * Controllable stand-in for Electron's `safeStorage`.
  *
- * Production code imports electron lazily, so tests exercise the desktop path
- * by injecting this mock into `createSecretEnvironment` directly rather than
- * registering a module-wide electron mock — one less global registration that
- * could clobber another file's expectations. Lives here with the obsidian stub
- * because it is the same kind of shared, per-test-reconfigurable handle.
+ * The plugin no longer writes ciphertext — see `secrets.ts` — so this exists to
+ * decode what earlier releases already put on users' disks, and to let tests
+ * manufacture such a value in the first place (via {@link sealForTest}).
+ * `encryptString` is therefore a test affordance, not something production
+ * reaches: `SafeStorageLike` does not even declare it.
+ *
+ * Two independent instances model two machines' keychains: a value sealed by one
+ * cannot be opened by the other, which is the cross-device failure the decoder
+ * has to survive.
  */
 export class SafeStorageLikeMock {
 	available = true;
@@ -617,6 +629,19 @@ export class SafeStorageLikeMock {
 		}
 		return plain;
 	}
+}
+
+/**
+ * Produces the persisted form an older release of this plugin would have written.
+ *
+ * Lives in the stub rather than in production code because nothing ships that
+ * seals any more; this is how a test builds the legacy value it wants to see
+ * opened. The layout — `enc:v1:` plus base64 — is `secrets.ts`'s, restated here
+ * on purpose: a test that reused the production encoder could not catch the
+ * encoder and decoder drifting apart together.
+ */
+export function sealForTest(safeStorage: SafeStorageLikeMock, plaintext: string): string {
+	return `enc:v1:${safeStorage.encryptString(plaintext).toString("base64")}`;
 }
 
 /**
