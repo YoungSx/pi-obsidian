@@ -26,6 +26,7 @@ import { ObsidianSessionManager } from "./session/ObsidianSessionManager";
 import { getLegacySessionDir, isLegacySessionDir } from "./session/sessionDir";
 import { ObsidianAgentService } from "./agent/ObsidianAgentService";
 import { McpManager } from "./mcp/mcpManager";
+import { emptySkillLoadReport, type SkillLoadReport } from "./agent/skillLoader";
 import { PiemChatView } from "./ui/PiemChatView";
 import { requestNoteReference, warnIfTruncated } from "./ui/noteReferenceCommand";
 import { BRAND_ICON_ID, registerBrandIcon } from "./brandIcon";
@@ -472,6 +473,18 @@ export default class PiemPlugin extends Plugin {
 	 */
 	async refreshAgentSkills(): Promise<void> {
 		await this.agentService?.refreshSkills();
+	}
+
+	/**
+	 * Warnings from the agent's last skill load, for the Skills settings tab.
+	 *
+	 * The panel reads the agent's load rather than performing its own, so it can
+	 * never report on a read the agent did not do. Falls back to an empty report
+	 * when there is no service — the settings tab outlives a failed `onload`, and
+	 * a dialog about skill files must not be the thing that throws.
+	 */
+	agentSkillLoad(): SkillLoadReport {
+		return this.agentService?.getSkillLoad() ?? emptySkillLoadReport();
 	}
 
 	private async startNewChat(): Promise<void> {

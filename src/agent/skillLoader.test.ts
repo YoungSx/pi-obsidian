@@ -4,7 +4,7 @@ import { installObsidianStub } from "../testing/obsidianStub";
 
 installObsidianStub();
 
-const { composeSystemPrompt, DEFAULT_SKILLS_DIR, expandSkill, findSkill, formatSkillDiagnostics, loadVaultSkills, mergeSkills } =
+const { composeSystemPrompt, DEFAULT_SKILLS_DIR, emptySkillLoadReport, expandSkill, findSkill, loadVaultSkills, mergeSkills } =
 	await import("./skillLoader");
 
 /** Minimal ExecutionEnv over a fixed path→content map, matching pi's skill walk. */
@@ -99,18 +99,29 @@ describe("loadVaultSkills", () => {
 	});
 });
 
-describe("formatSkillDiagnostics", () => {
-	it("is empty when nothing went wrong", () => {
-		expect(formatSkillDiagnostics([])).toBe("");
+describe("emptySkillLoadReport", () => {
+	it("reports no problems in either layer", () => {
+		const report = emptySkillLoadReport();
+
+		expect(report.vault).toEqual([]);
+		expect(report.user.diagnostics).toEqual([]);
+		expect(report.user.skills).toEqual([]);
 	});
 
-	it("joins one line per warning", () => {
-		const lines = formatSkillDiagnostics([
-			{ type: "warning", code: "parse_failed", message: "first problem", path: "/a" },
-			{ type: "warning", code: "read_failed", message: "second problem", path: "/b" },
-		]);
+	it("lists no searched folders, rather than the built-in pair", () => {
+		// Nothing has been consulted before the first load, and a report naming
+		// folders would claim a look that never happened — the distinction
+		// `UserSkillsSearchEntry.found` exists to preserve. The settings panel
+		// renders this shape on a tab opened before any skill load, so an
+		// invented row would appear on screen.
+		expect(emptySkillLoadReport().user.searched).toEqual([]);
+	});
 
-		expect(lines).toBe("first problem\nsecond problem");
+	it("hands back a fresh object each call, so one holder cannot mutate another's", () => {
+		const first = emptySkillLoadReport();
+		first.vault.push({ type: "warning", code: "parse_failed", message: "mine", path: "/a" });
+
+		expect(emptySkillLoadReport().vault).toEqual([]);
 	});
 });
 

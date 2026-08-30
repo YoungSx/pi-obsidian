@@ -30,7 +30,7 @@ import { renderSettingsPanel } from "./ui/settings/SettingsPanel";
 import { getT, isLanguageSetting, resolveLanguage, type LanguageHost, type LanguageSetting, type Translator } from "./i18n";
 import { DEFAULT_SEND_SHORTCUT, isSendShortcutSetting, type SendShortcut } from "./ui/keyboard";
 import { SkillManager } from "./skills/skillManager";
-import { loadUserSkills, userSkillsSupported } from "./skills/userSkills";
+import { userSkillsSupported } from "./skills/userSkills";
 import { normalizeUserSkillsDir } from "./skills/userSkillsDir";
 import { VaultExecutionEnv } from "./vault/VaultExecutionEnv";
 import { createFetchForTransport } from "./net/obsidianFetch";
@@ -510,10 +510,13 @@ export class PiemSettingTab extends PluginSettingTab {
 					update: (dirName) => manager().update(dirName),
 					remove: (dirName) => manager().remove(dirName),
 					refreshAgent: () => this.plugin.refreshAgentSkills(),
-					// The configured directory is read at call time, not captured, so
-					// the panel reports on the folder currently in the field rather
-					// than the one that was set when the tab opened.
-					loadUserSkills: () => loadUserSkills(this.plugin.settings.userSkillsDir),
+					// The agent's own load, not one this panel performs. The panel used
+					// to walk the folders itself, so the tab presented as the place
+					// skill problems are reported could describe a read the agent never
+					// did — and the two disagree exactly when it matters, a network
+					// folder reattaching between them. `refreshAgent` above is what
+					// makes this current, and the panel awaits it before every render.
+					lastSkillLoad: () => this.plugin.agentSkillLoad(),
 					// Probed rather than Platform.isDesktop: the same signal
 					// loadUserSkills skips on, so the panel and the loader can
 					// never disagree about whether this device has a node fs.

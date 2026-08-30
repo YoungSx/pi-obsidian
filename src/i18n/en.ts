@@ -145,6 +145,18 @@ export const en = {
 		commandKindSkill: "Skill",
 		/** Notice shown when a `/name` matches no loaded template or skill. */
 		unknownCommand: "Unknown command: /{name}",
+		/**
+		 * Appended to the refusal above only when the last skill load had
+		 * problems, and never otherwise — a plain typo gets a plain answer.
+		 *
+		 * It exists because the refusal can be wrong rather than merely
+		 * unhelpful: a SKILL.md whose frontmatter name breaks pi's rules loads
+		 * under its folder name instead, so the command the user read in their
+		 * own file really is missing while the skill really is loaded. Names no
+		 * path and quotes no error; the problems themselves are in the tab this
+		 * points at.
+		 */
+		unknownCommandSkillProblems: "Some skills could not be read. See Settings \u2192 Extensions.",
 		/** A template keeps the short name; the skill remains reachable explicitly. */
 		commandConflict: "Both a prompt and skill use /{name}. Used the prompt; use /skill:{name} for the skill.",
 		/** Notice summarizing non-fatal warnings from loading prompt templates. */
@@ -569,6 +581,30 @@ export const en = {
 		conflict: "{name} has local edits, so nothing was overwritten. Conflicting files: {files}.",
 		couldNotUpdate: "Could not update {name}: {message}",
 		couldNotDelete: "Could not delete {name}: {message}",
+		/**
+		 * Reads the files again. The recovery for everything the two problem
+		 * lists below can report — fix the file, fix the folder's permissions,
+		 * then press this — and the only way to make a load happen on demand,
+		 * which is what lets a failure be caught with the log view open.
+		 */
+		reload: "Reload",
+		/**
+		 * The reload's own verdict, needed because a clean reload changes nothing
+		 * on screen: the problem lists simply stay empty, and a button that
+		 * appears to do nothing reads as broken.
+		 */
+		reloadClean: "Skills read again, and nothing was wrong. The agent is using what is on disk now.",
+		/** Does not restate the problems: they are listed under the section each belongs to. */
+		reloadProblems: "Skills read again. The problems that came back are listed with each section.",
+		couldNotReload: "Could not read the skills again: {message}",
+		problemsHeading: "Problems reading skill files",
+		/**
+		 * Carries the consequence, which is the half a parser message never
+		 * states: a file listed here is missing from the list above, and nothing
+		 * else was affected by it.
+		 */
+		problemsDesc:
+			"These files were found but could not be read as skills, so they are missing from the list above. Every other skill loaded normally.",
 		userHeading: "User-level skills",
 		/**
 		 * Deliberately no longer names the folders.
@@ -617,6 +653,16 @@ export const en = {
 		 * looking in the wrong place entirely.
 		 */
 		userSearchedUnknown: "Could not be checked.",
+		userProblemsHeading: "Problems reading folders on this computer",
+		/**
+		 * "In its own words" is the load-bearing phrase: it tells the reader the
+		 * text below is the filesystem's, not Piem's own broken output, which is
+		 * what keeps a line like `EACCES: permission denied` from reading as a
+		 * crash. The second sentence is the consequence, and the third keeps one
+		 * unreadable folder from implying the rest of the section is untrustworthy.
+		 */
+		userProblemsDesc:
+			"Reported by this computer's filesystem, in its own words. Skills at these paths are not loaded. Folders that read cleanly are unaffected.",
 		userSkillOne: "1 skill",
 		userSkillMany: "{count} skills",
 	},

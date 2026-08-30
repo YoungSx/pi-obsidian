@@ -2528,6 +2528,37 @@ button.piem-chat__latest {
 	color: var(--text-warning);
 	font-size: var(--font-ui-small);
 	margin: 0 0 var(--size-4-4);
+	/* Diagnostics arrive as multi-line strings joined with `\n`; without this they
+	 * collapse into one unreadable run-on sentence. Same reason
+	 * `.piem-chat__banner-text` sets it. */
+	white-space: pre-line;
+}
+
+/*
+ * One skill-loading problem, in the filesystem's own words.
+ *
+ * Monospace because that is itself part of the framing: a line like
+ * `EACCES: permission denied, realpath 'C:\Users\…'` set in the UI font reads as
+ * the plugin's own broken output, and set in monospace it reads as quoted machine
+ * output — which is what the heading above it promises. It also makes separators
+ * and casing legible in a path the reader has to compare against what they typed.
+ *
+ * Wrapped, never truncated. An elided middle destroys exactly that comparison, so
+ * `overflow-wrap: anywhere` takes the hit on long unbroken Windows paths instead.
+ *
+ * Selectable, explicitly: Obsidian sets `user-select: none` on `body` and hands it
+ * back only to a few of its own surfaces, so a path the user needs to copy into a
+ * bug report inherits `none`. Both spellings for the same mobile WKWebView reason
+ * the chat transcript documents.
+ */
+.piem-settings-problem {
+	color: var(--text-warning);
+	font-family: var(--font-monospace);
+	font-size: var(--font-ui-smaller);
+	margin-top: var(--size-4-1);
+	overflow-wrap: anywhere;
+	-webkit-user-select: text;
+	user-select: text;
 }
 
 /*

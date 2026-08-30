@@ -232,7 +232,6 @@ describe("SkillManager.listSkills", () => {
 		const manager = new SkillManager(stubFetch({}), new MemoryFsEnv());
 		const inventory = await manager.listSkills();
 		expect(inventory.rows).toEqual([]);
-		expect(inventory.diagnostics).toEqual([]);
 	});
 
 	test("directory and root-level skills are listed with the right shape", async () => {

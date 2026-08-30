@@ -11,6 +11,10 @@ import { DEFAULT_LOG_LEVEL } from "../logging/logLevel";
 import type { PiemSettings } from "../settings";
 import { DEFAULT_SETTINGS } from "../settings";
 import type { ObsidianAgentService as ObsidianAgentServiceType } from "./ObsidianAgentService";
+import type { UserSkillsLoad } from "../skills/userSkills";
+import { spyLogger } from "../testing/logSpy";
+import { getT } from "../i18n";
+import type { LoggerLike } from "../logging/Logger";
 
 installObsidianStub();
 
@@ -26,7 +30,10 @@ const SESSION_DIR = `.${"obsidian"}/plugins/piem/sessions`;
 
 // The real home directory may hold user-level skills, and a test that asserts
 // on the composed prompt has to be hermetic — every service gets an empty loader.
-const NO_USER_SKILLS = async () => ({ skills: [], diagnostics: [] });
+// `searched` is empty rather than listing the built-in pair: nothing probed
+// them here, and a stub that claimed a look would be the very lie
+// `UserSkillsSearchEntry.found` distinguishes.
+const NO_USER_SKILLS = async (): Promise<UserSkillsLoad> => ({ skills: [], diagnostics: [], searched: [] });
 
 class MemoryAdapter {
 	private readonly files = new Map<string, { content: string; mtime: number }>();
@@ -716,11 +723,13 @@ describe("ObsidianAgentService", () => {
 		expect(service.getSnapshot().errorMessage).toBeTruthy();
 	});
 
-	it("reports a failed start through the snapshot instead of rejecting initialize()", async () => {
-		// Every caller of `initialize()` — the panel's effect, `sendPrompt`'s lazy
-		// start, a second tab opening mid-init — awaits the same shared promise. A
-		// rejection there would be an unhandled-rejection landmine in every path
-		// that does not await it, so the failure must ride the snapshot instead.
+	it("starts without skills rather than failing when the skill layer throws", async () => {
+		// The skill layer must not be able to stop the agent from existing. A
+		// folder the host refuses to read is the user's environment, not a broken
+		// conversation, and an agent without skills still answers questions while
+		// one that never started answers nothing. This used to reach
+		// `initializationError` and surface as the assertive banner, which also
+		// gates sending — so an unreadable home directory silently disabled chat.
 		const service = createService(new MemoryAdapter(), {
 			loadUserSkills: async () => {
 				throw new Error("User skill folder unreadable.");
@@ -728,16 +737,13 @@ describe("ObsidianAgentService", () => {
 		});
 
 		await service.initialize(); // must not throw
-		expect(service.getSnapshot().errorMessage).toBe("User skill folder unreadable.");
 
-		// And the failed start still gates sending, silently: the banner already
-		// carries the reason, so a refusal needs no second copy of it.
-		expect(await service.sendPrompt("Hello")).toBe(false);
-		expect(service.getSnapshot().noticeMessage).toBeUndefined();
-
-		// Dismissal is the one clear path, and it clears the start failure too.
-		service.dismissMessages();
 		expect(service.getSnapshot().errorMessage).toBeUndefined();
+		// Nor does the raw host message reach the quiet channel: it belongs to the
+		// Skills tab and the log, not to a panel about the user's notes.
+		expect(service.getSnapshot().noticeMessage).toBeUndefined();
+		// And sending still works, which is the whole point of containing it.
+		expect(await service.sendPrompt("Hello")).toBe(true);
 	});
 
 	it("keeps a reply whose write to the vault failed, and reports it as a notice", async () => {
@@ -1611,14 +1617,86 @@ describe("vault skills", () => {
 
 	const SUMMARIZE_SKILL = "---\nname: summarize\ndescription: Summarize a note\n---\nDo the summary.";
 
-	function createSkillsService(app: App, prompts: string[]): ObsidianAgentServiceType {
+	function createSkillsService(app: App, prompts: string[], logger?: LoggerLike): ObsidianAgentServiceType {
 		return new ObsidianAgentService(
 			app,
 			() => defaultTestSettings(),
 			new ObsidianSessionManager(asDataAdapter(new MemoryAdapter()), SESSION_DIR, "obsidian-vault:Test"),
-			{ streamFn: createPromptCapturingStreamFn(prompts), loadUserSkills: NO_USER_SKILLS },
+			{ streamFn: createPromptCapturingStreamFn(prompts), loadUserSkills: NO_USER_SKILLS, logger },
 		);
 	}
+
+	it("reports nothing before a load has happened, rather than inventing folders", async () => {
+		// The settings tab renders this shape when opened before any chat, which is
+		// why it must be honest about having looked at nothing: `searched` listing
+		// the built-in pair would claim a probe that never ran, the exact confusion
+		// `UserSkillsSearchEntry.found` distinguishes. The panel awaits
+		// `refreshSkills` before every render to make the field current — this pins
+		// what it would otherwise render.
+		const service = createSkillsService(createVaultAppWithSkills({}), []);
+
+		expect(service.getSkillLoad()).toEqual({ vault: [], user: { skills: [], diagnostics: [], searched: [] } });
+	});
+
+	it("makes the load current for a caller that awaits refreshSkills", async () => {
+		// The panel's whole contract: await this, then read the field. If the field
+		// were populated later — on the next send, say — the tab would render the
+		// previous load and the report would describe a read the agent had moved on
+		// from.
+		const service = createSkillsService(
+			createVaultAppWithSkills({ "Piem/skills/bad/SKILL.md": "---\nname: Not_A_Name\ndescription: broken\n---\nBody" }),
+			[],
+		);
+
+		await service.refreshSkills();
+
+		expect(service.getSkillLoad().vault.length).toBeGreaterThan(0);
+	});
+
+	it("logs each load problem once, not once per message sent", async () => {
+		// The log is where the detail lives now that the banner does not carry it,
+		// and `reloadSkills` runs on every send — so an unreadable folder that stays
+		// unreadable would write one line per user message into a 2000-record ring,
+		// burying the very detail the log view exists to show. The fingerprint is
+		// what makes a standing problem legible instead of a flood.
+		const { logger, records } = spyLogger();
+		const service = createSkillsService(
+			createVaultAppWithSkills({ "Piem/skills/bad/SKILL.md": "---\nname: Not_A_Name\ndescription: broken\n---\nBody" }),
+			[],
+			logger,
+		);
+
+		await service.sendPrompt("Hello");
+		const afterFirst = records.filter((record) => record.level === "warn").length;
+		await service.sendPrompt("Hello again");
+		await service.sendPrompt("And again");
+
+		expect(afterFirst).toBeGreaterThan(0);
+		expect(records.filter((record) => record.level === "warn").length).toBe(afterFirst);
+		// The code and the path ride the log even though the panel shows neither:
+		// this is where a bug report gets assembled.
+		const warned = records.find((record) => record.level === "warn");
+		expect(warned?.detail?.code).toBe("invalid_metadata");
+		expect(warned?.detail?.path).toContain("bad/SKILL.md");
+		expect(warned?.detail?.layer).toBe("vault");
+	});
+
+	it("logs again once the problems on disk actually change", async () => {
+		// Deduping must not become silence: a user who fixes one file and breaks
+		// another has a different problem, and the log has to say so.
+		const skillFiles: Record<string, string> = { "Piem/skills/bad/SKILL.md": "---\nname: Not_A_Name\ndescription: broken\n---\nBody" };
+		const { logger, records } = spyLogger();
+		const service = createSkillsService(createVaultAppWithSkills(skillFiles), [], logger);
+
+		await service.sendPrompt("Hello");
+		const afterFirst = records.filter((record) => record.level === "warn").length;
+
+		delete skillFiles["Piem/skills/bad/SKILL.md"];
+		skillFiles["Piem/skills/worse/SKILL.md"] = "---\nname: Also_Bad\ndescription: broken\n---\nBody";
+		await service.sendPrompt("Hello again");
+
+		expect(records.filter((record) => record.level === "warn").length).toBeGreaterThan(afterFirst);
+	});
 
 	it("composes vault skills into the system prompt the model receives", async () => {
 		// The prompt travels through state into the request context, so asserting
@@ -1689,10 +1767,13 @@ describe("vault skills", () => {
 		expect(sent).not.toContain("Call get_active_note");
 	});
 
-	it("surfaces skill diagnostics as a notice the user can still see", async () => {
-		// Regression guard for the sendPrompt ordering: refreshConfiguration runs
-		// reloadSkills, which sets the notice; clearing beforehand is what keeps
-		// the warning from being erased in the same breath.
+	it("keeps skill load problems out of the chat panel entirely", async () => {
+		// The reported defect: `EACCES: permission denied, realpath '…'` from a
+		// home-directory folder appeared in the chat banner. These are reports
+		// about the user's own files, `reloadSkills` runs on every send, and the
+		// banner has no control that could act on them — so they go to the Skills
+		// tab and the log instead. Asserted on the vault half because it is the
+		// one a fake vault can produce; the user half rides the same path.
 		const prompts: string[] = [];
 		const service = createSkillsService(
 			createVaultAppWithSkills({
@@ -1704,9 +1785,67 @@ describe("vault skills", () => {
 
 		await service.sendPrompt("Hello");
 
-		// pi's diagnostic message names the offending skill, not the file path;
-		// the notice is what survives the sendPrompt clear-then-reload ordering.
-		expect(service.getSnapshot().noticeMessage).toContain("Not_A_Name");
+		expect(service.getSnapshot().noticeMessage).toBeUndefined();
+		expect(service.getSnapshot().errorMessage).toBeUndefined();
+	});
+
+	it("hands the same load's problems to the settings panel, split by layer", async () => {
+		// The panel renders this rather than loading the folders itself, so it can
+		// never describe a read the agent did not perform. Two independent loads a
+		// moment apart can disagree — a network folder that reattaches between them
+		// would leave the panel reporting clean while the prompt was built without
+		// those skills.
+		const prompts: string[] = [];
+		const service = createSkillsService(
+			createVaultAppWithSkills({
+				"Piem/skills/summarize/SKILL.md": SUMMARIZE_SKILL,
+				"Piem/skills/bad/SKILL.md": "---\nname: Not_A_Name\ndescription: broken\n---\nBody",
+			}),
+			prompts,
+		);
+
+		await service.initialize();
+		const { vault, user } = service.getSkillLoad();
+
+		// pi's message names the offending skill, and `path` names the file — the
+		// pair is what makes the row actionable, so both must survive the trip.
+		expect(vault.some((diagnostic) => diagnostic.message.includes("Not_A_Name"))).toBe(true);
+		expect(vault.some((diagnostic) => diagnostic.path.endsWith("bad/SKILL.md"))).toBe(true);
+		// The user layer stays its own list: its consequences differ, and its
+		// messages are raw filesystem text rather than pi's own wording.
+		expect(user.diagnostics).toEqual([]);
+	});
+
+	it("points an unresolvable command at the Skills tab only when a load actually failed", async () => {
+		// The refusal misattributes the cause rather than merely being unhelpful.
+		// A SKILL.md pi refused to load — here, no `description` — is genuinely
+		// absent, so the command the user wrote in their own file really is
+		// unknown, and "unknown command" reads as "you typed it wrong" when the
+		// truth is "your file did not load". Per-turn and caused by what they just
+		// typed, the same standard the missing-embed notice meets.
+		const prompts: string[] = [];
+		const withProblem = createSkillsService(
+			createVaultAppWithSkills({ "Piem/skills/bad/SKILL.md": "---\nname: bad\n---\nBody with no description" }),
+			prompts,
+		);
+
+		expect(await withProblem.sendPrompt("/bad")).toBe(false);
+		const hinted = withProblem.getSnapshot().noticeMessage ?? "";
+		expect(hinted).toContain("/bad");
+		// Names the tab as it is actually labelled. The pointer is useless if it
+		// sends the reader to a tab that does not exist, and this leaf has already
+		// gone stale once — the tab was renamed from "Skills" to "Extensions" while
+		// this copy still said the old name.
+		expect(hinted).toContain(getT("en").t("settings.tabExtensions"));
+		// The pointer names no path and quotes no filesystem text — the problems
+		// themselves stay in the tab it points at.
+		expect(hinted).not.toContain("bad/SKILL.md");
+
+		// A clean load gets the plain refusal: a typo deserves a plain answer.
+		const clean = createSkillsService(createVaultAppWithSkills({ "Piem/skills/summarize/SKILL.md": SUMMARIZE_SKILL }), []);
+
+		expect(await clean.sendPrompt("/nope")).toBe(false);
+		expect(clean.getSnapshot().noticeMessage).toBe("Unknown command: /nope");
 	});
 
 	it("refreshes a live agent's prompt when the vault gains a skill", async () => {

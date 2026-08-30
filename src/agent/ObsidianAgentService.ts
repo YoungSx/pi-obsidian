@@ -41,8 +41,8 @@ import { injectContext, type InjectedNote } from "./contextInjection";
 import { ContextRefs, type ContextRef } from "./contextRefs";
 import { createSubagentExtension } from "../subagent/extension";
 import { OBSIDIAN_AGENT_SYSTEM_PROMPT } from "./systemPrompt";
-import { composeSystemPrompt, expandSkill, findSkill, formatSkillDiagnostics, loadVaultSkills, mergeSkills } from "./skillLoader";
-import { loadUserSkills, type UserSkill } from "../skills/userSkills";
+import { composeSystemPrompt, emptySkillLoadReport, expandSkill, findSkill, loadVaultSkills, mergeSkills, type SkillLoadReport } from "./skillLoader";
+import { loadUserSkills, type UserSkillsLoad } from "../skills/userSkills";
 import type { Skill, SkillDiagnostic } from "@earendil-works/pi-agent-core";
 import { describeAgentEvent } from "./agentEventLog";
 import { summarizeToolContent } from "../ui/traceSummary";
@@ -309,8 +309,12 @@ export interface ObsidianAgentServiceOptions {
 	 * User-level skill loader, overridable so tests stay out of the real home
 	 * directory; defaults to {@link loadUserSkills}. Receives the configured
 	 * extra folder, if any.
+	 *
+	 * Returns the loader's whole result, `searched` included, because the Skills
+	 * settings tab reports on this load rather than running its own — see
+	 * {@link SkillLoadReport}.
 	 */
-	loadUserSkills?: (customDir?: string) => Promise<{ skills: UserSkill[]; diagnostics: SkillDiagnostic[] }>;
+	loadUserSkills?: (customDir?: string) => Promise<UserSkillsLoad>;
 	/**
 	 * Root logger; the service logs under its `agent` child.
 	 *
@@ -355,7 +359,7 @@ export class ObsidianAgentService {
 	private readonly getSettings: () => PiemSettings;
 	private readonly sessionManager: ObsidianSessionManager;
 	private readonly streamFn: StreamFn | undefined;
-	private readonly loadUserSkillsFn: (customDir?: string) => Promise<{ skills: UserSkill[]; diagnostics: SkillDiagnostic[] }>;
+	private readonly loadUserSkillsFn: (customDir?: string) => Promise<UserSkillsLoad>;
 	/** See {@link ObsidianAgentServiceOptions.persistSettings}. */
 	private readonly persistSettings: () => Promise<void>;
 	/** See {@link ObsidianAgentServiceOptions.getExternalTools}. */
@@ -525,6 +529,40 @@ export class ObsidianAgentService {
 	 * finished load rather than awaiting one.
 	 */
 	private skills: Skill[] = [];
+	/**
+	 * Warnings from the last skill load, kept apart by layer.
+	 *
+	 * These are reports about the user's own files — a malformed `SKILL.md`, a
+	 * home folder the filesystem refuses — so they belong to the panel that
+	 * manages those files, not to the conversation. They used to ride the chat
+	 * notice banner, which put raw OS text like
+	 * `EACCES: permission denied, realpath '…'` in front of someone who was
+	 * asking a question about their notes, and re-raised it on every send.
+	 *
+	 * Stored rather than passed through because the Skills settings tab reads
+	 * *this* load rather than performing its own. That is what keeps the tab
+	 * from describing a read the agent never did: two independent loads, a
+	 * moment apart, can disagree — a network folder that reattaches between
+	 * them would leave the panel reporting clean while the prompt was built
+	 * without those skills.
+	 *
+	 * The two layers stay separate all the way to the UI. They are reported
+	 * under different headings because their consequences differ: a vault file
+	 * is one the user can open from the panel, and a home-directory folder is
+	 * one only their operating system can explain.
+	 */
+	private lastSkillLoad: SkillLoadReport = emptySkillLoadReport();
+	/**
+	 * Fingerprint of the last logged diagnostic set, so a standing problem is
+	 * logged once instead of once per turn.
+	 *
+	 * {@link reloadSkills} runs on every prompt send, so an unreadable folder
+	 * would otherwise write one warning per user message — filling the 2000-record
+	 * ring buffer and the log file with copies of the same line, and burying the
+	 * detail the log panel exists to show. `undefined` means nothing has been
+	 * logged yet, which is distinct from the empty string a clean load produces.
+	 */
+	private loggedDiagnosticsKey: string | undefined;
 
 	constructor(app: App, getSettings: () => PiemSettings, sessionManager: ObsidianSessionManager, options: ObsidianAgentServiceOptions = {}) {
 		this.app = app;
@@ -621,13 +659,15 @@ export class ObsidianAgentService {
 		// in-flight request instead of letting it bill tokens whose chips are
 		// already superseded.
 		this.suggestionController?.abort();
-		// Stale banners are cleared exactly once, and before
-		// `refreshConfiguration` rather than after it. Two things depend on this
-		// single point: the reload inside `refreshConfiguration` surfaces fresh
-		// skill diagnostics as a notice, and the image resolution below can raise
-		// a missing-embed notice — clearing after either would erase a warning
-		// before it was ever seen. The run's own error path still overwrites
-		// `panelError` in `catch`.
+		// Stale banners are cleared exactly once, and before the work below rather
+		// than after it. The command resolution and the image resolution further
+		// down both raise notices — an unknown `/name`, a missing embed — and
+		// clearing after either would erase a warning before it was ever seen. The
+		// run's own error path still overwrites `panelError` in `catch`.
+		//
+		// Skill diagnostics used to be the other reason this order mattered. They
+		// no longer reach the banner at all (see `reloadSkills`), so the ordering
+		// now rests on the two per-turn notices alone.
 		this.panelError = undefined;
 		this.noticeMessage = undefined;
 		await this.refreshConfiguration();
@@ -643,7 +683,7 @@ export class ObsidianAgentService {
 			if (explicitSkillName !== undefined) {
 				const skill = findSkill(this.skills, explicitSkillName);
 				if (!skill) {
-					this.setNotice(this.t().t("chat.unknownCommand", { name: command.name }));
+					this.setNotice(this.describeUnknownCommand(command.name));
 					return false;
 				}
 				modelPrompt = expandSkill(skill, command.additionalInstructions);
@@ -658,7 +698,7 @@ export class ObsidianAgentService {
 				} else if (skill) {
 					modelPrompt = expandSkill(skill, command.additionalInstructions);
 				} else {
-					this.setNotice(this.t().t("chat.unknownCommand", { name: command.name }));
+					this.setNotice(this.describeUnknownCommand(command.name));
 					return false;
 				}
 			}
@@ -1135,6 +1175,14 @@ export class ObsidianAgentService {
 	 * — never hears about them. This is the narrower half of that method: the
 	 * skills reload and the subscriber notification, with none of the model
 	 * and session bookkeeping a settings change needs.
+	 *
+	 * Also the panel's Reload button, which is why a failure is *not* contained
+	 * here: someone pressed a control and is waiting for its verdict, so the
+	 * rejection travels to them instead of being logged and swallowed. The
+	 * startup path takes {@link reloadSkillsSafely} for the opposite reason.
+	 *
+	 * Awaiting this is how a caller makes {@link getSkillLoad} current: the
+	 * promise resolves only once the load has finished and been stored.
 	 */
 	async refreshSkills(): Promise<void> {
 		await this.reloadSkills();
@@ -1216,7 +1264,10 @@ export class ObsidianAgentService {
 		// Skills are read from the vault here too: `saveSettings` calls this after
 		// every settings change, and the panel re-reads the folder with it, so a
 		// newly saved skill reaches the running conversation without a reload.
-		await this.reloadSkills();
+		// Contained, for the reason `reloadSkillsSafely` documents: `sendPrompt`
+		// awaits this outside its own `try`, so a throwing skill layer would
+		// reject the send rather than merely arrive without skills.
+		await this.reloadSkillsSafely();
 		await this.sessionManager.ensureConfiguration(defaults);
 		await this.refreshSessionInfo();
 		this.notify();
@@ -1376,7 +1427,7 @@ export class ObsidianAgentService {
 	}
 
 	private async initializeAgent(): Promise<void> {
-		await this.reloadSkills();
+		await this.reloadSkillsSafely();
 		const defaults = this.getSessionDefaults();
 		this.sessionInfo = await this.sessionManager.continueRecentSession(defaults);
 		const context = await this.sessionManager.buildSessionContext();
@@ -1559,10 +1610,16 @@ export class ObsidianAgentService {
 	 *
 	 * Runs before a new agent is built and again whenever configuration
 	 * refreshes, so a skill the user just saved in the vault reaches the next
-	 * turn without a plugin reload. The diagnostics are warnings about the
-	 * user's own files — a typo'd `SKILL.md` is not a chat failure — so they
-	 * ride the notice channel, which the next user turn clears, rather than the
-	 * assertive error banner.
+	 * turn without a plugin reload.
+	 *
+	 * The diagnostics do not reach the chat panel. They are warnings about the
+	 * user's own files, and this method runs on every send, so routing them to
+	 * the notice banner put raw filesystem text —
+	 * `EACCES: permission denied, realpath '…'` — in front of someone asking a
+	 * question about their notes, once per message, with no control anywhere near
+	 * it that could act on the problem. They are stored for the Skills settings
+	 * tab, which owns those files, and logged for the log panel. See
+	 * {@link lastSkillLoad}.
 	 */
 	private async reloadSkills(): Promise<void> {
 		const { skills: vaultSkills, diagnostics } = await loadVaultSkills(this.env);
@@ -1570,19 +1627,109 @@ export class ObsidianAgentService {
 		// pi itself reads those directories, so a vault that already uses pi
 		// picks up the skills it wrote there, and a vault skill of the same
 		// name still wins.
-		const { skills: userSkills, diagnostics: userDiagnostics } = await this.loadUserSkillsFn(this.getSettings().userSkillsDir);
-		const skills = mergeSkills(createBuiltinSkills(this.t()), userSkills, vaultSkills);
+		const userLoad = await this.loadUserSkillsFn(this.getSettings().userSkillsDir);
+		const skills = mergeSkills(createBuiltinSkills(this.t()), userLoad.skills, vaultSkills);
 		this.skills = skills;
-		// Both sets are warnings about the user's own files, so they share the
-		// notice channel; dropping the user-level half would recreate the silence
-		// this reload path exists to end — a misconfigured extra folder loading
-		// nothing would go unmentioned.
-		const problems = formatSkillDiagnostics([...diagnostics, ...userDiagnostics]);
-		if (problems) {
-			this.setNotice(problems);
-		}
+		this.lastSkillLoad = { vault: diagnostics, user: userLoad };
+		this.logSkillDiagnostics(diagnostics, userLoad.diagnostics);
 		if (this.agent) {
 			this.agent.state.systemPrompt = composeSystemPrompt(OBSIDIAN_AGENT_SYSTEM_PROMPT, skills);
+		}
+	}
+
+	/**
+	 * "Unknown command", plus a pointer to the Skills tab when the last load
+	 * had problems.
+	 *
+	 * This is the one place a skill-loading problem still speaks in chat, and it
+	 * earns that by being per-turn and caused by what the user just typed —
+	 * the same standard `chat.imageNotFound` meets. It exists because the bare
+	 * refusal misattributes the cause. A `SKILL.md` pi refused to load — no
+	 * `description`, unreadable frontmatter — is genuinely absent, so the command
+	 * the user wrote in their own file really is unknown, and the answer reads as
+	 * "you typed it wrong" when the truth is "your file did not load". A name that
+	 * merely breaks pi's character rules is worse still: the skill loads under
+	 * whatever the frontmatter said, so the *folder* name the user reached for is
+	 * the one that fails. Either way the explanation is a diagnostic, and without
+	 * this pointer its only copy is in a panel they have no reason to open.
+	 *
+	 * It names no path and quotes no filesystem text — the problems themselves
+	 * stay in the Skills tab. Silent when the last load was clean, which is the
+	 * ordinary case: a plain typo gets a plain answer.
+	 */
+	private describeUnknownCommand(name: string): string {
+		const t = this.t();
+		const unknown = t.t("chat.unknownCommand", { name });
+		const { vault, user } = this.lastSkillLoad;
+		const problems = vault.length + user.diagnostics.length;
+		return problems === 0 ? unknown : `${unknown}\n${t.t("chat.unknownCommandSkillProblems")}`;
+	}
+
+	/**
+	 * {@link reloadSkills} with the skill layer's failures contained.
+	 *
+	 * The loaders promise never to throw — every {@link NodeHomeEnv} operation
+	 * returns a `Result` — but that is a contract, not a structural guarantee, and
+	 * the seam is injectable. On the startup path the difference mattered: a throw
+	 * from here reached {@link initialize}'s handler, became
+	 * {@link initializationError}, and surfaced as the assertive red banner, which
+	 * also gates sending. A folder the user's operating system refuses to read
+	 * would have stopped the agent from existing.
+	 *
+	 * So a failure here degrades to no skills plus a logged error. Skills are an
+	 * augmentation: an agent without them answers questions, and one that cannot
+	 * start answers nothing. Only the startup path takes this route — a reload
+	 * driven by the settings panel's Reload button lets the error out, because
+	 * there someone is watching and asked for the result.
+	 */
+	private async reloadSkillsSafely(): Promise<void> {
+		try {
+			await this.reloadSkills();
+		} catch (error) {
+			this.log.error("Skill load failed; continuing without skills", () => ({ error: String(error) }));
+			this.skills = createBuiltinSkills(this.t());
+			this.lastSkillLoad = emptySkillLoadReport();
+		}
+	}
+
+	/**
+	 * Warnings from the last skill load, for the Skills settings tab.
+	 *
+	 * The panel renders this rather than loading the folders itself, so it can
+	 * never describe a read the agent did not perform — see
+	 * {@link lastSkillLoad}. Callers refresh it by awaiting
+	 * {@link refreshSkills}, which resolves only after the load finishes.
+	 */
+	getSkillLoad(): SkillLoadReport {
+		return this.lastSkillLoad;
+	}
+
+	/**
+	 * Logs each diagnostic once per distinct set, at warn.
+	 *
+	 * `code` and `path` are logged though the panel does not show them: the code
+	 * is jargon with no consequence attached, and the log is where a bug report
+	 * gets assembled. The fingerprint is what keeps a standing problem — an
+	 * unreadable folder that is still unreadable next turn — from writing one
+	 * line per user message into a ring buffer that holds 2000 of them.
+	 */
+	private logSkillDiagnostics(vault: SkillDiagnostic[], user: SkillDiagnostic[]): void {
+		const all = [
+			...vault.map((diagnostic) => ({ layer: "vault", diagnostic })),
+			...user.map((diagnostic) => ({ layer: "user", diagnostic })),
+		];
+		const key = all.map(({ layer, diagnostic }) => `${layer}:${diagnostic.code}:${diagnostic.path}:${diagnostic.message}`).join("\n");
+		if (key === this.loggedDiagnosticsKey) {
+			return;
+		}
+		this.loggedDiagnosticsKey = key;
+		for (const { layer, diagnostic } of all) {
+			this.log.warn("Skill load warning", () => ({
+				layer,
+				code: diagnostic.code,
+				path: diagnostic.path,
+				message: diagnostic.message,
+			}));
 		}
 	}
 

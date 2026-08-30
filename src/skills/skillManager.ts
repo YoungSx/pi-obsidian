@@ -42,10 +42,20 @@ export interface SkillRow {
 	provenance?: SkillProvenance;
 }
 
+/**
+ * The installed skills, as rows.
+ *
+ * Deliberately carries no diagnostics. This class performs its own load — a
+ * fresh {@link ExecutionEnv}, a moment after the agent's — and reporting
+ * problems from it would let the panel describe a read the agent never did:
+ * two loads either side of a folder reattaching disagree, and the panel would
+ * say clean while the prompt was built without those skills. The warnings come
+ * from `ObsidianAgentService.getSkillLoad()` instead. What survives here is
+ * what only a vault walk can answer and the agent's load never computes:
+ * `dirName` and `provenance`, which update and delete need.
+ */
 export interface SkillInventory {
 	rows: SkillRow[];
-	/** One line per load problem, for the tab's warning banner. */
-	diagnostics: string[];
 }
 
 export class SkillManager {
@@ -61,9 +71,9 @@ export class SkillManager {
 
 	/** Lists installed skills. A vault without the skills folder lists as empty. */
 	async listSkills(): Promise<SkillInventory> {
-		const { skills, diagnostics } = await loadVaultSkills(this.env, this.skillsDir);
+		const { skills } = await loadVaultSkills(this.env, this.skillsDir);
 		const rows = await Promise.all(skills.map((skill) => this.toRow(skill)));
-		return { rows, diagnostics: diagnostics.map((diagnostic) => diagnostic.message) };
+		return { rows };
 	}
 
 	/** Fetches a URL the user pasted, for preview before anything is written. */
