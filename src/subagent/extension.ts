@@ -1,5 +1,6 @@
 import type { AgentTool, Skill, StreamFn, ThinkingLevel } from "@earendil-works/pi-agent-core";
 import type { Model } from "@earendil-works/pi-ai";
+import { createKillSubagentTool, createListSubagentsTool } from "./controlTools";
 import { SubagentRegistry } from "./registry";
 import { SUBAGENT_DEPTH_LIMIT, createSpawnSubagentTool, type SubagentToolsContext } from "./spawnTool";
 import { createWaitSubagentTool, type WaitPacing } from "./waitTool";
@@ -29,8 +30,9 @@ export interface SubagentHost {
  *
  * The plugin wires one call to this at construction and touches nothing else:
  * `createTools` assembles the parent's tool set (vault tools plus the
- * spawn/wait pair), the extension owns every policy the delegation involves —
- * depth cap, spawn/wait pacing, the registry, child-kill bookkeeping — and
+ * delegation four: spawn, wait, list, kill), the extension owns every policy
+ * the delegation involves — depth cap, concurrency cap, wait pacing, the
+ * registry, child-kill bookkeeping — and
  * `disposeAll` is the teardown hook for service destruction and plugin
  * unload.
  *
@@ -72,7 +74,15 @@ export function createSubagentExtension(
 	function buildTools(depth: number): AgentTool[] {
 		const tools = host.createVaultTools();
 		if (depth < SUBAGENT_DEPTH_LIMIT) {
-			tools.push(createSpawnSubagentTool(context, depth), createWaitSubagentTool(context));
+			// The four travel together: a level that may spawn must also be able to
+			// collect, enumerate, and stop what it spawned. Handing out spawn alone
+			// is what leaves a parent unable to manage its own fan-out.
+			tools.push(
+				createSpawnSubagentTool(context, depth),
+				createWaitSubagentTool(context),
+				createListSubagentsTool(context),
+				createKillSubagentTool(context),
+			);
 		}
 		return tools;
 	}

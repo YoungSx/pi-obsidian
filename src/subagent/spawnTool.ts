@@ -22,6 +22,20 @@ import type { WaitPacing } from "./waitTool";
 export const SUBAGENT_DEPTH_LIMIT = 2;
 
 /**
+ * How many subagents may be running at once, across the whole tree.
+ *
+ * This is the one place a *new* limit is warranted rather than a relaxed one:
+ * nothing else stops a parent from fanning out until the provider starts
+ * refusing requests, and a rate limit surfaces as an opaque per-child failure
+ * that looks like the task went wrong rather than like the fan-out was too
+ * wide. Claude Code caps concurrent subagents at 20 and Codex at 4; 20 is the
+ * looser of the two and far above any plausible deliberate fan-out, so it
+ * bounds the runaway case without touching normal use. Settled children do not
+ * count — unlike Codex, a finished child holds nothing until it is collected.
+ */
+export const SUBAGENT_CONCURRENCY_LIMIT = 20;
+
+/**
  * Everything the delegation tools reach for at execution time.
  *
  * Getters rather than captured values because the parent service re-resolves
@@ -80,16 +94,18 @@ const ROLE_NAMES = SUBAGENT_ROLES.map((role) => role.name).join(", ");
  * The subagent runs on the same model and transport as the parent but an
  * isolated, in-memory transcript — nothing it does lands in the session log,
  * and its only output is the report a later {@link createWaitSubagentTool}
- * call collects. Nesting is capped by construction: the extension hands these
- * tools only to sets at depth {@link SUBAGENT_DEPTH_LIMIT} allows, and a
- * grandchild's set never contains them, so the tree cannot grow past that
- * floor.
+ * call collects. Nesting is capped by construction: the extension hands the
+ * delegation tools only to sets at depth {@link SUBAGENT_DEPTH_LIMIT} allows,
+ * and a grandchild's set never contains them, so the tree cannot grow past
+ * that floor. Width is capped at runtime instead, by
+ * {@link SUBAGENT_CONCURRENCY_LIMIT} — depth is a property of a tool set, but
+ * how many children are alive is only knowable when a spawn is asked for.
  */
 export function createSpawnSubagentTool(context: SubagentToolsContext, depth: number): AgentTool<typeof SpawnParameters> {
 	return {
 		name: "spawn_subagent",
 		label: "Spawn subagent",
-		description: `Start one self-contained task on a subagent and return immediately with its id — do not wait for the result here; collect it with wait_subagent. The subagent runs with this vault's tools and reports back when done. Use it when a task is better worked in isolation — a broad vault sweep, a critique, a summary — or when the intermediate tool output would flood this conversation. Several spawns started together run in parallel. Roles: ${ROLE_NAMES}. The subagent cannot ask questions; its reply is its only output, so a good task leaves nothing unsaid. It may spawn one further level down, but no deeper.`,
+		description: `Start one self-contained task on a subagent and return immediately with its id — do not wait for the result here; collect it with wait_subagent. The subagent runs with this vault's tools and reports back when done. Use it when a task is better worked in isolation — a broad vault sweep, a critique, a summary — or when the intermediate tool output would flood this conversation. Several spawns started together run in parallel (up to ${SUBAGENT_CONCURRENCY_LIMIT} at once); check on them with list_subagents and stop one you no longer need with kill_subagent. Roles: ${ROLE_NAMES}. The subagent cannot ask questions; its reply is its only output, so a good task leaves nothing unsaid. It may spawn one further level down, but no deeper.`,
 		parameters: SpawnParameters,
 		execute: async (_toolCallId, params, signal) => {
 			throwIfAborted(signal);
@@ -98,6 +114,14 @@ export function createSpawnSubagentTool(context: SubagentToolsContext, depth: nu
 				// Unreachable for schema-valid calls; kept because a hand-rolled
 				// payload through a shim deserves a named error, not `undefined` noise.
 				throw new Error(`Unknown subagent role: ${params.role}. Valid roles: ${ROLE_NAMES}`);
+			}
+			const live = context.registry.liveCount();
+			if (live >= SUBAGENT_CONCURRENCY_LIMIT) {
+				// Named as a pacing problem rather than a fault, because that is what
+				// it is and the recovery is obvious: collect something first.
+				throw new Error(
+					`${live} subagents are already running, which is the limit (${SUBAGENT_CONCURRENCY_LIMIT}). Collect one with wait_subagent or stop one with kill_subagent, then spawn again.`,
+				);
 			}
 			const id = context.registry.nextId();
 			// The linked controller is the child's kill switch: it fires with the
