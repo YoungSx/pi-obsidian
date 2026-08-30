@@ -59,6 +59,16 @@ export interface SubagentRunResult {
 	/** Assistant turns the subagent took, for the parent's tool-result details. */
 	turns: number;
 	usage: UsageTotals;
+	/**
+	 * Why a report is less than the whole answer, when it is.
+	 *
+	 * A run cut short still holds whatever the child had already written, and
+	 * throwing that away is the one thing none of the peer implementations do —
+	 * a 29-minute sweep reaped at 30 minutes has findings worth reading. Absent
+	 * on a run that finished on its own, so the common case carries no field
+	 * the parent has to interpret.
+	 */
+	incomplete?: "reaped" | "aborted";
 }
 
 export interface LinkedSignals {
@@ -208,10 +218,12 @@ export async function runSubagent(options: SubagentRunOptions): Promise<Subagent
 		throwIfAborted(linked.signal);
 		await agent.prompt(task);
 	} catch (error) {
-		if (linked.signal.aborted) {
-			throw abortError();
+		// An abort is not a failure to report — the salvage path below decides
+		// whether the run left anything worth handing back. Anything else is a
+		// real fault and travels as itself.
+		if (!linked.signal.aborted) {
+			throw error;
 		}
-		throw error;
 	} finally {
 		// On the happy path the signal never fires, so the listener must come
 		// down with the rest of the wiring or it outlives the run.
@@ -219,28 +231,45 @@ export async function runSubagent(options: SubagentRunOptions): Promise<Subagent
 		linked.dispose();
 	}
 
-	// pi resolves `prompt` — rather than rejecting — when a run ends aborted,
-	// so the killed-run case is checked here too, after settlement.
-	if (linked.signal.aborted) {
-		throw abortError();
-	}
-
 	const messages = agent.state.messages;
 	const lastAssistant = [...messages].reverse().find((message) => message.role === "assistant");
+	const accounting = {
+		turns: messages.filter((message) => message.role === "assistant").length,
+		usage: sumUsage(messages),
+	};
+
+	// pi resolves `prompt` — rather than rejecting — when a run ends aborted, so
+	// the killed-run case is settled here rather than in the catch above.
+	if (linked.signal.aborted) {
+		// Whatever the child had already written is the point of salvaging: a
+		// long sweep reaped one minute from the end holds most of its findings.
+		// The strict "a tool-call message is not a report" rule is relaxed for
+		// exactly this case — there is no final report to prefer over prefatory
+		// text, so the alternative to imperfect text is no text at all. The
+		// `incomplete` flag is what stops the parent reading it as the answer.
+		const salvaged = extractAssistantText(lastAssistant);
+		if (!salvaged) {
+			throw abortError();
+		}
+		return { text: salvaged, ...accounting, incomplete: linked.timedOut() ? "reaped" : "aborted" };
+	}
+
 	// A message that requested tools has no report in it — even when it also
 	// carries prefatory text ("Let me search for that…"), which is exactly the
 	// wrong thing to hand the parent as a deliverable.
 	const reportReady = lastAssistant !== undefined && lastAssistant.stopReason !== "toolUse";
 	const text = reportReady ? extractAssistantText(lastAssistant) : "";
 	if (!text) {
-		// Reachable when the run stopped on a tool error before any reply: report
-		// the failure instead of handing the parent an empty success.
-		const failure = lastToolError(messages) ?? agent.state.errorMessage ?? "produced no report";
-		throw new Error(`Subagent failed: ${failure}`);
+		// A failing tool that ended the run is a failure; a child that swept the
+		// vault, found nothing, and said so briefly is not. Conflating them
+		// leaves the parent unable to tell "no matches" from "the run broke", so
+		// only a recorded error raises here — the empty-but-clean run returns as
+		// itself and the wait tool words it as "no report".
+		const failure = lastToolError(messages) ?? agent.state.errorMessage;
+		if (failure) {
+			throw new Error(`Subagent failed: ${failure}`);
+		}
+		return { text: "", ...accounting };
 	}
-	return {
-		text,
-		turns: messages.filter((message) => message.role === "assistant").length,
-		usage: sumUsage(messages),
-	};
+	return { text, ...accounting };
 }

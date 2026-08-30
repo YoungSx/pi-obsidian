@@ -14,6 +14,15 @@ export interface SubagentEntry {
 	settled: boolean;
 	result?: SubagentRunResult;
 	error?: Error;
+	/**
+	 * Why this child was cut short, when something cut it short.
+	 *
+	 * Recorded at the moment the kill is ordered rather than derived afterwards:
+	 * once the run unwinds, a parent-stop, a reaper, and an explicit
+	 * `kill_subagent` are indistinguishable from the aborted signal alone, and
+	 * the parent needs to know which one it was to word its own next move.
+	 */
+	killedBy?: "parent" | "teardown" | "tool";
 	/** The spawn call's run signal; a wait only sees children of its own run. */
 	parentSignal: AbortSignal | undefined;
 }
@@ -90,6 +99,52 @@ export class SubagentRegistry {
 		return this.entries.get(id);
 	}
 
+	/**
+	 * Kills one live child on the parent's orders.
+	 *
+	 * Returns what happened rather than throwing, because every outcome here is
+	 * something the model should read and move on from: an id it mistyped, a
+	 * child that had already finished, a sibling belonging to another run. The
+	 * kill itself is the same `abort` that teardown and parent-stop use, so a
+	 * killed child unwinds down one well-tested path.
+	 */
+	kill(id: string, ownerSignal: AbortSignal | undefined): "killed" | "already-settled" | "not-found" | "not-yours" {
+		const entry = this.entries.get(id);
+		if (!entry) {
+			return "not-found";
+		}
+		// Scoped the same way an id-less wait is: a child may kill what it
+		// spawned, never a sibling or its own parent's other work. A hostless
+		// caller (no signal) is the test/CLI case and owns everything.
+		if (ownerSignal !== undefined && entry.parentSignal !== ownerSignal) {
+			return "not-yours";
+		}
+		if (entry.settled) {
+			return "already-settled";
+		}
+		entry.killedBy = "tool";
+		entry.abort();
+		return "killed";
+	}
+
+	/**
+	 * How many children are still running, across every run and depth.
+	 *
+	 * Counted live rather than tracked incrementally: entries settle from their
+	 * own promise handlers, and a counter decremented there would drift the
+	 * moment a path forgot to. The map is bounded by one plugin session's
+	 * spawns, so the scan is cheap.
+	 */
+	liveCount(): number {
+		let live = 0;
+		for (const entry of this.entries.values()) {
+			if (!entry.settled) {
+				live += 1;
+			}
+		}
+		return live;
+	}
+
 	/** Children of one run, in spawn order — what an id-less wait covers. */
 	forSignal(signal: AbortSignal): SubagentEntry[] {
 		return [...this.entries.values()].filter((entry) => entry.parentSignal === signal);
@@ -103,6 +158,9 @@ export class SubagentRegistry {
 	/** Kills every live child; called when the service or plugin tears down. */
 	disposeAll(): void {
 		for (const entry of this.entries.values()) {
+			if (!entry.settled) {
+				entry.killedBy = "teardown";
+			}
 			entry.abort();
 			entry.dispose();
 		}

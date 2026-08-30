@@ -13,10 +13,13 @@ export function createActiveNoteTool(app: App): AgentTool<typeof ActiveNoteParam
 	return {
 		name: "get_active_note",
 		label: "Get active note",
-		// The active note's path already arrives in the per-turn <context> block, so
-		// the description steers away from the no-argument call that only re-reads it.
+		// The active note's path arrives in the per-turn <context> block for the main
+		// conversation, so the wording steers that caller away from a no-argument
+		// call that only re-reads it. A subagent gets no such block, and the old
+		// flat "it is already in your context" steered it away from the one tool
+		// that could tell it — hence the conditional phrasing.
 		description:
-			"Read the active Markdown note's selected text or body content. Its path is already in your context, so do not call this only to learn the path.",
+			"Read the active Markdown note's path, selected text, or body content. If a <context> block in this conversation already names the active note, do not call this only to learn the path.",
 		parameters: ActiveNoteParameters,
 		execute: async (_toolCallId, params, signal) => {
 			throwIfAborted(signal);

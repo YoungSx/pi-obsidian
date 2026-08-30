@@ -9,8 +9,9 @@ import {
 	type StreamFn,
 } from "@earendil-works/pi-agent-core";
 import { Type } from "typebox";
-import { clampWaitTimeoutMs, WAIT_DEFAULT_MS, WAIT_MAX_MS, WAIT_MIN_MS, type WaitPacing } from "./waitTool";
+import { clampWait, clampWaitTimeoutMs, WAIT_DEFAULT_MS, WAIT_MAX_MS, WAIT_MIN_MS, type WaitPacing } from "./waitTool";
 import { runSubagent, SUBAGENT_MAX_LIFETIME_MS } from "./runner";
+import { SUBAGENT_CONCURRENCY_LIMIT } from "./spawnTool";
 import { createSubagentExtension, type SubagentHost } from "./extension";
 import {
 	DEFAULT_SUBAGENT_ROLE_NAME,
@@ -377,6 +378,79 @@ describe("runSubagent", () => {
 	it("arms the default reaper, which is finite", () => {
 		expect(SUBAGENT_MAX_LIFETIME_MS).toBeGreaterThan(0);
 	});
+
+	it("hands back a partial report when the reaper lands mid-run", async () => {
+		const failing = failingTool();
+		// The script clamps to its last entry, so after the written turn the model
+		// retries the failing call forever and the reaper ends the run. The text
+		// from the turn before is the salvage.
+		const result = await runSubagent({
+			task: "t",
+			role,
+			tools: [failing],
+			model: MODEL,
+			// Prefatory text on the tool-call message is the only text a run that
+			// never finishes ever produces — a plain text turn would end the run
+			// before the reaper could land. Salvage relaxes the "a tool-call
+			// message is not a report" rule for exactly this case.
+			streamFn: scriptedStreamFn([{ toolCall: { id: "call_1", name: "grep" }, text: "Partial findings: two matches." }]),
+			thinkingLevel: "off" as never,
+			timeoutMs: 60,
+		});
+		expect(result.text).toContain("Partial findings");
+		expect(result.incomplete).toBe("reaped");
+	});
+
+	it("marks a parent-aborted run's salvaged text as aborted, not reaped", async () => {
+		const controller = new AbortController();
+		const failing = failingTool();
+		const run = runSubagent({
+			task: "t",
+			role,
+			tools: [failing],
+			model: MODEL,
+			streamFn: scriptedStreamFn([{ toolCall: { id: "call_1", name: "grep" }, text: "Wrote this much." }]),
+			thinkingLevel: "off" as never,
+			signal: controller.signal,
+		});
+		// Let the first turn land before stopping, so there is something to salvage.
+		await new Promise((resolve) => setTimeout(resolve, 20));
+		controller.abort();
+		const result = await run;
+		expect(result.text).toContain("Wrote this much.");
+		expect(result.incomplete).toBe("aborted");
+	});
+
+	it("still throws when an aborted run wrote nothing at all", async () => {
+		const controller = new AbortController();
+		const run = runSubagent({
+			task: "t",
+			role,
+			tools: [],
+			model: MODEL,
+			streamFn: hangingStreamFn(),
+			thinkingLevel: "off" as never,
+			signal: controller.signal,
+		});
+		controller.abort();
+		expect(run).rejects.toThrow("Subagent aborted");
+	});
+
+	it("returns an empty report rather than a failure for a clean silent run", async () => {
+		// "I swept the vault and found nothing" is an answer. Only a recorded
+		// error makes an empty run a failure.
+		const result = await runSubagent({
+			task: "t",
+			role,
+			tools: [],
+			model: MODEL,
+			streamFn: scriptedStreamFn([{ text: "" }]),
+			thinkingLevel: "off" as never,
+		});
+		expect(result.text).toBe("");
+		expect(result.incomplete).toBeUndefined();
+		expect(result.turns).toBe(1);
+	});
 });
 
 describe("spawn/wait extension", () => {
@@ -579,5 +653,332 @@ describe("spawn/wait extension", () => {
 		// Skills ride every level of the tree.
 		expect(grandchild!.systemPrompt).toContain("grooming");
 		extension.disposeAll();
+	});
+
+	it("the parent set carries the delegation four", () => {
+		const names = toolsWithPacing(scriptedStreamFn([{ text: "ok" }])).map((tool) => tool.name);
+		expect(names).toContain("spawn_subagent");
+		expect(names).toContain("wait_subagent");
+		expect(names).toContain("list_subagents");
+		expect(names).toContain("kill_subagent");
+	});
+
+	it("the grandchild set carries none of the four", async () => {
+		const observations: ChildObservation[] = [];
+		const parentStream = scriptedStreamFn([
+			{ toolCall: { id: "p1", name: "spawn_subagent", arguments: { task: "Sweep" } } },
+			{ toolCall: { id: "p2", name: "wait_subagent", arguments: {} } },
+			{ text: "Folded in." },
+		]);
+		const childStream = scriptedStreamFn([
+			{ toolCall: { id: "s1", name: "spawn_subagent", arguments: { task: "Narrow" } } },
+			{ toolCall: { id: "s2", name: "wait_subagent", arguments: {} } },
+			{ text: "Child report." },
+		]);
+		const grandchildStream = scriptedStreamFn([{ text: "Floor report." }]);
+		const dispatching: StreamFn = (model, context, options) => {
+			if (!(context.systemPrompt?.includes("delegated task") ?? false)) {
+				return parentStream(model, context, options);
+			}
+			const hasSpawn = (context.tools ?? []).some((tool) => tool.name === "spawn_subagent");
+			return (hasSpawn ? childStream : grandchildStream)(model, context, options);
+		};
+		const extension = createSubagentExtension(makeHost(observing(dispatching, observations)), { waitPacing: TEST_PACING });
+		const agent = new Agent({
+			streamFn: dispatching,
+			convertToLlm,
+			initialState: {
+				systemPrompt: "You are the parent.",
+				model: MODEL,
+				thinkingLevel: "off" as never,
+				tools: extension.createTools(),
+				messages: [],
+			},
+		});
+		await agent.prompt("Delegate.");
+		const grandchild = observations.find(
+			(o) => o.systemPrompt?.includes("delegated task") && !o.toolNames.includes("spawn_subagent"),
+		);
+		expect(grandchild).toBeDefined();
+		for (const name of ["spawn_subagent", "wait_subagent", "list_subagents", "kill_subagent"]) {
+			expect(grandchild!.toolNames).not.toContain(name);
+		}
+		extension.disposeAll();
+	});
+
+	it("list_subagents answers at once, without waiting", async () => {
+		const controller = new AbortController();
+		const extension = createSubagentExtension(makeHost(hangingStreamFn()), { waitPacing: TEST_PACING });
+		const tools = extension.createTools();
+		try {
+			await toolNamed(tools, "spawn_subagent").execute("c1", { task: "a", role: "scout" }, controller.signal);
+			const listed = await toolNamed(tools, "list_subagents").execute("c2", {}, controller.signal);
+			expect(textBlock(listed)).toContain("subagent-1");
+			expect(listed.details).toMatchObject({ subagents: [{ subagentId: "subagent-1", role: "scout", status: "running" }] });
+		} finally {
+			extension.disposeAll();
+		}
+	});
+
+	it("list_subagents names children of earlier turns rather than claiming none exist", async () => {
+		const tools = toolsWithPacing(scriptedStreamFn([{ text: "done" }]));
+		const earlier = new AbortController();
+		await toolNamed(tools, "spawn_subagent").execute("c1", { task: "a" }, earlier.signal);
+		const laterTurn = new AbortController();
+		const listed = await toolNamed(tools, "list_subagents").execute("c2", {}, laterTurn.signal);
+		expect(textBlock(listed)).toContain("Earlier turns spawned: subagent-1");
+		expect(listed.details).toMatchObject({ subagents: [], earlierIds: ["subagent-1"] });
+	});
+
+	it("kill_subagent stops a live child and its partial work survives", async () => {
+		const controller = new AbortController();
+		// Prefatory text is the only text a never-finishing child produces, and it
+		// is what the kill must leave behind.
+		const stream = scriptedStreamFn([{ toolCall: { id: "t1", name: "grep" }, text: "Found two so far." }]);
+		const host: SubagentHost = {
+			...makeHost(stream),
+			// A tool that never resolves keeps the child alive until the kill lands.
+			createVaultTools: () => [
+				{
+					name: "grep",
+					label: "grep",
+					description: "hangs",
+					parameters: Type.Object({}),
+					execute: async (_id: string, _p: unknown, signal?: AbortSignal) =>
+						new Promise((_resolve, reject) => {
+							signal?.addEventListener("abort", () => reject(new Error("aborted")), { once: true });
+						}),
+				} as AgentTool,
+			],
+		};
+		const extension = createSubagentExtension(host, { waitPacing: TEST_PACING });
+		const tools = extension.createTools();
+		try {
+			await toolNamed(tools, "spawn_subagent").execute("c1", { task: "Sweep" }, controller.signal);
+			// Let the first turn land so there is prefatory text to salvage.
+			await new Promise((resolve) => setTimeout(resolve, 20));
+			const killed = await toolNamed(tools, "kill_subagent").execute("c2", { subagentId: "subagent-1" }, controller.signal);
+			expect(killed.details).toMatchObject({ subagentId: "subagent-1", killed: true });
+			const collected = await toolNamed(tools, "wait_subagent").execute("c3", { subagentId: "subagent-1" }, controller.signal);
+			expect(textBlock(collected)).toContain("Found two so far.");
+			expect(textBlock(collected)).toContain("kill_subagent");
+			expect(textBlock(collected)).toContain("INCOMPLETE");
+			expect(collected.details).toMatchObject({
+				status: "settled",
+				subagents: [{ subagentId: "subagent-1", status: "incomplete", incomplete: "aborted" }],
+			});
+		} finally {
+			extension.disposeAll();
+		}
+	});
+
+	it("kill_subagent reports rather than throws on a settled child and an unknown id", async () => {
+		const tools = toolsWithPacing(scriptedStreamFn([{ text: "done" }]));
+		await toolNamed(tools, "spawn_subagent").execute("c1", { task: "a" }, undefined);
+		await toolNamed(tools, "wait_subagent").execute("c2", {}, undefined);
+		const settled = await toolNamed(tools, "kill_subagent").execute("c3", { subagentId: "subagent-1" }, undefined);
+		expect(settled.details).toMatchObject({ killed: false, reason: "already-settled" });
+		const missing = await toolNamed(tools, "kill_subagent").execute("c4", { subagentId: "subagent-9" }, undefined);
+		expect(missing.details).toMatchObject({ killed: false, reason: "not-found" });
+		expect(textBlock(missing)).toContain("subagent-1");
+	});
+
+	it("kill_subagent refuses a child of another run", async () => {
+		const extension = createSubagentExtension(makeHost(hangingStreamFn()), { waitPacing: TEST_PACING });
+		const tools = extension.createTools();
+		const mine = new AbortController();
+		const theirs = new AbortController();
+		try {
+			await toolNamed(tools, "spawn_subagent").execute("c1", { task: "a" }, theirs.signal);
+			const refused = await toolNamed(tools, "kill_subagent").execute("c2", { subagentId: "subagent-1" }, mine.signal);
+			expect(refused.details).toMatchObject({ killed: false, reason: "not-yours" });
+		} finally {
+			extension.disposeAll();
+		}
+	});
+
+	it("refuses a spawn past the concurrency limit and says how to recover", async () => {
+		const controller = new AbortController();
+		const extension = createSubagentExtension(makeHost(hangingStreamFn()), { waitPacing: TEST_PACING });
+		const tools = extension.createTools();
+		const spawn = toolNamed(tools, "spawn_subagent");
+		try {
+			for (let i = 0; i < SUBAGENT_CONCURRENCY_LIMIT; i++) {
+				await spawn.execute(`c${i}`, { task: `task ${i}` }, controller.signal);
+			}
+			expect(spawn.execute("over", { task: "one too many" }, controller.signal)).rejects.toThrow(
+				`which is the limit (${SUBAGENT_CONCURRENCY_LIMIT})`,
+			);
+		} finally {
+			extension.disposeAll();
+		}
+	});
+
+	it("a settled child frees its concurrency slot", async () => {
+		const tools = toolsWithPacing(scriptedStreamFn([{ text: "done" }]));
+		const spawn = toolNamed(tools, "spawn_subagent");
+		for (let i = 0; i < SUBAGENT_CONCURRENCY_LIMIT; i++) {
+			await spawn.execute(`c${i}`, { task: `task ${i}` }, undefined);
+		}
+		await toolNamed(tools, "wait_subagent").execute("collect", {}, undefined);
+		// Every child settled, so the next spawn is not at the limit.
+		const after = await spawn.execute("next", { task: "after collection" }, undefined);
+		expect(after.details).toMatchObject({ status: "running" });
+	});
+
+	it("a long report is not cut at pi's 2000-line file limit", async () => {
+		const long = Array.from({ length: 2_600 }, (_, i) => `line ${i + 1}`).join("\n");
+		const tools = toolsWithPacing(scriptedStreamFn([{ text: long }]));
+		await toolNamed(tools, "spawn_subagent").execute("c1", { task: "Enumerate" }, undefined);
+		const result = await toolNamed(tools, "wait_subagent").execute("c2", { subagentId: "subagent-1" }, undefined);
+		expect(textBlock(result)).toContain("line 2600");
+		expect(result.details).not.toMatchObject({ truncated: true });
+	});
+
+	it("names the next offset when a report is cut, and paging reaches the end", async () => {
+		// Wide enough to exceed pi's 50KB byte budget, so the cap really lands.
+		const long = Array.from({ length: 900 }, (_, i) => `line ${i + 1}: ${"x".repeat(80)}`).join("\n");
+		const tools = toolsWithPacing(scriptedStreamFn([{ text: long }]));
+		await toolNamed(tools, "spawn_subagent").execute("c1", { task: "Enumerate" }, undefined);
+		const wait = toolNamed(tools, "wait_subagent");
+		const first = await wait.execute("c2", { subagentId: "subagent-1" }, undefined);
+		expect(first.details).toMatchObject({ truncated: true, totalLines: 900 });
+		// Line numbers count the report's own lines, so page one starts at 1 — the
+		// header is outside the cap on purpose.
+		expect(textBlock(first)).toContain("lines 1-");
+		expect(textBlock(first)).toContain("of 900");
+		expect(textBlock(first)).toContain("line 1: ");
+
+		// Follow the offset the result names, rather than computing one.
+		let next = (first.details as { nextOffset?: number }).nextOffset;
+		expect(next).toBeGreaterThan(1);
+		let last = first;
+		for (let page = 0; page < 6 && next !== undefined; page++) {
+			last = await wait.execute(`page${page}`, { subagentId: "subagent-1", offset: next }, undefined);
+			next = (last.details as { nextOffset?: number }).nextOffset;
+		}
+		// Paging terminates, and the final page reaches the report's last line.
+		expect(next).toBeUndefined();
+		expect(textBlock(last)).toContain("(complete)");
+		expect(textBlock(last)).toContain("line 900:");
+	});
+
+	it("warns on every page of a salvaged report, not only the last", async () => {
+		const controller = new AbortController();
+		// A long prefatory text on a hanging tool call: the salvage is big enough
+		// to need paging, so page one must carry the warning too.
+		const long = Array.from({ length: 900 }, (_, i) => `finding ${i + 1}: ${"z".repeat(80)}`).join("\n");
+		const host: SubagentHost = {
+			...makeHost(scriptedStreamFn([{ toolCall: { id: "t1", name: "grep" }, text: long }])),
+			createVaultTools: () => [
+				{
+					name: "grep",
+					label: "grep",
+					description: "hangs",
+					parameters: Type.Object({}),
+					execute: async (_id: string, _p: unknown, signal?: AbortSignal) =>
+						new Promise((_resolve, reject) => {
+							signal?.addEventListener("abort", () => reject(new Error("aborted")), { once: true });
+						}),
+				} as AgentTool,
+			],
+		};
+		const extension = createSubagentExtension(host, { waitPacing: TEST_PACING });
+		const tools = extension.createTools();
+		try {
+			await toolNamed(tools, "spawn_subagent").execute("c1", { task: "Sweep" }, controller.signal);
+			await new Promise((resolve) => setTimeout(resolve, 20));
+			await toolNamed(tools, "kill_subagent").execute("c2", { subagentId: "subagent-1" }, controller.signal);
+			const wait = toolNamed(tools, "wait_subagent");
+			const first = await wait.execute("c3", { subagentId: "subagent-1" }, controller.signal);
+			expect(textBlock(first)).toContain("INCOMPLETE");
+			expect(textBlock(first)).toContain("kill_subagent");
+			const next = (first.details as { nextOffset?: number }).nextOffset;
+			expect(next).toBeGreaterThan(1);
+			const second = await wait.execute("c4", { subagentId: "subagent-1", offset: next }, controller.signal);
+			// The warning repeats rather than appearing once at the start.
+			expect(textBlock(second)).toContain("INCOMPLETE");
+		} finally {
+			extension.disposeAll();
+		}
+	});
+
+	it("reports a clamped wait rather than letting it look like a slow child", async () => {
+		const extension = createSubagentExtension(makeHost(hangingStreamFn()), { waitPacing: TEST_PACING });
+		const tools = extension.createTools();
+		const controller = new AbortController();
+		try {
+			await toolNamed(tools, "spawn_subagent").execute("c1", { task: "a" }, controller.signal);
+			const result = await toolNamed(tools, "wait_subagent").execute("c2", { timeoutMs: 1 }, controller.signal);
+			expect(result.details).toMatchObject({
+				status: "running",
+				requestedTimeoutMs: 1,
+				effectiveTimeoutMs: TEST_PACING.minMs,
+			});
+		} finally {
+			extension.disposeAll();
+		}
+	});
+
+	it("clampWait says whether it moved the dial", () => {
+		expect(clampWait(undefined)).toEqual({ value: WAIT_DEFAULT_MS, clamped: false });
+		expect(clampWait(45_000)).toEqual({ value: 45_000, clamped: false });
+		expect(clampWait(WAIT_MIN_MS - 1)).toEqual({ value: WAIT_MIN_MS, clamped: true });
+		expect(clampWait(WAIT_MAX_MS + 1)).toEqual({ value: WAIT_MAX_MS, clamped: true });
+	});
+
+	it("an id-less wait in a later turn names the earlier children instead of denying them", async () => {
+		const tools = toolsWithPacing(scriptedStreamFn([{ text: "done" }]));
+		const earlier = new AbortController();
+		await toolNamed(tools, "spawn_subagent").execute("c1", { task: "a" }, earlier.signal);
+		const laterTurn = new AbortController();
+		expect(toolNamed(tools, "wait_subagent").execute("c2", {}, laterTurn.signal)).rejects.toThrow(
+			"Earlier turns spawned: subagent-1",
+		);
+	});
+
+	it("a failing child never reaches the unhandled-rejection lane", async () => {
+		// The bare `.catch` in registry.spawn is what keeps a child nobody has
+		// waited for yet from crashing the host. Load-bearing and otherwise
+		// untested: this asserts the rejection is absorbed until a wait reads it.
+		const rejections: unknown[] = [];
+		// `process.on("unhandledRejection")` is not in Bun's process typings, so the
+		// listener rides the global event the runtime does emit.
+		const onRejection = (event: Event): void => {
+			rejections.push(event);
+		};
+		globalThis.addEventListener("unhandledrejection", onRejection);
+		try {
+			const extension = createSubagentExtension(
+				{
+					...makeHost(scriptedStreamFn([{ text: "" }])),
+					// A tool set whose only tool always fails, so the child dies with a
+					// recorded tool error — the one shape that still rejects.
+					createVaultTools: () => [failingTool()],
+					getStreamFn: () => scriptedStreamFn([{ toolCall: { id: "t1", name: "grep" } }, { text: "" }]),
+				},
+				{ waitPacing: TEST_PACING },
+			);
+			const spawned = extension.createTools();
+			await toolNamed(spawned, "spawn_subagent").execute("c1", { task: "a" }, undefined);
+			// Long enough for the child to settle and reject with nobody waiting.
+			await new Promise((resolve) => setTimeout(resolve, 60));
+			expect(rejections).toEqual([]);
+			// The failure is still there to be read, as data rather than a crash.
+			const collected = await toolNamed(spawned, "wait_subagent").execute("c2", { subagentId: "subagent-1" }, undefined);
+			expect(collected.details).toMatchObject({ subagents: [{ status: "failed" }] });
+			extension.disposeAll();
+		} finally {
+			globalThis.removeEventListener("unhandledrejection", onRejection);
+		}
+	});
+
+	it("words a clean silent child as no report, not as a failure", async () => {
+		const tools = toolsWithPacing(scriptedStreamFn([{ text: "" }]));
+		await toolNamed(tools, "spawn_subagent").execute("c1", { task: "Find the mole" }, undefined);
+		const result = await toolNamed(tools, "wait_subagent").execute("c2", {}, undefined);
+		expect(textBlock(result)).toContain("finished with no report");
+		expect(textBlock(result)).not.toContain("failed");
+		expect(result.details).toMatchObject({ status: "settled", subagents: [{ subagentId: "subagent-1", status: "done" }] });
 	});
 });
