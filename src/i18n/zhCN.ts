@@ -77,6 +77,10 @@ export const zhCN: DeepPartial<EnCopy> = {
 		earlierSummarized: "较早的历史已被总结，以适应上下文窗口。",
 		imagePlaceholder: "[图片：{mimeType}]",
 		imagesNotSupported: "{model} 不支持图片。请更换模型或移除图片。",
+		/** 回复尚在流式输出时又收到一次发送；编辑器的控件让这只会是罕见的竞态。 */
+		agentBusy: "Piem 已经在回复中了。",
+		/** 回复已生成但没能写进 vault。读者反正已看到正文，所以这是通知而不是警报。 */
+		persistFailed: "这条回复没能保存进笔记库：{error}",
 		imageThumbAlt: "已附图片：{mimeType}",
 		removeImage: "移除图片 {index}",
 		imageNotFound: "在 vault 中找不到 {path}，未发送。",

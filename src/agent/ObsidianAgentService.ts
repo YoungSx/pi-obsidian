@@ -73,6 +73,18 @@ export interface PendingToolCall {
 	progress?: string;
 }
 
+/** A failure the panel shows in its error banner, with how to recover from it. */
+interface PanelError {
+	message: string;
+	/**
+	 * Opening the settings tab is the recovery for this failure — a missing
+	 * credential, most of all. A provider refusal or a failed vault write has
+	 * no settings fix, and a settings shortcut on those errors misdirects the
+	 * user to a screen that cannot help.
+	 */
+	opensSettings: boolean;
+}
+
 export interface ChatSnapshot {
 	messages: AgentMessage[];
 	streamingMessage?: AgentMessage;
@@ -94,6 +106,23 @@ export interface ChatSnapshot {
 	 */
 	pendingToolCalls: PendingToolCall[];
 	errorMessage?: string;
+	/**
+	 * Whether the settings tab is the recovery for {@link errorMessage}. Carried
+	 * beside the message rather than inferred in the UI: the banner cannot tell
+	 * a missing credential from a provider refusal, and offering "Open
+	 * settings" for a network error points the user at a screen that cannot
+	 * help.
+	 */
+	errorOpensSettings?: boolean;
+	/**
+	 * Whether the active model accepts image content. Staging (paste, drop,
+	 * attach) is gated on this *before* anything is staged, so a text-only
+	 * model never collects pictures it will refuse at send time. The send-time
+	 * gate in `sendPrompt` stays as the backstop for a model switched in
+	 * between staging and sending. Absent from older snapshots means "unknown";
+	 * the gate treats that as allowed rather than blocking a working flow.
+	 */
+	supportsImages?: boolean;
 	/**
 	 * Informational message that is not a failure ("Nothing to compact yet.").
 	 * Kept apart from `errorMessage` because the error banner is an
@@ -381,10 +410,18 @@ export class ObsidianAgentService {
 	 * every emit site is how logging quietly stops happening.
 	 */
 	private readonly log: LoggerLike;
-	private errorMessage: string | undefined;
+	/**
+	 * The panel's failure slot, as one object rather than a bare string plus a
+	 * side flag: the recovery affordance has to travel with the message it
+	 * recovers, and a second field updated at every clear site is exactly how
+	 * the two drift apart.
+	 */
+	private panelError: PanelError | undefined;
 	private noticeMessage: string | undefined;
 	/** Agent-reported error the user already dismissed; see {@link dismissMessages}. */
 	private dismissedAgentError: string | undefined;
+	/** Why the last {@link initialize} failed, if it did; rides the error banner until dismissed. */
+	private initializationError: string | undefined;
 	private modelsBundle: ObsidianModelsBundle | null = null;
 	private modelsBundleKey: string | null = null;
 	private lastCompaction: CompactResult | undefined;
@@ -490,6 +527,17 @@ export class ObsidianAgentService {
 		};
 	}
 
+	/**
+	 * Builds the agent on first use.
+	 *
+	 * Resolves even when starting fails: the reason is recorded on
+	 * {@link initializationError} — which the error banner picks up through the
+	 * snapshot — and `agent` stays null. Every caller here is a UI entry point,
+	 * and a rejection used to surface as an unhandled rejection wherever the
+	 * caller had no catch; the banner is where this panel reports everything
+	 * else, so a start failure belongs there too rather than in the console.
+	 * A caller that needs the agent checks `this.agent` after awaiting.
+	 */
 	async initialize(): Promise<void> {
 		if (this.agent) {
 			return;
@@ -498,7 +546,19 @@ export class ObsidianAgentService {
 			return this.initialization;
 		}
 
-		this.initialization = this.initializeAgent();
+		// The settle handlers ride the shared promise rather than the awaited
+		// call: a concurrent caller that returns `this.initialization` directly
+		// must never see a rejection, and the success path has to clear a
+		// failure left by an earlier attempt in the same chain.
+		this.initialization = this.initializeAgent().then(
+			() => {
+				this.initializationError = undefined;
+			},
+			(error: unknown) => {
+				this.initializationError = error instanceof Error ? error.message : String(error);
+				this.notify();
+			},
+		);
 		try {
 			await this.initialization;
 		} finally {
@@ -517,9 +577,15 @@ export class ObsidianAgentService {
 		// session would report every `/name` as unknown.
 		await this.initialize();
 
-		const agent = this.requireAgent();
+		// A failed start leaves no agent, and the banner already carries why —
+		// the snapshot falls back to `initializationError`. A second message
+		// here would only paraphrase it, so the send is refused quietly.
+		const agent = this.agent;
+		if (!agent) {
+			return false;
+		}
 		if (agent.state.isStreaming) {
-			this.setError("The agent is already responding.");
+			this.setError(this.t().t("chat.agentBusy"));
 			return false;
 		}
 		// A real send ends the turn the suggestion was asked for — drop any
@@ -532,8 +598,8 @@ export class ObsidianAgentService {
 		// skill diagnostics as a notice, and the image resolution below can raise
 		// a missing-embed notice — clearing after either would erase a warning
 		// before it was ever seen. The run's own error path still overwrites
-		// `errorMessage` in `catch`.
-		this.errorMessage = undefined;
+		// `panelError` in `catch`.
+		this.panelError = undefined;
 		this.noticeMessage = undefined;
 		await this.refreshConfiguration();
 
@@ -571,7 +637,9 @@ export class ObsidianAgentService {
 
 		if (!this.hasApiKey()) {
 			const t = this.t();
-			this.setError(t.t("target.needsKeyToSend", { target: describeModelTarget(this.getSettings(), t) }));
+			// The missing credential is the one failure the settings tab fixes,
+			// so this is the error that earns the banner's settings shortcut.
+			this.setError(t.t("target.needsKeyToSend", { target: describeModelTarget(this.getSettings(), t) }), true);
 			return false;
 		}
 
@@ -603,7 +671,7 @@ export class ObsidianAgentService {
 			await agent.prompt(promptText, allImages.length > 0 ? allImages : undefined);
 			sent = true;
 		} catch (error) {
-			this.errorMessage = error instanceof Error ? error.message : String(error);
+			this.panelError = { message: error instanceof Error ? error.message : String(error), opensSettings: false };
 		} finally {
 			this.activeRunContext = null;
 			await this.notifySettledState();
@@ -618,13 +686,27 @@ export class ObsidianAgentService {
 	 * this service's own field would be undone the moment the snapshot fell back
 	 * to the agent's. `dismissedAgentError` records what was dismissed and the
 	 * snapshot suppresses exactly that string, which a later, different failure
-	 * naturally escapes.
+	 * naturally escapes. The start failure is cleared outright — a retry that
+	 * fails again re-records it through {@link initialize}.
 	 */
 	dismissMessages(): void {
-		this.errorMessage = undefined;
+		this.panelError = undefined;
 		this.noticeMessage = undefined;
+		this.initializationError = undefined;
 		this.dismissedAgentError = this.agent?.state.errorMessage;
 		this.notify();
+	}
+
+	/**
+	 * Reports the image gate before anything is staged, as a notice rather than
+	 * an error: nothing was lost and nothing failed — the model just cannot take
+	 * what was offered. The panel's image handlers call this on a model without
+	 * image support; the send-time gate stays as the backstop for a model
+	 * switched in between staging and sending.
+	 */
+	notifyImagesBlocked(): void {
+		const t = this.t();
+		this.setNotice(t.t("chat.imagesNotSupported", { model: describeModelTarget(this.getSettings(), t) }));
 	}
 
 	/**
@@ -872,7 +954,7 @@ export class ObsidianAgentService {
 		// way. The active note is left alone because it describes the workspace.
 		this.contextRefs.reset();
 		this.replaceAgent([], seed);
-		this.errorMessage = undefined;
+		this.panelError = undefined;
 		this.sessionRevision += 1;
 		this.notify();
 	}
@@ -910,7 +992,7 @@ export class ObsidianAgentService {
 		// follow state and no inherited pins.
 		this.contextRefs.reset();
 		this.adoptSessionContext(context);
-		this.errorMessage = undefined;
+		this.panelError = undefined;
 		await this.sessionManager.ensureConfiguration(this.getSessionDefaults());
 		this.sessionInfo = await this.sessionManager.getActiveSessionInfo();
 		this.notify();
@@ -1002,7 +1084,7 @@ export class ObsidianAgentService {
 
 		this.sessionRevision += 1;
 		if (!wasActive) {
-			this.errorMessage = undefined;
+			this.panelError = undefined;
 			this.notify();
 			return;
 		}
@@ -1159,7 +1241,11 @@ export class ObsidianAgentService {
 					return progress === undefined ? { name } : { name, progress };
 				})
 				.filter((pending): pending is PendingToolCall => pending !== undefined),
-			errorMessage: this.errorMessage ?? this.visibleAgentError(agent),
+			errorMessage: this.panelError?.message ?? this.visibleAgentError(agent) ?? this.initializationError,
+			errorOpensSettings: this.panelError?.opensSettings ?? false,
+			// Staging gate: the composer asks before collecting bytes the model
+			// would refuse, instead of the send gate explaining the refusal after.
+			supportsImages: modelSupportsImages(model),
 			noticeMessage: this.noticeMessage,
 			provider: model.provider,
 			modelId: model.id,
@@ -1466,7 +1552,11 @@ export class ObsidianAgentService {
 			}
 		} catch (error) {
 			const message = error instanceof Error ? error.message : String(error);
-			this.errorMessage = message;
+			// A persist failure does not undo the reply — the reader has already
+			// seen it — so a red alert overstates the damage and a grey notice
+			// states it. `appendNotice` keeps an earlier warning alongside rather
+			// than under it.
+			this.appendNotice(this.t().t("chat.persistFailed", { error: message }));
 			// The snapshot field renders once in the panel; the log keeps the
 			// failure even after the user dismisses the notice.
 			this.log.error("Failed to persist agent output", () => ({ event: event.type, error: message }));
@@ -1630,21 +1720,24 @@ export class ObsidianAgentService {
 	 */
 	async compactNow(): Promise<void> {
 		await this.initialize();
-		const agent = this.requireAgent();
-		if (agent.state.isStreaming) {
+		// A failed start leaves no agent, and the banner already carries why —
+		// same reasoning as the matching guard in `sendPrompt`.
+		const agent = this.agent;
+		if (!agent || agent.state.isStreaming) {
 			return;
 		}
 		if (!this.hasApiKey()) {
 			const t = this.t();
-			this.setError(t.t("target.needsKeyToCompact", { target: describeModelTarget(this.getSettings(), t) }));
+			// Same recovery as `needsKeyToSend` above: the fix lives in settings.
+			this.setError(t.t("target.needsKeyToCompact", { target: describeModelTarget(this.getSettings(), t) }), true);
 			return;
 		}
 
 		try {
-			this.errorMessage = undefined;
+			this.panelError = undefined;
 			this.noticeMessage = undefined;
 			const compacted = await this.runExclusiveCompaction(agent, { force: true });
-			if (!compacted && !this.errorMessage) {
+			if (!compacted && !this.panelError) {
 				this.setNotice(this.t().t("chat.nothingToCompact"));
 			}
 		} finally {
@@ -1901,8 +1994,8 @@ export class ObsidianAgentService {
 		return agentError && agentError === this.dismissedAgentError ? undefined : agentError;
 	}
 
-	private setError(message: string): void {
-		this.errorMessage = message;
+	private setError(message: string, opensSettings = false): void {
+		this.panelError = { message, opensSettings };
 		this.noticeMessage = undefined;
 		this.dismissedAgentError = undefined;
 		this.notify();

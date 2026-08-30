@@ -61,9 +61,14 @@ describe("ChatBanner", () => {
 		expect(dismissed).toBe(1);
 	});
 
-	it("offers a settings action instead of printing a path, when the host can open it", async () => {
+	it("offers a settings action instead of printing a path, when the failure declares settings as its recovery", async () => {
 		let opened = 0;
-		const host = await renderBanner({ errorMessage: "Needs an API key.", onDismiss: () => undefined, onOpenSettings: () => (opened += 1) });
+		const host = await renderBanner({
+			errorMessage: "Needs an API key.",
+			errorOpensSettings: true,
+			onDismiss: () => undefined,
+			onOpenSettings: () => (opened += 1),
+		});
 
 		const action = host.querySelector<HTMLButtonElement>(".piem-chat__banner-action");
 		expect(action?.textContent).toBe("Open settings");
@@ -72,8 +77,19 @@ describe("ChatBanner", () => {
 		expect(opened).toBe(1);
 	});
 
+	it("omits the action for a failure settings cannot fix, so 'Open settings' never points at a dead end", async () => {
+		const host = await renderBanner({
+			errorMessage: "The provider refused the request.",
+			errorOpensSettings: false,
+			onDismiss: () => undefined,
+			onOpenSettings: () => undefined,
+		});
+
+		expect(host.querySelector(".piem-chat__banner-action")).toBeNull();
+	});
+
 	it("omits the action when the host cannot reach settings", async () => {
-		const host = await renderBanner({ errorMessage: "Needs an API key.", onDismiss: () => undefined });
+		const host = await renderBanner({ errorMessage: "Needs an API key.", errorOpensSettings: true, onDismiss: () => undefined });
 
 		expect(host.querySelector(".piem-chat__banner-action")).toBeNull();
 	});

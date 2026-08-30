@@ -125,6 +125,7 @@ class FakeAgentService {
 	// a reader to trust it.
 	abort(): void {}
 	dismissMessages(): void {}
+	notifyImagesBlocked(): void {}
 	async retryFrom(): Promise<boolean> {
 		return false;
 	}
