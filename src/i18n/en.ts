@@ -62,7 +62,6 @@ export const en = {
 		conversationAria: "Conversation",
 		/** Skip link above the transcript; see WCAG 2.4.1 (Bypass Blocks). */
 		skipToComposer: "Skip to message box",
-		toolsRunning: "Tools running",
 		working: "Working: ",
 		/**
 		 * The typing indicator shown between sending and the first token, in the
