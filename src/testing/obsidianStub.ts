@@ -618,3 +618,93 @@ export class SafeStorageLikeMock {
 		return plain;
 	}
 }
+
+/**
+ * Controllable stand-in for Obsidian's `app.secretStorage`.
+ *
+ * Sits beside {@link SafeStorageLikeMock} for the same reason: production code
+ * reaches the store through the host, so tests inject this rather than
+ * registering a module-wide mock that another file would inherit.
+ *
+ * The failure modes are the ones the adapter and the relocation rules are built
+ * around, so each is a separate switch rather than a single "broken" flag:
+ *
+ * - `swallowWrites` — accepts a write and keeps nothing, which is what an
+ *   adapter save that fails after `setSecret` returned looks like from here.
+ * - `throwOnWrite` / `throwOnRead` / `throwOnList` — the real store throws on an
+ *   invalid id and when its backend is absent ("Secure storage is not
+ *   available."), and those throws land on the onload path.
+ * - `omitDelete` — `deleteSecret` exists at runtime but not in `obsidian.d.ts`,
+ *   so a host without it has to stay a supported shape.
+ */
+export class SecretStorageMock {
+	readonly entries = new Map<string, string>();
+	swallowWrites = false;
+	throwOnWrite = false;
+	throwOnRead = false;
+	throwOnList = false;
+	omitDelete = false;
+	setSecretCalls: [id: string, secret: string][] = [];
+	deleteSecretCalls: string[] = [];
+
+	constructor(initial: Record<string, string> = {}) {
+		for (const [id, value] of Object.entries(initial)) {
+			this.entries.set(id, value);
+		}
+	}
+
+	setSecret(id: string, secret: string): void {
+		this.setSecretCalls.push([id, secret]);
+		if (this.throwOnWrite) {
+			throw new Error("Secure storage is not available.");
+		}
+		if (this.swallowWrites) {
+			return;
+		}
+		this.entries.set(id, secret);
+	}
+
+	getSecret(id: string): string | null {
+		if (this.throwOnRead) {
+			throw new Error("Secure storage is not available.");
+		}
+		// `null` rather than `""` for a missing entry: that is the real API's
+		// spelling, and code that conflates the two is what this catches.
+		return this.entries.get(id) ?? null;
+	}
+
+	listSecrets(): string[] {
+		if (this.throwOnList) {
+			throw new Error("Secure storage is not available.");
+		}
+		return [...this.entries.keys()];
+	}
+
+	deleteSecret(id: string): void {
+		if (this.omitDelete) {
+			throw new Error("deleteSecret should not have been called on a host without it");
+		}
+		this.deleteSecretCalls.push(id);
+		this.entries.delete(id);
+	}
+
+	/**
+	 * The host shape `createObsidianSecretVault` reads its store off.
+	 *
+	 * With `omitDelete` set, the store is rebuilt as a plain object carrying only
+	 * the three documented methods — an actual absent `deleteSecret`, which is
+	 * what a host predating it looks like, rather than one that throws.
+	 */
+	asHost(): { secretStorage: unknown } {
+		if (!this.omitDelete) {
+			return { secretStorage: this };
+		}
+		return {
+			secretStorage: {
+				setSecret: (id: string, secret: string): void => this.setSecret(id, secret),
+				getSecret: (id: string): string | null => this.getSecret(id),
+				listSecrets: (): string[] => this.listSecrets(),
+			},
+		};
+	}
+}

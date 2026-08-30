@@ -33,7 +33,13 @@ export interface SecretVault {
 	readonly available: boolean;
 	/** The stored secret, or `""` when absent — absence is not an error. */
 	read(id: string): string;
-	/** Whether the value is readable back through {@link read} afterwards. */
+	/**
+	 * Stores the secret, returning whether it read back afterwards.
+	 *
+	 * Implementations must verify rather than report the call's own success:
+	 * `false` here is what tells relocation to keep its plaintext copy, so a
+	 * store that accepts writes and keeps nothing has to be visible.
+	 */
 	write(id: string, secret: string): boolean;
 	/** Best-effort removal. A store that cannot delete is not an error. */
 	remove(id: string): void;
@@ -109,11 +115,12 @@ export interface SecretResolution {
 /**
  * Resolves one slot against the vault, performing whatever write it calls for.
  *
- * `relocate` verifies by reading back. That proves only that the host's map
- * accepted the value, not that it reached storage — persistence is what the
- * deferred `confirm` covers — but it does catch the failures that are silent
- * otherwise: an id the host rejects, a store that is not really there, a value
- * another plugin overwrote under the same id.
+ * A `relocate` trusts `write`'s verdict, which by this interface's contract
+ * means the value read back. That proves only that the store accepted and kept
+ * the value in the session — not that it reached persistent storage, which is
+ * what the deferred `confirm` covers — but it does catch the failures that are
+ * otherwise silent: an id the host rejects, a store that is not really there, a
+ * value another plugin overwrote under the same id.
  */
 export function resolveSlot(slot: SecretSlot, vault: SecretVault): SecretResolution {
 	if (!vault.available) {
