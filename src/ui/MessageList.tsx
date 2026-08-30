@@ -621,14 +621,34 @@ function renderUserMessage(message: UserMessage, args: RenderArgs): React.ReactN
 	});
 }
 
+/**
+ * Whether the block at `index` is the one the model is writing right now.
+ *
+ * A streaming message can hold a finished thinking block and a text block still
+ * growing behind it, so "the turn is streaming" alone marks too much: the
+ * thinking row would spin for the whole reply. The provider appends blocks in
+ * order, so exactly the last block can still be growing — everything before it
+ * is settled and shows its finished face. False for a settled message, where no
+ * block is live no matter what.
+ */
+function isLiveBlock(message: AssistantMessage, index: number, isStreaming: boolean): boolean {
+	return isStreaming && index === message.content.length - 1;
+}
+
 function renderAssistantMessage(message: AssistantMessage, args: RenderArgs): React.ReactNode {
 	return message.content.map((content, index) => {
 		if (content.type === "text") {
 			return <Block key={index} text={content.text} kind="assistant" isStreaming={args.isStreaming} context={args.renderContext} />;
 		}
 		if (content.type === "thinking") {
+			const live = isLiveBlock(message, index, args.isStreaming);
 			return (
-				<Trace key={index} icon="brain" name={args.renderContext.t.t("chat.thoughtItThrough")} className="piem-chat__trace--thinking">
+				<Trace
+					key={index}
+					icon={live ? "loader-circle" : "brain"}
+					name={args.renderContext.t.t(live ? "chat.thinkingNow" : "chat.thoughtItThrough")}
+					className={live ? "piem-chat__trace--thinking piem-chat__trace--live" : "piem-chat__trace--thinking"}
+				>
 					<Block text={content.thinking} kind="thinking" isStreaming={args.isStreaming} context={args.renderContext} />
 				</Trace>
 			);

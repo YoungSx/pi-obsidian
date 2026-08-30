@@ -466,6 +466,30 @@ describe("MessageList trace collapsing", () => {
 		expect(trace?.hasAttribute("open")).toBe(false);
 	});
 
+	it("labels thinking as in progress while the turn is still streaming", async () => {
+		const host = renderMessages([assistantThinking("weighing options")], { isStreaming: true });
+		await flushRender();
+
+		const trace = host.querySelector("details.piem-chat__trace--thinking");
+		// The live row carries the running marker and the present-tense label;
+		// a settled "Thought it through" on a turn still going would read as done.
+		expect(trace?.classList.contains("piem-chat__trace--live")).toBe(true);
+		expect(trace?.querySelector(".piem-chat__trace-name")?.textContent).toBe("Thinking…");
+	});
+
+	it("settles the thinking row once prose starts behind it", async () => {
+		// The provider appends blocks in order, so thinking followed by text is
+		// finished thinking even though the turn is still streaming — the live
+		// marker belongs to the last block alone.
+		const message = { ...assistantBase(), content: [{ type: "thinking", thinking: "done thinking" }, { type: "text", text: "partial prose" }] };
+		const host = renderMessages([message], { isStreaming: true });
+		await flushRender();
+
+		const trace = host.querySelector("details.piem-chat__trace--thinking");
+		expect(trace?.classList.contains("piem-chat__trace--live")).toBe(false);
+		expect(trace?.querySelector(".piem-chat__trace-name")?.textContent).toBe("Thought it through");
+	});
+
 	it("flags a failed tool result on the collapsed row", async () => {
 		const host = renderMessages([{ ...toolResult({}), isError: true, content: [{ type: "text", text: "File not found." }] } as ToolResultMessage]);
 		await flushRender();
