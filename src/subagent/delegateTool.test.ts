@@ -1,7 +1,7 @@
 import { describe, expect, it } from "bun:test";
 import type { Api, AssistantMessage, Context, Model, SimpleStreamOptions } from "@earendil-works/pi-ai";
 import { createAssistantMessageEventStream } from "@earendil-works/pi-ai";
-import type { AgentTool, StreamFn } from "@earendil-works/pi-agent-core";
+import type { AgentTool, Skill, StreamFn } from "@earendil-works/pi-agent-core";
 import { Type } from "typebox";
 import { createDelegateTool, type DelegateToolContext } from "./delegateTool";
 import { DEFAULT_SUBAGENT_TIMEOUT_MS, runSubagent } from "./runner";
@@ -9,7 +9,6 @@ import {
 	DEFAULT_SUBAGENT_ROLE_NAME,
 	SUBAGENT_ROLES,
 	composeSubagentPrompt,
-	filterToolsForSubagent,
 	findSubagentRole,
 } from "./roles";
 
@@ -20,6 +19,13 @@ const MODEL: Model<Api> = {
 	contextWindow: 128_000,
 	maxTokens: 4_096,
 } as unknown as Model<Api>;
+
+const SKILL: Skill = {
+	name: "grooming",
+	description: "How to groom the vault",
+	content: "Brush daily.",
+	filePath: "/vault/Piem/skills/grooming/SKILL.md",
+};
 
 /**
  * Builds a streamFn whose nth request replays the nth script entry.
@@ -146,8 +152,8 @@ describe("subagent roles", () => {
 		const role = findSubagentRole("scout")!;
 		const prompt = composeSubagentPrompt(role);
 		expect(prompt).toContain("subagent");
-		expect(prompt).toContain("Research only");
-		expect(prompt).toContain("tool result");
+		expect(prompt).toContain("Research first");
+		expect(prompt).toContain("deliverable is a report of findings");
 	});
 
 	it("resolves the default role", () => {
@@ -157,29 +163,6 @@ describe("subagent roles", () => {
 
 	it("every advertised role is reachable through the tool schema's names", () => {
 		expect(SUBAGENT_ROLES.map((role) => role.name)).toEqual(["general", "scout", "reviewer"]);
-	});
-});
-
-describe("filterToolsForSubagent", () => {
-	it("always strips delegate and read_skill, whatever the role", () => {
-		for (const role of SUBAGENT_ROLES) {
-			const names = filterToolsForSubagent(allTools(), role).map((tool) => tool.name);
-			expect(names).not.toContain("delegate");
-			expect(names).not.toContain("read_skill");
-		}
-	});
-
-	it("read-only roles additionally lose every vault-mutating tool", () => {
-		const names = filterToolsForSubagent(allTools(), findSubagentRole("scout")!).map((tool) => tool.name);
-		expect(names).not.toContain("write");
-		expect(names).not.toContain("edit");
-		expect(names).not.toContain("move_note");
-		expect(names).not.toContain("trash_note");
-		expect(names).toContain("read");
-		expect(names).toContain("grep");
-
-		const general = filterToolsForSubagent(allTools(), findSubagentRole("general")!).map((tool) => tool.name);
-		expect(general).toContain("write");
 	});
 });
 
@@ -268,16 +251,63 @@ describe("runSubagent", () => {
 		expect(run).rejects.toThrow("Subagent aborted");
 	});
 
-	it("throws instead of returning an empty success when the run stopped on a tool error", async () => {
-		const failing: AgentTool = {
-			name: "grep",
-			label: "grep",
-			description: "fails",
-			parameters: Type.Object({}),
-			execute: async () => {
-				throw new Error("vault exploded");
-			},
-		};
+	it("feeds a tool error back and lets the model recover", async () => {
+		// No `shouldStopAfterTurn` here, unlike the parent: the error is one
+		// turn's result, and the next request sees it — a bad call is a
+		// recoverable stumble, not a dead run.
+		const failing = failingTool();
+		const result = await runSubagent({
+			task: "t",
+			role,
+			tools: [failing],
+			model: MODEL,
+			streamFn: scriptedStreamFn([
+				{ toolCall: { id: "call_1", name: "grep" } },
+				{ text: "Recovered and found it." },
+			]),
+			thinkingLevel: "off" as never,
+		});
+		expect(result.text).toBe("Recovered and found it.");
+		expect(result.turns).toBe(2);
+	});
+
+	it("does not mistake prefatory text for a report after a recovered tool error", async () => {
+		const failing = failingTool();
+		const result = await runSubagent({
+			task: "t",
+			role,
+			tools: [failing],
+			model: MODEL,
+			streamFn: scriptedStreamFn([
+				{ toolCall: { id: "call_1", name: "grep" }, text: "Let me search for that." },
+				{ text: "Real report." },
+			]),
+			thinkingLevel: "off" as never,
+		});
+		expect(result.text).toBe("Real report.");
+	});
+
+	it("still refuses an empty success when the model gives up after a tool error", async () => {
+		const failing = failingTool();
+		expect(
+			runSubagent({
+				task: "t",
+				role,
+				tools: [failing],
+				model: MODEL,
+				streamFn: scriptedStreamFn([
+					{ toolCall: { id: "call_1", name: "grep" } },
+					{ text: "" },
+				]),
+				thinkingLevel: "off" as never,
+			}),
+		).rejects.toThrow("Subagent failed: grep: vault exploded");
+	});
+
+	it("times out instead of spinning when the model never recovers from a tool error", async () => {
+		const failing = failingTool();
+		// The script clamps to its last entry, so the model retries the failing
+		// call forever; the run must end at the deadline, not bill eternally.
 		expect(
 			runSubagent({
 				task: "t",
@@ -286,53 +316,70 @@ describe("runSubagent", () => {
 				model: MODEL,
 				streamFn: scriptedStreamFn([{ toolCall: { id: "call_1", name: "grep" } }]),
 				thinkingLevel: "off" as never,
+				timeoutMs: 30,
 			}),
-		).rejects.toThrow("Subagent failed: grep: vault exploded");
+		).rejects.toThrow("timed out");
 	});
 
-	it("does not mistake prefatory text for a report when the run stopped on a tool error", async () => {
-		const failing: AgentTool = {
-			name: "grep",
-			label: "grep",
-			description: "fails",
-			parameters: Type.Object({}),
-			execute: async () => {
-				throw new Error("vault exploded");
-			},
+	it("lists the given skills in the child system prompt", async () => {
+		let seenSystemPrompt: string | undefined;
+		const streamFn: StreamFn = (model, context, _options) => {
+			seenSystemPrompt = context.systemPrompt;
+			return scriptedStreamFn([{ text: "ok" }])(model, context, _options);
 		};
-		// The model prefixed its doomed tool call with prose; that prose must not
-		// come back to the parent as the deliverable.
-		expect(
-			runSubagent({
-				task: "t",
-				role,
-				tools: [failing],
-				model: MODEL,
-				streamFn: scriptedStreamFn([
-					{ toolCall: { id: "call_1", name: "grep" }, text: "Let me search for that." },
-				]),
-				thinkingLevel: "off" as never,
-			}),
-		).rejects.toThrow("Subagent failed: grep: vault exploded");
+		await runSubagent({
+			task: "t",
+			role,
+			tools: [],
+			skills: [SKILL],
+			model: MODEL,
+			streamFn,
+			thinkingLevel: "off" as never,
+		});
+		expect(seenSystemPrompt).toContain("grooming");
+		expect(seenSystemPrompt).toContain("read_skill");
 	});
 });
 
+/** A tool that always fails, for exercising the error-feedback path. */
+function failingTool(): AgentTool {
+	return {
+		name: "grep",
+		label: "grep",
+		description: "fails",
+		parameters: Type.Object({}),
+		execute: async () => {
+			// One real tick per call. The scripted stream resolves synchronously,
+			// so a sync-throwing tool turns the whole loop into uninterrupted
+			// microtasks — the run's timeout timer never gets a slot to fire and
+			// the test spins forever instead of timing out.
+			await new Promise((resolve) => setTimeout(resolve, 0));
+			throw new Error("vault exploded");
+		},
+	};
+}
+
 describe("delegate tool", () => {
-	function createContext(overrides: Partial<DelegateToolContext> = {}): DelegateToolContext & { childToolNames: () => string[] } {
-		// The child's *actual* tool set is read from the LLM context the streamFn
-		// receives — the only place the role-filtered set is observable.
+	function createContext(
+		overrides: Partial<DelegateToolContext> = {},
+	): DelegateToolContext & { childToolNames: () => string[]; childSystemPrompt: () => string | undefined } {
+		// The child's *actual* tool set and prompt are read from the LLM context
+		// the streamFn receives — the only place the assembled run is observable.
 		let childToolNames: string[] = [];
+		let childSystemPrompt: string | undefined;
 		const recordingStreamFn: StreamFn = (model, reqContext, options) => {
 			childToolNames = (reqContext.tools ?? []).map((tool) => tool.name);
+			childSystemPrompt = reqContext.systemPrompt;
 			return scriptedStreamFn([{ text: "report" }])(model, reqContext, options);
 		};
 		const context: DelegateToolContext = {
 			getModel: () => MODEL,
 			getStreamFn: () => recordingStreamFn,
 			getThinkingLevel: () => "off" as never,
+			getSkills: () => [SKILL],
 			createChildTools: () => allTools(),
 		};
-		return { ...context, ...overrides, childToolNames: () => childToolNames };
+		return { ...context, ...overrides, childToolNames: () => childToolNames, childSystemPrompt: () => childSystemPrompt };
 	}
 
 	it("delegates, runs the child, and returns its report with accounting details", async () => {
@@ -344,23 +391,22 @@ describe("delegate tool", () => {
 		expect(result.details).toMatchObject({ role: "general", turns: 1, usage: { requests: 1 } });
 	});
 
-	it("runs the subagent on a child set that excludes delegate itself", async () => {
+	it("passes the child set through unfiltered, mutators and read_skill included", async () => {
 		const context = createContext();
 		const tool = createDelegateTool(context);
 		await tool.execute("call_1", { task: "t" }, undefined);
 		const names = context.childToolNames();
-		expect(names).not.toContain("delegate");
-		expect(names).not.toContain("read_skill");
 		expect(names).toContain("write");
+		expect(names).toContain("read_skill");
 	});
 
-	it("gives a read-only role a read-only child set", async () => {
+	it("frames the child with the skills its read_skill tool serves", async () => {
 		const context = createContext();
 		const tool = createDelegateTool(context);
-		await tool.execute("call_1", { task: "t", role: "scout" }, undefined);
-		const names = context.childToolNames();
-		expect(names).not.toContain("write");
-		expect(names).not.toContain("trash_note");
+		await tool.execute("call_1", { task: "t" }, undefined);
+		const prompt = context.childSystemPrompt();
+		expect(prompt).toContain("grooming");
+		expect(prompt).toContain("read_skill");
 	});
 
 	it("refuses a role the schema should have prevented", async () => {

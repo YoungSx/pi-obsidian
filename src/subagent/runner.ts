@@ -4,11 +4,13 @@ import {
 	type AgentEvent,
 	type AgentMessage,
 	type AgentTool,
+	type Skill,
 	type StreamFn,
 	type ThinkingLevel,
 } from "@earendil-works/pi-agent-core";
 import type { Model } from "@earendil-works/pi-ai";
 import { sumUsage, type UsageTotals } from "../agent/usage";
+import { composeSystemPrompt } from "../agent/skillLoader";
 import { throwIfAborted } from "../tools/toolResult";
 import { composeSubagentPrompt, type SubagentRole } from "./roles";
 
@@ -30,6 +32,12 @@ export interface SubagentRunOptions {
 	streamFn: StreamFn;
 	thinkingLevel: ThinkingLevel;
 	getApiKey?: (provider: string) => Promise<string | undefined> | string | undefined;
+	/**
+	 * Skills listed in the subagent's system prompt, mirroring the parent's
+	 * `<available_skills>` block; `read_skill` then resolves a full skill body.
+	 * Omitted for tests — an empty list renders the base prompt untouched.
+	 */
+	skills?: readonly Skill[];
 	/** The parent run's signal; aborting it aborts the subagent immediately. */
 	signal?: AbortSignal;
 	timeoutMs?: number;
@@ -145,7 +153,10 @@ export async function runSubagent(options: SubagentRunOptions): Promise<Subagent
 		streamFn,
 		convertToLlm,
 		initialState: {
-			systemPrompt: composeSubagentPrompt(role),
+			// Same composition the parent uses, so the child sees the skill listing
+			// its `read_skill` tool serves; without it that tool points at a list
+			// the model was never shown.
+			systemPrompt: composeSystemPrompt(composeSubagentPrompt(role), options.skills ?? []),
 			model,
 			thinkingLevel,
 			tools,
@@ -153,9 +164,16 @@ export async function runSubagent(options: SubagentRunOptions): Promise<Subagent
 		},
 		getApiKey: options.getApiKey,
 		toolExecution: "sequential",
-		// Mirrors the parent's rule: a failed tool result ends the run after the
-		// current turn, so a model retrying the same invalid call cannot spin.
-		shouldStopAfterTurn: ({ toolResults }) => toolResults.some((result) => result.isError),
+		// Unlike the parent — which uses this hook to end the run on any tool
+		// error to protect the panel — the child feeds the error back and only
+		// stops when the run itself is dead. The predicate is still load-bearing:
+		// pi's loop never re-checks its signal between turns, so a completed
+		// request followed by tool results would run on forever and the timeout
+		// below would never land. `linked.signal` is the run's only abort source
+		// (parent abort and the timeout both fire it, and its listener is what
+		// calls `agent.abort()`), so reading it here is the between-turns abort
+		// check the loop lacks.
+		shouldStopAfterTurn: () => linked.signal.aborted,
 	});
 	if (options.onEvent) {
 		const onEvent = options.onEvent;

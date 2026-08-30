@@ -100,8 +100,10 @@ export function formatSkillDiagnostics(diagnostics: SkillDiagnostic[]): string {
  * an empty string for no skills, in which case the base prompt is passed
  * through untouched.
  */
-export function composeSystemPrompt(basePrompt: string, skills: Skill[]): string {
-	const formatted = formatSkillsForSystemPrompt(skills);
+export function composeSystemPrompt(basePrompt: string, skills: readonly Skill[]): string {
+	// pi's formatter types its parameter mutable; the copy keeps callers free to
+	// hold read-only skill lists (the subagent runner does).
+	const formatted = formatSkillsForSystemPrompt([...skills]);
 	if (!formatted) {
 		return basePrompt;
 	}
