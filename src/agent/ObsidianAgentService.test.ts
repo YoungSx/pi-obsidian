@@ -1979,3 +1979,89 @@ function getParent(path: string): string {
 	const index = path.lastIndexOf("/");
 	return index === -1 ? "" : path.slice(0, index);
 }
+
+describe("quick-action suggestions", () => {
+	const SUGGESTION_JSON = '[{"label":"Go deeper","prompt":"Expand on the reply."}]';
+
+	/** A streamFn that answers every request with `text`, optionally holding the first call until `gate` resolves. */
+	function suggestionReplyStreamFn(text: string, gate?: Promise<void>): StreamFn {
+		let requests = 0;
+		return (model: Model<Api>) => {
+			requests += 1;
+			const stream = createAssistantMessageEventStream();
+			const message: AssistantMessage = {
+				role: "assistant",
+				content: [{ type: "text", text }],
+				api: model.api,
+				provider: model.provider,
+				model: model.id,
+				usage: {
+					input: 100,
+					output: 10,
+					cacheRead: 0,
+					cacheWrite: 0,
+					totalTokens: 110,
+					cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+				},
+				stopReason: "stop",
+				timestamp: Date.now(),
+			};
+			if (gate && requests === 1) {
+				void gate.then(() => {
+					stream.push({ type: "done", reason: "stop", message });
+					stream.end(message);
+				});
+			} else {
+				stream.push({ type: "done", reason: "stop", message });
+				stream.end(message);
+			}
+			return stream;
+		};
+	}
+
+	it("returns the model's chips for the empty screen without touching the conversation", async () => {
+		const { service } = createServiceWithSettings(new MemoryAdapter(), { streamFn: suggestionReplyStreamFn(SUGGESTION_JSON) });
+		await service.initialize();
+
+		const actions = await service.suggestQuickActions("empty");
+
+		expect(actions).toEqual([{ id: "suggested-0", label: "Go deeper", prompt: "Expand on the reply." }]);
+		// A side-channel request must not leave a mark on the transcript.
+		expect(service.getSnapshot().messages).toHaveLength(0);
+	});
+
+	it("declines a reply-scope request when there is no reply to react to", async () => {
+		const { service } = createServiceWithSettings(new MemoryAdapter(), { streamFn: suggestionReplyStreamFn(SUGGESTION_JSON) });
+		await service.initialize();
+
+		const actions = await service.suggestQuickActions("reply");
+
+		expect(actions).toBeNull();
+	});
+
+	it("supersedes an in-flight request and resolves the loser to null, never the winner's chips", async () => {
+		let releaseFirst!: () => void;
+		const gate = new Promise<void>((resolve) => {
+			releaseFirst = resolve;
+		});
+		const { service } = createServiceWithSettings(new MemoryAdapter(), { streamFn: suggestionReplyStreamFn(SUGGESTION_JSON, gate) });
+		await service.initialize();
+
+		const first = service.suggestQuickActions("empty");
+		const second = service.suggestQuickActions("empty");
+		releaseFirst();
+
+		expect(await second).toEqual([{ id: "suggested-0", label: "Go deeper", prompt: "Expand on the reply." }]);
+		// The superseded request was aborted mid-flight; it must come back empty
+		// rather than racing the winner's answer into the row.
+		expect(await first).toBeNull();
+	});
+
+	it("declines to ask when the target has no credential", async () => {
+		const { service, settings } = createServiceWithSettings(new MemoryAdapter(), { streamFn: suggestionReplyStreamFn(SUGGESTION_JSON) });
+		await service.initialize();
+		settings.providerApiKeys = {};
+
+		expect(await service.suggestQuickActions("empty")).toBeNull();
+	});
+});

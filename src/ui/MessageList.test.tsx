@@ -521,21 +521,36 @@ describe("MessageList tool-result diff", () => {
 });
 
 describe("MessageList quick actions", () => {
-	it("suggests follow-ups under a settled reply and sends the tapped prompt", async () => {
+	it("renders the model's follow-ups under a settled reply and sends the tapped prompt", async () => {
 		const selected: string[] = [];
 		const host = renderMessages([userMessage("What is this?"), assistantMessage("An answer.")], {
 			onQuickAction: (prompt) => selected.push(prompt),
+			suggestedActions: [
+				{ id: "suggested-0", label: "Go deeper", prompt: "Expand on the points above." },
+				{ id: "suggested-1", label: "Key points", prompt: "Summarize the reply as bullets." },
+			],
 		});
 		await flushRender();
 
 		const row = host.querySelector(".piem-chat__quick-actions");
 		expect(row?.getAttribute("aria-label")).toBe("Suggested prompts");
 		const chips = Array.from(row?.querySelectorAll<HTMLButtonElement>(".piem-chat__quick-action") ?? []);
-		expect(chips.length).toBe(3);
+		expect(chips.length).toBe(2);
 		chips[1]?.click();
 		await flushRender();
-		// The tap sends the full prompt from the copy table, not the chip label.
-		expect(selected[0]).toContain("Summarize your reply as a short bullet list.");
+		// The tap sends the full prompt, not the chip label.
+		expect(selected[0]).toContain("Summarize the reply as bullets.");
+	});
+
+	it("shows no follow-ups on a settled reply when the model suggested nothing", async () => {
+		// The post-reply row is model-generated with no built-in stand-ins: a
+		// failed or empty suggestion request leaves the row out entirely.
+		const host = renderMessages([userMessage("q"), assistantMessage("An answer.")], {
+			onQuickAction: () => undefined,
+		});
+		await flushRender();
+
+		expect(host.querySelector(".piem-chat__quick-actions")).toBeNull();
 	});
 
 	it("hides the follow-ups while the turn is still streaming", async () => {
@@ -564,13 +579,17 @@ describe("MessageList quick actions", () => {
 		expect(compacting.querySelector(".piem-chat__quick-actions")).toBeNull();
 	});
 
-	it("leads with continue when the newest reply was truncated", async () => {
+	it("renders exactly the suggested row under a truncated reply, with no continue chip of its own", async () => {
+		// Truncation used to mint a rule-based "Continue" chip; the row is
+		// model-generated now, and the model's chips are the whole row.
 		const host = renderMessages([userMessage("q"), assistantMessage("half a", { stopReason: "length" })], {
 			onQuickAction: () => undefined,
+			suggestedActions: [{ id: "suggested-0", label: "Finish it", prompt: "Finish your reply." }],
 		});
 		await flushRender();
 
-		expect(host.querySelector(".piem-chat__quick-action")?.textContent).toBe("Continue");
+		const chips = Array.from(host.querySelectorAll<HTMLButtonElement>(".piem-chat__quick-action"));
+		expect(chips.map((chip) => chip.textContent)).toEqual(["Finish it"]);
 	});
 
 	it("offers no follow-ups without a sender wired", async () => {

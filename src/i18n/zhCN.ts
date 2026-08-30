@@ -237,27 +237,15 @@ export const zhCN: DeepPartial<EnCopy> = {
 				prompt: "在我的笔记库里你能帮我做什么？举三个具体的例子。",
 			},
 		},
-		reply: {
-			continue: {
-				label: "继续",
-				prompt: "从刚才停下的地方继续你的回答。",
-			},
-			explainCode: {
-				label: "解释代码",
-				prompt: "用大白话解释上面的代码。",
-			},
-			elaborate: {
-				label: "再深入讲讲",
-				prompt: "把上面的要点再展开讲得更深一些。",
-			},
-			keyPoints: {
-				label: "列要点",
-				prompt: "把你的回答总结成一份简短的要点清单。",
-			},
-			example: {
-				label: "举个例子",
-				prompt: "针对你刚才讲的内容，举一个具体的例子。",
-			},
+		suggest: {
+			instruction:
+				"你正在为一位聊天助手生成一键追问按钮。只回复一个 JSON 数组，最多 3 个对象，每个形如 {\"label\": string, \"prompt\": string}。label 是显示在按钮上的 2-4 个词；prompt 是按下按钮后发送的完整消息。不要使用 markdown、代码围栏或数组以外的任何文字。用{language}书写。",
+			emptyWithNote:
+				"对话还是空的，用户正打开着笔记「{path}」作为上下文。",
+			emptyNoNote:
+				"对话还是空的，也没有打开任何笔记；建议应该围绕用户的笔记库整体。",
+			reply:
+				"请基于下面这段助手的回答来给建议：\n\n{reply}",
 		},
 	},
 

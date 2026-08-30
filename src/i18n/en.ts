@@ -363,9 +363,11 @@ export const en = {
 	},
 
 	/**
-	 * One-tap prompts: the empty screen's first moves and a settled reply's
-	 * follow-ups. `label` names the chip on screen; `prompt` is the full text a
-	 * tap sends, written as a message to the model rather than a button title.
+	 * One-tap prompts. `empty` is the empty screen's deterministic first moves;
+	 * `suggest` builds the model-generated request that replaces them and owns
+	 * the post-reply row. `label` names the chip on screen; `prompt` is the
+	 * full text a tap sends, written as a message to the model rather than a
+	 * button title.
 	 */
 	quickActions: {
 		label: "Suggested prompts",
@@ -395,27 +397,15 @@ export const en = {
 				prompt: "What can you help me with in my vault? Give three concrete examples.",
 			},
 		},
-		reply: {
-			continue: {
-				label: "Continue",
-				prompt: "Continue your reply from where it stopped.",
-			},
-			explainCode: {
-				label: "Explain the code",
-				prompt: "Explain the code above in plain language.",
-			},
-			elaborate: {
-				label: "Go deeper",
-				prompt: "Expand on the key points above in more depth.",
-			},
-			keyPoints: {
-				label: "Key points",
-				prompt: "Summarize your reply as a short bullet list.",
-			},
-			example: {
-				label: "Give an example",
-				prompt: "Give a concrete example of what you described.",
-			},
+		suggest: {
+			instruction:
+				"You are generating one-tap follow-up prompts for a chat assistant. Reply with ONLY a JSON array of at most 3 objects, each {\"label\": string, \"prompt\": string}. Each label is 2-4 words shown on a button; each prompt is the full message the button sends. Do not use markdown, code fences, or any text outside the array. Write in {language}.",
+			emptyWithNote:
+				"The conversation is empty and the user has the note \"{path}\" open as context.",
+			emptyNoNote:
+				"The conversation is empty and no note is open; the suggestions should be about the user's vault in general.",
+			reply:
+				"Base the suggestions on this assistant reply:\n\n{reply}",
 		},
 	},
 

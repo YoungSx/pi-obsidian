@@ -3,6 +3,8 @@ import type { App, Component } from "obsidian";
 import { flushRender, installDom } from "../testing/dom";
 import { installObsidianStub, lastMenu, resetMenus } from "../testing/obsidianStub";
 import type { ChatSnapshot, ObsidianAgentService } from "../agent/ObsidianAgentService";
+import type { SuggestionScope } from "../agent/quickActionSuggestionRequest";
+import type { QuickAction } from "./quickActionSuggestions";
 import type { DraftStore } from "../session/DraftStore";
 import type { ActiveSessionInfo } from "../session/ObsidianSessionManager";
 
@@ -133,6 +135,26 @@ class FakeAgentService {
 	pinContextRef(): void {}
 	unpinContextRef(): void {}
 	setFollowActiveNote(): void {}
+
+	/**
+	 * Suggestion wiring. Each request is logged with its scope, so a placement
+	 * that should have stayed quiet shows up as an absence, and answered from
+	 * `suggestionResults` — `null` is the service's failure shape, which is how
+	 * a test exercises "no fallback" without a network.
+	 */
+	readonly suggestionRequests: SuggestionScope[] = [];
+	suggestionResults: (QuickAction[] | null)[] = [];
+
+	async suggestQuickActions(scope: SuggestionScope): Promise<QuickAction[] | null> {
+		this.suggestionRequests.push(scope);
+		return this.suggestionResults.shift() ?? null;
+	}
+
+	/** Pushes a partial snapshot the way the real service's events do. */
+	emit(overrides: Partial<ChatSnapshot>): void {
+		this.snapshot = { ...this.snapshot, ...overrides };
+		this.notify();
+	}
 	/** Model ids the switcher asked for, so a menu that reaches nothing shows up. */
 	readonly switchedModels: string[] = [];
 
@@ -195,11 +217,20 @@ interface Mounted {
 }
 
 async function mountChat(
-	options: { withDraftStore?: boolean; snapshot?: Partial<ChatSnapshot>; failSends?: boolean } = {},
+	options: {
+		withDraftStore?: boolean;
+		snapshot?: Partial<ChatSnapshot>;
+		failSends?: boolean;
+		/** Queued answers for `suggestQuickActions`; must be set before mount, since the first request can fire during it. */
+		suggestionResults?: (QuickAction[] | null)[];
+	} = {},
 ): Promise<Mounted> {
 	const host = document.createElement("div");
 	document.body.appendChild(host);
 	const service = new FakeAgentService(fakeApp(), options.snapshot, options.failSends);
+	if (options.suggestionResults) {
+		service.suggestionResults = options.suggestionResults;
+	}
 	const inputController = new ChatInputController();
 	const draftStore = new RecordingDraftStore();
 	const root = createRoot(host);
@@ -494,6 +525,97 @@ describe("ChatApp quick actions", () => {
 		const { host } = await mountChat();
 
 		expect(quickActionChips(host)).toHaveLength(0);
+	});
+});
+
+describe("ChatApp model-suggested quick actions", () => {
+	/** A configured target with an active note, so both suggestion rows can appear. */
+	const readySnapshot: Partial<ChatSnapshot> = {
+		isConfigured: true,
+		contextRefs: [{ kind: "active", path: "Ideas/active-note.md", isPinned: false }],
+	};
+
+	const agentChips: QuickAction[] = [
+		{ id: "suggested-0", label: "Agent chip", prompt: "The model's own prompt." },
+		{ id: "suggested-1", label: "Another", prompt: "A second one." },
+	];
+
+	function quickActionChips(host: HTMLElement): HTMLButtonElement[] {
+		return Array.from(host.querySelectorAll<HTMLButtonElement>(".piem-chat__quick-action"));
+	}
+
+	function assistantReply(text: string) {
+		return {
+			role: "assistant",
+			content: [{ type: "text", text }],
+			api: "anthropic-messages",
+			provider: "deepseek",
+			model: "deepseek-v4-pro",
+			usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } },
+			stopReason: "stop",
+			timestamp: Date.now(),
+		};
+	}
+
+	it("swaps the empty screen's built-ins for the model's chips once the request lands", async () => {
+		const { host, service } = await mountChat({ snapshot: readySnapshot, suggestionResults: [agentChips] });
+
+		await flushRender(() => quickActionChips(host).some((chip) => chip.textContent === "Agent chip"));
+
+		// The built-ins gave way: the model's row replaced them wholesale.
+		expect(quickActionChips(host).some((chip) => chip.textContent === "Summarize this note")).toBe(false);
+		expect(service.suggestionRequests).toEqual(["empty"]);
+	});
+
+	it("keeps the built-ins on the empty screen when the suggestion request fails", async () => {
+		const { host, service } = await mountChat({ snapshot: readySnapshot, suggestionResults: [null] });
+
+		await flushRender();
+
+		// The empty screen's contract: a failure costs nothing visible.
+		expect(service.suggestionRequests).toEqual(["empty"]);
+		expect(quickActionChips(host).some((chip) => chip.textContent === "Summarize this note")).toBe(true);
+		expect(quickActionChips(host).some((chip) => chip.textContent === "Agent chip")).toBe(false);
+	});
+
+	it("shows the model's follow-ups after a reply settles", async () => {
+		const { host, service } = await mountChat({ snapshot: { ...readySnapshot, isStreaming: true }, suggestionResults: [agentChips] });
+
+		service.emit({ isStreaming: false, messages: [assistantReply("The reply the reader just read.")] as ChatSnapshot["messages"] });
+
+		await flushRender(() => quickActionChips(host).some((chip) => chip.textContent === "Agent chip"));
+		expect(service.suggestionRequests).toEqual(["reply"]);
+	});
+
+	it("leaves the post-reply row empty when the suggestion request fails", async () => {
+		const { host, service } = await mountChat({ snapshot: { ...readySnapshot, isStreaming: true }, suggestionResults: [null] });
+
+		service.emit({ isStreaming: false, messages: [assistantReply("The reply the reader just read.")] as ChatSnapshot["messages"] });
+		await flushRender();
+
+		// No fallback here, by the placement's contract: a nicety that failed shows nothing.
+		expect(quickActionChips(host)).toHaveLength(0);
+	});
+
+	it("does not fire a speculative request when opening an already-settled conversation", async () => {
+		const { service } = await mountChat({ snapshot: { ...readySnapshot, messages: [assistantReply("An old reply.")] as ChatSnapshot["messages"] } });
+
+		await flushRender();
+
+		expect(service.suggestionRequests).toEqual([]);
+	});
+
+	it("does not leak a previous conversation's chips across a session switch", async () => {
+		const { host, service } = await mountChat({ snapshot: readySnapshot, suggestionResults: [agentChips] });
+		await flushRender(() => quickActionChips(host).some((chip) => chip.textContent === "Agent chip"));
+
+		// A new session bumps the revision; the old chips are tagged with revision 0.
+		service.emit({ sessionRevision: 1 });
+		await flushRender();
+
+		// The reply-scope chips are stale, so the empty screen is back on its built-ins.
+		expect(quickActionChips(host).some((chip) => chip.textContent === "Agent chip")).toBe(false);
+		expect(quickActionChips(host).some((chip) => chip.textContent === "Summarize this note")).toBe(true);
 	});
 });
 

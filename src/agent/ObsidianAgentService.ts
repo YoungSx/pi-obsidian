@@ -21,6 +21,8 @@ import { compactIfNeeded, needsCompaction, DEFAULT_COMPACTION_RETRY, type Compac
 import { measureContextFill, sumUsage, type ContextFill, type UsageTotals } from "./usage";
 import { resolveCompactionSettings, type CompactionSettings } from "./compactionSettings";
 import { createObsidianTools } from "../tools/obsidianTools";
+import { fetchQuickActionSuggestions, lastAssistantText, type SuggestionScope } from "./quickActionSuggestionRequest";
+import type { QuickAction } from "../ui/quickActionSuggestions";
 import { DEFAULT_THINKING_LEVEL } from "../constants";
 import {
 	describeModelTarget,
@@ -423,6 +425,18 @@ export class ObsidianAgentService {
 	 * they share those exit paths but not a controller.
 	 */
 	private branchSummaryController: AbortController | null = null;
+	/**
+	 * Abort controller for a quick-action suggestion request in flight, separate
+	 * from {@link branchSummaryController} so cancelling one never cancels the
+	 * other.
+	 *
+	 * Same shape of concern, different lifetime: a suggestion is issued
+	 * speculatively after a turn settles or on an empty screen, is worth nothing
+	 * once the conversation moves on, and must never block or banner anything.
+	 * It shares the background-request exit paths — abort, dispose,
+	 * session-switch — but not a controller.
+	 */
+	private suggestionController: AbortController | null = null;
 	/** Frozen for one user turn so a mid-loop note switch cannot retarget a write. */
 	private activeRunContext: ContextRef[] | null = null;
 	/**
@@ -757,6 +771,66 @@ export class ObsidianAgentService {
 		}
 	}
 
+	/**
+	 * Asks the active model for quick-action chips, as a best-effort side
+	 * channel.
+	 *
+	 * The two placements the panel offers have different failure contracts, and
+	 * both are the *caller's* to keep: the empty screen falls back to its
+	 * built-in chips, while a settled reply simply shows nothing. This method
+	 * only guarantees one thing either way — a null result means "nothing to
+	 * show", never an error. A failed suggestion is not worth a banner: it is
+	 * decoration, and an `aria-live` alert about missing decoration would
+	 * interrupt the reader to say less than the transcript already does.
+	 *
+	 * Billed like every other side-channel request: the usage lands in
+	 * {@link recordOverheadUsage} before the result returns, so a parse failure
+	 * cannot spend the user's money invisibly.
+	 */
+	async suggestQuickActions(scope: SuggestionScope): Promise<QuickAction[] | null> {
+		const settings = this.getSettings();
+		if (!this.hasApiKey() || !this.agent || this.agent.state.isStreaming || this.isCompacting) {
+			return null;
+		}
+		const subject =
+			scope === "reply"
+				? lastAssistantText(this.agent.state.messages)
+				: this.contextRefs.list().find((ref) => ref.kind === "active")?.path ?? null;
+		if (scope === "reply" && !subject) {
+			return null;
+		}
+
+		// One suggestion request at a time: a new call supersedes the previous
+		// one, which the abort also marks so the request stops billing.
+		this.suggestionController?.abort();
+		const controller = new AbortController();
+		this.suggestionController = controller;
+		try {
+			const model = getSelectedModel(settings);
+			const result = await fetchQuickActionSuggestions({
+				streamSimple: this.resolveStreamFn(),
+				model,
+				scope,
+				subject,
+				language: resolveLanguage(this.app.vault as LanguageHost, settings.language),
+				t: this.t(),
+				apiKey: this.getApiKey(model.provider),
+				signal: controller.signal,
+			});
+			if (this.suggestionController !== controller) {
+				// Superseded mid-flight: the caller that replaced this request owns
+				// the row now, and a late answer must not resurrect stale chips.
+				return null;
+			}
+			this.recordOverheadUsage(result.usage);
+			return result.actions;
+		} finally {
+			if (this.suggestionController === controller) {
+				this.suggestionController = null;
+			}
+		}
+	}
+
 	abort(): void {
 		// A compaction before a prompt is only reachable through this controller,
 		// because the agent is not streaming yet. One between turns is reachable
@@ -764,6 +838,7 @@ export class ObsidianAgentService {
 		// controller — so aborting both is right and idempotent.
 		this.compactionController?.abort();
 		this.branchSummaryController?.abort();
+		this.suggestionController?.abort();
 		const agent = this.agent;
 		if (!agent) {
 			return;
@@ -774,6 +849,9 @@ export class ObsidianAgentService {
 
 	async newSession(): Promise<void> {
 		this.agent?.abort();
+		// Suggestions belong to the conversation that prompted them; a fresh chat
+		// must not inherit chips fetched for the last one.
+		this.suggestionController?.abort();
 		// The level is inherited from the conversation just left, not from a
 		// global setting: the user tuned it there and a fresh chat should not
 		// start from a value they never chose. Clamped to the model the new
@@ -811,6 +889,7 @@ export class ObsidianAgentService {
 		this.agent?.abort();
 		this.compactionController?.abort();
 		this.branchSummaryController?.abort();
+		this.suggestionController?.abort();
 		try {
 			this.sessionInfo = await this.sessionManager.loadSession(path);
 		} catch (error) {
@@ -907,6 +986,7 @@ export class ObsidianAgentService {
 			this.agent?.abort();
 			this.compactionController?.abort();
 			this.branchSummaryController?.abort();
+			this.suggestionController?.abort();
 		}
 
 		try {
@@ -1025,6 +1105,7 @@ export class ObsidianAgentService {
 		this.unsubscribeAgent = null;
 		this.compactionController?.abort();
 		this.branchSummaryController?.abort();
+		this.suggestionController?.abort();
 		this.agent?.abort();
 		this.listeners.clear();
 	}

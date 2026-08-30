@@ -8,7 +8,7 @@ import { MarkdownText } from "./MarkdownText";
 import { assistantText } from "./messageActions";
 import { QuickActions } from "./QuickActions";
 import { ReplyActions } from "./ReplyActions";
-import { emptyScreenQuickActions, replyQuickActions, type QuickAction } from "./quickActionSuggestions";
+import { emptyScreenQuickActions, type QuickAction } from "./quickActionSuggestions";
 import { describeReplyCutoff, type ReplyCutoff } from "./replyCutoff";
 import { useT } from "./TranslatorContext";
 import type { Translator } from "../i18n";
@@ -78,6 +78,20 @@ export interface MessageListProps {
 	 * is how tests mount the transcript without wiring a sender.
 	 */
 	onQuickAction?: (prompt: string) => void;
+	/**
+	 * Model-generated suggestions for whichever placement is live, resolved by
+	 * `ChatApp` (empty screen while the transcript is empty, otherwise the
+	 * settled reply) and empty when none apply — not yet arrived, failed, or
+	 * superseded.
+	 *
+	 * The two placements read it differently. The empty screen treats it as a
+	 * replacement for its built-in chips, which stay up until it arrives, so a
+	 * failed request costs the reader nothing. The reply row treats it as the
+	 * whole row: chips are a nicety there, and a request that failed or came
+	 * back empty shows nothing rather than canned prompts pretending the model
+	 * suggested them.
+	 */
+	suggestedActions?: QuickAction[];
 }
 
 /**
@@ -196,24 +210,35 @@ export function MessageList({
 	hasActiveNote = false,
 	isCompacting = false,
 	onQuickAction,
+	suggestedActions = [],
 }: MessageListProps): React.JSX.Element {
 	const t = useT();
 	const context: MessageContext = { app, component, sourcePath, showAgentDetails, t };
 	const activeIndex = streamingIndex(isStreaming, messages.length);
 	const regenerateIndex = regenerableIndex(messages);
-	// Empty-screen suggestions exist for the configured, ready state only — the
-	// connect-model branch has its one call to action, and the skeleton has
-	// nothing to suggest yet.
+	/*
+	 * Empty-screen suggestions exist for the configured, ready state only — the
+	 * connect-model branch has its one call to action, and the skeleton has
+	 * nothing to suggest yet. The model's answer replaces the built-ins when it
+	 * arrives; until then the built-ins are what the reader sees, which is what
+	 * keeps a slow or failed suggestion request from costing the empty screen
+	 * its call to action.
+	 */
 	const emptyActions =
-		!onQuickAction || isInitializing || !isConfigured ? [] : emptyScreenQuickActions(hasActiveNote, t);
+		!onQuickAction || isInitializing || !isConfigured
+			? []
+			: suggestedActions.length > 0
+				? suggestedActions
+				: emptyScreenQuickActions(hasActiveNote, t);
 	/*
 	 * Follow-ups exist only for a settled conversation. While anything is in
 	 * flight the newest entry is not an answer the reader can react to yet, and
-	 * a row that flickers in and out around each turn reads as noise.
+	 * a row that flickers in and out around each turn reads as noise. They come
+	 * from the model alone — no built-in stand-ins, because a suggestion after a
+	 * reply is a nicety, and an empty row states that honestly.
 	 */
 	const settledIndex = !isStreaming && !isCompacting && pendingToolCalls.length === 0 ? regenerateIndex : null;
-	const followUpActions =
-		!onQuickAction || settledIndex === null ? [] : replyQuickActions(messages[settledIndex] as AssistantMessage, t);
+	const followUpActions = !onQuickAction || settledIndex === null ? [] : suggestedActions;
 	const transcriptRef = useRef<HTMLElement | null>(null);
 	const shouldFollowRef = useRef(true);
 	const [isAtLatest, setIsAtLatest] = useState(true);
