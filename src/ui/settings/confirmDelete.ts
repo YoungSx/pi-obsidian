@@ -2,7 +2,8 @@ import { Modal, Notice, Setting, type App } from "obsidian";
 import type { Translator } from "../../i18n";
 
 /**
- * Confirmation before a settings row is removed.
+ * Confirmation before a settings row is removed — or, with {@link ConfirmDeleteOptions.kind},
+ * before a reversible consequence lands, such as disconnecting an MCP server.
  *
  * Deleting a provider is not a local edit: every model bound to it loses its
  * base URL and credential, so the panel has to say how many go with it before
@@ -18,6 +19,13 @@ export interface ConfirmDeleteOptions {
 	consequences: readonly string[];
 	/** Copy for the dialog's own chrome (title and buttons). */
 	t: Translator;
+	/**
+	 * Defaults to `"delete"`. `"disable"` is the reversible counterpart: the
+	 * title and button read 停用 instead of 删除, and the button drops its
+	 * warning tint — `setWarning` marks an irreversible click, and a disable
+	 * is undone by flipping the toggle back.
+	 */
+	kind?: "delete" | "disable";
 	/**
 	 * A secret that dies with this row, offered for copying before it does.
 	 * Omitted when the row holds nothing worth saving.
@@ -40,7 +48,12 @@ class ConfirmDeleteModal extends Modal {
 
 	onOpen(): void {
 		const { t } = this.options;
-		this.setTitle(t.t("confirmDelete.title", { subject: this.options.subject }));
+		const kind = this.options.kind ?? "delete";
+		this.setTitle(
+			kind === "disable"
+				? t.t("confirmDelete.disableTitle", { subject: this.options.subject })
+				: t.t("confirmDelete.title", { subject: this.options.subject }),
+		);
 		for (const line of this.options.consequences) {
 			this.contentEl.createEl("p", { text: line });
 		}
@@ -58,17 +71,19 @@ class ConfirmDeleteModal extends Modal {
 					});
 				});
 			})
-			.addButton((button) =>
+			.addButton((button) => {
 				// `setWarning` is Obsidian's destructive styling, which is what tells
 				// this button apart from the Cancel beside it at a glance.
-				button
-					.setButtonText(t.t("confirmDelete.delete"))
-					.setWarning()
-					.onClick(() => {
-						this.close();
-						void this.options.onConfirm();
-					}),
-			);
+				if (kind === "disable") {
+					button.setButtonText(t.t("confirmDelete.disable"));
+				} else {
+					button.setButtonText(t.t("confirmDelete.delete")).setWarning();
+				}
+				button.onClick(() => {
+					this.close();
+					void this.options.onConfirm();
+				});
+			});
 	}
 
 	onClose(): void {

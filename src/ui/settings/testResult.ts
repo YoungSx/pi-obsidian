@@ -1,6 +1,7 @@
 import type { Setting } from "obsidian";
 import type { ConnectionTestResult } from "../../connectionTest";
 import type { Translator } from "../../i18n";
+import { createEffectLine } from "./effectLine";
 
 /**
  * Shared presentation for a connection test: the verdict and the button.
@@ -48,7 +49,7 @@ export interface TestRowHandle {
  * in the caller's wiring surfaces in the panel instead of an unhandled rejection.
  */
 export function attachTestButton(setting: Setting, t: Translator, run: () => Promise<ConnectionTestResult>): TestRowHandle {
-	const resultEl = setting.descEl.createDiv({ cls: "piem-test-result" });
+	const resultEl = createEffectLine(setting.descEl, "piem-test-result");
 	let running = false;
 
 	setting.addButton((button) => {

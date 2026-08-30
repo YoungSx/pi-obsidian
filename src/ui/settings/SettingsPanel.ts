@@ -25,6 +25,7 @@ import {
 	replaceById,
 } from "./configLists";
 import { openConfirmDelete } from "./confirmDelete";
+import { createEffectLine } from "./effectLine";
 import { ModelModal } from "./ModelModal";
 import { McpServerModal } from "./McpServerModal";
 import { ProviderModal } from "./ProviderModal";
@@ -652,7 +653,7 @@ function renderSendShortcutRow(containerEl: HTMLElement, host: SettingsPanelHost
 		});
 
 	if (Platform.isMobile) {
-		setting.descEl.createDiv({ cls: "piem-settings-effect", text: t.t("settings.sendShortcutMobileNote") });
+		createEffectLine(setting.descEl).setText(t.t("settings.sendShortcutMobileNote"));
 	}
 }
 
@@ -787,7 +788,7 @@ function renderSessionDirRow(containerEl: HTMLElement, host: SettingsPanelHost):
 	const { settings, t } = host;
 	const setting = new Setting(containerEl).setName(sessionDirName(t));
 	setting.setDesc(`${sessionDirDescription(t)} ${sessionDirRestartHint(t)}`);
-	const effect = setting.descEl.createDiv({ cls: "piem-settings-effect" });
+	const effect = createEffectLine(setting.descEl);
 
 	const currentDir = host.activeSessionDir();
 	const describe = (next: string, problem?: string): void => {
@@ -837,7 +838,7 @@ function renderRetentionRow(containerEl: HTMLElement, host: SettingsPanelHost): 
 	// Appended after `setDesc`, which replaces the description's contents. Its own
 	// element so the line can be rewritten after an edit without re-rendering the
 	// tab, which would throw focus out of the field.
-	const effect = setting.descEl.createDiv({ cls: "piem-settings-effect" });
+	const effect = createEffectLine(setting.descEl);
 
 	// Undefined until the directory has been read; `describeRetention` is only
 	// called once a real count exists, so the line never states a wrong one.
@@ -1256,7 +1257,7 @@ function renderMcpRow(containerEl: HTMLElement, host: SettingsPanelHost, state: 
 	// description; the connection verdict hangs beneath it as an effect line,
 	// the same slot every other async status in this panel uses.
 	const setting = new Setting(containerEl).setName(state.name).setDesc(state.url);
-	const verdictEl = setting.descEl.createDiv({ cls: "piem-settings-effect" });
+	const verdictEl = createEffectLine(setting.descEl);
 	setMcpVerdict(verdictEl, state, t);
 
 	// The toggle writes the enabled flag and saves; whether the server connects
@@ -1267,21 +1268,45 @@ function renderMcpRow(containerEl: HTMLElement, host: SettingsPanelHost, state: 
 	setting.addToggle((toggle) => {
 		toggle.setValue(state.enabled);
 		toggle.onChange(async (enabled) => {
-			const server = host.settings.mcpServers.find((row) => row.id === state.id);
-			if (server) {
-				server.enabled = enabled;
-			}
-			toggle.setDisabled(true);
-			verdictEl.setText(enabled ? t.t("mcp.statusConnecting") : t.t("mcp.statusDisabled"));
-			try {
-				await host.save();
-			} finally {
-				toggle.setDisabled(false);
-				const fresh = host.mcp.states().find((row) => row.id === state.id);
-				if (fresh) {
-					setMcpVerdict(verdictEl, fresh, t);
+			// Disabling cuts the server's tools out of chat the moment the save
+			// lands, while its token stays behind — a one-sided consequence the
+			// delete path spells out in a dialog, so the flip gets the same
+			// treatment instead of a post-hoc verdict line. Enabling restores
+			// rather than destroys, so it goes straight through.
+			const apply = async (): Promise<void> => {
+				const server = host.settings.mcpServers.find((row) => row.id === state.id);
+				if (server) {
+					server.enabled = enabled;
 				}
+				toggle.setDisabled(true);
+				verdictEl.setText(enabled ? t.t("mcp.statusConnecting") : t.t("mcp.statusDisabled"));
+				try {
+					await host.save();
+				} finally {
+					toggle.setDisabled(false);
+					const fresh = host.mcp.states().find((row) => row.id === state.id);
+					if (fresh) {
+						setMcpVerdict(verdictEl, fresh, t);
+					}
+				}
+			};
+			if (enabled) {
+				await apply();
+				return;
 			}
+			openConfirmDelete(host.app, {
+				subject: t.t("confirmDelete.mcpServerSubject", { name: state.name }),
+				kind: "disable",
+				consequences: [t.t("mcp.disableConsequenceTools"), t.t("mcp.disableConsequenceToken")],
+				t,
+				onConfirm: async () => {
+					toggle.setValue(false);
+					await apply();
+				},
+			});
+			// The user declined; restore the toggle so the row keeps telling the
+			// truth about what is configured.
+			toggle.setValue(true);
 		});
 	});
 
@@ -1465,7 +1490,7 @@ function renderUserSkillsDirRow(containerEl: HTMLElement, host: SettingsPanelHos
 	const { settings, t } = host;
 	const setting = new Setting(containerEl).setName(userSkillsDirName(t));
 	setting.setDesc(userSkillsDirDescription(t));
-	const effect = setting.descEl.createDiv({ cls: "piem-settings-effect" });
+	const effect = createEffectLine(setting.descEl);
 	const describe = (problem?: string): void => {
 		effect.setText(problem ?? "");
 		effect.toggleClass("piem-settings-effect--error", problem !== undefined);
