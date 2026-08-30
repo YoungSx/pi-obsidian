@@ -13,6 +13,7 @@ import { LANGUAGES, getT, type LanguageSetting, type Translator } from "../../i1
 import { LOG_LEVEL_SETTINGS, readLogLevel, type LogLevelSetting } from "../../logging/logLevel";
 import { createObsidianModels } from "../../net/streamFn";
 import { createFetchForTransport, type NetworkTransport } from "../../net/obsidianFetch";
+import { fetchModelsDevIndex } from "../../net/modelsDev";
 import { ModelListingCache } from "../../net/modelListingCache";
 import {
 	describeModelDeletion,
@@ -374,6 +375,8 @@ function renderModelList(containerEl: HTMLElement, host: SettingsPanelHost, refr
 					test: (draft) => testDraftModel(host, draft),
 					listModels: (provider, signal) => listingCacheFor(settings.networkTransport).ensure(provider, signal),
 					knownListings: () => listingCacheFor(settings.networkTransport).known(),
+					fetchModelsDev: (signal) =>
+						fetchModelsDevIndex({ fetch: createFetchForTransport(settings.networkTransport), signal }),
 					onSubmit: async (model) => {
 						settings.models.push(model);
 						// The first model configured becomes the active one: a user who
@@ -427,6 +430,8 @@ function renderModelList(containerEl: HTMLElement, host: SettingsPanelHost, refr
 					test: (draft) => testDraftModel(host, draft),
 					listModels: (provider, signal) => listingCacheFor(settings.networkTransport).ensure(provider, signal),
 					knownListings: () => listingCacheFor(settings.networkTransport).known(),
+					fetchModelsDev: (signal) =>
+						fetchModelsDevIndex({ fetch: createFetchForTransport(settings.networkTransport), signal }),
 					onSubmit: async (updated) => {
 						replaceById(settings.models, updated);
 						await host.save();
