@@ -295,3 +295,22 @@ describe("saveSettings persistence boundary", () => {
 		expect(plugin.settings.customEndpoint?.apiKey).toBe("sk-endpoint");
 	});
 });
+
+describe("forgetProviderSecret", () => {
+	it("drops the deleted provider's key from the vault", () => {
+		const id = secretIdFor("provider", "p1");
+		const storage = new SecretStorageMock({ [id]: "sk-vaulted" });
+		const { plugin } = pluginWithData(null, { vault: vaultFor(storage) });
+
+		plugin.forgetProviderSecret("p1");
+
+		expect(storage.deleteSecretCalls).toEqual([id]);
+		expect(storage.entries.has(id)).toBe(false);
+	});
+
+	it("is a no-op on the plaintext tier", () => {
+		const { plugin } = pluginWithData(null);
+
+		expect(() => plugin.forgetProviderSecret("p1")).not.toThrow();
+	});
+});

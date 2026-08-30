@@ -19,6 +19,7 @@ import {
 	type PersistedSecrets,
 } from "./settingsSecrets";
 import { resolveSlot } from "./secretVault";
+import { secretIdFor } from "./secretIds";
 import { NOOP_LOGGER, type LoggerLike } from "./logging/Logger";
 import { createSecretEnvironment, type SecretEnvironment } from "./secretsStore";
 import { DraftStore } from "./session/DraftStore";
@@ -459,6 +460,25 @@ export default class PiemPlugin extends Plugin {
 				}
 			}
 		}
+	}
+
+	/**
+	 * Drops a deleted provider's key from the vault tier.
+	 *
+	 * Deletion is the one moment a vault value can become an orphan: the provider
+	 * is gone, so no later load's `secretSlots` will ever name its id again, and
+	 * the value would sit in Obsidian's secret manager indefinitely — only to be
+	 * silently re-adopted if a future provider happens to reuse the id. The panel
+	 * knows the semantics ("this provider is being deleted") while only the plugin
+	 * knows the id derivation, so the call is by provider id and the mapping
+	 * happens here.
+	 *
+	 * Ordering with the following `save` is lossless in both directions: if the
+	 * `save` fails, `data.json` still holds the key and the next load relocates
+	 * it; if this `remove` is a no-op, there was nothing in the vault to drop.
+	 */
+	forgetProviderSecret(providerId: string): void {
+		this.requireSecretEnvironment().vault().remove(secretIdFor("provider", providerId));
 	}
 
 	/**

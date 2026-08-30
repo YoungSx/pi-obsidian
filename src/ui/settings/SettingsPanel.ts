@@ -107,6 +107,22 @@ export interface SettingsPanelHost {
 	save(): Promise<void>;
 	/** Whether this device can encrypt secrets at rest. */
 	secretStorage: SecretStorageState;
+	/**
+	 * Drops a deleted provider's key from the vault tier.
+	 *
+	 * Called at the moment the deletion is confirmed, before {@link save}: the
+	 * panel owns the semantics, the host owns the id derivation, and without
+	 * this the store would keep the key until something reuses its id.
+	 */
+	forgetProviderSecret(providerId: string): void;
+	/**
+	 * Drops a deleted provider's key from the vault tier.
+	 *
+	 * Called at the moment the deletion is confirmed, before {@link save}: the
+	 * panel owns the semantics, the host owns the id derivation, and without
+	 * this the store would keep the key until something reuses its id.
+	 */
+	forgetProviderSecret(providerId: string): void;
 	/** Names whatever requests currently target, for the status line. */
 	describeTarget(): string;
 	/** Copy for the whole panel, resolved from {@link SettingsPanelSettings.language}. */
@@ -413,6 +429,7 @@ function renderProviderList(containerEl: HTMLElement, host: SettingsPanelHost, r
 					copySecret: provider.apiKey === "" ? undefined : provider.apiKey,
 					onConfirm: async () => {
 						removeProvider(settings, provider.id);
+						host.forgetProviderSecret(provider.id);
 						await host.save();
 						refresh();
 					},
