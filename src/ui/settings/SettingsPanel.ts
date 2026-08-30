@@ -402,6 +402,8 @@ function renderProviderList(containerEl: HTMLElement, host: SettingsPanelHost, r
 					subject: t.t("confirmDelete.providerSubject", { name: describeProviderConfig(provider) }),
 					consequences: describeProviderDeletion(boundModels, t),
 					t,
+					// The key may exist nowhere else — offer it before it goes.
+					copySecret: provider.apiKey === "" ? undefined : provider.apiKey,
 					onConfirm: async () => {
 						removeProvider(settings, provider.id);
 						await host.save();
@@ -1283,8 +1285,8 @@ function renderMcpRow(containerEl: HTMLElement, host: SettingsPanelHost, state: 
 		});
 	});
 
-	setting.addButton((button) => {
-		button.setButtonText(t.t("mcp.edit"));
+	setting.addExtraButton((button) => {
+		rowAction(button, "pencil", t.t("mcp.edit"));
 		button.onClick(() => {
 			const server = host.settings.mcpServers.find((row) => row.id === state.id);
 			if (server) {
@@ -1293,8 +1295,8 @@ function renderMcpRow(containerEl: HTMLElement, host: SettingsPanelHost, state: 
 		});
 	});
 
-	setting.addButton((button) => {
-		button.setButtonText(t.t("skills.delete"));
+	setting.addExtraButton((button) => {
+		rowAction(button, "trash-2", t.t("mcp.delete"));
 		button.onClick(() => {
 			openConfirmDelete(host.app, {
 				subject: t.t("confirmDelete.mcpServerSubject", { name: state.name }),

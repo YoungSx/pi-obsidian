@@ -80,7 +80,7 @@ export class ImportSkillModal extends Modal {
 		// however far the body has scrolled.
 		new Setting(contentEl)
 			.setClass("piem-settings-modal-footer")
-			.addButton((button) => button.setButtonText(t.t("confirmDelete.cancel")).onClick(() => this.close()))
+			.addButton((button) => button.setButtonText(t.t("skillImport.cancel")).onClick(() => this.close()))
 			.addButton((button) => {
 				this.actionButton = button;
 				button.setCta();
