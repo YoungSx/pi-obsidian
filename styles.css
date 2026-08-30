@@ -784,9 +784,17 @@ button.piem-settings-tab {
 
 @media (prefers-reduced-motion: reduce) {
 
+	/*
+	 * Three frozen dots at low opacity read as three grey specks — nothing
+	 * points at what they mean. An ellipsis is the same signal in its settled,
+	 * static form: the pause the dots animate is exactly what "…" types.
+	 */
 	.piem-chat__typing-dot {
-		animation: none;
-		opacity: 0.6;
+		display: none;
+	}
+
+	.piem-chat__typing::after {
+		content: "…";
 	}
 }
 
@@ -1013,9 +1021,11 @@ button.piem-settings-tab {
 	font-family: var(--font-interface);
 }
 
-/* The argument or outcome next to the name; first thing to give up width. */
+/* The argument or outcome next to the name; first thing to give up width.
+ * Muted, not faint: faint is reserved for icons — at meta sizes its contrast
+ * drops under 4.5:1, and this is text a reader is meant to parse. */
 .piem-chat__trace-detail {
-	color: var(--text-faint);
+	color: var(--text-muted);
 	min-width: 0;
 	overflow: hidden;
 	text-overflow: ellipsis;
@@ -1353,7 +1363,18 @@ button.piem-chat__latest {
 }
 
 .piem-chat__spinner {
-	animation: pi-spin 1.1s linear infinite;
+	/* The spin is motion, so reduce users get the same stand-in as the typing
+	 * dots: the glyph holds still at the dimmed resting tone, present rather
+	 * than animated. */
+	opacity: 0.6;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+
+	.piem-chat__spinner {
+		opacity: 1;
+		animation: pi-spin 1.1s linear infinite;
+	}
 }
 
 @keyframes pi-spin {
