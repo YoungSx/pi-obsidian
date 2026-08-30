@@ -1,107 +1,75 @@
 /**
- * Secret storage for API keys.
+ * Decoder for the ciphertext earlier releases of this plugin wrote.
  *
- * Obsidian exposes no secret-store API, so the plugin leans on Electron's
- * `safeStorage` (DPAPI on Windows, Keychain on macOS, libsecret on Linux) when
- * it is available and falls back to the historical plaintext layout when it is
- * not (mobile, or a Linux desktop without a keyring service).
+ * Read-only, and read-only on purpose. Before Obsidian exposed a secret store,
+ * this plugin encrypted keys itself through Electron's `safeStorage` (DPAPI on
+ * Windows, Keychain on macOS, libsecret on Linux) and wrote the ciphertext into
+ * `data.json` under an `enc:v1:` marker. Issue #145 is the observation that this
+ * never put anything *in* the keychain: the OS lent a lock, and the locked box
+ * stayed in the vault config.
  *
- * The module is deliberately free of `obsidian`/`electron` imports: everything
- * here takes its platform dependency as an argument, which keeps the codec
- * logic unit-testable without mocking either module.
+ * The write path is gone — keys now go to `app.secretStorage` or stay plaintext,
+ * nothing in between. This decoder survives it because those `enc:v1:` values
+ * are already on users' disks and, unlike a plaintext key, cannot be recovered
+ * by asking the user to type them again. `loadSettings` opens them once and
+ * relocates whatever comes out; the plugin never produces another one.
  *
- * Scope is one string at a time. Where the secrets sit inside a settings blob —
- * which fields hold them, how they map to providers — is `settingsSecrets.ts`.
+ * Free of `obsidian`/`electron` imports: the platform arrives as an argument,
+ * which is what keeps this decodable in tests without mocking either module.
  */
 
 /**
- * Prefix marking a persisted value as safeStorage ciphertext.
+ * Prefix marking a persisted value as `safeStorage` ciphertext.
  *
- * Versioned from day one so a future format change can be detected on load
- * instead of silently mis-decoding. The prefix also doubles as the
- * plaintext/ciphertext discriminator: base64 never starts with `enc:`.
+ * Doubles as the plaintext/ciphertext discriminator, which is what lets a vault
+ * holding both be read in one pass: base64 never starts with `enc:`.
  */
 const SEALED_PREFIX = "enc:v1:";
 
-/** Minimal shape of the Electron `safeStorage` surface this module needs. */
+/** The slice of Electron's `safeStorage` decoding needs. */
 export interface SafeStorageLike {
 	isEncryptionAvailable(): boolean;
-	encryptString(plainText: string): Buffer;
 	decryptString(encrypted: Buffer): string;
 }
 
 /**
- * Codec between in-memory plaintext secrets and their persisted form.
+ * Opens one persisted value, whatever layout it is in.
  *
- * In-memory settings always hold plaintext — every reader (`getApiKey`, the
- * settings panel) stays untouched — while persistence applies this codec at
- * the `loadData`/`saveData` boundary.
- */
-export interface SecretCodec {
-	/** True when values written by {@link seal} can also be read back here. */
-	canRoundTrip: boolean;
-	seal(plaintext: string): string;
-	unseal(stored: string): string | undefined;
-}
-
-function encodeBase64(buffer: Buffer): string {
-	return buffer.toString("base64");
-}
-
-function decodeBase64(value: string): Buffer {
-	return Buffer.from(value, "base64");
-}
-
-export function createSafeStorageCodec(safeStorage: SafeStorageLike): SecretCodec {
-	return {
-		// Double-checked rather than trusted: the caller's environment probe
-		// (desktop app + keyring present) must agree with what safeStorage
-		// itself reports before we claim ciphertext round-trips.
-		get canRoundTrip() {
-			try {
-				return safeStorage.isEncryptionAvailable();
-			} catch {
-				return false;
-			}
-		},
-		seal(plaintext) {
-			return SEALED_PREFIX + encodeBase64(safeStorage.encryptString(plaintext));
-		},
-		unseal(stored) {
-			if (!stored.startsWith(SEALED_PREFIX)) {
-				// A value persisted by the plaintext codec (or an older build)
-				// passes through unchanged; sealing happens on next save.
-				return stored;
-			}
-			try {
-				const decrypted = safeStorage.decryptString(decodeBase64(stored.slice(SEALED_PREFIX.length)));
-				return decrypted === "" ? undefined : decrypted;
-			} catch {
-				// Ciphertext from another machine's OS keychain cannot be
-				// opened here. Returning undefined drops the dead value; the
-				// user re-enters the key once per device, which beats keeping
-				// garbage that would fail every request with an auth error.
-				return undefined;
-			}
-		},
-	};
-}
-
-/**
- * Pass-through codec for environments without OS-level encryption.
+ * Returns the plaintext, or `""` for a value this device cannot decrypt.
+ * Total: every failure — an absent `safeStorage`, an unavailable keyring,
+ * ciphertext from another machine's keychain, malformed base64 — yields `""`
+ * rather than throwing, because this runs on the load path where a throw costs
+ * the whole plugin rather than one key.
  *
- * `canRoundTrip` is true because this codec both writes and reads the same
- * plaintext layout; it does not mean the storage is secure.
+ * A value with no marker passes through unchanged, so a plaintext key (the
+ * historical layout, and the layout on any device without encryption) reads back
+ * as itself.
  */
-export const PLAINTEXT_CODEC: SecretCodec = {
-	canRoundTrip: true,
-	seal(plaintext) {
-		return plaintext;
-	},
-	unseal(stored) {
-		return stored === "" ? undefined : stored;
-	},
-};
+export function unsealPersistedSecret(stored: unknown, safeStorage: SafeStorageLike | null): string {
+	if (typeof stored !== "string" || stored === "") {
+		return "";
+	}
+	if (!stored.startsWith(SEALED_PREFIX)) {
+		return stored;
+	}
+	if (!safeStorage) {
+		// Ciphertext on a device with no decoder: mobile, or a desktop whose
+		// keyring is gone. Nothing to do but report it missing.
+		return "";
+	}
+	try {
+		if (!safeStorage.isEncryptionAvailable()) {
+			return "";
+		}
+		return safeStorage.decryptString(Buffer.from(stored.slice(SEALED_PREFIX.length), "base64"));
+	} catch {
+		// Ciphertext sealed by another machine's OS keychain cannot be opened
+		// here. Dropping the dead value beats keeping garbage that would fail
+		// every request with an auth error pointing nowhere; the caller warns so
+		// the user knows to re-enter the key rather than just observing failures.
+		return "";
+	}
+}
 
 /** Whether a persisted value carries the sealed-ciphertext marker. */
 export function isSealedSecret(value: string): boolean {
@@ -111,12 +79,11 @@ export function isSealedSecret(value: string): boolean {
 /**
  * Whether unsealing silently dropped a value that arrived as ciphertext.
  *
- * `unseal` returns `undefined` for both an empty plaintext and a failed
- * decryption, and the `unseal*` helpers normalize that to `""`, so the caller
- * cannot tell them apart from the result alone. Comparing against the persisted
- * form closes the gap: only a value that carried the sealed marker and came
- * back empty is a dead key — a legitimately empty secret is never stored
- * sealed.
+ * `unsealPersistedSecret` returns `""` for both an empty secret and a failed
+ * decryption, so the caller cannot tell them apart from the result alone.
+ * Comparing against the persisted form closes the gap: only a value that
+ * carried the sealed marker and came back empty is a dead key — a legitimately
+ * empty secret was never stored sealed.
  */
 export function isUndecryptableSecret(stored: string, unsealed: string): boolean {
 	return stored.startsWith(SEALED_PREFIX) && unsealed === "";

@@ -959,9 +959,10 @@ export const en = {
 
 	/** Where API keys are stored on this device. */
 	secretStorage: {
-		encrypted: "Stored in this vault's plugin config, encrypted with your operating system's keychain.",
-		plaintext: "This device has no OS keychain available, so keys are stored as plaintext in this vault's plugin config.",
+		vault: "Stored in Obsidian's secret storage, which is your operating system's keychain — not in this vault.",
+		plaintext: "This version of Obsidian has no secret storage, so keys are stored as plaintext in this vault's plugin config.",
 		keyField: "Sent only to {target}. {storage} Use a restricted, low-limit key.",
+		noSync: "Secret storage does not sync, so each device needs its own copy of a key. Entering it again on another device is expected.",
 		providerTarget: "this provider's base URL",
 	},
 

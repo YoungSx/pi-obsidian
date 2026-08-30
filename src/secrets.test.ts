@@ -1,154 +1,104 @@
-import { describe, expect, it } from "bun:test";
-import { installObsidianStub, SafeStorageLikeMock } from "./testing/obsidianStub";
-import type { SecretCodec } from "./secrets";
+/**
+ * The decoder's contract is "open whatever is on disk, never throw". These
+ * cases drive both layouts it has to read — plaintext and the `enc:v1:`
+ * ciphertext earlier releases wrote — and every way decoding can fail.
+ */
 
-// `secrets.ts` is free of obsidian/electron imports, but the shared stub also
+import { describe, expect, it } from "bun:test";
+import { installObsidianStub, SafeStorageLikeMock, sealForTest } from "./testing/obsidianStub";
+
+// The module is free of obsidian/electron imports, but the shared stub also
 // backs `SafeStorageLikeMock`; register it before the dynamic import resolves.
-// Environment detection itself is covered in `secretsStore.test.ts`.
 installObsidianStub();
 
-const { createSafeStorageCodec, PLAINTEXT_CODEC } = await import("./secrets");
+const { isSealedSecret, isUndecryptableSecret, unsealPersistedSecret } = await import("./secrets");
 
-function codecWith(mock: SafeStorageLikeMock): SecretCodec {
-	return createSafeStorageCodec(mock);
-}
+describe("unsealPersistedSecret", () => {
+	it("passes a plaintext value through unchanged", () => {
+		// The historical layout, and the layout on any device without a decoder.
+		expect(unsealPersistedSecret("sk-plain", null)).toBe("sk-plain");
+		expect(unsealPersistedSecret("sk-plain", new SafeStorageLikeMock())).toBe("sk-plain");
+	});
 
-describe("createSafeStorageCodec", () => {
-	it("round-trips a plaintext secret through seal and unseal", () => {
+	it("opens ciphertext this device can decrypt", () => {
 		const mock = new SafeStorageLikeMock();
-		const codec = codecWith(mock);
+		const sealed = sealForTest(mock, "sk-sealed");
 
-		const sealed = codec.seal("sk-secret");
-		expect(sealed).not.toContain("sk-secret");
-		expect(codec.unseal(sealed)).toBe("sk-secret");
-		expect(mock.encryptStringCalls).toBe(1);
-		expect(mock.decryptStringCalls).toBe(1);
+		expect(sealed.startsWith("enc:v1:")).toBe(true);
+		expect(unsealPersistedSecret(sealed, mock)).toBe("sk-sealed");
 	});
 
-	it("marks sealed values with a versioned prefix", () => {
-		const codec = codecWith(new SafeStorageLikeMock());
-		expect(codec.seal("k")).toMatch(/^enc:v1:/);
+	it("reports ciphertext as unset when there is no decoder", () => {
+		// Mobile, or a desktop whose keyring is gone.
+		expect(unsealPersistedSecret(sealForTest(new SafeStorageLikeMock(), "sk-sealed"), null)).toBe("");
 	});
 
-	it("reports canRoundTrip from safeStorage availability", () => {
-		const available = codecWith(new SafeStorageLikeMock());
-		expect(available.canRoundTrip).toBe(true);
+	it("reports ciphertext as unset when encryption is unavailable", () => {
+		const mock = new SafeStorageLikeMock();
+		const sealed = sealForTest(mock, "sk-sealed");
+		mock.available = false;
 
-		const unavailable = new SafeStorageLikeMock();
-		unavailable.available = false;
-		expect(codecWith(unavailable).canRoundTrip).toBe(false);
+		expect(unsealPersistedSecret(sealed, mock)).toBe("");
 	});
 
-	it("treats a throwing availability probe as unavailable", () => {
+	it("reports ciphertext from another machine's keychain as unset", () => {
+		// Two independent keychains: the value seals under one and cannot be
+		// opened under the other. Dropping it beats keeping garbage that would
+		// fail every request with an auth error pointing nowhere.
+		const foreign = sealForTest(new SafeStorageLikeMock(), "sk-far-away");
+
+		expect(unsealPersistedSecret(foreign, new SafeStorageLikeMock())).toBe("");
+	});
+
+	it("survives a decoder that throws on its availability probe", () => {
 		const throwing = new SafeStorageLikeMock();
-		throwing.available = false;
-		throwing.isEncryptionAvailable = () => {
-			throw new Error("keychain gone");
+		const sealed = sealForTest(throwing, "sk-sealed");
+		throwing.isEncryptionAvailable = (): boolean => {
+			throw new Error("libsecret is not running");
 		};
-		expect(codecWith(throwing).canRoundTrip).toBe(false);
+
+		expect(unsealPersistedSecret(sealed, throwing)).toBe("");
 	});
 
-	it("passes plaintext through unseal so legacy values survive one more load", () => {
-		const codec = codecWith(new SafeStorageLikeMock());
-		expect(codec.unseal("sk-legacy-plaintext")).toBe("sk-legacy-plaintext");
+	it("survives malformed base64 behind the marker", () => {
+		expect(unsealPersistedSecret("enc:v1:!!!not-base64!!!", new SafeStorageLikeMock())).toBe("");
 	});
 
-	it("returns undefined for ciphertext this keychain cannot open", () => {
-		const codecA = codecWith(new SafeStorageLikeMock());
-		const sealedElsewhere = codecA.seal("sk-other-device");
-
-		// A fresh mock models another machine: same prefix, unknown token.
-		const codecB = codecWith(new SafeStorageLikeMock());
-		expect(codecB.unseal(sealedElsewhere)).toBeUndefined();
+	it("reads a non-string or empty persisted value as unset", () => {
+		for (const value of [undefined, null, 0, {}, [], "", true]) {
+			expect(unsealPersistedSecret(value, new SafeStorageLikeMock())).toBe("");
+		}
 	});
 
-	it("decodes an empty sealed value to undefined rather than empty string", () => {
-		const codec = codecWith(new SafeStorageLikeMock());
-		expect(codec.unseal(codec.seal(""))).toBeUndefined();
+	it("does not touch the decoder for a value with no marker", () => {
+		const mock = new SafeStorageLikeMock();
+
+		unsealPersistedSecret("sk-plain", mock);
+
+		expect(mock.decryptStringCalls).toBe(0);
 	});
 });
 
-describe("PLAINTEXT_CODEC", () => {
-	it("round-trips values unchanged and claims round-trip capability", () => {
-		expect(PLAINTEXT_CODEC.seal("sk-plain")).toBe("sk-plain");
-		expect(PLAINTEXT_CODEC.unseal("sk-plain")).toBe("sk-plain");
-		expect(PLAINTEXT_CODEC.canRoundTrip).toBe(true);
+describe("isSealedSecret", () => {
+	it("recognizes the versioned marker only", () => {
+		expect(isSealedSecret("enc:v1:AAAA")).toBe(true);
+		expect(isSealedSecret("sk-plain")).toBe(false);
+		expect(isSealedSecret("")).toBe(false);
+		// A future format change has to be detectable rather than mis-decoded,
+		// which is what the version in the marker is for.
+		expect(isSealedSecret("enc:v2:AAAA")).toBe(false);
 	});
 });
 
 describe("isUndecryptableSecret", () => {
-	it("flags a sealed value that unsealed to empty", async () => {
-		const { isUndecryptableSecret } = await import("./secrets");
+	it("flags a sealed value that opened to empty", () => {
 		expect(isUndecryptableSecret("enc:v1:AAAA", "")).toBe(true);
 	});
 
-	it("does not flag plaintext passthroughs or legitimately empty values", async () => {
-		const { isUndecryptableSecret } = await import("./secrets");
-		// Legacy plaintext keys keep whatever they unsealed to.
+	it("does not flag plaintext passthroughs or legitimately empty values", () => {
+		// Legacy plaintext keys keep whatever they opened to.
 		expect(isUndecryptableSecret("sk-plain", "")).toBe(false);
 		// A decrypted value is never empty, so this pair cannot occur in practice.
 		expect(isUndecryptableSecret("enc:v1:AAAA", "sk-opened")).toBe(false);
-	});
-});
-
-describe("MCP server tokens", () => {
-	const tokenOf = (entry: unknown): string => (entry as { token?: string }).token ?? "";
-
-	it("seals non-empty plaintext tokens and leaves empties alone", async () => {
-		const { sealMcpServerTokens } = await import("./settingsSecrets");
-		const codec = codecWith(new SafeStorageLikeMock());
-		const sealed = sealMcpServerTokens(
-			[
-				{ id: "a", name: "A", url: "https://a.example.com", token: "secret-a", enabled: true },
-				{ id: "b", name: "B", url: "https://b.example.com", token: "", enabled: true },
-			],
-			codec,
-		);
-		expect(sealed[0]!.token).toMatch(/^enc:v1:/);
-		expect(sealed[0]!.token).not.toContain("secret-a");
-		expect(sealed[1]!.token).toBe("");
-	});
-
-	it("does not double-seal a value that is already sealed", async () => {
-		const { sealMcpServerTokens } = await import("./settingsSecrets");
-		const codec = codecWith(new SafeStorageLikeMock());
-		const once = sealMcpServerTokens(
-			[{ id: "a", name: "A", url: "https://a.example.com", token: "secret-a", enabled: true }],
-			codec,
-		);
-		const twice = sealMcpServerTokens(once, codec);
-		expect(twice[0]!.token).toBe(once[0]!.token);
-	});
-
-	it("unseals tokens in the raw persisted array, other fields untouched", async () => {
-		const { unsealMcpServerTokens } = await import("./settingsSecrets");
-		const codec = codecWith(new SafeStorageLikeMock());
-		const sealedToken = codec.seal("secret-b");
-		const raw = [{ id: "b", url: "https://b.example.com", token: sealedToken, enabled: false }];
-		const unsealed = unsealMcpServerTokens(raw, codec);
-		expect(unsealed[0]).toEqual({ id: "b", url: "https://b.example.com", token: "secret-b", enabled: false });
-	});
-
-	it("passes plaintext tokens through so unencrypted-device vaults still load", async () => {
-		const { unsealMcpServerTokens } = await import("./settingsSecrets");
-		const codec = codecWith(new SafeStorageLikeMock());
-		const raw = [{ id: "c", url: "https://c.example.com", token: "plain-token" }];
-		expect(tokenOf(unsealMcpServerTokens(raw, codec)[0])).toBe("plain-token");
-	});
-
-	it("drops a token this keychain cannot open to empty instead of garbage", async () => {
-		const { unsealMcpServerTokens } = await import("./settingsSecrets");
-		const elsewhere = codecWith(new SafeStorageLikeMock());
-		const foreign = elsewhere.seal("sk-other-device");
-		const codec = codecWith(new SafeStorageLikeMock());
-		const raw = [{ id: "d", url: "https://d.example.com", token: foreign }];
-		expect(tokenOf(unsealMcpServerTokens(raw, codec)[0])).toBe("");
-	});
-
-	it("returns an empty array for non-array persisted data and skips junk entries", async () => {
-		const { unsealMcpServerTokens } = await import("./settingsSecrets");
-		const codec = codecWith(new SafeStorageLikeMock());
-		expect(unsealMcpServerTokens("nope", codec)).toEqual([]);
-		expect(unsealMcpServerTokens(["garbage", null], codec)).toEqual(["garbage", null]);
 	});
 });

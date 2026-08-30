@@ -1,34 +1,18 @@
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
-import { installObsidianStub, platformMock, SafeStorageLikeMock } from "./testing/obsidianStub";
-import type { CreateSecretStoreOptions, HostRequire } from "./secretsStore";
+import { installObsidianStub, platformMock, SecretStorageMock } from "./testing/obsidianStub";
 
-// `secretsStore.ts` reads `Platform` from obsidian at call time, so the module
-// stub has to be registered before the import below resolves.
+// `secretsStore.ts` reads `Platform` and `requireApiVersion` from obsidian at
+// call time, so the module stub has to be registered before the import below.
 installObsidianStub();
 
 const { createSecretEnvironment } = await import("./secretsStore");
-const { PLAINTEXT_CODEC } = await import("./secrets");
 
-/**
- * Builds a host `require` that serves the given module map.
- *
- * Unknown ids throw, exactly as a shell without that module does — the code
- * under test must survive a throwing lookup and move on to the next shape.
- */
-function hostRequireOf(modules: Record<string, unknown>): HostRequire {
-	return (id: string) => {
-		if (!(id in modules)) {
-			throw new Error(`Cannot find module '${id}'`);
-		}
-		return modules[id];
-	};
-}
+/** A desktop new enough for `app.secretStorage` to be trusted. */
+const modernDesktop = { isMobileApp: false, hasApiVersion: () => true } as const;
 
-const desktop = { isDesktopApp: true } as const;
-
-/** Whether the resolved codec actually encrypts, as opposed to passing through. */
-function sealsCiphertext(codec: { seal(plaintext: string): string }): boolean {
-	return codec.seal("sk-secret") !== "sk-secret";
+/** A host exposing a working store. */
+function hostWith(storage: SecretStorageMock): { secretStorage: unknown } {
+	return storage.asHost();
 }
 
 // The stub's Platform flags are process-global; restore them so a later test
@@ -42,133 +26,100 @@ afterEach(() => {
 });
 
 describe("createSecretEnvironment", () => {
-	it("keeps the plaintext codec on mobile without touching the host require", () => {
-		let requireCalls = 0;
-		const hostRequire: HostRequire = () => {
-			requireCalls += 1;
-			return { safeStorage: new SafeStorageLikeMock() };
-		};
+	it("takes the vault tier on a modern desktop with a working store", () => {
+		const storage = new SecretStorageMock();
 
-		const environment = createSecretEnvironment({ isDesktopApp: false, hostRequire });
+		const environment = createSecretEnvironment({ ...modernDesktop, host: hostWith(storage) });
 
-		expect(environment.codec()).toBe(PLAINTEXT_CODEC);
-		// Reaching for electron at all on mobile is the bug this guards against.
-		expect(requireCalls).toBe(0);
+		expect(environment.tier()).toBe("vault");
+		expect(environment.vault().available).toBe(true);
+	});
+
+	it("keeps keys in the plugin config on a desktop older than the gate", () => {
+		// This is the case the gate exists for: on 1.11.4 the desktop store held
+		// its contents unencrypted, so moving there would be a downgrade from the
+		// `safeStorage` ciphertext earlier releases wrote.
+		const environment = createSecretEnvironment({
+			isMobileApp: false,
+			hasApiVersion: () => false,
+			host: hostWith(new SecretStorageMock()),
+		});
+
+		expect(environment.tier()).toBe("plaintext");
+		expect(environment.vault().available).toBe(false);
+	});
+
+	it("exempts mobile from the version gate", () => {
+		// The alternative on mobile is plaintext `data.json`, so any keystore at
+		// all is the better of the two — whatever the app version says.
+		const environment = createSecretEnvironment({
+			isMobileApp: true,
+			hasApiVersion: () => false,
+			host: hostWith(new SecretStorageMock()),
+		});
+
+		expect(environment.tier()).toBe("vault");
 	});
 
 	it("reads the platform from obsidian when no override is given", () => {
-		platformMock.isDesktopApp = false;
+		platformMock.isMobileApp = true;
 
-		expect(createSecretEnvironment({ hostRequire: hostRequireOf({}) }).codec()).toBe(PLAINTEXT_CODEC);
-	});
-
-	it("keeps the plaintext codec when the shell injects no require", () => {
-		expect(createSecretEnvironment({ ...desktop, hostRequire: null }).codec()).toBe(PLAINTEXT_CODEC);
-	});
-
-	it("keeps the plaintext codec when electron carries no safeStorage", () => {
-		// The real renderer-process shape: safeStorage is a main-process module,
-		// so `require("electron")` alone does not expose it.
-		const hostRequire = hostRequireOf({ electron: { clipboard: {}, shell: {} } });
-
-		expect(createSecretEnvironment({ ...desktop, hostRequire }).codec()).toBe(PLAINTEXT_CODEC);
-	});
-
-	it("accepts safeStorage exposed directly on electron", () => {
-		const hostRequire = hostRequireOf({ electron: { safeStorage: new SafeStorageLikeMock() } });
-
-		const codec = createSecretEnvironment({ ...desktop, hostRequire }).codec();
-
-		expect(codec).not.toBe(PLAINTEXT_CODEC);
-		expect(sealsCiphertext(codec)).toBe(true);
-	});
-
-	it("falls through to the remote bridge on electron", () => {
-		const hostRequire = hostRequireOf({ electron: { remote: { safeStorage: new SafeStorageLikeMock() } } });
-
-		const codec = createSecretEnvironment({ ...desktop, hostRequire }).codec();
-
-		expect(sealsCiphertext(codec)).toBe(true);
-	});
-
-	it("falls through to the @electron/remote package", () => {
-		const hostRequire = hostRequireOf({
-			electron: { clipboard: {} },
-			"@electron/remote": { safeStorage: new SafeStorageLikeMock() },
+		const environment = createSecretEnvironment({
+			hasApiVersion: () => false,
+			host: hostWith(new SecretStorageMock()),
 		});
 
-		const codec = createSecretEnvironment({ ...desktop, hostRequire }).codec();
-
-		expect(sealsCiphertext(codec)).toBe(true);
+		expect(environment.tier()).toBe("vault");
 	});
 
-	it("survives a require that throws for every module", () => {
-		const environment = createSecretEnvironment({ ...desktop, hostRequire: hostRequireOf({}) });
+	it("keeps keys in the plugin config when the host exposes no store", () => {
+		const environment = createSecretEnvironment({ ...modernDesktop, host: {} });
 
-		expect(environment.codec()).toBe(PLAINTEXT_CODEC);
+		expect(environment.tier()).toBe("plaintext");
 	});
 
-	it("rejects a partially shaped safeStorage instead of calling into it", () => {
-		// Missing encryptString/decryptString: usable-looking but it would throw
-		// later, at a point where the failure is much harder to attribute.
-		const hostRequire = hostRequireOf({ electron: { safeStorage: { isEncryptionAvailable: () => true } } });
-
-		expect(createSecretEnvironment({ ...desktop, hostRequire }).codec()).toBe(PLAINTEXT_CODEC);
+	it("keeps keys in the plugin config when there is no host at all", () => {
+		expect(createSecretEnvironment({ ...modernDesktop, host: null }).tier()).toBe("plaintext");
 	});
 
-	it("keeps the plaintext codec when encryption is unavailable", () => {
-		const safeStorage = new SafeStorageLikeMock();
-		safeStorage.available = false;
+	it("keeps keys in the plugin config when the store is only partially shaped", () => {
+		const partial = { secretStorage: { getSecret: () => null } };
 
-		expect(createSecretEnvironment({ ...desktop, safeStorage }).codec()).toBe(PLAINTEXT_CODEC);
+		expect(createSecretEnvironment({ ...modernDesktop, host: partial }).tier()).toBe("plaintext");
 	});
 
-	it("keeps the plaintext codec when the availability probe throws", () => {
-		const safeStorage = {
-			isEncryptionAvailable: () => {
-				throw new Error("libsecret is not running");
+	it("keeps keys in the plugin config when reading the store itself throws", () => {
+		// Shape detection only reads the property and type-checks three methods, so
+		// this is the one failure available before any call: a host whose
+		// `secretStorage` accessor throws. It has to be absorbed because the probe
+		// runs on the `onload` path, where a throw costs the whole plugin.
+		const hostileHost = {
+			get secretStorage(): unknown {
+				throw new Error("secret storage unavailable");
 			},
-			encryptString: () => Buffer.from(""),
-			decryptString: () => "",
 		};
 
-		expect(createSecretEnvironment({ ...desktop, safeStorage }).codec()).toBe(PLAINTEXT_CODEC);
+		expect(createSecretEnvironment({ ...modernDesktop, host: hostileHost }).tier()).toBe("plaintext");
 	});
 
-	it("prefers an injected safeStorage over anything the host exposes", () => {
-		let requireCalls = 0;
-		const hostRequire: HostRequire = () => {
-			requireCalls += 1;
-			return {};
-		};
+	it("resolves the same vault instance on every call", () => {
+		const environment = createSecretEnvironment({ ...modernDesktop, host: hostWith(new SecretStorageMock()) });
 
-		const codec = createSecretEnvironment({ ...desktop, safeStorage: new SafeStorageLikeMock(), hostRequire }).codec();
-
-		expect(sealsCiphertext(codec)).toBe(true);
-		expect(requireCalls).toBe(0);
-	});
-
-	it("resolves the same codec instance on every call", () => {
-		const environment = createSecretEnvironment({ ...desktop, safeStorage: new SafeStorageLikeMock() });
-
-		expect(environment.codec()).toBe(environment.codec());
+		expect(environment.vault()).toBe(environment.vault());
 	});
 
 	it("never throws, whatever the host does", () => {
-		const hostile: HostRequire = () => {
-			throw new Error("boom");
-		};
 		// The getter is read inside `createSecretEnvironment`, so the throw has to
 		// be absorbed there rather than at the call site.
-		const hostileOptions: CreateSecretStoreOptions = {
-			get isDesktopApp(): boolean {
+		const hostileOptions = {
+			host: hostWith(new SecretStorageMock()),
+			get isMobileApp(): boolean {
 				throw new Error("platform unavailable");
 			},
 		};
 
-		expect(() => createSecretEnvironment({ ...desktop, hostRequire: hostile })).not.toThrow();
 		expect(() => createSecretEnvironment(hostileOptions)).not.toThrow();
-		expect(createSecretEnvironment(hostileOptions).codec()).toBe(PLAINTEXT_CODEC);
+		expect(createSecretEnvironment(hostileOptions).tier()).toBe("plaintext");
 	});
 
 	it("reports each plaintext-fallback reason through the injected log", () => {
@@ -177,27 +128,24 @@ describe("createSecretEnvironment", () => {
 			reasons.push(message);
 		};
 
-		createSecretEnvironment({ isDesktopApp: false, log });
-		createSecretEnvironment({ ...desktop, hostRequire: null, log });
-		const unavailable = new SafeStorageLikeMock();
-		unavailable.available = false;
-		createSecretEnvironment({ ...desktop, safeStorage: unavailable, log });
-		// `probeSafeStorage` absorbs a hostile require itself, so the outer catch
-		// is reached through a probe that throws instead of returning false.
-		const hostileProbe = new SafeStorageLikeMock();
-		hostileProbe.isEncryptionAvailable = () => {
-			throw new Error("keychain exploded");
-		};
-		createSecretEnvironment({ ...desktop, safeStorage: hostileProbe, log });
+		createSecretEnvironment({ isMobileApp: false, hasApiVersion: () => false, host: null, log });
+		createSecretEnvironment({ ...modernDesktop, host: {}, log });
+		createSecretEnvironment({
+			...modernDesktop,
+			host: hostWith(new SecretStorageMock()),
+			get isMobileApp(): boolean {
+				throw new Error("boom");
+			},
+			log,
+		});
 
-		expect(reasons).toHaveLength(4);
-		expect(reasons[0]).toContain("Not a desktop app");
-		expect(reasons[1]).toContain("safeStorage");
-		expect(reasons[2]).toContain("encryption unavailable");
-		expect(reasons[3]).toContain("probe failed");
+		expect(reasons).toHaveLength(3);
+		expect(reasons[0]).toContain("older than");
+		expect(reasons[1]).toContain("secret storage");
+		expect(reasons[2]).toContain("probe failed");
 	});
 
 	it("stays silent when no log is injected", () => {
-		expect(() => createSecretEnvironment({ isDesktopApp: false })).not.toThrow();
+		expect(() => createSecretEnvironment({ ...modernDesktop, host: null })).not.toThrow();
 	});
 });
