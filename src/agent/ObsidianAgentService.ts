@@ -39,7 +39,7 @@ import { ObsidianSessionManager, type ActiveSessionInfo, type SessionContext, ty
 import { arrayBufferToBase64, extractImageRefs, mimeTypeForPath, sanitizeMessageForLog, stripImageRefs } from "../vault/image";
 import { injectContext, type InjectedNote } from "./contextInjection";
 import { ContextRefs, type ContextRef } from "./contextRefs";
-import { SUBAGENT_DEPTH_LIMIT, createDelegateTool } from "../subagent/delegateTool";
+import { createSubagentExtension } from "../subagent/extension";
 import { OBSIDIAN_AGENT_SYSTEM_PROMPT } from "./systemPrompt";
 import { composeSystemPrompt, expandSkill, findSkill, formatSkillDiagnostics, loadVaultSkills, mergeSkills } from "./skillLoader";
 import { loadUserSkills, type UserSkill } from "../skills/userSkills";
@@ -362,6 +362,12 @@ export class ObsidianAgentService {
 	 * — every call routes through the vault API — so one instance is safe to hold.
 	 */
 	private readonly env: ExecutionEnv;
+	/**
+	 * Delegation lives wholesale in the subagent extension; this service only
+	 * plays host — vault tools, live model/transport getters — and tears it
+	 * down with everything else in {@link dispose}.
+	 */
+	private readonly subagentExtension: ReturnType<typeof createSubagentExtension>;
 	private agent: Agent | null = null;
 	private unsubscribeAgent: (() => void) | null = null;
 	private initialization: Promise<void> | null = null;
@@ -519,6 +525,16 @@ export class ObsidianAgentService {
 		this.persistSettings = options.persistSettings ?? (() => this.refreshConfiguration());
 		this.log = (options.logger ?? NOOP_LOGGER).child("agent");
 		this.env = new VaultExecutionEnv(app);
+		this.subagentExtension = createSubagentExtension({
+			createVaultTools: () => createObsidianTools(this.app, this.env, this.getSettings(), () => this.skills),
+			getModel: () => getSelectedModel(this.getSettings()),
+			getStreamFn: () => this.resolveStreamFn(),
+			// Thinking level is session-owned now; a spawned subagent rides the
+			// live agent's current level rather than any global preference.
+			getThinkingLevel: () => this.agent?.state.thinkingLevel ?? DEFAULT_THINKING_LEVEL,
+			getApiKey: (provider) => this.getApiKey(provider),
+			getSkills: () => this.skills,
+		});
 	}
 
 	subscribe(listener: SnapshotListener): () => void {
@@ -1178,7 +1194,7 @@ export class ObsidianAgentService {
 			this.agent.state.thinkingLevel = clamped;
 			await this.sessionManager.appendThinkingLevelChange(clamped);
 		}
-		this.agent.state.tools = this.buildTools(0);
+		this.agent.state.tools = this.buildTools();
 		// Skills are read from the vault here too: `saveSettings` calls this after
 		// every settings change, and the panel re-reads the folder with it, so a
 		// newly saved skill reaches the running conversation without a reload.
@@ -1195,6 +1211,9 @@ export class ObsidianAgentService {
 		this.branchSummaryController?.abort();
 		this.suggestionController?.abort();
 		this.agent?.abort();
+		// Orphaned subagents outlive their parent run otherwise — the reaper is
+		// a 30-minute backstop, not a teardown path.
+		this.subagentExtension.disposeAll();
 		this.listeners.clear();
 	}
 
@@ -1419,33 +1438,15 @@ export class ObsidianAgentService {
 	}
 
 	/**
-	 * Builds the vault tool set for one delegation depth.
+	 * Builds the tool set the agent runs with.
 	 *
-	 * Both agents assemble from this one place, and depth is what shapes the
-	 * set: the `delegate` tool rides along while `depth` is below
-	 * {@link SUBAGENT_DEPTH_LIMIT}, and a set built at the limit carries no
-	 * delegate — the tree is capped by construction at parent → child →
-	 * grandchild. Model, transport, and keys are read through getters at
-	 * execution time, so a delegate run picks up whatever configuration is live
-	 * when it starts.
+	 * Vault tools come straight from the tools module; delegation rides in
+	 * wholesale from the subagent extension, which owns the spawn/wait pair,
+	 * the depth cap, and the registry — this service only supplies the host
+	 * getters the extension resolves at execution time.
 	 */
-	private buildTools(depth: number): AgentTool[] {
-		const tools = createObsidianTools(this.app, this.env, this.getSettings(), () => this.skills);
-		if (depth < SUBAGENT_DEPTH_LIMIT) {
-			tools.push(
-				createDelegateTool({
-					getModel: () => getSelectedModel(this.getSettings()),
-					getStreamFn: () => this.resolveStreamFn(),
-					// Thinking level is session-owned now; a delegate rides the live
-					// agent's current level rather than any global preference.
-					getThinkingLevel: () => this.agent?.state.thinkingLevel ?? DEFAULT_THINKING_LEVEL,
-					getApiKey: (provider) => this.getApiKey(provider),
-					getSkills: () => this.skills,
-					createChildTools: () => this.buildTools(depth + 1),
-				}),
-			);
-		}
-		return tools;
+	private buildTools(): AgentTool[] {
+		return this.subagentExtension.createTools();
 	}
 
 	private replaceAgent(messages: AgentMessage[], thinkingLevel: ThinkingLevel): void {
@@ -1495,7 +1496,7 @@ export class ObsidianAgentService {
 				// The caller resolves this: the loaded session's own level, or the
 				// seed a new session was created with. Global settings have no say.
 				thinkingLevel,
-				tools: this.buildTools(0),
+				tools: this.buildTools(),
 				messages,
 			},
 			getApiKey: (provider) => this.getApiKey(provider),
