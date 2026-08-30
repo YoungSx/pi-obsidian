@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import type { Api, AssistantMessage, Context, Model, SimpleStreamOptions } from "@earendil-works/pi-ai";
+import type { Api, AssistantMessage, Context, Model, Models, SimpleStreamOptions } from "@earendil-works/pi-ai";
 import { createAssistantMessageEventStream } from "@earendil-works/pi-ai";
 import {
 	Agent,
@@ -10,7 +10,7 @@ import {
 } from "@earendil-works/pi-agent-core";
 import { Type } from "typebox";
 import { clampWait, clampWaitTimeoutMs, WAIT_DEFAULT_MS, WAIT_MAX_MS, WAIT_MIN_MS, type WaitPacing } from "./waitTool";
-import { runSubagent, SUBAGENT_MAX_LIFETIME_MS } from "./runner";
+import { runSubagent, SUBAGENT_MAX_COMPACTIONS, SUBAGENT_MAX_LIFETIME_MS } from "./runner";
 import { SUBAGENT_CONCURRENCY_LIMIT } from "./spawnTool";
 import { createSubagentExtension, type SubagentHost } from "./extension";
 import {
@@ -131,6 +131,88 @@ function hangingStreamFn(): StreamFn {
 			options?.signal?.addEventListener("abort", fire, { once: true });
 		}
 		return stream;
+	};
+}
+
+/**
+ * A model with a tiny window, so pi's compaction threshold trips on turn one.
+ *
+ * The real trigger reads the newest assistant usage against the window, so the
+ * pairing with {@link fullContextStreamFn} is what makes compaction fire rather
+ * than any test hook.
+ */
+const SMALL_WINDOW_MODEL: Model<Api> = {
+	id: "small-window",
+	api: "openai-completions",
+	provider: "test",
+	contextWindow: 2_000,
+	maxTokens: 500,
+} as unknown as Model<Api>;
+
+function usageReporting(input: number) {
+	return {
+		input,
+		output: 10,
+		cacheRead: 0,
+		cacheWrite: 0,
+		totalTokens: input + 10,
+		cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0.01 },
+	};
+}
+
+/** Turns that each report a nearly-full context, then one that replies. */
+function fullContextStreamFn(toolTurns: number): StreamFn {
+	let requests = 0;
+	return (model: Model<Api>, _context: Context, _options?: SimpleStreamOptions) => {
+		requests += 1;
+		const stream = createAssistantMessageEventStream();
+		const base = {
+			role: "assistant" as const,
+			api: model.api,
+			provider: model.provider,
+			model: model.id,
+			usage: usageReporting(1_900),
+			timestamp: Date.now(),
+		};
+		const message: AssistantMessage =
+			requests <= toolTurns
+				? { ...base, content: [{ type: "toolCall", id: `c${requests}`, name: "noop", arguments: {} }], stopReason: "toolUse" }
+				: { ...base, content: [{ type: "text", text: "Report." }], stopReason: "stop" };
+		stream.push({ type: "done", reason: message.stopReason as never, message });
+		stream.end(message);
+		return stream;
+	};
+}
+
+/** A `Models` whose only live method is the one compaction reaches. */
+function summarizingModels(onComplete: () => void): Models {
+	return {
+		completeSimple: async (model: Model<Api>) => {
+			onComplete();
+			return {
+				role: "assistant",
+				content: [{ type: "text", text: "Summary of earlier work." }],
+				api: model.api,
+				provider: model.provider,
+				model: model.id,
+				usage: usageReporting(50),
+				timestamp: Date.now(),
+				stopReason: "stop",
+			} as AssistantMessage;
+		},
+		streamSimple: () => {
+			throw new Error("test bug: compaction should not stream");
+		},
+	} as unknown as Models;
+}
+
+function noopTool(): AgentTool {
+	return {
+		name: "noop",
+		label: "noop",
+		description: "does nothing",
+		parameters: Type.Object({}),
+		execute: async () => ({ content: [{ type: "text", text: "ok" }], details: {} }),
 	};
 }
 
@@ -373,6 +455,144 @@ describe("runSubagent", () => {
 		});
 		expect(seenSystemPrompt).toContain("grooming");
 		expect(seenSystemPrompt).toContain("read_skill");
+	});
+
+	it("appends caller instructions after the role appendix", async () => {
+		let seen: string | undefined;
+		const streamFn: StreamFn = (model, context, options) => {
+			seen = context.systemPrompt;
+			return scriptedStreamFn([{ text: "ok" }])(model, context, options);
+		};
+		await runSubagent({
+			task: "Summarize the mole notes",
+			role: findSubagentRole("scout")!,
+			instructions: "Answer in exactly three bullet points.",
+			tools: [],
+			model: MODEL,
+			streamFn,
+			thinkingLevel: "off" as never,
+		});
+		expect(seen).toContain("Research first");
+		expect(seen).toContain("three bullet points");
+		// Framing lands after the role, so a caller narrows the role rather than
+		// replacing it — and never unsays the base framing.
+		expect(seen!.indexOf("three bullet points")).toBeGreaterThan(seen!.indexOf("Research first"));
+		expect(seen).toContain("never ask questions");
+	});
+
+	it("leaves the prompt untouched for blank instructions", () => {
+		const role = findSubagentRole("general")!;
+		expect(composeSubagentPrompt(role, "   ")).toBe(composeSubagentPrompt(role));
+		expect(composeSubagentPrompt(role, undefined)).toBe(composeSubagentPrompt(role));
+	});
+
+	it("compacts its own context mid-run when the host supplies a registry", async () => {
+		let summaries = 0;
+		const result = await runSubagent({
+			task: "t",
+			role,
+			tools: [noopTool()],
+			model: SMALL_WINDOW_MODEL,
+			streamFn: fullContextStreamFn(2),
+			thinkingLevel: "off" as never,
+			models: summarizingModels(() => {
+				summaries += 1;
+			}),
+		});
+		expect(result.text).toBe("Report.");
+		expect(summaries).toBeGreaterThan(0);
+		// The summarization request is billed but leaves no message, so it only
+		// lands in the totals through the extras channel.
+		expect(result.usage.requests).toBe(result.turns + summaries);
+	});
+
+	it("runs without compaction when no registry is supplied", async () => {
+		// The identical run to the test above, minus `models`. A summarization
+		// request would show up as a billed request with no message behind it, so
+		// requests matching turns exactly is the assertion that none happened.
+		const result = await runSubagent({
+			task: "t",
+			role,
+			tools: [noopTool()],
+			model: SMALL_WINDOW_MODEL,
+			streamFn: fullContextStreamFn(2),
+			thinkingLevel: "off" as never,
+		});
+		expect(result.text).toBe("Report.");
+		expect(result.usage.requests).toBe(result.turns);
+	});
+
+	it("spends at most its compaction budget however long the run goes", async () => {
+		let summaries = 0;
+		// Every turn reports a full context, so the threshold trips at every
+		// boundary — the pathological case the budget exists for.
+		const result = await runSubagent({
+			task: "t",
+			role,
+			tools: [noopTool()],
+			model: SMALL_WINDOW_MODEL,
+			streamFn: fullContextStreamFn(SUBAGENT_MAX_COMPACTIONS + 4),
+			thinkingLevel: "off" as never,
+			models: summarizingModels(() => {
+				summaries += 1;
+			}),
+		});
+		expect(result.text).toBe("Report.");
+		expect(summaries).toBe(SUBAGENT_MAX_COMPACTIONS);
+	});
+
+	it("finishes the run when compaction itself fails", async () => {
+		// pi's contract is that this hook must not throw, and a child has no banner
+		// to report on — so a failed summary is silent and the run continues.
+		const failing = {
+			completeSimple: async () => {
+				throw new Error("summarizer exploded");
+			},
+			streamSimple: () => {
+				throw new Error("unused");
+			},
+		} as unknown as Models;
+		const result = await runSubagent({
+			task: "t",
+			role,
+			tools: [noopTool()],
+			model: SMALL_WINDOW_MODEL,
+			streamFn: fullContextStreamFn(2),
+			thinkingLevel: "off" as never,
+			models: failing,
+		});
+		expect(result.text).toBe("Report.");
+	});
+
+	it("names a context overflow instead of passing the provider's wording through", async () => {
+		const overflowing: StreamFn = (model, _context, _options) => {
+			const stream = createAssistantMessageEventStream();
+			const message: AssistantMessage = {
+				role: "assistant",
+				content: [],
+				api: model.api,
+				provider: model.provider,
+				model: model.id,
+				usage: usageReporting(0),
+				timestamp: Date.now(),
+				stopReason: "error",
+				// One of the phrasings pi's detector knows.
+				errorMessage: "prompt is too long: 213000 tokens > 200000 maximum",
+			};
+			stream.push({ type: "error", reason: "error", error: message });
+			stream.end(message);
+			return stream;
+		};
+		const run = runSubagent({
+			task: "t",
+			role,
+			tools: [],
+			model: SMALL_WINDOW_MODEL,
+			streamFn: overflowing,
+			thinkingLevel: "off" as never,
+		});
+		expect(run).rejects.toThrow("ran out of context");
+		expect(run).rejects.toThrow("Narrow it, or split it");
 	});
 
 	it("arms the default reaper, which is finite", () => {
@@ -703,6 +923,81 @@ describe("spawn/wait extension", () => {
 		for (const name of ["spawn_subagent", "wait_subagent", "list_subagents", "kill_subagent"]) {
 			expect(grandchild!.toolNames).not.toContain(name);
 		}
+		extension.disposeAll();
+	});
+
+	it("omits the model parameter and the menu when the host offers no models", () => {
+		const spawn = toolNamed(toolsWithPacing(scriptedStreamFn([{ text: "ok" }])), "spawn_subagent");
+		const properties = (spawn.parameters as unknown as { properties: Record<string, unknown> }).properties;
+		expect(properties.model).toBeUndefined();
+		expect(spawn.description).not.toContain("label → id");
+		// The level is always offered: the clamp reduces it to what the model
+		// supports, so it needs no host list.
+		expect(properties.thinkingLevel).toBeDefined();
+	});
+
+	it("advertises the host's models and runs the child on the one picked", async () => {
+		const cheap: Model<Api> = { ...MODEL, id: "cheap-model" } as Model<Api>;
+		const seenModels: string[] = [];
+		const streamFn: StreamFn = (model, context, options) => {
+			seenModels.push(model.id);
+			return scriptedStreamFn([{ text: "done" }])(model, context, options);
+		};
+		const extension = createSubagentExtension(
+			{
+				...makeHost(streamFn),
+				listModels: () => [
+					{ id: "choice-default", label: "Opus 5 (OpenRouter)" },
+					{ id: "choice-cheap", label: "Haiku (Anthropic)" },
+				],
+				resolveModel: (id) => (id === "choice-cheap" ? cheap : MODEL),
+			},
+			{ waitPacing: TEST_PACING },
+		);
+		const tools = extension.createTools();
+		const spawn = toolNamed(tools, "spawn_subagent");
+		expect(spawn.description).toContain("Haiku (Anthropic) → choice-cheap");
+		const result = await spawn.execute("c1", { task: "Sweep", model: "choice-cheap" } as never, undefined);
+		expect(result.details).toMatchObject({ model: "cheap-model" });
+		await toolNamed(tools, "wait_subagent").execute("c2", {}, undefined);
+		expect(seenModels).toEqual(["cheap-model"]);
+		extension.disposeAll();
+	});
+
+	it("names an unresolvable model instead of quietly falling back to the parent's", async () => {
+		const extension = createSubagentExtension(
+			{
+				...makeHost(scriptedStreamFn([{ text: "done" }])),
+				listModels: () => [{ id: "choice-gone", label: "Deleted model" }],
+				// The user deleted it between agent builds: advertised, unresolvable.
+				resolveModel: () => undefined,
+			},
+			{ waitPacing: TEST_PACING },
+		);
+		const spawn = toolNamed(extension.createTools(), "spawn_subagent");
+		expect(spawn.execute("c1", { task: "t", model: "choice-gone" } as never, undefined)).rejects.toThrow(
+			"Unknown model: choice-gone",
+		);
+		extension.disposeAll();
+	});
+
+	it("clamps the child's level to what its own model supports", async () => {
+		const seenLevels: unknown[] = [];
+		const streamFn: StreamFn = (model, context, options) => {
+			seenLevels.push((context as { thinkingLevel?: unknown }).thinkingLevel);
+			return scriptedStreamFn([{ text: "done" }])(model, context, options);
+		};
+		// MODEL has no `reasoning`, so pi's clamp collapses any level to "off" —
+		// which is exactly the case a parent must be able to see it got.
+		const extension = createSubagentExtension(makeHost(streamFn), { waitPacing: TEST_PACING });
+		const tools = extension.createTools();
+		const result = await toolNamed(tools, "spawn_subagent").execute(
+			"c1",
+			{ task: "t", thinkingLevel: "max" } as never,
+			undefined,
+		);
+		expect(result.details).toMatchObject({ thinkingLevel: "off" });
+		await toolNamed(tools, "wait_subagent").execute("c2", {}, undefined);
 		extension.disposeAll();
 	});
 

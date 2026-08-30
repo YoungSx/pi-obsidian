@@ -30,6 +30,7 @@ import {
 	getConfiguredApiKey,
 	getSelectedModel,
 	listModelChoices,
+	resolveModelChoice,
 	modelSupportsImages,
 	type ModelChoice,
 	type PiemSettings,
@@ -578,6 +579,20 @@ export class ObsidianAgentService {
 			// Thinking level is session-owned now; a spawned subagent rides the
 			// live agent's current level rather than any global preference.
 			getThinkingLevel: () => this.agent?.state.thinkingLevel ?? DEFAULT_THINKING_LEVEL,
+			// The same list and the same join the model switcher uses, so a spawn
+			// can only pick something the user could pick — and resolves it the way
+			// the switcher would. Read per call, so a model configured after this
+			// service was built is offered to the next agent build.
+			listModels: () => listModelChoices(this.getSettings()).map((choice) => ({ id: choice.id, label: `${choice.name} (${choice.provider})` })),
+			resolveModel: (choiceId) => resolveModelChoice(this.getSettings(), choiceId),
+			// The same instance the parent's own compaction uses, rebuilt with it
+			// when a provider registration changes. `withRequestDefaults` is not
+			// optional here: compaction reaches `models.completeSimple` internally,
+			// which takes neither an API key nor a `fetch`, so both have to be baked
+			// into the instance or a child compacts against `globalThis.fetch`
+			// without a key.
+			getModels: () => withRequestDefaults(this.requireModelsBundle(), (provider) => this.getApiKey(provider)),
+			getCompactionSettings: (contextWindow) => this.resolveCompaction(contextWindow),
 			getApiKey: (provider) => this.getApiKey(provider),
 			getSkills: () => this.skills,
 		});

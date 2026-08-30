@@ -1,5 +1,6 @@
 import type { AgentTool, Skill, StreamFn, ThinkingLevel } from "@earendil-works/pi-agent-core";
-import type { Model } from "@earendil-works/pi-ai";
+import type { Model, Models } from "@earendil-works/pi-ai";
+import type { CompactionSettings } from "../agent/compactionSettings";
 import { createKillSubagentTool, createListSubagentsTool } from "./controlTools";
 import { SubagentRegistry } from "./registry";
 import { SUBAGENT_DEPTH_LIMIT, createSpawnSubagentTool, type SubagentToolsContext } from "./spawnTool";
@@ -15,12 +16,43 @@ import { createWaitSubagentTool, type WaitPacing } from "./waitTool";
  * a settings change rides the live wiring, not the wiring that existed when
  * the extension was built.
  */
+/** One model a spawn may pick, as the host describes it. */
+export interface SubagentModelChoice {
+	/** Opaque id the spawn parameter carries and {@link SubagentHost.resolveModel} reads. */
+	id: string;
+	/** What to call it in the tool description, so the model can choose by name. */
+	label: string;
+}
+
 export interface SubagentHost {
 	/** The vault tool set a subagent runs with, before the extension adds delegation. */
 	createVaultTools(): AgentTool[];
 	getModel(): Model<string>;
 	getStreamFn(): StreamFn;
 	getThinkingLevel(): ThinkingLevel;
+	/**
+	 * The models a spawn may pick from, and the resolver for one it picked.
+	 *
+	 * Both cross the seam rather than being computed here because the join they
+	 * need is over the user's two settings lists, which the extension cannot
+	 * see. Optional so a host with nothing configured — or a test — simply does
+	 * not offer the choice, and the parameter disappears from the schema rather
+	 * than advertising an empty set.
+	 */
+	listModels?: () => readonly SubagentModelChoice[];
+	resolveModel?: (choiceId: string) => Model<string> | undefined;
+	/**
+	 * The provider registry a child compacts through, with the host's API key and
+	 * transport already baked in.
+	 *
+	 * A getter rather than a captured value for the same reason the others are:
+	 * the host rebuilds this whenever a provider registration would differ, and a
+	 * child holding a stale one fails on a provider it should have known. Absent
+	 * means children run without compaction — the behavior before this existed.
+	 */
+	getModels?: () => Models;
+	/** The user's resolved compaction settings for a child's context window. */
+	getCompactionSettings?: (contextWindow: number) => CompactionSettings;
 	getApiKey?: (provider: string) => Promise<string | undefined> | string | undefined;
 	getSkills(): readonly Skill[];
 }
@@ -37,9 +69,12 @@ export interface SubagentHost {
  * unload.
  *
  * Dependency contract for everything in `src/subagent/`: pi packages, this
- * module, and three pure shared helpers (`../tools/toolResult`,
- * `../agent/usage`, `../agent/skillLoader`). Anything vault-touching enters
- * only through {@link SubagentHost}.
+ * module, and five pure shared helpers (`../tools/toolResult`,
+ * `../vault/truncate`, `../agent/usage`, `../agent/skillLoader`, and the
+ * compaction pair `../agent/compaction` + `../agent/compactionSettings`).
+ * Each imports nothing but pi. Anything vault-touching enters only through
+ * {@link SubagentHost} — including the `Models` instance a child compacts
+ * through, which is a pi type wrapping an Obsidian transport the host bakes in.
  */
 /**
  * @param options Test seam: shrinks the wait window to milliseconds so a
@@ -64,6 +99,10 @@ export function createSubagentExtension(
 		getModel: () => host.getModel(),
 		getStreamFn: () => host.getStreamFn(),
 		getThinkingLevel: () => host.getThinkingLevel(),
+		listModels: host.listModels ? () => host.listModels?.() ?? [] : undefined,
+		resolveModel: host.resolveModel ? (choiceId) => host.resolveModel?.(choiceId) : undefined,
+		getModels: host.getModels ? () => host.getModels?.() : undefined,
+		getCompactionSettings: host.getCompactionSettings ? (window) => host.getCompactionSettings?.(window) : undefined,
 		getApiKey: host.getApiKey ? (provider) => host.getApiKey?.(provider) : undefined,
 		getSkills: () => host.getSkills(),
 		registry,
