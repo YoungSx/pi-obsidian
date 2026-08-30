@@ -242,4 +242,46 @@ describe("McpManager", () => {
 		expect(manager.getServerStates()[0]?.status).toBe("ok");
 		await manager.dispose();
 	});
+
+	it("skips the handshake when a connect finds the same url and token already live", async () => {
+		// `connect` rides every settings save via refreshConfiguration; without
+		// this skip, changing an unrelated setting would re-handshake every
+		// server on each save.
+		const server = serverFixture({ name: "x", url: "https://x.example.com", token: "t" });
+		let postCount = 0;
+		const make = (token: string) =>
+			makeManager([{ ...server, token }], () => async (url, init) => {
+				if ((init?.method ?? "GET").toUpperCase() === "GET") {
+					return new Response(null, { status: 405 });
+				}
+				postCount++;
+				const body = typeof init?.body === "string" ? init.body : "";
+				if (body.includes('"method":"initialize"')) {
+					return handshakeResponses("session-1")[0]!;
+				}
+				if (body.includes("notifications/initialized")) {
+					return new Response(null, { status: 202 });
+				}
+				return new Response(JSON.stringify({ jsonrpc: "2.0", id: 1, result: { tools: [] } }), {
+					status: 200,
+					headers: { "content-type": "application/json" },
+				});
+			});
+
+		// Same config read twice — the manager's own servers() closure, as
+		// saveSettings would deliver it.
+		const manager = make("t");
+		await manager.connect();
+		const afterFirst = postCount;
+		await manager.connect();
+		expect(postCount).toBe(afterFirst);
+		await manager.dispose();
+
+		// A token change is a different connection and must re-handshake.
+		postCount = 0;
+		const rotated = make("t2");
+		await rotated.connect();
+		expect(postCount).toBe(afterFirst);
+		await rotated.dispose();
+	});
 });
