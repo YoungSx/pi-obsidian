@@ -40,8 +40,6 @@ export function ChatApp({ service, inputController, component, draftStore }: Cha
 	const { draft: input, setDraft: setInput, clearDraft } = useSessionDraft(draftStore, snapshot.session?.id);
 	const [sessions, setSessions] = useState<ActiveSessionInfo[]>([]);
 	const [isInitializing, setIsInitializing] = useState(true);
-	const [initializationError, setInitializationError] = useState<string>();
-	const [dismissedInitError, setDismissedInitError] = useState(false);
 	// Reported upward by the composer, then handed to the transcript so its skip
 	// link has something to point at. It travels through state rather than a ref
 	// because the link only renders once the id exists.
@@ -76,6 +74,11 @@ export function ChatApp({ service, inputController, component, draftStore }: Cha
 
 	inputRef.current = input;
 
+	// Read inside the staging handler, which must not depend on the snapshot.
+	const supportsImagesRef = useRef(snapshot.supportsImages !== false);
+
+	supportsImagesRef.current = snapshot.supportsImages !== false;
+
 	const app = service.getApp();
 	// Link-resolution base for rendered Markdown, recomputed per render because
 	// reading the workspace is cheap. It is not a render trigger: `MarkdownText`
@@ -87,14 +90,11 @@ export function ChatApp({ service, inputController, component, draftStore }: Cha
 
 	useEffect(() => {
 		const unsubscribe = service.subscribe(setSnapshot);
-		void service
-			.initialize()
-			.then(() => setInitializationError(undefined))
-			.catch((error: unknown) => {
-				setInitializationError(error instanceof Error ? error.message : String(error));
-				setDismissedInitError(false);
-			})
-			.finally(() => setIsInitializing(false));
+		// A failed start reports itself through the snapshot now — the service
+		// records the reason on the banner instead of rejecting, so there is no
+		// local error state to mirror here. This effect only closes the busy
+		// window.
+		void service.initialize().finally(() => setIsInitializing(false));
 		return unsubscribe;
 	}, [service]);
 
@@ -204,9 +204,19 @@ export function ChatApp({ service, inputController, component, draftStore }: Cha
 	};
 
 	const handleAddImages = useCallback(async (files: File[]): Promise<void> => {
+		// Stage nothing on a model that cannot take images: the refusal is
+		// reported before any bytes are read, rather than at send time after the
+		// user believes the pictures are coming along. The send-time gate in the
+		// service stays as the backstop for a model switched in between staging
+		// and sending. The ref, like `inputRef` above, keeps this handler from
+		// re-registering on every snapshot.
+		if (!supportsImagesRef.current) {
+			service.notifyImagesBlocked();
+			return;
+		}
 		const staged = await Promise.all(files.map((file) => fileToPendingImage(file)));
 		setPendingImages((current) => [...current, ...staged]);
-	}, []);
+	}, [service]);
 
 	const handleRemoveImage = useCallback((id: string): void => {
 		setPendingImages((current) => current.filter((image) => image.id !== id));
@@ -290,14 +300,10 @@ export function ChatApp({ service, inputController, component, draftStore }: Cha
 				/>
 
 				<ChatBanner
-					errorMessage={dismissedInitError ? snapshot.errorMessage : (snapshot.errorMessage ?? initializationError)}
+					errorMessage={snapshot.errorMessage}
+					errorOpensSettings={snapshot.errorOpensSettings}
 					noticeMessage={snapshot.noticeMessage}
-					onDismiss={() => {
-						// The initialization error is this component's own state, so it has
-						// to be dismissed here rather than through the service.
-						setDismissedInitError(true);
-						service.dismissMessages();
-					}}
+					onDismiss={() => service.dismissMessages()}
 					onOpenSettings={canOpenSettings ? () => openPluginSettings(app) : undefined}
 				/>
 

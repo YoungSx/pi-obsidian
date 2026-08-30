@@ -609,6 +609,55 @@ describe("ObsidianAgentService", () => {
 		expect(service.getSnapshot().errorMessage).toBeTruthy();
 	});
 
+	it("reports a failed start through the snapshot instead of rejecting initialize()", async () => {
+		// Every caller of `initialize()` — the panel's effect, `sendPrompt`'s lazy
+		// start, a second tab opening mid-init — awaits the same shared promise. A
+		// rejection there would be an unhandled-rejection landmine in every path
+		// that does not await it, so the failure must ride the snapshot instead.
+		const service = createService(new MemoryAdapter(), {
+			loadUserSkills: async () => {
+				throw new Error("User skill folder unreadable.");
+			},
+		});
+
+		await service.initialize(); // must not throw
+		expect(service.getSnapshot().errorMessage).toBe("User skill folder unreadable.");
+
+		// And the failed start still gates sending, silently: the banner already
+		// carries the reason, so a refusal needs no second copy of it.
+		expect(await service.sendPrompt("Hello")).toBe(false);
+		expect(service.getSnapshot().noticeMessage).toBeUndefined();
+
+		// Dismissal is the one clear path, and it clears the start failure too.
+		service.dismissMessages();
+		expect(service.getSnapshot().errorMessage).toBeUndefined();
+	});
+
+	it("keeps a reply whose write to the vault failed, and reports it as a notice", async () => {
+		// The reader has already seen the reply on screen when the append fails, so
+		// a red alert would overstate the damage; it arrives on the grey notice
+		// channel instead, and the earlier warning (if any) is kept alongside.
+		const adapter = new MemoryAdapter();
+		const service = createService(adapter);
+		// Open the session first, so only the turn's writes hit the broken append.
+		await service.sendPrompt("First conversation");
+		service.subscribe(() => undefined);
+		const original = adapter.append.bind(adapter);
+		adapter.append = async (path: string, data: string) => {
+			if (data.includes("assistant")) {
+				throw new Error("Disk full");
+			}
+			return original(path, data);
+		};
+
+		await service.sendPrompt("Second conversation");
+
+		const snapshot = service.getSnapshot();
+		expect(snapshot.errorMessage).toBeUndefined();
+		expect(snapshot.noticeMessage).toContain("Disk full");
+		expect(snapshot.messages.at(-1)?.role).toBe("assistant");
+	});
+
 	it("reports context fill against the model's window, heuristic before any usage", async () => {
 		const service = createService();
 		const fresh = service.getSnapshot().contextFill;
@@ -1700,7 +1749,10 @@ function createServiceWithSettings(
 	const sessionManager = new ObsidianSessionManager(adapter, SESSION_DIR, "obsidian-vault:Test");
 	const service = new ObsidianAgentService(createFakeApp(adapter, overrides.vaultFiles), () => settings, sessionManager, {
 		streamFn: overrides.streamFn ?? createFakeStreamFn(),
-		loadUserSkills: NO_USER_SKILLS,
+		// Forwarded, not defaulted: a test that swaps in a throwing loader is how
+		// a failed *start* is simulated, and a default here would silently swallow
+		// the override.
+		loadUserSkills: overrides.loadUserSkills ?? NO_USER_SKILLS,
 		...(overrides.persistSettings ? { persistSettings: overrides.persistSettings } : {}),
 	});
 	return { service, settings };

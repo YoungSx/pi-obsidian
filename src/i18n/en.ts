@@ -117,6 +117,10 @@ export const en = {
 		imagePlaceholder: "[image: {mimeType}]",
 		/** Shown as a banner when the active model lacks image capability. */
 		imagesNotSupported: "{model} does not accept images. Switch models or remove the image.",
+		/** Banner error when a send lands while a reply is already streaming; the composer's controls make it a rare race. */
+		agentBusy: "The agent is already responding.",
+		/** Notice when a finished reply could not be written to the vault. The reader has the text either way, so this is a notice, not an alert. */
+		persistFailed: "This reply could not be saved to the vault: {error}",
 		/** alt text for a staged image thumbnail. */
 		imageThumbAlt: "Image attached: {mimeType}",
 		/** aria-label for the button removing the Nth staged image (1-based). */
