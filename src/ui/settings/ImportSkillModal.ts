@@ -75,7 +75,10 @@ export class ImportSkillModal extends Modal {
 		this.statusEl = contentEl.createEl("p", { cls: "piem-settings-effect" });
 		this.previewEl = contentEl.createDiv();
 
+		// Sticks to the modal's bottom edge so the action row stays reachable
+		// however far the body has scrolled.
 		new Setting(contentEl)
+			.setClass("piem-settings-modal-footer")
 			.addButton((button) => button.setButtonText(t.t("confirmDelete.cancel")).onClick(() => this.close()))
 			.addButton((button) => {
 				this.actionButton = button;

@@ -2584,6 +2584,27 @@ button.piem-chat__latest {
 }
 
 /*
+ * The modal footers stick to the bottom of that scroll box, so Save stays on
+ * screen no matter how far the body has scrolled — the cap above bounds the
+ * form, this keeps its exit visible. Opaque, because rows pass underneath it.
+ * The border-top the row already carries reads as the separator while stuck.
+ */
+.piem-settings-modal .piem-settings-modal-footer {
+	position: sticky;
+	bottom: 0;
+	background: var(--modal-background);
+}
+
+/*
+ * The model filter hides rows with the hidden attribute; the flex display on
+ * .setting-item would otherwise override the user-agent default and leave
+ * "hidden" rows visible.
+ */
+.piem-settings-tab-content .setting-item[hidden] {
+	display: none;
+}
+
+/*
  * Verdict from a connection test, rendered under the row's description.
  *
  * The state is carried by the text colour alone — no fill. This block sits

@@ -248,32 +248,40 @@ export interface SettingsPanelSettings {
 /** Which tab is open. Module-level so it survives a re-render of the panel. */
 let lastActiveTabId = "models";
 
+/**
+ * Where the tabs this build merged used to point, so a panel opened on the old
+ * layout does not snap back to the first tab.
+ */
+const RETIRED_TAB_IDS: Record<string, string> = { sessions: "chat", logs: "general" };
+
+/**
+ * Model count from which the filter row earns its place. Below it, scanning a
+ * handful of rows beats typing; past it the list outgrows one glance and search
+ * starts saving time instead of costing it.
+ */
+const MODEL_FILTER_MIN_ROWS = 8;
+
 export function renderSettingsPanel(containerEl: HTMLElement, host: SettingsPanelHost): void {
 	containerEl.empty();
 
 	const { t } = host;
 	const tabs: SettingsTabDefinition[] = [
 		{ id: "models", label: t.t("settings.tabModels"), render: (el) => renderModelsTab(el, host) },
+		// Behaviour on top, storage underneath, separated by a section heading:
+		// both halves answer questions about the same thing — the conversation —
+		// and two or three rows cannot carry a tab of their own.
 		{ id: "chat", label: t.t("settings.tabChat"), render: (el) => renderChatTab(el, host) },
-		// Its own tab rather than a row under Network: chat storage has nothing to
-		// do with how requests leave the vault, and these are the only settings in
-		// the panel that decide what happens to the user's own writing.
-		//
-		// Labelled "History" rather than "Sessions": session is the internal name for
-		// a chat, and the tab strip is the wrong place to teach a reader a second word
-		// for their own conversations.
-		{ id: "sessions", label: t.t("settings.tabSessions"), render: (el) => renderSessionsTab(el, host) },
 		{ id: "extensions", label: t.t("settings.tabExtensions"), render: (el) => renderExtensionsTab(el, host) },
-		{ id: "logs", label: t.t("settings.tabLogs"), render: (el) => renderLogsTab(el, host) },
-		// Language and About each held one or two rows and no control that changed
-		// behaviour; merged because a reader reaching for either is doing the same
-		// thing — adjusting the plugin rather than configuring it.
+		// Controls first, prose last: language, shortcuts, logs, then the About
+		// material. Each held one or two rows and no tab of their own; a reader
+		// reaching for any of them is doing the same thing — adjusting the plugin
+		// rather than configuring it.
 		{ id: "general", label: t.t("settings.tabGeneral"), render: (el) => renderGeneralTab(el, host) },
 	];
 
 	renderSettingsTabs(containerEl, {
 		tabs,
-		activeTabId: lastActiveTabId,
+		activeTabId: RETIRED_TAB_IDS[lastActiveTabId] ?? lastActiveTabId,
 		onTabChange: (tabId) => {
 			lastActiveTabId = tabId;
 		},
@@ -456,10 +464,32 @@ function renderModelList(containerEl: HTMLElement, host: SettingsPanelHost, refr
 			});
 		});
 
+	// Created before the rows container so it reads directly above the list it
+	// filters. Hidden below the threshold: with a handful of rows, scanning
+	// beats typing.
+	let filterInput: HTMLInputElement | undefined;
+	if (settings.models.length >= MODEL_FILTER_MIN_ROWS) {
+		new Setting(containerEl)
+			.setName(t.t("settings.modelsFilterLabel"))
+			.addText((text) => {
+				text.setPlaceholder(t.t("settings.modelsFilterPlaceholder"));
+				filterInput = text.inputEl;
+			});
+	}
+
+	// Rows land in their own container so the filter can hide them in place —
+	// re-rendering on each keystroke would rebuild the field mid-typing and
+	// throw focus out of it.
+	const rowsEl = containerEl.createDiv();
+
 	for (const model of settings.models) {
-		const setting = new Setting(containerEl)
+		const setting = new Setting(rowsEl)
 			.setName(describeModelConfig(model))
 			.setDesc(describeModelRow(settings, model, t));
+		// What the filter matches against: the name a row shows, the id behind it,
+		// and the provider it rides on.
+		setting.settingEl.dataset.filterText =
+			`${describeModelConfig(model)} ${describeModelRow(settings, model, t)}`.toLowerCase();
 
 		setting.addExtraButton((button) => {
 			button.setIcon("pencil");
@@ -501,8 +531,40 @@ function renderModelList(containerEl: HTMLElement, host: SettingsPanelHost, refr
 			});
 		});
 	}
+
+	if (filterInput) {
+		const input = filterInput;
+		// Sits below the rows: an empty result is read where the rows would be.
+		const emptyNote = containerEl.createEl("p", {
+			cls: "piem-settings-empty",
+			text: t.t("settings.modelsFilterEmpty"),
+		});
+		emptyNote.hidden = true;
+
+		const applyFilter = (): void => {
+			const query = input.value.trim().toLowerCase();
+			let visible = 0;
+			for (const row of Array.from(rowsEl.children)) {
+				const el = row as HTMLElement;
+				const match = query === "" || (el.dataset.filterText ?? "").includes(query);
+				el.toggleAttribute("hidden", !match);
+				if (match) visible++;
+			}
+			emptyNote.hidden = visible > 0;
+		};
+		input.addEventListener("input", applyFilter);
+	}
 }
 
+/**
+ * The Chat tab: how conversations behave, then where they are kept.
+ *
+ * The former History tab folded in here rather than standing alone: three rows
+ * cannot carry a tab of their own, and both halves answer questions about the
+ * same thing — the conversation. A section heading separates them rather than a
+ * collapsible: storage is not advanced configuration, it is something every
+ * long-term user eventually needs and should not have to unfold to find.
+ */
 function renderChatTab(containerEl: HTMLElement, host: SettingsPanelHost): void {
 	const { t } = host;
 
@@ -511,8 +573,6 @@ function renderChatTab(containerEl: HTMLElement, host: SettingsPanelHost): void 
 	 * beside the model switcher in the chat panel itself, so a global dropdown
 	 * would only masquerade as a default while every session overrides it.
 	 */
-	renderSendShortcutRow(containerEl, host);
-
 	new Setting(containerEl)
 		.setName(t.t("settings.showAgentDetails"))
 		.setDesc(t.t("settings.showAgentDetailsDesc"))
@@ -525,6 +585,14 @@ function renderChatTab(containerEl: HTMLElement, host: SettingsPanelHost): void 
 		});
 
 	renderCompactionGroup(containerEl, host);
+
+	new Setting(containerEl)
+		.setName(t.t("settings.chatHistoryHeading"))
+		.setHeading()
+		.setDesc(t.t("settings.chatHistoryDesc"));
+	renderSessionDirRow(containerEl, host);
+	renderRetentionRow(containerEl, host);
+	renderLegacyChatsNotice(containerEl, host);
 }
 
 /**
@@ -664,20 +732,6 @@ function renderTokenRow(containerEl: HTMLElement, options: TokenRowOptions): voi
 				void options.onChange(parsed);
 			});
 		});
-}
-
-/**
- * Where chats are kept, and how many.
- *
- * The count of stored chats is read once per render and shown under the field,
- * because the setting's effect is invisible otherwise: the number alone does not
- * say whether anything is about to be trashed, and the answer depends on state
- * the user cannot see from the settings dialog.
- */
-function renderSessionsTab(containerEl: HTMLElement, host: SettingsPanelHost): void {
-	renderSessionDirRow(containerEl, host);
-	renderRetentionRow(containerEl, host);
-	renderLegacyChatsNotice(containerEl, host);
 }
 
 /**
@@ -835,13 +889,25 @@ function renderNetworkGroup(containerEl: HTMLElement, host: SettingsPanelHost): 
 }
 
 /**
- * The General tab: interface language, then the About material.
+ * The General tab: controls first, prose last — language, shortcuts, logs, then
+ * the About material.
  *
- * Language stays first because it is the one row with a control; everything
- * under it is prose and links.
+ * Each of these held one or two rows on a former tab of its own; merged because
+ * a reader reaching for any of them is doing the same thing — adjusting the
+ * plugin rather than configuring it. The send shortcut joins the Shortcuts
+ * section here rather than the Chat tab: it is the plugin's only keyboard
+ * setting, so it borrows a section named for the word a reader reaches for
+ * instead of hiding behind a chat-behaviour label.
  */
 function renderGeneralTab(containerEl: HTMLElement, host: SettingsPanelHost): void {
+	const { t } = host;
 	renderLanguageRows(containerEl, host);
+
+	new Setting(containerEl).setName(t.t("settings.shortcutsHeading")).setHeading();
+	renderSendShortcutRow(containerEl, host);
+
+	renderLogsSection(containerEl, host);
+
 	renderAboutRows(containerEl, host);
 }
 
@@ -875,17 +941,20 @@ function renderAboutRows(containerEl: HTMLElement, host: SettingsPanelHost): voi
 }
 
 /**
- * Logs tab.
+ * The log threshold, and the way into the viewer.
  *
- * One threshold and a shortcut into the viewer. The threshold is written to
- * settings and takes effect immediately — the logger reads it live through the
- * settings closure, so no reload is involved. Filter labels on the viewer's own
- * dropdown are shared copy (`logView.filter.*`); a threshold and a view filter
- * are different controls, but the level words themselves should not differ
- * between them.
+ * The threshold is written to settings and takes effect immediately — the logger
+ * reads it live through the settings closure, so no reload is involved. Filter
+ * labels on the viewer's own dropdown are shared copy (`logView.filter.*`); a
+ * threshold and a view filter are different controls, but the level words
+ * themselves should not differ between them. The viewer row is named rather
+ * than a bare button, so assistive technology announcing it out of context
+ * still says what it opens.
  */
-function renderLogsTab(containerEl: HTMLElement, host: SettingsPanelHost): void {
+function renderLogsSection(containerEl: HTMLElement, host: SettingsPanelHost): void {
 	const { settings, t } = host;
+
+	new Setting(containerEl).setName(t.t("settings.logsHeading")).setHeading();
 
 	new Setting(containerEl)
 		.setName(t.t("settings.logLevelHeading"))
@@ -900,7 +969,10 @@ function renderLogsTab(containerEl: HTMLElement, host: SettingsPanelHost): void 
 				await host.save();
 			});
 		});
-	new Setting(containerEl).addButton((button) => button.setButtonText(t.t("commands.openLogs")).onClick(() => host.openLogView()));
+	new Setting(containerEl)
+		.setName(t.t("settings.logViewerName"))
+		.setDesc(t.t("settings.logViewerDesc"))
+		.addButton((button) => button.setButtonText(t.t("commands.openLogs")).onClick(() => host.openLogView()));
 }
 
 /**

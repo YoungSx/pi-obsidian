@@ -100,7 +100,10 @@ export class McpServerModal extends Modal {
 			return { ok: true, detail: t.t("mcp.testOk", { tools: count }) };
 		});
 
+		// Sticks to the modal's bottom edge so the save row stays reachable however
+		// far the body has scrolled.
 		new Setting(contentEl)
+			.setClass("piem-settings-modal-footer")
 			.addButton((button) => {
 				button.setButtonText(t.t("mcp.cancelButton"));
 				button.onClick(() => this.close());

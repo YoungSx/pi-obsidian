@@ -470,19 +470,38 @@ export const en = {
 
 	/** Settings page. */
 	settings: {
+		// Four tabs. The former History and Logs tabs each held two or three rows
+		// — too little to navigate for — so their rows folded into the tab whose
+		// question they answer: chat storage is part of the conversation it
+		// stores, and the log level is plugin adjustment, like the language.
 		tabModels: "Models",
 		tabChat: "Chat",
-		tabSessions: "History",
 		tabExtensions: "Extensions",
 		tabGeneral: "General",
-		tabLogs: "Logs",
 
 		logLevelHeading: "Log level",
 		logLevelDesc:
 			"How much the plugin writes to its log. \"Warnings\" is enough for everyday use; turn it down to \"Debug\" while troubleshooting, then back.",
+		logsHeading: "Logs",
+		/**
+		 * Names the row that opens the viewer, because a bare button reads as a
+		 * stray control and assistive technology announcing it out of context
+		 * still needs to say what it opens.
+		 */
+		logViewerName: "Log viewer",
+		logViewerDesc: "Everything the plugin has written, searchable and filterable by level.",
 
 		languageHeading: "Language",
 		languageDesc: "What language the interface speaks. “Auto” follows the vault’s language.",
+
+		shortcutsHeading: "Shortcuts",
+		/**
+		 * Sits under the Shortcuts heading on the General tab. It is the only
+		 * keyboard setting the plugin has, so it borrows a section instead of
+		 * standing one up; the heading keeps it findable by the word a reader
+		 * reaches for — "shortcut" — rather than by remembering which tab.
+		 */
+		sendShortcut: "Send message with",
 
 		statusActiveModel: "Active model",
 		providersHeading: "Providers",
@@ -512,11 +531,18 @@ export const en = {
 		noKey: "no key",
 		modelCount: "{count} model",
 		modelsCount: "{count} models",
+		/**
+		 * Filter row over the model list. It appears only past a screenful of
+		 * rows, because scanning a handful beats typing — the control has to earn
+		 * its place before it appears.
+		 */
+		modelsFilterLabel: "Filter",
+		modelsFilterPlaceholder: "Type to filter by name, ID, or provider…",
+		modelsFilterEmpty: "No models match.",
 		providerMissing: "provider missing",
 		activeSuffix: " · active",
 		showAgentDetails: "Show agent details",
 		showAgentDetailsDesc: "Show token counts, spend, and raw tool arguments in the chat panel.",
-		sendShortcut: "Send with",
 		/**
 		 * Names what the other key does under each option, because that is the
 		 * actual trade: whichever key does not send has to make a new line, and a
@@ -527,6 +553,14 @@ export const en = {
 		sendShortcutModEnter: "Ctrl+Enter or ⌘+Enter (Enter makes a new line)",
 		/** Shown under the row on a phone, where a soft keyboard has no Shift+Enter. */
 		sendShortcutMobileNote: "On a phone, Enter always makes a new line — a soft keyboard has no Shift+Enter — so use the Send button.",
+		/**
+		 * Section heading under the Chat tab for where chats are kept. Storage is
+		 * separated from behaviour by a heading, not a collapsible: it is not
+		 * advanced configuration, it is something every long-term user eventually
+		 * needs and should not have to unfold to find.
+		 */
+		chatHistoryHeading: "Chat history",
+		chatHistoryDesc: "Where chats are kept, and how many old ones stay.",
 		/** Summary line of the network section folded under the Models tab. */
 		networkHeading: "Network",
 		networkHeadingDesc: "How requests leave the vault.",
@@ -930,6 +964,14 @@ export const en = {
 	modelModal: {
 		addTitle: "Add model",
 		editTitle: "Edit model",
+		/**
+		 * Collapsible group for the four capability fields. The identity fields
+		 * (provider, ID, display name) stay flat: a new model cannot be saved
+		 * without them, so hiding anything required would trade one scroll for a
+		 * click and a hunt.
+		 */
+		capabilityGroup: "Capabilities & limits",
+		capabilityGroupHint: "Context window, output cap, and what the model accepts.",
 		provider: "Provider",
 		providerDesc: "Which configured endpoint serves this model.",
 		modelId: "Model ID",
