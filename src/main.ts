@@ -155,6 +155,12 @@ export default class PiemPlugin extends Plugin {
 			// makes that write survive a reload, and it reconfigures the running
 			// agent on the way back.
 			persistSettings: () => this.saveSettings(),
+			// MCP tools join the vault tools on every build or reconfigure; the
+			// manager owns connecting and skips servers whose config is unchanged.
+			getExternalTools: async () => {
+				await this.mcpManager.connect();
+				return this.mcpManager.buildAgentTools();
+			},
 		});
 		this.draftStore = DraftStore.forPlugin(this.app, this, this.requirePluginLogger().logger);
 

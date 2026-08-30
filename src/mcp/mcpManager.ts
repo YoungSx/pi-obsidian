@@ -65,6 +65,8 @@ interface McpServerEntry {
 	tools: McpTool[];
 	status: McpServerStatus;
 	error?: string;
+	/** The url+token this entry was connected with, for skip-if-unchanged. */
+	connection?: { url: string; token: string };
 }
 
 /** Converts a JSON Schema object into the TypeBox type pi's tool signatures use. */
@@ -239,11 +241,23 @@ export class McpManager {
 	}
 
 	private async connectServer(server: McpServerConfig): Promise<void> {
+		// `connect` runs on every settings save (it is how refreshed tools reach the
+		// agent), so an already-connected server with the same url+token is left
+		// alone — name edits need no reconnect either, since tool names are derived
+		// from the live config in `buildAgentTools`. A failed server is always
+		// retried; that is the only path a temporarily down endpoint recovers on.
+		const existing = this.entries.get(server.id);
+		if (
+			existing?.status === "ok" &&
+			existing.connection?.url === server.url &&
+			existing.connection?.token === server.token
+		) {
+			return;
+		}
 		try {
-			const existing = this.entries.get(server.id);
 			const client = await this.openClient(server);
 			const { tools } = await withTimeout(client.listTools(), CONNECT_TIMEOUT_MS, "Listing tools");
-			this.entries.set(server.id, { client, tools, status: "ok" });
+			this.entries.set(server.id, { client, tools, status: "ok", connection: { url: server.url, token: server.token } });
 			if (existing && existing.client !== client) {
 				await this.closeClient(existing.client);
 			}
@@ -251,10 +265,11 @@ export class McpManager {
 			// A partial client can exist after a failed listTools; keep it so dispose
 			// still closes its transport, but mark the server failed.
 			this.entries.set(server.id, {
-				client: this.entries.get(server.id)?.client ?? null,
+				client: existing?.client ?? null,
 				tools: [],
 				status: "error",
 				error: error instanceof Error ? error.message : String(error),
+				connection: { url: server.url, token: server.token },
 			});
 		}
 	}

@@ -333,6 +333,14 @@ export interface ObsidianAgentServiceOptions {
 	 * holding the settings object directly wants.
 	 */
 	persistSettings?: () => Promise<void>;
+	/**
+	 * Gathers agent tools beyond the built-in vault ones — MCP servers today.
+	 *
+	 * The implementation owns when to connect: the service calls it whenever a
+	 * conversation is built or reconfigured, and merges the result after the
+	 * vault tools. Omitted (the default in tests) means no external tools.
+	 */
+	getExternalTools?: () => Promise<AgentTool[]>;
 }
 
 interface CompactionRunOptions {
@@ -350,6 +358,8 @@ export class ObsidianAgentService {
 	private readonly loadUserSkillsFn: (customDir?: string) => Promise<{ skills: UserSkill[]; diagnostics: SkillDiagnostic[] }>;
 	/** See {@link ObsidianAgentServiceOptions.persistSettings}. */
 	private readonly persistSettings: () => Promise<void>;
+	/** See {@link ObsidianAgentServiceOptions.getExternalTools}. */
+	private readonly getExternalToolsFn: () => Promise<AgentTool[]>;
 	private readonly listeners = new Set<SnapshotListener>();
 	/**
 	 * Single vault execution env shared by the file tools and the prompt-template
@@ -523,6 +533,7 @@ export class ObsidianAgentService {
 		this.streamFn = options.streamFn;
 		this.loadUserSkillsFn = options.loadUserSkills ?? loadUserSkills;
 		this.persistSettings = options.persistSettings ?? (() => this.refreshConfiguration());
+		this.getExternalToolsFn = options.getExternalTools ?? (async () => []);
 		this.log = (options.logger ?? NOOP_LOGGER).child("agent");
 		this.env = new VaultExecutionEnv(app);
 		this.subagentExtension = createSubagentExtension({
@@ -971,7 +982,7 @@ export class ObsidianAgentService {
 		// carrying either forward would shape a fresh chat the user never set up that
 		// way. The active note is left alone because it describes the workspace.
 		this.contextRefs.reset();
-		this.replaceAgent([], seed);
+		await this.replaceAgent([], seed);
 		this.panelError = undefined;
 		this.sessionRevision += 1;
 		this.notify();
@@ -1009,7 +1020,7 @@ export class ObsidianAgentService {
 		// Same reasoning as `newSession`: the incoming conversation gets a clean
 		// follow state and no inherited pins.
 		this.contextRefs.reset();
-		this.adoptSessionContext(context);
+		await this.adoptSessionContext(context);
 		this.panelError = undefined;
 		await this.sessionManager.ensureConfiguration(this.getSessionDefaults());
 		this.sessionInfo = await this.sessionManager.getActiveSessionInfo();
@@ -1194,7 +1205,14 @@ export class ObsidianAgentService {
 			this.agent.state.thinkingLevel = clamped;
 			await this.sessionManager.appendThinkingLevelChange(clamped);
 		}
-		this.agent.state.tools = this.buildTools();
+		this.agent.state.tools = [
+			...this.buildTools(),
+			// Connect runs here, on the same settings-save path that rebuilt the
+			// vault tool list — one road from "configuration changed" to "the agent
+			// sees the new tools". The manager skips servers whose url+token are
+			// unchanged, so routine saves do not reconnect anything.
+			...(await this.fetchExternalTools()),
+		];
 		// Skills are read from the vault here too: `saveSettings` calls this after
 		// every settings change, and the panel re-reads the folder with it, so a
 		// newly saved skill reaches the running conversation without a reload.
@@ -1363,7 +1381,7 @@ export class ObsidianAgentService {
 		this.sessionInfo = await this.sessionManager.continueRecentSession(defaults);
 		const context = await this.sessionManager.buildSessionContext();
 		this.lastCompaction = await this.sessionManager.getLastCompaction();
-		this.adoptSessionContext(context);
+		await this.adoptSessionContext(context);
 		await this.refreshPromptTemplates();
 		this.notify();
 	}
@@ -1394,7 +1412,8 @@ export class ObsidianAgentService {
 	 * Messages a compaction absorbed carry no entry and are left unmapped, which
 	 * is what makes {@link retryFrom} decline them.
 	 */
-	private adoptSessionContext(context: SessionContext): void {
+	/** Adopts a loaded session; async only to gather the tool list for the fresh agent. */
+	private async adoptSessionContext(context: SessionContext): Promise<void> {
 		this.messageEntryIds = new WeakMap<object, string>();
 		context.messages.forEach((message, index) => {
 			const entryId = context.messageOrigins[index];
@@ -1405,7 +1424,7 @@ export class ObsidianAgentService {
 		// The session's recorded level, clamped to the model requests will run on:
 		// the conversation may have last run a model whose ceiling differs, and a
 		// level the model cannot express is an error waiting for the next prompt.
-		this.replaceAgent(
+		await this.replaceAgent(
 			context.messages,
 			clampThinkingLevel(getSelectedModel(this.getSettings()), context.thinkingLevel),
 		);
@@ -1443,13 +1462,27 @@ export class ObsidianAgentService {
 	 * Vault tools come straight from the tools module; delegation rides in
 	 * wholesale from the subagent extension, which owns the spawn/wait pair,
 	 * the depth cap, and the registry — this service only supplies the host
-	 * getters the extension resolves at execution time.
+	 * getters the extension resolves at execution time. MCP tools are appended
+	 * by the callers, whose async gather may connect to servers.
 	 */
 	private buildTools(): AgentTool[] {
 		return this.subagentExtension.createTools();
 	}
 
-	private replaceAgent(messages: AgentMessage[], thinkingLevel: ThinkingLevel): void {
+	/** External tools for the current settings; empty when no provider is wired. */
+	private fetchExternalTools(): Promise<AgentTool[]> {
+		return this.getExternalToolsFn();
+	}
+
+	/**
+	 * Builds a fresh agent over `messages`, wiring every seam the conversation
+	 * needs.
+	 *
+	 * Async because the tool list now includes external tools — MCP today — and
+	 * gathering them may connect to servers. Every caller already awaited other
+	 * work on the way here, so the extra hop costs nothing.
+	 */
+	private async replaceAgent(messages: AgentMessage[], thinkingLevel: ThinkingLevel): Promise<void> {
 		this.unsubscribeAgent?.();
 		// An aborted run never delivers `tool_execution_end`, so anything keyed by a
 		// call that was in flight would otherwise accumulate for the life of the
@@ -1496,7 +1529,7 @@ export class ObsidianAgentService {
 				// The caller resolves this: the loaded session's own level, or the
 				// seed a new session was created with. Global settings have no say.
 				thinkingLevel,
-				tools: this.buildTools(),
+				tools: [...this.buildTools(), ...(await this.fetchExternalTools())],
 				messages,
 			},
 			getApiKey: (provider) => this.getApiKey(provider),
