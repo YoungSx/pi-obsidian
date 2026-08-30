@@ -276,12 +276,6 @@ export class ModelModal extends Modal {
 	/** Input fields for the numeric limits, so a recommendation can fill a blank one. */
 	private contextWindowInput: TextComponent | null = null;
 	private maxTokensInput: TextComponent | null = null;
-	/** Rewritable notes under the numeric fields, naming what auto-filled them. */
-	private contextWindowHint: HTMLElement | null = null;
-	private maxTokensHint: HTMLElement | null = null;
-	/** Provenance of the value sitting in each numeric field, when a recommendation put it there. Cleared the moment the user edits the field. */
-	private contextWindowFilledFrom: CapabilityHintSource | null = null;
-	private maxTokensFilledFrom: CapabilityHintSource | null = null;
 
 	constructor(options: ModelModalOptions) {
 		super(options.app);
@@ -371,7 +365,6 @@ export class ModelModal extends Modal {
 		const contextWindowSetting = new Setting(contentEl)
 			.setName(t.t("modelModal.contextWindow"))
 			.setDesc(t.t("modelModal.contextWindowDesc"));
-		this.contextWindowHint = contextWindowSetting.descEl.createDiv({ cls: "piem-settings-effect" });
 		contextWindowSetting.addText((text) => {
 			text.inputEl.type = "number";
 			text.setPlaceholder(t.t("modelModal.contextWindowPlaceholder"));
@@ -380,18 +373,12 @@ export class ModelModal extends Modal {
 			text.onChange((value) => {
 				const parsed = Number.parseInt(value, 10);
 				this.draft.contextWindow = Number.isInteger(parsed) && parsed > 0 ? parsed : undefined;
-				// A hand-typed value is no longer the recommendation's, so the note
-				// naming it must go. Component setters fire no events, so this only
-				// runs for real edits.
-				this.contextWindowFilledFrom = null;
-				this.contextWindowHint?.setText("");
 			});
 		});
 
 		const maxTokensSetting = new Setting(contentEl)
 			.setName(t.t("modelModal.maxTokens"))
 			.setDesc(t.t("modelModal.maxTokensDesc"));
-		this.maxTokensHint = maxTokensSetting.descEl.createDiv({ cls: "piem-settings-effect" });
 		maxTokensSetting.addText((text) => {
 			text.inputEl.type = "number";
 			text.setPlaceholder(t.t("modelModal.maxTokensPlaceholder"));
@@ -400,8 +387,6 @@ export class ModelModal extends Modal {
 			text.onChange((value) => {
 				const parsed = Number.parseInt(value, 10);
 				this.draft.maxTokens = Number.isInteger(parsed) && parsed > 0 ? parsed : undefined;
-				this.maxTokensFilledFrom = null;
-				this.maxTokensHint?.setText("");
 			});
 		});
 
@@ -474,10 +459,10 @@ export class ModelModal extends Modal {
 	 * so once flipped manually the form keeps applying nothing and the line stays
 	 * as the record of what the source thought.
 	 *
-	 * The numeric fields follow a different rule: they fill only when blank. Blank
-	 * means "use the default", so filling one can never overwrite a stored or
-	 * hand-typed value — which is why it happens regardless of `apply`. A filled
-	 * field says so under itself, and stops saying so the moment it is edited.
+	 * The numeric fields follow a different rule: they fill only when blank, and
+	 * say nothing about it. Blank means "use the default", so filling one can
+	 * never overwrite a stored or hand-typed value — which is why it happens
+	 * regardless of `apply`.
 	 */
 	private refreshCatalogRecommendation(apply: boolean): void {
 		const { t } = this.options;
@@ -500,23 +485,11 @@ export class ModelModal extends Modal {
 		if (hint?.contextWindow !== undefined && this.draft.contextWindow === undefined) {
 			this.draft.contextWindow = hint.contextWindow;
 			this.contextWindowInput?.setValue(String(hint.contextWindow));
-			this.contextWindowFilledFrom = hint.source;
 		}
-		this.contextWindowHint?.setText(
-			this.contextWindowFilledFrom
-				? t.t("modelModal.autofillHint", { source: describeHintSource(this.contextWindowFilledFrom, t) })
-				: "",
-		);
 		if (hint?.maxTokens !== undefined && this.draft.maxTokens === undefined) {
 			this.draft.maxTokens = hint.maxTokens;
 			this.maxTokensInput?.setValue(String(hint.maxTokens));
-			this.maxTokensFilledFrom = hint.source;
 		}
-		this.maxTokensHint?.setText(
-			this.maxTokensFilledFrom
-				? t.t("modelModal.autofillHint", { source: describeHintSource(this.maxTokensFilledFrom, t) })
-				: "",
-		);
 		if (hint && apply) {
 			if (!this.reasoningTouched) {
 				this.draft.reasoning = hint.reasoning;
