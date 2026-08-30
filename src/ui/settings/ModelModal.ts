@@ -103,54 +103,61 @@ export function buildModelSuggestions(listings: readonly ProviderListing[] = [])
 }
 
 /**
- * What the builtin catalog says about one model id's thinking support.
+ * What the builtin catalog says about one model id's capabilities.
+ *
+ * Both answers come from the same snapshot the suggestions do, so one lookup
+ * serves every capability toggle the form renders.
  */
-export interface ThinkingSupportHint {
+export interface CatalogCapabilityHint {
 	/** Whether the catalog entry advertises reasoning parameters. */
-	supports: boolean;
+	reasoning: boolean;
+	/** Whether the catalog entry accepts image content alongside text. */
+	images: boolean;
 	/** Which builtin provider's catalog supplied the answer, e.g. `anthropic`. */
 	source: string;
 }
 
 /**
- * Looks one model id up in the builtin catalog and reports its thinking support.
+ * Looks one model id up in the builtin catalog and reports its capabilities.
  *
  * A *recommendation*, not a probe — and deliberately so. A listing response
- * carries no capability data, and the only live way to learn thinking support is
- * to send a real thinking request and read the server's error, which is
+ * carries no capability data, and the only live way to learn what a server
+ * accepts is to send real requests and read its errors, which is
  * provider-specific, costs tokens, and is wrong more often than the shipped
  * snapshot is right. So detection runs offline against the same catalog that
- * powers the suggestions, and the toggle stays editable for the gateways where
- * that snapshot is stale.
+ * powers the suggestions, and every toggle stays editable for the gateways
+ * where that snapshot is stale.
  *
  * Matching is exact first. Ids are commonly namespaced by the gateway in front —
  * an OpenRouter-style endpoint serves `anthropic/claude-…` — so the final path
  * segment matches too, and the hint names the catalog section that knew the tail,
  * since that is where the claim came from.
  */
-export function findThinkingSupportHint(modelApiId: string): ThinkingSupportHint | undefined {
+export function findCatalogCapabilityHint(modelApiId: string): CatalogCapabilityHint | undefined {
 	const id = modelApiId.trim().toLowerCase();
 	if (!id) {
 		return undefined;
 	}
 	const exact = findCatalogModel(id);
 	if (exact) {
-		return { supports: exact.reasoning, source: exact.provider };
+		return { reasoning: exact.reasoning, images: exact.images, source: exact.provider };
 	}
 	const tail = id.slice(id.lastIndexOf("/") + 1);
 	if (tail === id) {
 		return undefined;
 	}
 	const namespaced = findCatalogModel(tail);
-	return namespaced ? { supports: namespaced.reasoning, source: namespaced.provider } : undefined;
+	return namespaced
+		? { reasoning: namespaced.reasoning, images: namespaced.images, source: namespaced.provider }
+		: undefined;
 }
 
 /** First catalog entry whose id matches, case-insensitively, in shipped order. */
-function findCatalogModel(id: string): { reasoning: boolean; provider: string } | undefined {
+function findCatalogModel(id: string): { reasoning: boolean; images: boolean; provider: string } | undefined {
 	for (const provider of getBuiltinProviders()) {
 		const match = getBuiltinModels(provider).find((model) => model.id.toLowerCase() === id);
 		if (match) {
-			return { reasoning: match.reasoning, provider };
+			return { reasoning: match.reasoning, images: match.input.includes("image"), provider };
 		}
 	}
 	return undefined;
@@ -189,14 +196,17 @@ export class ModelModal extends Modal {
 	/** Listings this form has collected, seeded from the session's existing ones. */
 	private listings: readonly ProviderListing[] = [];
 	/**
-	 * Whether the user has set the thinking toggle by hand this session. Once
-	 * true, catalog recommendations stop being applied — see
-	 * {@link refreshThinkingRecommendation}.
+	 * Whether the user has set a capability toggle by hand this session. Once
+	 * true for one, catalog recommendations stop being applied to it — see
+	 * {@link refreshCatalogRecommendation}.
 	 */
 	private reasoningTouched = false;
+	private imagesTouched = false;
 	private reasoningToggle: ToggleComponent | null = null;
-	/** Rewritable note under the toggle's description; empty renders as nothing. */
+	private imagesToggle: ToggleComponent | null = null;
+	/** Rewritable note under a toggle's description; empty renders as nothing. */
 	private thinkingHint: HTMLElement | null = null;
+	private imageHint: HTMLElement | null = null;
 
 	constructor(options: ModelModalOptions) {
 		super(options.app);
@@ -222,7 +232,7 @@ export class ModelModal extends Modal {
 		// Editing starts from a stored choice, so the catalog's answer is reported
 		// but never applied over it; a form opened to add starts with an empty id,
 		// which has no recommendation to show either way.
-		this.refreshThinkingRecommendation(false);
+		this.refreshCatalogRecommendation(false);
 
 		new Setting(contentEl)
 			.setName(t.t("modelModal.provider"))
@@ -254,7 +264,7 @@ export class ModelModal extends Modal {
 					this.testRow?.reset();
 					// The id decides what the catalog can recommend; a changed id is a
 					// changed question, so the stale answer must not survive it.
-					this.refreshThinkingRecommendation(true);
+					this.refreshCatalogRecommendation(true);
 				});
 					// Read through a closure rather than passed as a snapshot, so a probe
 				// that lands after this field was built still shows up: the suggest
@@ -262,7 +272,7 @@ export class ModelModal extends Modal {
 				new CatalogSuggest(this.app, text.inputEl, () => buildModelSuggestions(this.listings), (value) => {
 					this.draft.modelApiId = value;
 					this.testRow?.reset();
-					this.refreshThinkingRecommendation(true);
+					this.refreshCatalogRecommendation(true);
 				});
 			});
 
@@ -290,6 +300,19 @@ export class ModelModal extends Modal {
 				});
 			});
 
+		new Setting(contentEl)
+			.setName(t.t("modelModal.maxTokens"))
+			.setDesc(t.t("modelModal.maxTokensDesc"))
+			.addText((text) => {
+				text.inputEl.type = "number";
+				text.setPlaceholder(t.t("modelModal.maxTokensPlaceholder"));
+				text.setValue(this.draft.maxTokens ? String(this.draft.maxTokens) : "");
+				text.onChange((value) => {
+					const parsed = Number.parseInt(value, 10);
+					this.draft.maxTokens = Number.isInteger(parsed) && parsed > 0 ? parsed : undefined;
+				});
+			});
+
 		const thinkingSetting = new Setting(contentEl)
 			.setName(t.t("modelModal.supportsThinking"))
 			.setDesc(t.t("modelModal.supportsThinkingDesc"));
@@ -305,6 +328,20 @@ export class ModelModal extends Modal {
 				// recorded rather than recomputed on the next id edit.
 				this.reasoningTouched = true;
 				this.draft.reasoning = reasoning;
+				this.testRow?.reset();
+			});
+		});
+
+		const imagesSetting = new Setting(contentEl)
+			.setName(t.t("modelModal.supportsImages"))
+			.setDesc(t.t("modelModal.supportsImagesDesc"));
+		this.imageHint = imagesSetting.descEl.createDiv({ cls: "piem-settings-effect" });
+		imagesSetting.addToggle((toggle) => {
+			this.imagesToggle = toggle;
+			toggle.setValue(this.draft.supportsImages);
+			toggle.onChange((supportsImages) => {
+				this.imagesTouched = true;
+				this.draft.supportsImages = supportsImages;
 				this.testRow?.reset();
 			});
 		});
@@ -338,26 +375,39 @@ export class ModelModal extends Modal {
 	/**
 	 * Re-reads the catalog for the current model id.
 	 *
-	 * Two effects, deliberately separable. The hint line always follows the id: it
-	 * is a report, and reports do not wait for permission. The toggle value only
-	 * follows it while the user has not set the toggle by hand — a recommendation
-	 * that overwrites an explicit choice is not a recommendation, so once flipped
-	 * manually the form keeps applying nothing and the line stays as the record of
-	 * what the catalog thought.
+	 * Two effects, deliberately separable per capability. Each hint line always
+	 * follows the id: it is a report, and reports do not wait for permission. Each
+	 * toggle value only follows it while the user has not set that toggle by hand —
+	 * a recommendation that overwrites an explicit choice is not a recommendation,
+	 * so once flipped manually the form keeps applying nothing and the line stays
+	 * as the record of what the catalog thought.
 	 */
-	private refreshThinkingRecommendation(apply: boolean): void {
-		const hint = findThinkingSupportHint(this.draft.modelApiId);
+	private refreshCatalogRecommendation(apply: boolean): void {
+		const { t } = this.options;
+		const hint = findCatalogCapabilityHint(this.draft.modelApiId);
 		this.thinkingHint?.setText(
 			hint
-				? this.options.t.t(
-						hint.supports ? "modelModal.thinkingHintSupported" : "modelModal.thinkingHintUnsupported",
-						{ source: hint.source },
-					)
+				? t.t(hint.reasoning ? "modelModal.thinkingHintSupported" : "modelModal.thinkingHintUnsupported", {
+						source: hint.source,
+					})
 				: "",
 		);
-		if (hint && apply && !this.reasoningTouched) {
-			this.draft.reasoning = hint.supports;
-			this.reasoningToggle?.setValue(hint.supports);
+		this.imageHint?.setText(
+			hint
+				? t.t(hint.images ? "modelModal.imagesHintSupported" : "modelModal.imagesHintUnsupported", {
+						source: hint.source,
+					})
+				: "",
+		);
+		if (hint && apply) {
+			if (!this.reasoningTouched) {
+				this.draft.reasoning = hint.reasoning;
+				this.reasoningToggle?.setValue(hint.reasoning);
+			}
+			if (!this.imagesTouched) {
+				this.draft.supportsImages = hint.images;
+				this.imagesToggle?.setValue(hint.images);
+			}
 		}
 	}
 

@@ -37,6 +37,7 @@ function model(overrides: Partial<ModelConfig> = {}): ModelConfig {
 		modelApiId: "deepseek-v4-pro",
 		displayName: "DeepSeek V4 Pro",
 		reasoning: true,
+		supportsImages: false,
 		...overrides,
 	};
 }
@@ -133,12 +134,26 @@ describe("normalizeModelConfig", () => {
 			modelApiId: "gpt-4o",
 			displayName: "",
 			reasoning: false,
+			supportsImages: false,
 		});
 	});
 
 	it("treats reasoning as opt-in so a strict server is never sent thinking fields by default", () => {
 		expect(normalizeModelConfig({ id: "m1", providerId: "p1", modelApiId: "m", reasoning: "yes" })?.reasoning).toBe(false);
 		expect(normalizeModelConfig({ id: "m1", providerId: "p1", modelApiId: "m", reasoning: true })?.reasoning).toBe(true);
+	});
+
+	it("treats image input as opt-in, so rows written before the field existed keep sending text-only", () => {
+		expect(normalizeModelConfig({ id: "m1", providerId: "p1", modelApiId: "m" })?.supportsImages).toBe(false);
+		expect(normalizeModelConfig({ id: "m1", providerId: "p1", modelApiId: "m", supportsImages: true })?.supportsImages).toBe(true);
+		expect(normalizeModelConfig({ id: "m1", providerId: "p1", modelApiId: "m", supportsImages: "yes" })?.supportsImages).toBe(false);
+	});
+
+	it("keeps a max-tokens override and drops malformed values like the other numeric fields", () => {
+		expect(normalizeModelConfig({ id: "m1", providerId: "p1", modelApiId: "m", maxTokens: 4096 })?.maxTokens).toBe(4096);
+		expect(normalizeModelConfig({ id: "m1", providerId: "p1", modelApiId: "m", maxTokens: "4096" })?.maxTokens).toBe(4096);
+		expect(normalizeModelConfig({ id: "m1", providerId: "p1", modelApiId: "m", maxTokens: 0 })?.maxTokens).toBeUndefined();
+		expect(normalizeModelConfig({ id: "m1", providerId: "p1", modelApiId: "m", maxTokens: -1 })?.maxTokens).toBeUndefined();
 	});
 
 	it("accepts numeric-string context windows and drops unusable ones", () => {
@@ -240,6 +255,15 @@ describe("buildConfiguredModel", () => {
 		expect(buildConfiguredModel(model({ contextWindow: 4096 }), provider()).contextWindow).toBe(4096);
 		expect(buildConfiguredModel(model(), provider()).contextWindow).toBe(DEFAULT_CUSTOM_ENDPOINT_CONTEXT_WINDOW);
 		expect(buildConfiguredModel(model(), provider()).maxTokens).toBe(DEFAULT_CUSTOM_ENDPOINT_MAX_TOKENS);
+	});
+
+	it("honors a max-tokens override, since the shipped default is a guess about the server", () => {
+		expect(buildConfiguredModel(model({ maxTokens: 32768 }), provider()).maxTokens).toBe(32768);
+	});
+
+	it("advertises image input only when the model declares it, which is what gates image send", () => {
+		expect(buildConfiguredModel(model({ supportsImages: false }), provider()).input).toEqual(["text"]);
+		expect(buildConfiguredModel(model({ supportsImages: true }), provider()).input).toEqual(["text", "image"]);
 	});
 });
 

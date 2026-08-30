@@ -26,7 +26,7 @@ function provider(id: string, name = id): ProviderConfig {
 }
 
 function model(id: string, providerId: string): ModelConfig {
-	return { id, providerId, modelApiId: `${id}-api`, displayName: id, reasoning: false };
+	return { id, providerId, modelApiId: `${id}-api`, displayName: id, reasoning: false, supportsImages: false };
 }
 
 function lists(overrides: Partial<ConfigLists> = {}): ConfigLists {

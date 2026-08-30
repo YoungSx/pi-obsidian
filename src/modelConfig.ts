@@ -96,6 +96,17 @@ export interface ModelConfig {
 	contextWindow?: number;
 	/** Whether to advertise thinking support for this model. */
 	reasoning: boolean;
+	/**
+	 * Whether this model accepts image content alongside text. Gates image send
+	 * (see {@link settings.modelSupportsImages}); off until declared, because a
+	 * multimodal claim against a text-only server fails at send time.
+	 */
+	supportsImages: boolean;
+	/**
+	 * Cap on the tokens a single reply may produce. Falls back to
+	 * {@link DEFAULT_CUSTOM_ENDPOINT_MAX_TOKENS} when unset.
+	 */
+	maxTokens?: number;
 }
 
 function readTrimmedString(value: unknown): string {
@@ -131,7 +142,14 @@ export function emptyProviderConfig(): ProviderConfig {
 
 /** A blank model bound to `providerId`. */
 export function emptyModelConfig(providerId: string): ModelConfig {
-	return { id: uuidv7(), providerId, modelApiId: "", displayName: "", reasoning: false };
+	return {
+		id: uuidv7(),
+		providerId,
+		modelApiId: "",
+		displayName: "",
+		reasoning: false,
+		supportsImages: false,
+	};
 }
 
 /**
@@ -187,10 +205,17 @@ export function normalizeModelConfig(data: unknown): ModelConfig | undefined {
 		modelApiId,
 		displayName: readTrimmedString(raw.displayName),
 		reasoning: raw.reasoning === true,
+		// Conservative default: rows written before this field existed must keep
+		// sending text-only, exactly as they did.
+		supportsImages: raw.supportsImages === true,
 	};
 	const contextWindow = readPositiveInteger(raw.contextWindow);
 	if (contextWindow !== undefined) {
 		config.contextWindow = contextWindow;
+	}
+	const maxTokens = readPositiveInteger(raw.maxTokens);
+	if (maxTokens !== undefined) {
+		config.maxTokens = maxTokens;
 	}
 	return config;
 }
@@ -275,10 +300,12 @@ export function buildConfiguredModel(model: ModelConfig, provider: ProviderConfi
 		provider: provider.id,
 		baseUrl: provider.baseUrl,
 		reasoning: model.reasoning,
-		input: ["text"] as ("text" | "image")[],
+		// Image input is a capability the user declares (or the builtin catalog
+		// recommends), so the send path can gate attachments on it.
+		input: (model.supportsImages ? ["text", "image"] : ["text"]) as ("text" | "image")[],
 		cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
 		contextWindow: model.contextWindow ?? DEFAULT_CUSTOM_ENDPOINT_CONTEXT_WINDOW,
-		maxTokens: DEFAULT_CUSTOM_ENDPOINT_MAX_TOKENS,
+		maxTokens: model.maxTokens ?? DEFAULT_CUSTOM_ENDPOINT_MAX_TOKENS,
 	};
 	// `compat` is a conditional type keyed on the api, so each protocol is
 	// constructed in its own branch rather than through a shared object literal
@@ -319,6 +346,7 @@ export function migrateCustomEndpoint(
 		modelApiId: endpoint.modelId,
 		displayName: endpoint.modelId,
 		reasoning: false,
+		supportsImages: false,
 	};
 	if (endpoint.contextWindow !== undefined) {
 		model.contextWindow = endpoint.contextWindow;
