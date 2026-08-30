@@ -17,6 +17,11 @@ export interface MarkdownTextProps {
 	 * {@link MarkdownContainer}.
 	 */
 	sourcePath: string;
+	/**
+	 * Extra class for the outer element, e.g. the streaming-caret marker on the
+	 * block the model is still writing. Absent for every settled block.
+	 */
+	className?: string;
 }
 
 /**
@@ -37,12 +42,13 @@ export interface MarkdownTextProps {
  * did not. The class states the typeface either way rather than leaving it to one
  * blanket rule.
  */
-export function MarkdownText({ text, kind, isStreaming = false, app, component, sourcePath }: MarkdownTextProps): React.JSX.Element {
+export function MarkdownText({ text, kind, isStreaming = false, app, component, sourcePath, className }: MarkdownTextProps): React.JSX.Element {
 	const faceClass = `piem-chat__text--${resolveTextFace(kind)}`;
+	const blockClass = className ? `${faceClass} ${className}` : faceClass;
 	if (resolveTextRenderMode(kind, isStreaming) === "plain") {
-		return <pre className={`piem-chat__text ${faceClass}`}>{text}</pre>;
+		return <pre className={`piem-chat__text ${blockClass}`}>{text}</pre>;
 	}
-	return <MarkdownContainer markdown={text} faceClass={faceClass} app={app} component={component} sourcePath={sourcePath} />;
+	return <MarkdownContainer markdown={text} faceClass={blockClass} app={app} component={component} sourcePath={sourcePath} />;
 }
 
 /**

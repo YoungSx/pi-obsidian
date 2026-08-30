@@ -505,6 +505,37 @@ describe("MessageList trace collapsing", () => {
 	});
 });
 
+describe("MessageList streaming marks", () => {
+	it("leaves the user's own prompt out of the in-flight state", async () => {
+		// isStreaming leads the streaming message by one beat: the transcript still
+		// ends on the prompt before the first token lands. Marking the user's words
+		// aria-busy made them re-render as plain text and reflow when the answer
+		// arrived; the typing indicator fills that gap instead.
+		const host = renderMessages([userMessage("summarize my note")], { isStreaming: true });
+		await flushRender();
+
+		const user = host.querySelector("article.piem-chat__message--user");
+		expect(user?.getAttribute("aria-busy")).not.toBe("true");
+		// The gap still belongs to the typing indicator, not to silence.
+		expect(host.querySelector(".piem-chat__message--pending")).not.toBeNull();
+	});
+
+	it("marks the prose block being written with the live caret", async () => {
+		const host = renderMessages([userMessage("hi"), assistantMessage("half a th")], { isStreaming: true });
+		await flushRender();
+
+		const live = host.querySelector("article.piem-chat__message--assistant .piem-chat__block--live");
+		expect(live).not.toBeNull();
+	});
+
+	it("drops the caret once the reply has settled", async () => {
+		const host = renderMessages([userMessage("hi"), assistantMessage("done")], { isStreaming: false });
+		await flushRender();
+
+		expect(host.querySelector(".piem-chat__block--live")).toBeNull();
+	});
+});
+
 describe("MessageList tool-result diff", () => {
 	it("puts the add/remove counts on the collapsed row instead of nesting a second disclosure", async () => {
 		const host = renderMessages([toolResult({ diff: " 1 unchanged\n+2 added\n-3 removed" })]);

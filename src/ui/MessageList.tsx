@@ -98,12 +98,22 @@ export interface MessageListProps {
  * Index of the message still streaming in — the last entry, because
  * `ChatApp` appends the in-flight message after the settled transcript.
  * Its text stays plain until the turn settles; see `markdownPolicy.ts`.
+ *
+ * Only an assistant entry can be the streaming one. Before the first token
+ * arrives `isStreaming` is already true while the transcript still ends on the
+ * user's own prompt; treating that as in-flight marked the user's message
+ * `aria-busy` and — the visible part — downgraded it to plain text, so it
+ * re-rendered as Markdown (and reflowed) the moment the real answer showed up.
+ * The typing indicator, not the user's words, is what fills that gap.
  */
-function streamingIndex(isStreaming: boolean, messageCount: number): number | null {
-	if (!isStreaming || messageCount === 0) {
+function streamingIndex(isStreaming: boolean, messages: AgentMessage[]): number | null {
+	if (!isStreaming || messages.length === 0) {
 		return null;
 	}
-	return messageCount - 1;
+	if (messages[messages.length - 1]?.role !== "assistant") {
+		return null;
+	}
+	return messages.length - 1;
 }
 
 /**
@@ -214,7 +224,7 @@ export function MessageList({
 }: MessageListProps): React.JSX.Element {
 	const t = useT();
 	const context: MessageContext = { app, component, sourcePath, showAgentDetails, t };
-	const activeIndex = streamingIndex(isStreaming, messages.length);
+	const activeIndex = streamingIndex(isStreaming, messages);
 	const regenerateIndex = regenerableIndex(messages);
 	/*
 	 * Empty-screen suggestions exist for the configured, ready state only — the
@@ -599,14 +609,16 @@ interface TextBlockProps {
 	kind: TextBlockKind;
 	isStreaming: boolean;
 	context: MessageContext;
+	/** Forwarded to the block's outer element; see `MarkdownTextProps.className`. */
+	className?: string;
 }
 
 /**
  * Shared text-block entry point. Every branch funnels through here so the
  * Markdown-vs-plain decision lives in exactly one place (`markdownPolicy.ts`).
  */
-function Block({ text, kind, isStreaming, context }: TextBlockProps): React.JSX.Element {
-	return <MarkdownText text={text} kind={kind} isStreaming={isStreaming} app={context.app} component={context.component} sourcePath={context.sourcePath} />;
+function Block({ text, kind, isStreaming, context, className }: TextBlockProps): React.JSX.Element {
+	return <MarkdownText text={text} kind={kind} isStreaming={isStreaming} app={context.app} component={context.component} sourcePath={context.sourcePath} className={className} />;
 }
 
 function renderUserMessage(message: UserMessage, args: RenderArgs): React.ReactNode {
@@ -638,7 +650,11 @@ function isLiveBlock(message: AssistantMessage, index: number, isStreaming: bool
 function renderAssistantMessage(message: AssistantMessage, args: RenderArgs): React.ReactNode {
 	return message.content.map((content, index) => {
 		if (content.type === "text") {
-			return <Block key={index} text={content.text} kind="assistant" isStreaming={args.isStreaming} context={args.renderContext} />;
+			// The block the model is still writing carries a caret: with no marker,
+			// a streaming reply and a finished one differed only by the actions row
+			// appearing underneath after the fact.
+			const live = isLiveBlock(message, index, args.isStreaming) ? "piem-chat__block--live" : undefined;
+			return <Block key={index} text={content.text} kind="assistant" isStreaming={args.isStreaming} context={args.renderContext} className={live} />;
 		}
 		if (content.type === "thinking") {
 			const live = isLiveBlock(message, index, args.isStreaming);
