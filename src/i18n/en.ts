@@ -257,22 +257,12 @@ export const en = {
 	thinkingLevel: {
 		/** The verb, which leads the button's accessible name. */
 		switchThinking: "Change thinking level",
-		/** Accessible name and tooltip, e.g. "Change thinking level · High". */
-		buttonTitle: "{action} · {level}",
 		/**
-		 * The level words, one per pi's `ThinkingLevel` enum. These replace the
-		 * wire values ("xhigh") a reader should never meet; a translation owns the
-		 * wording outright rather than casing an English token.
+		 * Accessible name and tooltip, e.g. "Change thinking level · high". The
+		 * level interpolates verbatim and stays out of this table: it is a wire
+		 * keyword the request sends, so no language translates it (issue #143).
 		 */
-		levels: {
-			off: "Off",
-			minimal: "Minimal",
-			low: "Low",
-			medium: "Medium",
-			high: "High",
-			xhigh: "Extra high",
-			max: "Max",
-		},
+		buttonTitle: "{action} · {level}",
 	},
 
 	sendShortcut: {

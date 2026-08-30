@@ -82,15 +82,15 @@ describe("ThinkingLevelSelector presence", () => {
 	it("prints the level on the button and carries it in the accessible name", async () => {
 		const host = await renderSelector();
 
-		expect(host?.querySelector(".piem-chat__thinking-switcher-name")?.textContent).toBe("Low");
-		expect(button(host as HTMLElement).getAttribute("aria-label")).toBe("Change thinking level · Low");
+		expect(host?.querySelector(".piem-chat__thinking-switcher-name")?.textContent).toBe("low");
+		expect(button(host as HTMLElement).getAttribute("aria-label")).toBe("Change thinking level · low");
 	});
 
 	it("uses Obsidian's own tooltip rather than a native title attribute", async () => {
 		const host = (await renderSelector()) as HTMLElement;
 
 		expect(button(host).getAttribute("title")).toBeNull();
-		expect(setTooltipMock).toHaveBeenCalledWith(button(host), "Change thinking level · Low");
+		expect(setTooltipMock).toHaveBeenCalledWith(button(host), "Change thinking level · low");
 	});
 
 	it("announces that it opens a list, not that it performs an action", async () => {
@@ -113,7 +113,7 @@ describe("ThinkingLevelSelector menu", () => {
 	it("lists every level the model accepts, in the order the model reports them", async () => {
 		const host = (await renderSelector()) as HTMLElement;
 
-		expect((await openMenu(host)).titles()).toEqual(["Off", "Low", "High"]);
+		expect((await openMenu(host)).titles()).toEqual(["off", "low", "high"]);
 	});
 
 	it("marks the current level with a check", async () => {
@@ -127,7 +127,7 @@ describe("ThinkingLevelSelector menu", () => {
 		const chosen: string[] = [];
 		const host = (await renderSelector({ onSelect: (level) => chosen.push(level) })) as HTMLElement;
 
-		(await openMenu(host)).click("High");
+		(await openMenu(host)).click("high");
 
 		expect(chosen).toEqual(["high"]);
 	});

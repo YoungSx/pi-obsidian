@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import { hasThinkingChoice, thinkingLevelLabel, thinkingSelectorTitle, type ThinkingTarget } from "./thinkingSelectorCopy";
+import { hasThinkingChoice, thinkingSelectorTitle, type ThinkingTarget } from "./thinkingSelectorCopy";
 import { getT } from "../i18n";
 
 const en = getT("en");
@@ -30,28 +30,18 @@ describe("hasThinkingChoice", () => {
 	});
 });
 
-describe("thinkingLevelLabel", () => {
-	it("translates every level, in both languages", () => {
-		for (const level of thinking.thinkingLevels) {
-			expect(thinkingLevelLabel(level, en)).not.toBe("");
-			expect(thinkingLevelLabel(level, zh)).not.toBe("");
-		}
-	});
-
-	it("translates rather than echoing the enum, e.g. `xhigh` is not a word", () => {
-		expect(thinkingLevelLabel("xhigh", en)).toBe("Extra high");
-		expect(thinkingLevelLabel("xhigh", zh)).toBe("极高");
-	});
-});
-
 describe("thinkingSelectorTitle", () => {
 	it("leads with the verb, so the control announces that it can be changed", () => {
 		// Same shape as the model switcher's title: a name that is only the current
 		// value states the state but not the affordance.
-		expect(thinkingSelectorTitle(thinking, en)).toBe("Change thinking level · High");
+		expect(thinkingSelectorTitle(thinking, en)).toBe("Change thinking level · high");
 	});
 
-	it("translates the verb and the level, which is per-conversation state a user reads aloud", () => {
-		expect(thinkingSelectorTitle(thinking, zh)).toBe("调整思考力度 · 高");
+	it("keeps the level verbatim in every language, because it is a wire keyword", () => {
+		// The level is the exact string the session file records and the request
+		// sends (issue #143): "xhigh" may not surface as 极高, "Extra high", or any
+		// other prose. Only the verb is translated.
+		expect(thinkingSelectorTitle({ ...thinking, thinkingLevel: "xhigh" }, zh)).toBe("调整思考力度 · xhigh");
+		expect(thinkingSelectorTitle({ ...thinking, thinkingLevel: "xhigh" }, en)).toBe("Change thinking level · xhigh");
 	});
 });

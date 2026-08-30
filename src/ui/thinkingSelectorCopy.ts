@@ -35,27 +35,21 @@ export function hasThinkingChoice(target: ThinkingTarget): boolean {
 }
 
 /**
- * The word on the button face and in the menu rows.
- *
- * Routed through the translator rather than prettified from the enum: "xhigh"
- * and "max" are wire values a reader should never meet, and the level words are
- * the one part of this control a translation must own.
- */
-export function thinkingLevelLabel(level: ThinkingLevel, t: Translator): string {
-	return t.t(`thinkingLevel.levels.${level}`);
-}
-
-/**
- * Accessible name and tooltip, e.g. "Change thinking level · High".
+ * Accessible name and tooltip, e.g. "Change thinking level · high".
  *
  * The action leads. A control whose name is only its current value tells a
  * screen reader user what the panel is set to but not that they may change it,
  * so the verb comes first and the state follows it — the same shape
  * {@link modelSwitcherTitle} uses two controls to the left.
+ *
+ * The level itself is not routed through the translator: it is a wire keyword
+ * (issue #143) — the exact string the session file records and the request
+ * sends — so it renders verbatim in every language, the same rule model names
+ * follow. The verb is the only part here a translation owns.
  */
 export function thinkingSelectorTitle(target: ThinkingTarget, t: Translator): string {
 	return t.t("thinkingLevel.buttonTitle", {
 		action: t.t("thinkingLevel.switchThinking"),
-		level: thinkingLevelLabel(target.thinkingLevel, t),
+		level: target.thinkingLevel,
 	});
 }
