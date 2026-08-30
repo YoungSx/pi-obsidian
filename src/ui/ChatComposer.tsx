@@ -134,6 +134,14 @@ export function ChatComposer({
 	// view type, so two open chat panels would otherwise share one id and the
 	// skip link in each would jump to whichever mounted first.
 	const anchorId = useId();
+	/*
+	 * The command menu's listbox id, derived from the textarea's own — and the id
+	 * of whichever option is currently highlighted, which the menu reports through
+	 * `onActiveChange`. Between reports it is `null`, which is also what the
+	 * textarea advertises while the menu is closed or has no matches.
+	 */
+	const menuId = `piem-command-menu${anchorId}`;
+	const [activeOptionId, setActiveOptionId] = useState<string | null>(null);
 	const shortcut = resolveSendShortcut(sendShortcut, Platform.isMobile);
 	// Read by the capture-phase listener below, which is registered once:
 	// re-registering it whenever the setting changes would be a listener's worth
@@ -329,12 +337,28 @@ export function ChatComposer({
 					placeholder={t.t("chat.placeholder")}
 					aria-label={t.t("chat.composerAria")}
 					aria-keyshortcuts={sendShortcutAria(shortcut)}
+					/*
+					 * The ARIA combobox half of the command menu. The draft is where
+					 * focus lives while the user types `/`, so the textarea carries the
+					 * combobox role and quotes the menu — its listbox — and the
+					 * highlighted option by id. All three attributes key off the one
+					 * `activeOptionId` the menu reports, so `aria-expanded`,
+					 * `aria-controls` and `aria-activedescendant` open, close and move
+					 * together: with no matches the menu renders nothing and none of
+					 * the three advertise it.
+					 */
+					role="combobox"
+					aria-expanded={activeOptionId !== null}
+					aria-controls={activeOptionId !== null ? menuId : undefined}
+					aria-activedescendant={activeOptionId ?? undefined}
 					rows={2}
 				/>
 				{showMenu ? (
 					<CommandMenu
 						commands={commands}
 						query={commandQuery ?? ""}
+						menuId={menuId}
+						onActiveChange={setActiveOptionId}
 						onSelect={selectCommand}
 						onClose={() => setMenuOpen(false)}
 					/>

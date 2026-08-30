@@ -279,3 +279,161 @@ function pressEnter(host: HTMLElement, init: KeyboardEventInit & { isComposing?:
 }
 
 const roots = new WeakMap<HTMLElement, import("react-dom/client").Root>();
+
+/**
+ * The composer's command-menu wiring, from the textarea's side of the ARIA
+ * combobox pattern.
+ *
+ * The menu owns the listbox and the highlight; the textarea is where focus
+ * lives, so it is the textarea that must advertise the menu (`aria-expanded`),
+ * name it (`aria-controls`), and quote the highlighted option
+ * (`aria-activedescendant`). What these tests pin is that the three attributes
+ * all track the one signal the menu reports — open, moving, and gone again,
+ * with no id left dangling once the matches dry up.
+ */
+describe("ChatComposer command menu wiring", () => {
+	const COMMANDS = [
+		{ name: "summarize", description: "Summarize the active note", kind: "skill" as const, invocation: "summarize" },
+		{ name: "echo", description: "Echo the arguments", kind: "template" as const, invocation: "echo" },
+	];
+
+	/**
+	 * Renders the composer with a real controlled-input loop.
+	 *
+	 * `renderComposer` fixes the draft at render time, but the command menu only
+	 * opens through the input handler — so this loop feeds the typed value back
+	 * through `onInputChange` the way ChatApp does. Roots are unmounted in
+	 * afterEach: the menu binds a document-level keydown listener that survives
+	 * `replaceChildren`, and a leftover one would eat later tests' keystrokes.
+	 */
+	const wiredRoots: import("react-dom/client").Root[] = [];
+	async function renderWired(): Promise<HTMLElement> {
+		const host = document.createElement("div");
+		document.body.appendChild(host);
+		const root = createRoot(host);
+		wiredRoots.push(root);
+		let input = "";
+		const render = (): void => {
+			root.render(
+				<ChatComposer
+					input={input}
+					isStreaming={false}
+					isCompacting={false}
+					isInitializing={false}
+					isConfigured={true}
+					sendShortcut="enter"
+					onInputChange={(value) => {
+						input = value;
+						render();
+					}}
+					onSend={noop}
+					onAbort={noop}
+					commands={COMMANDS}
+				/>,
+			);
+		};
+		render();
+		await flushRender();
+		return host;
+	}
+
+	beforeEach(() => {
+		platformMock.isMobile = false;
+		platformMock.isMacOS = false;
+		document.body.replaceChildren();
+	});
+
+	afterEach(async () => {
+		for (const root of wiredRoots.splice(0)) {
+			root.unmount();
+		}
+		await flushRender();
+		platformMock.isMobile = false;
+		platformMock.isMacOS = false;
+		document.body.replaceChildren();
+	});
+
+	it("keeps the combobox role but advertises nothing while the menu is closed", async () => {
+		const host = await renderComposer({ commands: COMMANDS, input: "a plain draft" });
+
+		const textarea = textareaEl(host);
+		// The combobox role is permanent — the draft is the combobox whether or
+		// not the menu is up — but with nothing to open, it says so and stops.
+		expect(textarea?.getAttribute("role")).toBe("combobox");
+		expect(textarea?.getAttribute("aria-expanded")).toBe("false");
+		expect(textarea?.getAttribute("aria-controls")).toBeNull();
+		expect(textarea?.getAttribute("aria-activedescendant")).toBeNull();
+	});
+
+	it("opens as a combobox that names its listbox and highlighted option", async () => {
+		// `menuOpen` only flips through the input handler, so the `/` has to be
+		// typed, not merely rendered in.
+		const host = await renderWired();
+		await typeDraft(textareaEl(host)!, "/");
+		await flushRender();
+
+		const textarea = textareaEl(host);
+		// The menu is open and matched: expanded, named, and quoting an option
+		// that actually exists in the listbox it points at.
+		expect(textarea?.getAttribute("aria-expanded")).toBe("true");
+		const controlsId = textarea?.getAttribute("aria-controls");
+		expect(host.querySelector(`[id="${controlsId}"]`)?.getAttribute("role")).toBe("listbox");
+		const activeId = textarea?.getAttribute("aria-activedescendant") ?? "";
+		expect(host.querySelector(`[id="${activeId}"]`)?.getAttribute("role")).toBe("option");
+	});
+
+	it("moves aria-activedescendant with the keyboard highlight", async () => {
+		const host = await renderWired();
+		const textarea = textareaEl(host);
+		await typeDraft(textarea!, "/");
+		await flushRender();
+		const first = textarea?.getAttribute("aria-activedescendant");
+
+		// ArrowDown is consumed by the menu's document-level handler; dispatching
+		// there mirrors a real keypress bubbling out of the textarea.
+		const domWindow = globalThis as unknown as { window: { KeyboardEvent: typeof KeyboardEvent } };
+		document.dispatchEvent(new domWindow.window.KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true }));
+		await flushRender();
+
+		const second = textarea?.getAttribute("aria-activedescendant");
+		expect(second).not.toBe(first);
+		expect(host.querySelector(`[id="${second}"]`)?.getAttribute("aria-selected")).toBe("true");
+	});
+
+	it("retracts the combobox attributes the moment no command matches", async () => {
+		// An unmatched `/nope` renders no menu at all, so the textarea must stop
+		// claiming one — a dangling aria-controls would advertise a listbox that
+		// is not there.
+		const host = await renderWired();
+		await typeDraft(textareaEl(host)!, "/nope");
+		await flushRender();
+
+		const textarea = textareaEl(host);
+		expect(host.querySelector('[role="listbox"]')).toBeNull();
+		expect(textarea?.getAttribute("aria-expanded")).toBe("false");
+		expect(textarea?.getAttribute("aria-controls")).toBeNull();
+		expect(textarea?.getAttribute("aria-activedescendant")).toBeNull();
+	});
+
+	function textareaEl(host: HTMLElement): HTMLTextAreaElement | null {
+		return host.querySelector("textarea");
+	}
+});
+
+/**
+ * Types into the controlled textarea the way a user does.
+ *
+ * `textarea.value` directly leaves that record in place, so the following
+ * `input` event would be swallowed by React's controlled-input bookkeeping —
+ * see {@link ChatApp.test.tsx} for the fuller write-up of the same trap.
+ */
+async function typeDraft(textarea: HTMLTextAreaElement, text: string): Promise<void> {
+	const domWindow = (globalThis as unknown as { window: { HTMLTextAreaElement: { prototype: HTMLTextAreaElement }; Event: typeof Event } })
+		.window;
+	if (!Reflect.set(domWindow.HTMLTextAreaElement.prototype, "value", text, textarea)) {
+		throw new Error("textarea value setter rejected the write");
+	}
+	// The event constructor comes from the same window as the element — a global
+	// `new Event` fails happy-dom's instanceof check, as ChatApp.test documents.
+	textarea.dispatchEvent(new domWindow.Event("input", { bubbles: true }));
+}
