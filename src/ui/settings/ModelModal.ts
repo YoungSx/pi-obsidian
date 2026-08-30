@@ -1,5 +1,5 @@
 import { App, Modal, Notice, Setting } from "obsidian";
-import type { ToggleComponent } from "obsidian";
+import type { TextComponent, ToggleComponent } from "obsidian";
 import type { ConnectionTestResult } from "../../connectionTest";
 import {
 	describeProviderConfig,
@@ -9,6 +9,7 @@ import {
 } from "../../modelConfig";
 import { getBuiltinModels, getBuiltinProviders } from "../../net/builtinCatalog";
 import type { ProviderListing } from "../../net/modelListingCache";
+import type { ModelsDevIndex } from "../../net/modelsDev";
 import { CatalogSuggest, type CatalogSuggestion } from "./CatalogSuggest";
 import type { Translator } from "../../i18n";
 import { attachTestButton, type TestRowHandle } from "./testResult";
@@ -51,6 +52,13 @@ export interface ModelModalOptions {
 	listModels?(provider: ProviderConfig, signal: AbortSignal): Promise<ProviderListing>;
 	/** Listings already collected this session, shown before any new probe returns. */
 	knownListings?(): readonly ProviderListing[];
+	/**
+	 * Fetches the live models.dev capability index, shared per session. Optional
+	 * for the same reason {@link listModels} is — a caller with no network gets
+	 * the builtin snapshot and nothing worse. Expected to reject on failure; this
+	 * form treats that as "the snapshot is the only source today", silently.
+	 */
+	fetchModelsDev?(signal: AbortSignal): Promise<ModelsDevIndex>;
 }
 
 /**
@@ -103,64 +111,118 @@ export function buildModelSuggestions(listings: readonly ProviderListing[] = [])
 }
 
 /**
- * What the builtin catalog says about one model id's capabilities.
+ * What the recommendation sources say about one model id's capabilities.
  *
- * Both answers come from the same snapshot the suggestions do, so one lookup
- * serves every capability toggle the form renders.
+ * Both answers come from the same data models.dev publishes, so one lookup
+ * serves every capability control the form renders. The numeric fields are
+ * present only when the answering entry published a limit.
  */
 export interface CatalogCapabilityHint {
-	/** Whether the catalog entry advertises reasoning parameters. */
+	/** Whether the entry advertises reasoning parameters. */
 	reasoning: boolean;
-	/** Whether the catalog entry accepts image content alongside text. */
+	/** Whether the entry accepts image content alongside text. */
 	images: boolean;
-	/** Which builtin provider's catalog supplied the answer, e.g. `anthropic`. */
-	source: string;
+	/** Tokens of context, when the answering entry published one. */
+	contextWindow?: number;
+	/** Cap on output tokens, when the answering entry published one. */
+	maxTokens?: number;
+	/**
+	 * Where the claim came from, structured so the form can name it in the
+	 * user's language rather than a string baked in at lookup time.
+	 */
+	source: CapabilityHintSource;
 }
 
+/** Which recommendation source answered: the shipped snapshot, or the live models.dev fetch. */
+export type CapabilityHintSource = { kind: "builtin"; provider: string } | { kind: "models-dev" };
+
 /**
- * Looks one model id up in the builtin catalog and reports its capabilities.
+ * Looks one model id up across the recommendation sources and reports its
+ * capabilities.
  *
- * A *recommendation*, not a probe — and deliberately so. A listing response
- * carries no capability data, and the only live way to learn what a server
- * accepts is to send real requests and read its errors, which is
- * provider-specific, costs tokens, and is wrong more often than the shipped
- * snapshot is right. So detection runs offline against the same catalog that
- * powers the suggestions, and every toggle stays editable for the gateways
- * where that snapshot is stale.
+ * Two sources, one authority. The live models.dev index answers first because
+ * it is the same dataset the builtin snapshot was cut from, merely fresher; the
+ * snapshot fills in when the fetch has not landed or cannot — offline, or
+ * models.dev reshaped. Within each source, matching is exact first: ids are
+ * commonly namespaced by the gateway in front — an OpenRouter-style endpoint
+ * serves `anthropic/claude-…` — so the final path segment matches too, and the
+ * hint names the source that knew the tail, since that is where the claim came
+ * from.
  *
- * Matching is exact first. Ids are commonly namespaced by the gateway in front —
- * an OpenRouter-style endpoint serves `anthropic/claude-…` — so the final path
- * segment matches too, and the hint names the catalog section that knew the tail,
- * since that is where the claim came from.
+ * Neither source probes the user's endpoint. A listing response carries no
+ * capability data, and the only live way to learn what a server accepts is to
+ * send real requests and read its errors — provider-specific, costly, and wrong
+ * more often than the authority is. Every control stays editable for the
+ * gateways where even the fresh answer is stale.
  */
-export function findCatalogCapabilityHint(modelApiId: string): CatalogCapabilityHint | undefined {
+export function findCatalogCapabilityHint(modelApiId: string, live?: ModelsDevIndex): CatalogCapabilityHint | undefined {
 	const id = modelApiId.trim().toLowerCase();
 	if (!id) {
 		return undefined;
 	}
-	const exact = findCatalogModel(id);
-	if (exact) {
-		return { reasoning: exact.reasoning, images: exact.images, source: exact.provider };
-	}
 	const tail = id.slice(id.lastIndexOf("/") + 1);
-	if (tail === id) {
-		return undefined;
+	if (live) {
+		const exact = live.exact.get(id);
+		if (exact) {
+			return { ...exact, source: MODELS_DEV_SOURCE };
+		}
 	}
-	const namespaced = findCatalogModel(tail);
-	return namespaced
-		? { reasoning: namespaced.reasoning, images: namespaced.images, source: namespaced.provider }
-		: undefined;
-}
-
-/** First catalog entry whose id matches, case-insensitively, in shipped order. */
-function findCatalogModel(id: string): { reasoning: boolean; images: boolean; provider: string } | undefined {
-	for (const provider of getBuiltinProviders()) {
-		const match = getBuiltinModels(provider).find((model) => model.id.toLowerCase() === id);
-		if (match) {
-			return { reasoning: match.reasoning, images: match.input.includes("image"), provider };
+	const exactSnapshot = findCatalogModel(id);
+	if (exactSnapshot) {
+		return hintFromSnapshot(exactSnapshot);
+	}
+	if (live && tail !== id) {
+		const namespaced = live.tail.get(tail);
+		if (namespaced) {
+			return { ...namespaced, source: MODELS_DEV_SOURCE };
+		}
+	}
+	if (tail !== id) {
+		const namespacedSnapshot = findCatalogModel(tail);
+		if (namespacedSnapshot) {
+			return hintFromSnapshot(namespacedSnapshot);
 		}
 	}
 	return undefined;
+}
+
+/** Provenance label for an answer that came from the live models.dev fetch. */
+const MODELS_DEV_SOURCE: CapabilityHintSource = { kind: "models-dev" };
+
+/** One snapshot entry, carrying the catalog section that knew it. */
+type SnapshotEntry = Omit<CatalogCapabilityHint, "source"> & { provider: string };
+
+/** Widens a snapshot entry into a hint, attributing it to the catalog section that knew it. */
+function hintFromSnapshot(entry: SnapshotEntry): CatalogCapabilityHint {
+	return {
+		reasoning: entry.reasoning,
+		images: entry.images,
+		contextWindow: entry.contextWindow,
+		maxTokens: entry.maxTokens,
+		source: { kind: "builtin", provider: entry.provider },
+	};
+}
+function findCatalogModel(id: string): SnapshotEntry | undefined {
+	for (const provider of getBuiltinProviders()) {
+		const match = getBuiltinModels(provider).find((model) => model.id.toLowerCase() === id);
+		if (match) {
+			return {
+				reasoning: match.reasoning,
+				images: match.input.includes("image"),
+				contextWindow: match.contextWindow,
+				maxTokens: match.maxTokens,
+				provider,
+			};
+		}
+	}
+	return undefined;
+}
+
+/** Names a hint's provenance in the user's language, for the hint lines. */
+function describeHintSource(source: CapabilityHintSource, t: Translator): string {
+	return source.kind === "builtin"
+		? t.t("modelModal.sourceBuiltin", { catalog: source.provider })
+		: t.t("modelModal.sourceModelsDev");
 }
 
 /**
@@ -207,6 +269,19 @@ export class ModelModal extends Modal {
 	/** Rewritable note under a toggle's description; empty renders as nothing. */
 	private thinkingHint: HTMLElement | null = null;
 	private imageHint: HTMLElement | null = null;
+	/** Whether the user has typed or picked a model id this session. Gates whether the live index, when it lands, may apply its toggles — an edit form opened to a stored id must not have stored choices rewritten by a fetch that merely arrived late. */
+	private idTouched = false;
+	/** The live models.dev answers, once its fetch lands; absent until then. */
+	private modelsDevIndex: ModelsDevIndex | undefined;
+	/** Input fields for the numeric limits, so a recommendation can fill a blank one. */
+	private contextWindowInput: TextComponent | null = null;
+	private maxTokensInput: TextComponent | null = null;
+	/** Rewritable notes under the numeric fields, naming what auto-filled them. */
+	private contextWindowHint: HTMLElement | null = null;
+	private maxTokensHint: HTMLElement | null = null;
+	/** Provenance of the value sitting in each numeric field, when a recommendation put it there. Cleared the moment the user edits the field. */
+	private contextWindowFilledFrom: CapabilityHintSource | null = null;
+	private maxTokensFilledFrom: CapabilityHintSource | null = null;
 
 	constructor(options: ModelModalOptions) {
 		super(options.app);
@@ -229,6 +304,10 @@ export class ModelModal extends Modal {
 		// configured one. Nothing waits on it: suggestions render from what is
 		// already known, and the answer joins the list when it arrives.
 		this.probeSelectedProvider();
+		// Same trigger as the listing probe: opening the form is the deliberate
+		// action that earns the one shared request. The session cache collapses
+		// every later open into a no-op.
+		this.fetchCapabilityIndex();
 		// Editing starts from a stored choice, so the catalog's answer is reported
 		// but never applied over it; a form opened to add starts with an empty id,
 		// which has no recommendation to show either way.
@@ -261,6 +340,7 @@ export class ModelModal extends Modal {
 				text.setValue(this.draft.modelApiId);
 				text.onChange((value) => {
 					this.draft.modelApiId = value;
+					this.idTouched = true;
 					this.testRow?.reset();
 					// The id decides what the catalog can recommend; a changed id is a
 					// changed question, so the stale answer must not survive it.
@@ -271,6 +351,7 @@ export class ModelModal extends Modal {
 				// re-reads on every keystroke, and never triggers a request itself.
 				new CatalogSuggest(this.app, text.inputEl, () => buildModelSuggestions(this.listings), (value) => {
 					this.draft.modelApiId = value;
+					this.idTouched = true;
 					this.testRow?.reset();
 					this.refreshCatalogRecommendation(true);
 				});
@@ -287,31 +368,42 @@ export class ModelModal extends Modal {
 				});
 			});
 
-		new Setting(contentEl)
+		const contextWindowSetting = new Setting(contentEl)
 			.setName(t.t("modelModal.contextWindow"))
-			.setDesc(t.t("modelModal.contextWindowDesc"))
-			.addText((text) => {
-				text.inputEl.type = "number";
-				text.setPlaceholder(t.t("modelModal.contextWindowPlaceholder"));
-				text.setValue(this.draft.contextWindow ? String(this.draft.contextWindow) : "");
-				text.onChange((value) => {
-					const parsed = Number.parseInt(value, 10);
-					this.draft.contextWindow = Number.isInteger(parsed) && parsed > 0 ? parsed : undefined;
-				});
+			.setDesc(t.t("modelModal.contextWindowDesc"));
+		this.contextWindowHint = contextWindowSetting.descEl.createDiv({ cls: "piem-settings-effect" });
+		contextWindowSetting.addText((text) => {
+			text.inputEl.type = "number";
+			text.setPlaceholder(t.t("modelModal.contextWindowPlaceholder"));
+			text.setValue(this.draft.contextWindow ? String(this.draft.contextWindow) : "");
+			this.contextWindowInput = text;
+			text.onChange((value) => {
+				const parsed = Number.parseInt(value, 10);
+				this.draft.contextWindow = Number.isInteger(parsed) && parsed > 0 ? parsed : undefined;
+				// A hand-typed value is no longer the recommendation's, so the note
+				// naming it must go. Component setters fire no events, so this only
+				// runs for real edits.
+				this.contextWindowFilledFrom = null;
+				this.contextWindowHint?.setText("");
 			});
+		});
 
-		new Setting(contentEl)
+		const maxTokensSetting = new Setting(contentEl)
 			.setName(t.t("modelModal.maxTokens"))
-			.setDesc(t.t("modelModal.maxTokensDesc"))
-			.addText((text) => {
-				text.inputEl.type = "number";
-				text.setPlaceholder(t.t("modelModal.maxTokensPlaceholder"));
-				text.setValue(this.draft.maxTokens ? String(this.draft.maxTokens) : "");
-				text.onChange((value) => {
-					const parsed = Number.parseInt(value, 10);
-					this.draft.maxTokens = Number.isInteger(parsed) && parsed > 0 ? parsed : undefined;
-				});
+			.setDesc(t.t("modelModal.maxTokensDesc"));
+		this.maxTokensHint = maxTokensSetting.descEl.createDiv({ cls: "piem-settings-effect" });
+		maxTokensSetting.addText((text) => {
+			text.inputEl.type = "number";
+			text.setPlaceholder(t.t("modelModal.maxTokensPlaceholder"));
+			text.setValue(this.draft.maxTokens ? String(this.draft.maxTokens) : "");
+			this.maxTokensInput = text;
+			text.onChange((value) => {
+				const parsed = Number.parseInt(value, 10);
+				this.draft.maxTokens = Number.isInteger(parsed) && parsed > 0 ? parsed : undefined;
+				this.maxTokensFilledFrom = null;
+				this.maxTokensHint?.setText("");
 			});
+		});
 
 		const thinkingSetting = new Setting(contentEl)
 			.setName(t.t("modelModal.supportsThinking"))
@@ -373,30 +465,56 @@ export class ModelModal extends Modal {
 	}
 
 	/**
-	 * Re-reads the catalog for the current model id.
+	 * Re-reads the recommendation sources for the current model id.
 	 *
-	 * Two effects, deliberately separable per capability. Each hint line always
+	 * Effects are deliberately separable per control. Each hint line always
 	 * follows the id: it is a report, and reports do not wait for permission. Each
 	 * toggle value only follows it while the user has not set that toggle by hand —
 	 * a recommendation that overwrites an explicit choice is not a recommendation,
 	 * so once flipped manually the form keeps applying nothing and the line stays
-	 * as the record of what the catalog thought.
+	 * as the record of what the source thought.
+	 *
+	 * The numeric fields follow a different rule: they fill only when blank. Blank
+	 * means "use the default", so filling one can never overwrite a stored or
+	 * hand-typed value — which is why it happens regardless of `apply`. A filled
+	 * field says so under itself, and stops saying so the moment it is edited.
 	 */
 	private refreshCatalogRecommendation(apply: boolean): void {
 		const { t } = this.options;
-		const hint = findCatalogCapabilityHint(this.draft.modelApiId);
+		const hint = findCatalogCapabilityHint(this.draft.modelApiId, this.modelsDevIndex);
+		const source = hint ? describeHintSource(hint.source, t) : "";
 		this.thinkingHint?.setText(
 			hint
 				? t.t(hint.reasoning ? "modelModal.thinkingHintSupported" : "modelModal.thinkingHintUnsupported", {
-						source: hint.source,
+						source,
 					})
 				: "",
 		);
 		this.imageHint?.setText(
 			hint
 				? t.t(hint.images ? "modelModal.imagesHintSupported" : "modelModal.imagesHintUnsupported", {
-						source: hint.source,
+						source,
 					})
+				: "",
+		);
+		if (hint?.contextWindow !== undefined && this.draft.contextWindow === undefined) {
+			this.draft.contextWindow = hint.contextWindow;
+			this.contextWindowInput?.setValue(String(hint.contextWindow));
+			this.contextWindowFilledFrom = hint.source;
+		}
+		this.contextWindowHint?.setText(
+			this.contextWindowFilledFrom
+				? t.t("modelModal.autofillHint", { source: describeHintSource(this.contextWindowFilledFrom, t) })
+				: "",
+		);
+		if (hint?.maxTokens !== undefined && this.draft.maxTokens === undefined) {
+			this.draft.maxTokens = hint.maxTokens;
+			this.maxTokensInput?.setValue(String(hint.maxTokens));
+			this.maxTokensFilledFrom = hint.source;
+		}
+		this.maxTokensHint?.setText(
+			this.maxTokensFilledFrom
+				? t.t("modelModal.autofillHint", { source: describeHintSource(this.maxTokensFilledFrom, t) })
 				: "",
 		);
 		if (hint && apply) {
@@ -409,6 +527,34 @@ export class ModelModal extends Modal {
 				this.imagesToggle?.setValue(hint.images);
 			}
 		}
+	}
+
+	/**
+	 * Starts the shared models.dev fetch, if this form was handed the option.
+	 *
+	 * When it lands, the recommendation re-runs against the live index: hints
+	 * re-report, untouched toggles follow only if the user has already typed an
+	 * id — showing intent — and blank numeric fields fill either way. Failure is
+	 * silent, exactly like a failed listing probe: the snapshot still speaks.
+	 */
+	private fetchCapabilityIndex(): void {
+		if (!this.options.fetchModelsDev) {
+			return;
+		}
+		const signal = this.probes.signal;
+		void this.options.fetchModelsDev(signal).then(
+			(index) => {
+				if (signal.aborted) {
+					return;
+				}
+				this.modelsDevIndex = index;
+				this.refreshCatalogRecommendation(this.idTouched);
+			},
+			() => {
+				// Offline, aborted, or models.dev moved on. The snapshot is the
+				// only source today, which is what the form already showed.
+			},
+		);
 	}
 
 	/**
