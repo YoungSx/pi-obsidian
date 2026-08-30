@@ -141,10 +141,18 @@ describe("describeProviderDeletion", () => {
 });
 
 describe("describeModelDeletion", () => {
-	it("warns when the active model is the one going", () => {
+	it("names the successor when the active model is the one going", () => {
+		const target = model("m1", "p1");
+		const state = lists({ models: [target, model("m2", "p1")], activeModelId: "m1" });
+		expect(describeModelDeletion(state, target, en)[1]).toBe("It is the active model, so m2 takes over when it goes.");
+	});
+
+	it("says nothing replaces it when the active model is the only one", () => {
 		const target = model("m1", "p1");
 		const state = lists({ models: [target], activeModelId: "m1" });
-		expect(describeModelDeletion(state, target, en)).toHaveLength(2);
+		expect(describeModelDeletion(state, target, en)[1]).toBe(
+			"It is the only model, and nothing takes its place — add another before your next message.",
+		);
 	});
 
 	it("stays quiet for an inactive model", () => {

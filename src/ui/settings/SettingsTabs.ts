@@ -69,6 +69,11 @@ export function renderSettingsTabs(containerEl: HTMLElement, options: SettingsTa
 
 	const nav = containerEl.createDiv({ cls: "piem-settings-tabs" });
 	const content = containerEl.createDiv({ cls: "piem-settings-tab-content" });
+	// The pane is named after whichever tab is showing: a screen reader landing
+	// inside it announces the tab it belongs to, not just an unnamed region.
+	const panelId = "piem-settings-tabpanel";
+	content.setAttribute("role", "tabpanel");
+	content.id = panelId;
 	const buttons = new Map<string, HTMLElement>();
 
 	const showTab = (tabId: string): void => {
@@ -87,6 +92,7 @@ export function renderSettingsTabs(containerEl: HTMLElement, options: SettingsTa
 			// are reached with arrow keys, per the ARIA tabs pattern.
 			button.setAttribute("tabindex", isActive ? "0" : "-1");
 		}
+		content.setAttribute("aria-labelledby", `piem-settings-tab-${tabId}`);
 		content.empty();
 		tab.render(content);
 	};
@@ -96,6 +102,9 @@ export function renderSettingsTabs(containerEl: HTMLElement, options: SettingsTa
 		const button = nav.createEl("button", { text: tab.label, cls: "piem-settings-tab" });
 		button.type = "button";
 		button.setAttribute("role", "tab");
+		button.id = `piem-settings-tab-${tab.id}`;
+		// Points the tab at the pane it reveals, closing the tab↔panel loop.
+		button.setAttribute("aria-controls", panelId);
 		buttons.set(tab.id, button);
 		button.addEventListener("click", () => {
 			if (tab.id === activeId) {

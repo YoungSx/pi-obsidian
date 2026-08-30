@@ -11,7 +11,7 @@ import {
 import type { Translator } from "../../i18n";
 import { describeApiKeyField, type SecretStorageState } from "./secretStorageCopy";
 import { attachTestButton } from "./testResult";
-import { createModalStatus, DiscardGuard, type ModalStatus } from "./modalGuards";
+import { createModalStatus, DiscardGuard, submitOnEnter, type ModalStatus } from "./modalGuards";
 
 export interface ProviderModalOptions {
 	app: App;
@@ -73,6 +73,7 @@ export class ProviderModal extends Modal {
 					this.draft.name = value;
 					this.onEdit();
 				});
+				submitOnEnter(text.inputEl, () => void this.submit());
 			});
 
 		new Setting(contentEl)
@@ -86,6 +87,7 @@ export class ProviderModal extends Modal {
 					this.onEdit();
 					this.testRow?.reset();
 				});
+				submitOnEnter(text.inputEl, () => void this.submit());
 			});
 
 		new Setting(contentEl)
@@ -115,6 +117,7 @@ export class ProviderModal extends Modal {
 					this.onEdit();
 					this.testRow?.reset();
 				});
+				submitOnEnter(text.inputEl, () => void this.submit());
 			});
 
 		// Placed before the save row so a failing verdict is read before

@@ -6,6 +6,8 @@
  *   the next edit, instead of a toast that is gone in five seconds.
  * - {@link DiscardGuard} — the two-press rule that keeps a stray Esc from
  *   silently throwing away a half-filled form.
+ * - {@link submitOnEnter} — Enter in a plain text field saves, instead of
+ *   doing nothing while the pointer hunts for the save button.
  */
 
 /** The inline status line a form owns, created between its fields and its footer. */
@@ -88,4 +90,19 @@ export class DiscardGuard {
 		this.warn();
 		return false;
 	}
+}
+
+/**
+ * Enter inside one of these fields submits the form, as a config form is
+ * expected to. Wired per field rather than on the modal so a form can leave
+ * the suggest-driven fields out: there Enter belongs to picking a suggestion,
+ * and firing submit around it would race the pick.
+ */
+export function submitOnEnter(input: HTMLInputElement, submit: () => void): void {
+	input.addEventListener("keydown", (event) => {
+		if (event.key === "Enter") {
+			event.preventDefault();
+			submit();
+		}
+	});
 }
