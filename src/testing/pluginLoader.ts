@@ -158,6 +158,8 @@ export interface PluginHostRecord {
 	views: string[];
 	commands: string[];
 	ribbonIcons: string[];
+	/** Custom icons registered via `addIcon`, keyed by id (src/brandIcon.ts). */
+	icons: Map<string, string>;
 	settingTabs: number;
 	savedData: unknown[];
 }
@@ -242,6 +244,11 @@ export function createObsidianHostModule(record: PluginHostRecord, platform: Rec
 		Platform: platform,
 		requestUrl: async (): Promise<unknown> => ({ status: 200, text: "", json: {} }),
 		setIcon: () => undefined,
+		// Brand icon registration; the record captures it so the smoke test can
+		// assert the ribbon button resolves to a registered id.
+		addIcon: (iconId: string, svgContent: string): void => {
+			record.icons.set(iconId, svgContent);
+		},
 		normalizePath: (path: string) => path,
 		// Same implementations as the unit-test stub: the two surfaces stay
 		// separate (this one serves the bundle smoke test, not mock.module), but

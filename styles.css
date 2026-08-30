@@ -2597,3 +2597,16 @@ button.piem-chat__latest {
 	color: var(--text-muted);
 	font-size: var(--font-ui-smaller);
 }
+
+/* --- brand icon (src/brandIcon.ts) --- */
+
+/*
+ * The mark is a white glow on transparency, drawn for dark surfaces. On light
+ * themes it would vanish into the background, so the glyph is inverted there —
+ * the same adaptation a lucide icon gets for free from `currentColor`, which a
+ * raster image cannot use. Obsidian inlines the registered SVG into each slot,
+ * so the class reaches the ribbon, the context menu, and the view header alike.
+ */
+.theme-light .piem-brand-icon {
+	filter: invert(1);
+}

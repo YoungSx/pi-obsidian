@@ -1,5 +1,7 @@
 # Piem
 
+<p align="center"><img src="assets/icon.png" width="128" alt="Piem brand icon: white glowing hair on transparency"></p>
+
 Piem is an Obsidian plugin that runs an AI coding agent inside Obsidian. The
 agent works on your vault through vault-scoped tools — reading, searching, and
 editing notes — from a React chat side panel. It is built on the

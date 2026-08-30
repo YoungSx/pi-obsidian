@@ -2,6 +2,7 @@ import { ItemView, Scope, type WorkspaceLeaf } from "obsidian";
 import { createRoot, type Root } from "react-dom/client";
 import React from "react";
 import { VIEW_TYPE_PIEM_CHAT } from "../constants";
+import { BRAND_ICON_ID } from "../brandIcon";
 import type { ObsidianAgentService } from "../agent/ObsidianAgentService";
 import { ChatApp } from "./ChatApp";
 import { ChatInputController } from "./ChatInputController";
@@ -90,7 +91,7 @@ export class PiemChatView extends ItemView {
 	}
 
 	getIcon(): string {
-		return "bot";
+		return BRAND_ICON_ID;
 	}
 
 	focusInput(): void {

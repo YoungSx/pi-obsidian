@@ -41,6 +41,13 @@ const context = await esbuild.context({
 	},
 	entryPoints: ["src/main.ts"],
 	alias: SDK_SHIM_ALIASES,
+	// Assets referenced from source are inlined as data URIs rather than emitted
+	// as sibling files: the release ships exactly main.js/manifest.json/styles.css,
+	// so a separate icon file would silently 404 for anyone installing from a
+	// release archive. See src/brandIcon.ts.
+	loader: {
+		".png": "dataurl",
+	},
 	bundle: true,
 	external: [
 		"obsidian",
