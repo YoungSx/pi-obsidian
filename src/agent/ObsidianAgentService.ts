@@ -522,6 +522,10 @@ export class ObsidianAgentService {
 			this.setError("The agent is already responding.");
 			return false;
 		}
+		// A real send ends the turn the suggestion was asked for — drop any
+		// in-flight request instead of letting it bill tokens whose chips are
+		// already superseded.
+		this.suggestionController?.abort();
 		// Stale banners are cleared exactly once, and before
 		// `refreshConfiguration` rather than after it. Two things depend on this
 		// single point: the reload inside `refreshConfiguration` surfaces fresh
