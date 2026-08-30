@@ -22,8 +22,8 @@ export interface ConfirmDeleteOptions {
 	/**
 	 * Defaults to `"delete"`. `"disable"` is the reversible counterpart: the
 	 * title and button read 停用 instead of 删除, and the button drops its
-	 * warning tint — `setWarning` marks an irreversible click, and a disable
-	 * is undone by flipping the toggle back.
+	 * destructive tint — `setDestructive` marks an irreversible click, and a
+	 * disable is undone by flipping the toggle back.
 	 */
 	kind?: "delete" | "disable";
 	/**
@@ -72,12 +72,13 @@ class ConfirmDeleteModal extends Modal {
 				});
 			})
 			.addButton((button) => {
-				// `setWarning` is Obsidian's destructive styling, which is what tells
-				// this button apart from the Cancel beside it at a glance.
 				if (kind === "disable") {
 					button.setButtonText(t.t("confirmDelete.disable"));
 				} else {
-					button.setButtonText(t.t("confirmDelete.delete")).setWarning();
+					// `setDestructive` is Obsidian's destructive styling, which is what
+					// tells this button apart from the Cancel beside it at a glance.
+					// (It replaced `setWarning`, deprecated in 1.13.)
+					button.setButtonText(t.t("confirmDelete.delete")).setDestructive();
 				}
 				button.onClick(() => {
 					this.close();

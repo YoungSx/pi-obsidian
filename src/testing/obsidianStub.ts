@@ -31,13 +31,16 @@ export const addIconMock = mock<(iconId: string, svgContent: string) => void>();
 
 /**
  * The button handed to `Setting.addButton`, rendered as a real `<button>` so
- * assertions read the DOM rather than a private recording. `setWarning` maps
- * to Obsidian's `mod-warning` class — that class is how the destructive
- * styling reaches the screen, so it is exactly what a test should pin.
+ * assertions read the DOM rather than a private recording. `setDestructive`
+ * maps to Obsidian's `mod-destructive` class — verified against the shipped
+ * 1.13 implementation, which is literally `buttonEl.addClass("mod-destructive")`
+ * — and that class is how the destructive styling reaches the screen, so it is
+ * exactly what a test should pin. The deprecated `setWarning` is deliberately
+ * absent: it is `setDestructive().setCta()` upstream, and nothing here calls it.
  */
 export class SettingButtonStub {
 	text: string | undefined;
-	warning = false;
+	destructive = false;
 	onClickHandler: (() => unknown) | undefined;
 	private elRef: HTMLButtonElement | undefined;
 
@@ -49,9 +52,9 @@ export class SettingButtonStub {
 		return this;
 	}
 
-	setWarning(): this {
-		this.warning = true;
-		this.render().classList.add("mod-warning");
+	setDestructive(): this {
+		this.destructive = true;
+		this.render().classList.add("mod-destructive");
 		return this;
 	}
 

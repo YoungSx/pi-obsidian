@@ -16,7 +16,7 @@ const { openConfirmDelete } = await import("./confirmDelete");
  * Delete and disable share one modal, and the whole point of the `kind` option
  * is that the two verbs must not look the same: 删除 warns (irreversible), 停用
  * does not (flip the toggle back). The assertions therefore read the DOM the
- * stub built — title element, button text, warning class — because those are
+ * stub built — title element, button text, destructive class — because those are
  * exactly the pixels a user sees.
  *
  * The fake translator echoes the copy path back, so an assertion on
@@ -55,9 +55,9 @@ describe("confirmDelete", () => {
 		expect(modal.title).toContain("confirmDelete.title");
 	});
 
-	it("delete carries Obsidian's warning styling on the confirm button", () => {
+	it("delete carries Obsidian's destructive styling on the confirm button", () => {
 		const modal = openModal();
-		expect(modal.confirm.classList.contains("mod-warning")).toBe(true);
+		expect(modal.confirm.classList.contains("mod-destructive")).toBe(true);
 	});
 
 	it("disable swaps in the 停用 verb in title and button", () => {
@@ -66,9 +66,9 @@ describe("confirmDelete", () => {
 		expect(modal.confirm.textContent).toBe("confirmDelete.disable");
 	});
 
-	it("disable drops the warning tint — the action is reversible", () => {
+	it("disable drops the destructive tint — the action is reversible", () => {
 		const modal = openModal({ kind: "disable" });
-		expect(modal.confirm.classList.contains("mod-warning")).toBe(false);
+		expect(modal.confirm.classList.contains("mod-destructive")).toBe(false);
 	});
 
 	it("confirm runs the callback and closes the modal", async () => {

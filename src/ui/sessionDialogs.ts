@@ -150,7 +150,7 @@ class SessionDeleteModal extends Modal {
 			.addButton((button) =>
 				button
 					.setButtonText(this.t.t("session.delete"))
-					.setWarning()
+					.setDestructive()
 					.onClick(() => {
 						this.close();
 						this.onConfirm();
