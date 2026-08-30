@@ -338,7 +338,11 @@ export function MessageList({
 					))
 				)}
 				{pendingToolCalls.length > 0 ? (
-					<div aria-label={t.t("chat.toolsRunning")} className="piem-chat__tool-status" role="status">
+					// No aria-label: it would replace the row's own text as the
+					// accessible name, and the running tool names — the part worth
+					// hearing — would never reach the screen reader. role="status"
+					// already makes the content itself the announcement.
+					<div className="piem-chat__tool-status" role="status">
 						<ObsidianIcon name="loader-circle" className="piem-chat__spinner" />
 						{t.t("chat.working")}
 						{pendingToolCalls.map((pending) => describePendingTool(pending, showAgentDetails, t)).join(", ")}
@@ -670,13 +674,18 @@ function renderAssistantMessage(message: AssistantMessage, args: RenderArgs): Re
 			);
 		}
 		const showDetails = args.renderContext.showAgentDetails;
+		// Same live vocabulary as the thinking row: a call still running spins
+		// instead of sitting on the settled wrench, so "the turn is working"
+		// reads one way everywhere machine traffic appears.
+		const live = isLiveBlock(message, index, args.isStreaming);
 		return (
 			<Trace
 				key={index}
-				icon="wrench"
+				icon={live ? "loader-circle" : "wrench"}
 				name={describeTool(content.name, showDetails, args.renderContext.t)}
 				nameIsIdentifier={isToolIdentifier(content.name, showDetails)}
 				detail={summarizeToolPayload(content.arguments)}
+				className={live ? "piem-chat__trace--live" : undefined}
 				// Without the payload there is nothing behind the row to open, so it
 				// renders as a plain line rather than an empty disclosure.
 				body={showDetails ? <pre className="piem-chat__text">{JSON.stringify(content.arguments, null, 2)}</pre> : null}

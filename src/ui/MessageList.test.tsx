@@ -481,8 +481,7 @@ describe("MessageList trace collapsing", () => {
 		// The provider appends blocks in order, so thinking followed by text is
 		// finished thinking even though the turn is still streaming — the live
 		// marker belongs to the last block alone.
-		const message = { ...assistantBase(), content: [{ type: "thinking", thinking: "done thinking" }, { type: "text", text: "partial prose" }] };
-		const host = renderMessages([message], { isStreaming: true });
+		const host = renderMessages([{ ...assistantBase(), content: [{ type: "thinking", thinking: "done thinking" }, { type: "text", text: "partial prose" }] }], { isStreaming: true });
 		await flushRender();
 
 		const trace = host.querySelector("details.piem-chat__trace--thinking");
@@ -533,6 +532,38 @@ describe("MessageList streaming marks", () => {
 		await flushRender();
 
 		expect(host.querySelector(".piem-chat__block--live")).toBeNull();
+	});
+
+	it("spins the tool row whose result has not landed", async () => {
+		// A tool call is the last block while the model waits on it, so it earns
+		// the same running marker as a thinking row being produced.
+		const host = renderMessages([userMessage("hi"), assistantToolCall("read", { path: "Note.md" })], { isStreaming: true });
+		await flushRender();
+
+		const trace = host.querySelector(".piem-chat__trace");
+		// Without agent details on, the call row has nothing to open and renders
+		// flat — the live class must reach it either way.
+		expect(trace?.classList.contains("piem-chat__trace--flat")).toBe(true);
+		expect(trace?.classList.contains("piem-chat__trace--live")).toBe(true);
+	});
+
+	it("settles the tool row once the turn is done", async () => {
+		const host = renderMessages([userMessage("hi"), assistantToolCall("read", { path: "Note.md" })], { isStreaming: false });
+		await flushRender();
+
+		expect(host.querySelector("details.piem-chat__trace--live")).toBeNull();
+	});
+
+	it("lets the running-tools row speak its own content", async () => {
+		// The aria-label used to replace the row's text as the accessible name,
+		// so a screen reader heard "Tools running" and never the tool names the
+		// sighted reader sees right there.
+		const host = renderMessages([userMessage("hi")], { isStreaming: true, pendingToolCalls: [{ name: "read" }] });
+		await flushRender();
+
+		const status = host.querySelector(".piem-chat__tool-status");
+		expect(status?.hasAttribute("aria-label")).toBe(false);
+		expect(status?.textContent).toContain("Read a note");
 	});
 });
 
