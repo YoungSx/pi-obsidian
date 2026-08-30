@@ -442,6 +442,7 @@ export const zhCN: DeepPartial<EnCopy> = {
 		installFailed: "导入失败：{message}",
 		noneFound: "那里没有找到技能。技能是一个包含 SKILL.md 的文件夹，或一篇带名称和描述的 .md 文件。",
 		installed: "已导入 {count} 个。",
+		cancel: "取消",
 	},
 
 	/**
@@ -456,6 +457,7 @@ export const zhCN: DeepPartial<EnCopy> = {
 		desc: "接入远程 MCP（Model Context Protocol）服务器提供的工具。这些工具会以 mcp_ 前缀出现在对话中；请求会离开笔记库，发往你填写的地址。",
 		add: "添加服务器",
 		edit: "编辑",
+		delete: "删除",
 		empty: "还没有配置 MCP 服务器。添加一个，即可让它的工具进入对话。",
 		statusOk: "已连接；{tools} 个工具可用。",
 		statusError: "上次连接失败：{error}",
@@ -565,6 +567,8 @@ export const zhCN: DeepPartial<EnCopy> = {
 		modelSubject: "模型“{name}”",
 		skillSubject: "技能“{name}”",
 		mcpServerSubject: "MCP 服务器“{name}”",
+		copyKey: "复制 API 密钥",
+		copied: "已复制到剪贴板。",
 	},
 
 	deletion: {

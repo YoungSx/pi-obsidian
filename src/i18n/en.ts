@@ -715,6 +715,7 @@ export const en = {
 		installFailed: "Could not import: {message}",
 		noneFound: "No skills found there. A skill is a folder with a SKILL.md, or a .md file with a name and description.",
 		installed: "Imported {count}.",
+		cancel: "Cancel",
 	},
 
 	/**
@@ -730,6 +731,7 @@ export const en = {
 		desc: "Connect tools served by remote MCP (Model Context Protocol) servers. Their tools appear in chat with an mcp_ prefix; requests leave the vault to the URL you enter.",
 		add: "Add server",
 		edit: "Edit",
+		delete: "Delete",
 		empty: "No MCP servers configured yet. Add one to bring its tools into chat.",
 		statusOk: "Connected; {tools} tools available.",
 		statusError: "Last connection failed: {error}",
@@ -910,6 +912,11 @@ export const en = {
 		modelSubject: 'model "{name}"',
 		skillSubject: 'skill "{name}"',
 		mcpServerSubject: 'MCP server "{name}"',
+		// Deleting a provider takes its API key with it, and the key may exist
+		// nowhere else — so the confirmation offers an escape hatch before the
+		// click lands, not an apology after it.
+		copyKey: "Copy API key",
+		copied: "Copied to the clipboard.",
 	},
 
 	/** Consequences stated before a delete is confirmed. */

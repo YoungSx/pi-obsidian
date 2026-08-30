@@ -2384,7 +2384,6 @@ button.piem-chat__latest {
 .piem-settings-status__label {
 	color: var(--text-muted);
 	font-size: var(--font-ui-smaller);
-	text-transform: uppercase;
 }
 
 .piem-settings-status__value {

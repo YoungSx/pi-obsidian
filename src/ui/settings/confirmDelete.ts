@@ -1,4 +1,4 @@
-import { Modal, Setting, type App } from "obsidian";
+import { Modal, Notice, Setting, type App } from "obsidian";
 import type { Translator } from "../../i18n";
 
 /**
@@ -7,7 +7,8 @@ import type { Translator } from "../../i18n";
  * Deleting a provider is not a local edit: every model bound to it loses its
  * base URL and credential, so the panel has to say how many go with it before
  * the click lands. A `Notice` afterwards would arrive too late to matter, and
- * these rows hold an API key the user may not have anywhere else.
+ * these rows hold an API key the user may not have anywhere else — which is
+ * why {@link ConfirmDeleteOptions.copySecret} exists.
  */
 
 export interface ConfirmDeleteOptions {
@@ -17,6 +18,11 @@ export interface ConfirmDeleteOptions {
 	consequences: readonly string[];
 	/** Copy for the dialog's own chrome (title and buttons). */
 	t: Translator;
+	/**
+	 * A secret that dies with this row, offered for copying before it does.
+	 * Omitted when the row holds nothing worth saving.
+	 */
+	copySecret?: string;
 	onConfirm(): void | Promise<void>;
 }
 
@@ -33,18 +39,30 @@ class ConfirmDeleteModal extends Modal {
 	}
 
 	onOpen(): void {
-		this.setTitle(this.options.t.t("confirmDelete.title", { subject: this.options.subject }));
+		const { t } = this.options;
+		this.setTitle(t.t("confirmDelete.title", { subject: this.options.subject }));
 		for (const line of this.options.consequences) {
 			this.contentEl.createEl("p", { text: line });
 		}
 
+		const copySecret = this.options.copySecret;
 		new Setting(this.contentEl)
-			.addButton((button) => button.setButtonText(this.options.t.t("confirmDelete.cancel")).onClick(() => this.close()))
+			.addButton((button) => button.setButtonText(t.t("confirmDelete.cancel")).onClick(() => this.close()))
+			.addButton((button) => {
+				if (copySecret === undefined) {
+					return;
+				}
+				button.setButtonText(t.t("confirmDelete.copyKey")).onClick(() => {
+					void navigator.clipboard.writeText(copySecret).then(() => {
+						new Notice(t.t("confirmDelete.copied"));
+					});
+				});
+			})
 			.addButton((button) =>
 				// `setWarning` is Obsidian's destructive styling, which is what tells
 				// this button apart from the Cancel beside it at a glance.
 				button
-					.setButtonText(this.options.t.t("confirmDelete.delete"))
+					.setButtonText(t.t("confirmDelete.delete"))
 					.setWarning()
 					.onClick(() => {
 						this.close();
