@@ -874,7 +874,6 @@ export const en = {
 		supportsThinkingDesc: "Enable only if this model accepts reasoning parameters. Strict servers reject them outright.",
 		sourceBuiltin: "Built-in catalog ({catalog})",
 		sourceModelsDev: "models.dev",
-		autofillHint: "Auto-filled from {source}.",
 		thinkingHintSupported: "{source}: this model supports thinking. Recommended on.",
 		thinkingHintUnsupported: "{source}: this model does not support thinking. Recommended off.",
 		supportsImages: "Accepts images",

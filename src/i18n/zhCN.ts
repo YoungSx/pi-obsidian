@@ -572,7 +572,6 @@ export const zhCN: DeepPartial<EnCopy> = {
 		supportsThinkingDesc: "仅当该模型接受推理参数时启用。严格的服务器会直接拒绝它们。",
 		sourceBuiltin: "内置目录（{catalog}）",
 		sourceModelsDev: "models.dev",
-		autofillHint: "已根据 {source} 自动填入。",
 		thinkingHintSupported: "{source}：该模型支持思考，建议开启。",
 		thinkingHintUnsupported: "{source}：该模型不支持思考，建议关闭。",
 		supportsImages: "接受图片",
