@@ -163,16 +163,8 @@ export const zhCN: DeepPartial<EnCopy> = {
 
 	thinkingLevel: {
 		switchThinking: "调整思考力度",
+		// The level interpolates verbatim: a wire keyword, never translated.
 		buttonTitle: "{action} · {level}",
-		levels: {
-			off: "关闭",
-			minimal: "最低",
-			low: "低",
-			medium: "中",
-			high: "高",
-			xhigh: "极高",
-			max: "最高",
-		},
 	},
 
 	sendShortcut: {

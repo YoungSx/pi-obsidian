@@ -2,7 +2,7 @@ import React from "react";
 import { Menu } from "obsidian";
 import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
 import { IconButton } from "./ObsidianIcon";
-import { hasThinkingChoice, thinkingLevelLabel, thinkingSelectorTitle, type ThinkingTarget } from "./thinkingSelectorCopy";
+import { hasThinkingChoice, thinkingSelectorTitle, type ThinkingTarget } from "./thinkingSelectorCopy";
 import { useT } from "./TranslatorContext";
 
 interface ThinkingLevelSelectorProps {
@@ -41,12 +41,15 @@ export function ThinkingLevelSelector({ target, onSelect, isBusy }: ThinkingLeve
 		return null;
 	}
 
+	// The level renders verbatim — "xhigh", not "极高" — because it is a wire
+	// keyword: the exact string the session file records and the request sends,
+	// the same rule model names follow (issue #143).
 	const openMenu = (event: React.MouseEvent<HTMLButtonElement>): void => {
 		const menu = new Menu();
 		for (const level of target.thinkingLevels) {
 			menu.addItem((item) =>
 				item
-					.setTitle(thinkingLevelLabel(level, t))
+					.setTitle(level)
 					.setChecked(level === target.thinkingLevel)
 					.onClick(() => onSelect(level)),
 			);
@@ -72,7 +75,7 @@ export function ThinkingLevelSelector({ target, onSelect, isBusy }: ThinkingLeve
 			 * only one that is fully redundant with a channel the button already has.
 			 */}
 			<span className="piem-chat__thinking-switcher-name" aria-hidden="true">
-				{thinkingLevelLabel(target.thinkingLevel, t)}
+				{target.thinkingLevel}
 			</span>
 		</IconButton>
 	);
