@@ -92,8 +92,15 @@ export function composeSubagentPrompt(role: SubagentRole): string {
  */
 const ALWAYS_EXCLUDED = new Set(["delegate", "read_skill"]);
 
-/** Tool names that change the vault; a read-only role drops all of them. */
-const MUTATING_TOOLS = new Set(["write", "edit", "move_note", "trash_note"]);
+/**
+ * Tool names that change the vault; a read-only role drops all of them.
+ *
+ * Exported because the boundary is only as strong as its worst typo: a name
+ * here that no longer matches a registered tool would hand a read-only
+ * subagent a mutator, silently. `obsidianTools.test.ts` pins every name in
+ * this set against the real registration.
+ */
+export const MUTATING_TOOLS = new Set(["write", "edit", "move_note", "trash_note"]);
 
 export function filterToolsForSubagent(tools: readonly AgentTool[], role: SubagentRole): AgentTool[] {
 	const excluded = role.readOnly ? new Set([...ALWAYS_EXCLUDED, ...MUTATING_TOOLS]) : ALWAYS_EXCLUDED;

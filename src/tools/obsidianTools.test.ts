@@ -10,6 +10,7 @@ const { TFile: TFileClass, TFolder: TFolderClass } = await import("obsidian");
 const { createObsidianTools } = await import("./obsidianTools");
 const { createVaultHarnessContext } = await import("../vault/harnessAdapter");
 const { DEFAULT_SETTINGS } = await import("../settings");
+const { MUTATING_TOOLS } = await import("../subagent/roles");
 
 /** Stock settings, riding the requestUrl transport the network stub expects. */
 function defaultSettings() {
@@ -184,6 +185,19 @@ describe("tool registration", () => {
 		// an off-by-default setting, and re-adding any gate would leave the agent
 		// reasoning about pages it cannot reach — the failure the gate itself caused.
 		expect(tools(app).map((tool) => tool.name)).toContain("web_fetch");
+	});
+
+	it("keeps the subagent read-only boundary pointing at real tools", () => {
+		const app = createTaskApp([]);
+
+		// `MUTATING_TOOLS` in src/subagent/roles.ts filters what a read-only
+		// subagent may hold. A renamed or removed vault tool would leave a stale
+		// name in that set — silently handing the mutator to a role that must
+		// never mutate — so every name there must match a registered tool here.
+		const registered = new Set(tools(app).map((tool) => tool.name));
+		for (const name of MUTATING_TOOLS) {
+			expect(registered.has(name)).toBe(true);
+		}
 	});
 });
 

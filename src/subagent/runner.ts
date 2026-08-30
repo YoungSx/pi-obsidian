@@ -181,6 +181,9 @@ export async function runSubagent(options: SubagentRunOptions): Promise<Subagent
 		}
 		throw error;
 	} finally {
+		// On the happy path the signal never fires, so the listener must come
+		// down with the rest of the wiring or it outlives the run.
+		linked.signal.removeEventListener("abort", stopAgent);
 		linked.dispose();
 	}
 
@@ -192,7 +195,11 @@ export async function runSubagent(options: SubagentRunOptions): Promise<Subagent
 
 	const messages = agent.state.messages;
 	const lastAssistant = [...messages].reverse().find((message) => message.role === "assistant");
-	const text = extractAssistantText(lastAssistant);
+	// A message that requested tools has no report in it — even when it also
+	// carries prefatory text ("Let me search for that…"), which is exactly the
+	// wrong thing to hand the parent as a deliverable.
+	const reportReady = lastAssistant !== undefined && lastAssistant.stopReason !== "toolUse";
+	const text = reportReady ? extractAssistantText(lastAssistant) : "";
 	if (!text) {
 		// Reachable when the run stopped on a tool error before any reply: report
 		// the failure instead of handing the parent an empty success.
