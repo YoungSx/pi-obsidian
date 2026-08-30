@@ -311,6 +311,29 @@ export function listModelChoices(settings: PiemSettings): ModelChoice[] {
 	return choices;
 }
 
+/**
+ * One configured model resolved to what pi-ai dispatches on, by its choice id.
+ *
+ * Keyed on the {@link ModelConfig} id rather than the model's api id because api
+ * ids are not unique — two providers serve the same `openai/gpt-oss-120b` with
+ * different base URLs and costs, which is why {@link ModelChoice} carries both
+ * names. Scoped to `settings.models` for the same reason {@link listModelChoices}
+ * is: a builtin catalog entry has no configured credential, so resolving one
+ * would hand back a model whose first request fails on auth.
+ *
+ * Undefined for an unknown id and for a model whose provider went missing —
+ * the same orphan case {@link listModelChoices} omits, so the list a caller
+ * offers and the ids it can resolve agree by construction.
+ */
+export function resolveModelChoice(settings: PiemSettings, choiceId: string): Model<string> | undefined {
+	const model = settings.models.find((entry) => entry.id === choiceId);
+	if (!model) {
+		return undefined;
+	}
+	const provider = getProviderForModel(settings, model);
+	return provider ? buildConfiguredModel(model, provider) : undefined;
+}
+
 /** The active model paired with its provider, when both resolve. */
 export function getActiveConfiguration(settings: PiemSettings): { model: ModelConfig; provider: ProviderConfig } | undefined {
 	const model = getActiveModelConfig(settings);

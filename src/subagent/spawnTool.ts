@@ -1,7 +1,9 @@
 import { Type, type TLiteral } from "typebox";
 import type { AgentTool, Skill, StreamFn, ThinkingLevel } from "@earendil-works/pi-agent-core";
-import type { Model } from "@earendil-works/pi-ai";
+import { clampThinkingLevel, type Model, type Models } from "@earendil-works/pi-ai";
+import type { CompactionSettings } from "../agent/compactionSettings";
 import { textResult, throwIfAborted } from "../tools/toolResult";
+import type { SubagentModelChoice } from "./extension";
 import { DEFAULT_SUBAGENT_ROLE_NAME, SUBAGENT_ROLES, findSubagentRole, type SubagentRoleName } from "./roles";
 import { linkSignals, runSubagent, type LinkedSignals } from "./runner";
 import type { SubagentRegistry } from "./registry";
@@ -49,6 +51,12 @@ export interface SubagentToolsContext {
 	getModel: () => Model<string>;
 	getStreamFn: () => StreamFn;
 	getThinkingLevel: () => ThinkingLevel;
+	/** Models a spawn may pick from; absent when the host offers no choice. */
+	listModels?: () => readonly SubagentModelChoice[];
+	resolveModel?: (choiceId: string) => Model<string> | undefined;
+	/** Provider registry a child compacts through; absent means no compaction. */
+	getModels?: () => Models | undefined;
+	getCompactionSettings?: (contextWindow: number) => CompactionSettings | undefined;
 	getApiKey?: (provider: string) => Promise<string | undefined> | string | undefined;
 	/** Skills the subagent's prompt lists and its `read_skill` tool serves. */
 	getSkills: () => readonly Skill[];
@@ -66,27 +74,86 @@ export interface SubagentToolsContext {
 	waitPacing?: WaitPacing;
 }
 
-const SpawnParameters = Type.Object({
-	task: Type.String({
-		description:
-			"The complete, self-contained task for the subagent. It cannot see this conversation, so include every path, quote, and constraint it needs.",
-	}),
-	role: Type.Optional(
-		Type.Union(
-			// `Union` computes its `Static` only from a tuple; `.map` alone widens
-			// the members to an array and the parameter type collapses to never.
-			// The variadic tail keeps the static type honest whatever the role
-			// count grows to — a fixed-length cast would go stale on the next role.
-			SUBAGENT_ROLES.map((role) => Type.Literal(role.name)) as [
-				TLiteral<SubagentRoleName>,
-				...TLiteral<SubagentRoleName>[],
-			],
-			{ description: "Worker profile to run the task under. Defaults to general." },
+/**
+ * Thinking levels a spawn may ask for.
+ *
+ * pi's own seven-member union, minus nothing: the clamp at spawn time reduces
+ * whatever is asked for to what the child's model actually supports, so
+ * advertising the full set costs nothing and hiding members would make the
+ * parameter model-specific — which it cannot be, since the schema is built once
+ * and the model is chosen per call.
+ */
+const THINKING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh", "max"] as const;
+
+/**
+ * The spawn schema, built per tool construction because two of its members
+ * depend on the user's settings.
+ *
+ * `model` is a literal union over ids only the host knows, so it cannot live at
+ * module scope like `role` does. `Static` for a `TLiteral<string>` union is
+ * plain `string` — honest, since a runtime-only list genuinely cannot narrow
+ * further, while the schema still constrains the value to the enumerated ids.
+ * When the host offers no models the member is omitted outright rather than
+ * emitted empty: an empty `anyOf` is a parameter the model can only get wrong.
+ */
+function buildSpawnParameters(modelChoices: readonly SubagentModelChoice[]) {
+	return Type.Object({
+		task: Type.String({
+			description:
+				"The complete, self-contained task for the subagent. It cannot see this conversation, so include every path, quote, and constraint it needs.",
+		}),
+		role: Type.Optional(
+			Type.Union(
+				// `Union` computes its `Static` only from a tuple; `.map` alone widens
+				// the members to an array and the parameter type collapses to never.
+				// The variadic tail keeps the static type honest whatever the role
+				// count grows to — a fixed-length cast would go stale on the next role.
+				SUBAGENT_ROLES.map((role) => Type.Literal(role.name)) as [
+					TLiteral<SubagentRoleName>,
+					...TLiteral<SubagentRoleName>[],
+				],
+				{ description: "Worker profile to run the task under. Defaults to general." },
+			),
 		),
-	),
-});
+		instructions: Type.Optional(
+			Type.String({
+				description:
+					"Standing framing for the whole run that is not the task itself — an output contract, a format, a constraint that holds every turn. Put the work in `task` and the framing here.",
+			}),
+		),
+		...(modelChoices.length > 0
+			? {
+				model: Type.Optional(
+					Type.Union(
+						modelChoices.map((choice) => Type.Literal(choice.id)) as [TLiteral<string>, ...TLiteral<string>[]],
+						{ description: "Which configured model to run this subagent on. Omit to inherit this conversation's model." },
+					),
+				),
+			}
+			: {}),
+		thinkingLevel: Type.Optional(
+			Type.Union(
+				THINKING_LEVELS.map((level) => Type.Literal(level)) as [TLiteral<ThinkingLevel>, ...TLiteral<ThinkingLevel>[]],
+				{
+					description:
+						"Reasoning effort for this subagent. Omit to inherit this conversation's. Reduced automatically to what the chosen model supports, which for a model without reasoning is off.",
+				},
+			),
+		),
+	});
+}
+
+type SpawnParameters = ReturnType<typeof buildSpawnParameters>;
 
 const ROLE_NAMES = SUBAGENT_ROLES.map((role) => role.name).join(", ");
+
+/** The model menu as the tool description spells it out, so the model can pick by name. */
+function describeModelChoices(choices: readonly SubagentModelChoice[]): string {
+	if (choices.length === 0) {
+		return "";
+	}
+	return ` Models you may run a subagent on, as label → id: ${choices.map((choice) => `${choice.label} → ${choice.id}`).join("; ")}. Omit model to inherit this conversation's; pick a cheaper one for broad mechanical work.`;
+}
 
 /**
  * The `spawn_subagent` tool: starts one in-process subagent and returns at once.
@@ -101,12 +168,16 @@ const ROLE_NAMES = SUBAGENT_ROLES.map((role) => role.name).join(", ");
  * {@link SUBAGENT_CONCURRENCY_LIMIT} — depth is a property of a tool set, but
  * how many children are alive is only knowable when a spawn is asked for.
  */
-export function createSpawnSubagentTool(context: SubagentToolsContext, depth: number): AgentTool<typeof SpawnParameters> {
+export function createSpawnSubagentTool(context: SubagentToolsContext, depth: number): AgentTool<SpawnParameters> {
+	// Read once per construction, not per call: the schema is fixed for this tool
+	// instance, so a settings change reaches the next agent build rather than
+	// desynchronizing the advertised ids from the ones this schema accepts.
+	const modelChoices = context.listModels?.() ?? [];
 	return {
 		name: "spawn_subagent",
 		label: "Spawn subagent",
-		description: `Start one self-contained task on a subagent and return immediately with its id — do not wait for the result here; collect it with wait_subagent. The subagent runs with this vault's tools and reports back when done. Use it when a task is better worked in isolation — a broad vault sweep, a critique, a summary — or when the intermediate tool output would flood this conversation. Several spawns started together run in parallel (up to ${SUBAGENT_CONCURRENCY_LIMIT} at once); check on them with list_subagents and stop one you no longer need with kill_subagent. Roles: ${ROLE_NAMES}. The subagent cannot ask questions; its reply is its only output, so a good task leaves nothing unsaid. It may spawn one further level down, but no deeper.`,
-		parameters: SpawnParameters,
+		description: `Start one self-contained task on a subagent and return immediately with its id — do not wait for the result here; collect it with wait_subagent. The subagent runs with this vault's tools and reports back when done. Use it when a task is better worked in isolation — a broad vault sweep, a critique, a summary — or when the intermediate tool output would flood this conversation. Several spawns started together run in parallel (up to ${SUBAGENT_CONCURRENCY_LIMIT} at once); check on them with list_subagents and stop one you no longer need with kill_subagent. Roles: ${ROLE_NAMES}; narrow one further with the instructions parameter for standing framing that is not the task.${describeModelChoices(modelChoices)} The subagent cannot ask questions; its reply is its only output, so a good task leaves nothing unsaid. It may spawn one further level down, but no deeper.`,
+		parameters: buildSpawnParameters(modelChoices),
 		execute: async (_toolCallId, params, signal) => {
 			throwIfAborted(signal);
 			const role = findSubagentRole(params.role ?? DEFAULT_SUBAGENT_ROLE_NAME);
@@ -123,6 +194,22 @@ export function createSpawnSubagentTool(context: SubagentToolsContext, depth: nu
 					`${live} subagents are already running, which is the limit (${SUBAGENT_CONCURRENCY_LIMIT}). Collect one with wait_subagent or stop one with kill_subagent, then spawn again.`,
 				);
 			}
+			// A model the schema advertised but the host can no longer resolve means
+			// the user deleted it between agent builds. Naming it beats letting the
+			// child silently run on the parent's model, which is a different answer
+			// than the one the parent asked for.
+			const requestedModelId = (params as { model?: string }).model;
+			const model = requestedModelId === undefined ? context.getModel() : context.resolveModel?.(requestedModelId);
+			if (!model) {
+				throw new Error(
+					`Unknown model: ${requestedModelId}. Valid ids: ${modelChoices.map((choice) => choice.id).join(", ") || "(none configured)"}`,
+				);
+			}
+			// Clamped whenever a model was chosen, not only when a level was: the
+			// inherited parent level is the unsafe input and the common case, since
+			// it was clamped against the parent's model, not this one.
+			const requestedLevel = (params as { thinkingLevel?: ThinkingLevel }).thinkingLevel ?? context.getThinkingLevel();
+			const thinkingLevel = clampThinkingLevel(model, requestedLevel);
 			const id = context.registry.nextId();
 			// The linked controller is the child's kill switch: it fires with the
 			// parent run's signal (panel stop) and with disposeAll, and the runner
@@ -141,13 +228,20 @@ export function createSpawnSubagentTool(context: SubagentToolsContext, depth: nu
 					runSubagent({
 						task: params.task,
 						role,
+						instructions: params.instructions,
 						// One deeper than this tool's own set — the tree grows by exactly
-					// one level per spawn, by construction.
-					tools: context.createChildTools(depth + 1),
+						// one level per spawn, by construction.
+						tools: context.createChildTools(depth + 1),
 						skills: context.getSkills(),
-						model: context.getModel(),
+						model,
 						streamFn: context.getStreamFn(),
-						thinkingLevel: context.getThinkingLevel(),
+						thinkingLevel,
+						// Resolved at spawn, so a child rides the registry and thresholds
+						// live at that moment. The window comes from the child's own
+						// model, which a per-spawn override can make differ from the
+						// parent's.
+						models: context.getModels?.(),
+						compactionSettings: model.contextWindow ? context.getCompactionSettings?.(model.contextWindow) : undefined,
 						getApiKey: context.getApiKey,
 						signal: linked.signal,
 					}),
@@ -156,6 +250,11 @@ export function createSpawnSubagentTool(context: SubagentToolsContext, depth: nu
 				subagentId: id,
 				role: role.name,
 				status: "running",
+				// Reported because both can differ from what was asked for: an id the
+				// user renamed, and a level the clamp reduced. A parent that requested
+				// "max" on a non-reasoning model should see that it got "off".
+				model: model.id,
+				thinkingLevel,
 			});
 		},
 	};
