@@ -15,9 +15,11 @@ import iconDataUrl from "../assets/icon.png";
  * than shipped as a sibling file, because the release archive contains exactly
  * main.js/manifest.json/styles.css — a separate asset would 404 on install.
  *
- * Kept in one place, deliberately: the original 1536×1024 render on a black
- * field is archived as assets/icon-source.png, and assets/icon.png is the
- * black-to-alpha conversion of it. Nothing else should know the data URI
+ * Kept in one place, deliberately: the original 660×660 transparent render is
+ * archived untouched as assets/icon-source.png, and assets/icon.png is the
+ * 256px square derived from it — cropped to the non-transparent bounds, alpha
+ * re-curved and contrast-lifted so the fine strands survive ribbon size, then
+ * scaled to fill half the canvas height. Nothing else should know the data URI
  * exists.
  */
 
