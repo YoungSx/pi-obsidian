@@ -15,14 +15,18 @@ import { throwIfAborted } from "../tools/toolResult";
 import { composeSubagentPrompt, type SubagentRole } from "./roles";
 
 /**
- * How long one delegated task may run before its controller fires.
+ * The orphan reaper, not a task time limit.
  *
- * A subagent has no compaction and no user watching, so a model stuck in a
- * tool loop would otherwise bill silently forever — the timeout is the only
- * backstop. Five minutes covers a thorough vault sweep; the parent can always
- * re-delegate with a narrower task.
+ * Waiting on a subagent is the parent's job — Codex-style spawn/wait puts the
+ * pacing in a `wait` tool call, and a child that is still working is nobody's
+ * emergency. The one hazard is a child nobody waits for: a parent run that
+ * ends normally does not abort its signal, so without a cap a forgotten child
+ * could keep calling tools — and writing to the vault — until the plugin
+ * unloads. This window is the last-resort kill for exactly that case; it sits
+ * far above any legitimate wait loop. Tests pass a small one to keep runs
+ * from spinning.
  */
-export const DEFAULT_SUBAGENT_TIMEOUT_MS = 5 * 60_000;
+export const SUBAGENT_MAX_LIFETIME_MS = 30 * 60_000;
 
 export interface SubagentRunOptions {
 	task: string;
@@ -40,6 +44,10 @@ export interface SubagentRunOptions {
 	skills?: readonly Skill[];
 	/** The parent run's signal; aborting it aborts the subagent immediately. */
 	signal?: AbortSignal;
+	/**
+	 * Reaper window (see {@link SUBAGENT_MAX_LIFETIME_MS}). Optional so tests
+	 * can pass a short one; production callers take the default.
+	 */
 	timeoutMs?: number;
 	/** Escape hatch for tests and logging; the runner itself stays event-blind. */
 	onEvent?: (event: AgentEvent) => void;
@@ -53,22 +61,25 @@ export interface SubagentRunResult {
 	usage: UsageTotals;
 }
 
-interface LinkedSignals {
+export interface LinkedSignals {
 	signal: AbortSignal;
-	/** Must be called in a finally; stops the timeout timer and the parent listener. */
+	/** Fires the controller; how external callers kill the linked run. */
+	abort: () => void;
+	/** Must be called in a finally; stops the reaper timer and the parent listener. */
 	dispose: () => void;
-	/** True only when the timeout fired, so a caller can word the error correctly. */
+	/** True only when the reaper fired, so a caller can word the error correctly. */
 	timedOut: () => boolean;
 }
 
 /**
- * Merges the parent's signal with a timeout into one controller.
+ * Merges the parent's signal with an optional reaper into one controller.
  *
  * A run ends only when this controller fires or the model stops on its own, so
- * the caller must call `dispose` in a finally even on success — the timer
- * otherwise stays armed for the full window, keeping the Node loop alive.
+ * the caller must call `dispose` in a finally even on success — the reaper
+ * timer, when armed, otherwise stays armed for the full window, keeping the
+ * Node loop alive.
  */
-function linkSignals(parent: AbortSignal | undefined, timeoutMs: number): LinkedSignals {
+export function linkSignals(parent: AbortSignal | undefined, timeoutMs: number | undefined): LinkedSignals {
 	const controller = new AbortController();
 	let timedOut = false;
 
@@ -82,16 +93,19 @@ function linkSignals(parent: AbortSignal | undefined, timeoutMs: number): Linked
 		parent?.addEventListener("abort", forwardAbort, { once: true });
 	}
 
-	const timeoutHandle = setTimeout(() => {
+	const timeoutHandle = timeoutMs === undefined ? undefined : setTimeout(() => {
 		timedOut = true;
 		controller.abort();
 	}, timeoutMs);
 
 	return {
 		signal: controller.signal,
+		abort: () => controller.abort(),
 		timedOut: () => timedOut,
 		dispose: () => {
-			clearTimeout(timeoutHandle);
+			if (timeoutHandle !== undefined) {
+				clearTimeout(timeoutHandle);
+			}
 			parent?.removeEventListener("abort", forwardAbort);
 		},
 	};
@@ -135,18 +149,18 @@ function textOfBlocks(content: ReadonlyArray<{ type: string; text?: string }>): 
  *
  * The child shares the parent's model, transport, and API-key resolution but
  * nothing else: its transcript starts empty, is never persisted, and dies with
- * this call. There is no compaction on purpose — the timeout bounds the run,
- * and compaction would need the models bundle plus session bookkeeping the
- * child does not own.
+ * this call. There is no compaction on purpose — the lifetime reaper bounds a
+ * forgotten run, and compaction would need the models bundle plus session
+ * bookkeeping the child does not own.
  */
 export async function runSubagent(options: SubagentRunOptions): Promise<SubagentRunResult> {
 	const { task, role, tools, model, streamFn, thinkingLevel } = options;
-	const timeoutMs = options.timeoutMs ?? DEFAULT_SUBAGENT_TIMEOUT_MS;
+	const timeoutMs = options.timeoutMs ?? SUBAGENT_MAX_LIFETIME_MS;
 	const linked = linkSignals(options.signal, timeoutMs);
 	const abortError = (): Error =>
 		new Error(
 			linked.timedOut()
-				? `Subagent timed out after ${Math.round(timeoutMs / 1000)}s`
+				? `Subagent reaped after ${Math.round(timeoutMs / 1000)}s`
 				: "Subagent aborted",
 		);
 	const agent = new Agent({
@@ -168,9 +182,9 @@ export async function runSubagent(options: SubagentRunOptions): Promise<Subagent
 		// error to protect the panel — the child feeds the error back and only
 		// stops when the run itself is dead. The predicate is still load-bearing:
 		// pi's loop never re-checks its signal between turns, so a completed
-		// request followed by tool results would run on forever and the timeout
+		// request followed by tool results would run on forever and the reaper
 		// below would never land. `linked.signal` is the run's only abort source
-		// (parent abort and the timeout both fire it, and its listener is what
+		// (parent abort and the reaper both fire it, and its listener is what
 		// calls `agent.abort()`), so reading it here is the between-turns abort
 		// check the loop lacks.
 		shouldStopAfterTurn: () => linked.signal.aborted,
@@ -183,7 +197,7 @@ export async function runSubagent(options: SubagentRunOptions): Promise<Subagent
 	}
 
 	// The linked controller above is the subagent's real kill switch: pi's
-	// `Agent` takes no signal of its own, so parent abort and timeout both reach
+	// `Agent` takes no signal of its own, so parent abort and reaper both reach
 	// the run through `agent.abort()` — the same path the chat panel uses.
 	const stopAgent = (): void => agent.abort();
 	linked.signal.addEventListener("abort", stopAgent, { once: true });

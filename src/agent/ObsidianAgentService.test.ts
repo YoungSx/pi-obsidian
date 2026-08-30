@@ -118,11 +118,11 @@ describe("ObsidianAgentService", () => {
 
 	it("runs a delegated task on an in-process subagent and folds the report back in", async () => {
 		// Full chain, no mocks of the machinery under test: the parent model
-		// issues a `delegate` call, the tool builds a real child `Agent`, the
-		// child's own turn is answered by the same scripted streamFn, and the
-		// parent gets the report as a tool result and answers the user. One
-		// streamFn plays both roles, dispatched on the system prompt only the
-		// subagent prompt contains.
+		// spawns a subagent and waits for it, the tool builds a real child
+		// `Agent`, the child's own turn is answered by the same scripted
+		// streamFn, and the parent gets the report as a wait result and answers
+		// the user. One streamFn plays both roles, dispatched on the system
+		// prompt only the subagent prompt contains.
 		const childToolNames: string[][] = [];
 		const scripted: StreamFn = (model, context, options) => {
 			const isChild = context.systemPrompt?.includes("delegated task") ?? false;
@@ -132,14 +132,19 @@ describe("ObsidianAgentService", () => {
 			}
 			if (!thisParentCalled) {
 				thisParentCalled = true;
-				return scriptedToolCallStream(model, "delegate_1", "delegate", {
+				return scriptedToolCallStream(model, "spawn_1", "spawn_subagent", {
 					task: "Sweep the vault",
 					role: "scout",
 				});
 			}
+			if (thisWaits === 0) {
+				thisWaits += 1;
+				return scriptedToolCallStream(model, "wait_1", "wait_subagent", {});
+			}
 			return scriptedTextStream(model, "Nothing needs organizing.");
 		};
 		let thisParentCalled = false;
+		let thisWaits = 0;
 
 		const service = createService(new MemoryAdapter(), { streamFn: scripted });
 		await service.sendPrompt("Tidy check, please");
@@ -149,45 +154,54 @@ describe("ObsidianAgentService", () => {
 		const last = snapshot.messages[snapshot.messages.length - 1];
 		expect(last?.role).toBe("assistant");
 		expect(JSON.stringify(last)).toContain("Nothing needs organizing.");
+		// The wait result carried the child's report into the parent transcript.
+		expect(JSON.stringify(snapshot.messages)).toContain("Scout report: nothing to organize.");
 
 		// The child runs on the full vault set — mutators and the skill reader
-		// included, since roles no longer strip anything — and may itself
-		// delegate one further level (the cap is the next test's job).
+		// included, since roles no longer strip anything — and may itself spawn
+		// one further level (the cap is the next test's job).
 		expect(childToolNames).toHaveLength(1);
-		expect(childToolNames[0]).toContain("delegate");
+		expect(childToolNames[0]).toContain("spawn_subagent");
+		expect(childToolNames[0]).toContain("wait_subagent");
 		expect(childToolNames[0]).toContain("read_skill");
 		expect(childToolNames[0]).toContain("write");
 		expect(childToolNames[0]).toContain("grep");
 	});
 
-	it("lets a child delegate once more and caps the tree below that", async () => {
+	it("lets a child spawn once more and caps the tree below that", async () => {
 		// Same scripted streamFn plays three agents. A subagent whose tool set
-		// still carries `delegate` is answered with one more delegation; a set
+		// still carries `spawn_subagent` is answered with one more spawn; a set
 		// without it has hit the depth floor and must produce the report. The
 		// child is the only agent at depth ≤ 1, so counting its requests tells
-		// its first turn (delegate) from its second (final report).
+		// its first turn (spawn) from its second (wait) from its third (report).
 		const childToolNames: string[][] = [];
 		const grandchildToolNames: string[][] = [];
 		let childRequests = 0;
-		let parentCalled = false;
+		let parentCalls = 0;
 		const scripted: StreamFn = (model, context, options) => {
 			const isSubagent = context.systemPrompt?.includes("delegated task") ?? false;
 			if (!isSubagent) {
-				if (!parentCalled) {
-					parentCalled = true;
-					return scriptedToolCallStream(model, "delegate_1", "delegate", {
+				parentCalls += 1;
+				if (parentCalls === 1) {
+					return scriptedToolCallStream(model, "spawn_1", "spawn_subagent", {
 						task: "Sweep the vault",
 						role: "general",
 					});
 				}
+				if (parentCalls === 2) {
+					return scriptedToolCallStream(model, "wait_1", "wait_subagent", {});
+				}
 				return scriptedTextStream(model, "Folded in.");
 			}
 			const names = (context.tools ?? []).map((tool) => tool.name);
-			if (names.includes("delegate")) {
+			if (names.includes("spawn_subagent")) {
 				childToolNames.push(names);
 				childRequests += 1;
 				if (childRequests === 1) {
-					return scriptedToolCallStream(model, "delegate_2", "delegate", { task: "Narrow sweep" });
+					return scriptedToolCallStream(model, "spawn_2", "spawn_subagent", { task: "Narrow sweep" });
+				}
+				if (childRequests === 2) {
+					return scriptedToolCallStream(model, "wait_2", "wait_subagent", {});
 				}
 				return scriptedTextStream(model, "Child report: all clear.");
 			}
@@ -204,9 +218,9 @@ describe("ObsidianAgentService", () => {
 		expect(JSON.stringify(last)).toContain("Folded in.");
 		// The grandchild ran on a real tool set with no way to recurse further.
 		expect(grandchildToolNames).toHaveLength(1);
-		expect(grandchildToolNames[0]).not.toContain("delegate");
+		expect(grandchildToolNames[0]).not.toContain("spawn_subagent");
 		expect(grandchildToolNames[0]).toContain("grep");
-		expect(childToolNames).toHaveLength(2);
+		expect(childToolNames).toHaveLength(3);
 	});
 
 	it("reports usage once the provider has charged for a turn", async () => {
