@@ -733,6 +733,10 @@ export const en = {
 		empty: "No MCP servers configured yet. Add one to bring its tools into chat.",
 		statusOk: "Connected; {tools} tools available.",
 		statusError: "Last connection failed: {error}",
+		// Shown on the row's verdict line for the seconds the toggle's save takes
+		// to attempt a connection — the row promises a result, so it must not sit
+		// on a stale verdict while the network round trip runs.
+		statusConnecting: "Connecting…",
 		statusDisabled: "Disabled. Turn it on to connect.",
 		statusUntested: "Not connected yet. Saving settings or reloading the plugin connects it.",
 		testTitle: "Connection",
@@ -919,6 +923,15 @@ export const en = {
 		mcpServer: "Its tools stop being offered to the agent. The token stored for it is removed from this vault's config.",
 	},
 
+	/**
+	 * The first Esc on a config modal holding unsaved edits. One sentence shared
+	 * by every form: the mechanics are identical, only the fields differ, and a
+	 * reader who learns the rule once knows it everywhere.
+	 */
+	discard: {
+		warning: "This form has unsaved changes — press Esc again to discard them.",
+	},
+
 	/** Connection-test row. */
 	test: {
 		button: "Test",
@@ -982,6 +995,10 @@ export const en = {
 		displayNamePlaceholder: "My model",
 		contextWindow: "Context window",
 		contextWindowDesc: "Tokens this model accepts. Compaction plans against it; leave blank for the default.",
+		// Shown under a numeric field holding a value it will drop: 0, negative,
+		// or not a number. The field reverts silently otherwise, and a silently
+		// ignored keystroke reads as a broken field.
+		positiveNumberHint: "Needs a positive whole number — leave blank for the default.",
 		contextWindowPlaceholder: "128000",
 		maxTokens: "Max output tokens",
 		maxTokensDesc: "Cap on a single reply. Leave blank for the default (8192).",

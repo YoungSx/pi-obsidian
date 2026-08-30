@@ -1,6 +1,7 @@
 import { ButtonComponent, Modal, Notice, Setting, type App } from "obsidian";
 import type { Translator } from "../../i18n";
 import type { FetchedSkill, FetchedSource } from "../../skills/skillImport";
+import { createModalStatus, type ModalStatus } from "./modalGuards";
 
 export interface ImportSkillModalOptions {
 	app: App;
@@ -31,7 +32,7 @@ export class ImportSkillModal extends Modal {
 	/** Set once a fetch succeeds; the CTA then means "import" instead of "preview". */
 	private preview: FetchedSource | null = null;
 	private busy = false;
-	private statusEl!: HTMLElement;
+	private status!: ModalStatus;
 	private previewEl!: HTMLElement;
 	private actionButton!: ButtonComponent;
 
@@ -72,7 +73,7 @@ export class ImportSkillModal extends Modal {
 
 		// Created before the footer so the status lands between the field and the
 		// buttons in DOM order, which is also the reading order.
-		this.statusEl = contentEl.createEl("p", { cls: "piem-settings-effect" });
+		this.status = createModalStatus(contentEl);
 		this.previewEl = contentEl.createDiv();
 
 		// Sticks to the modal's bottom edge so the action row stays reachable
@@ -95,17 +96,17 @@ export class ImportSkillModal extends Modal {
 	private async runPreview(): Promise<void> {
 		const { t } = this.options;
 		if (!this.url) {
-			this.statusEl.setText(t.t("skillImport.invalidUrl"));
+			this.status.showError(t.t("skillImport.invalidUrl"));
 			return;
 		}
 		this.busy = true;
 		this.actionButton.setDisabled(true);
-		this.statusEl.setText(t.t("skillImport.fetching"));
+		this.status.show(t.t("skillImport.fetching"));
 		try {
 			this.preview = await this.options.fetchSource(this.url);
 		} catch (cause) {
 			this.preview = null;
-			this.statusEl.setText(t.t("skillImport.fetchFailed", { message: describeError(cause) }));
+			this.status.showError(t.t("skillImport.fetchFailed", { message: describeError(cause) }));
 		} finally {
 			this.busy = false;
 			this.actionButton.setDisabled(false);
@@ -118,11 +119,11 @@ export class ImportSkillModal extends Modal {
 		const { t } = this.options;
 		this.previewEl.empty();
 		if (!this.preview) {
-			this.statusEl.setText("");
+			this.status.clear();
 			this.actionButton.setButtonText(t.t("skillImport.preview"));
 			return;
 		}
-		this.statusEl.setText(this.preview.skills.length === 0 ? t.t("skillImport.noneFound") : "");
+		this.preview.skills.length === 0 ? this.status.show(t.t("skillImport.noneFound")) : this.status.clear();
 		for (const skill of this.preview.skills) {
 			new Setting(this.previewEl).setName(skill.name).setDesc(skill.description);
 		}

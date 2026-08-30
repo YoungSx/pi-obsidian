@@ -459,6 +459,7 @@ export const zhCN: DeepPartial<EnCopy> = {
 		empty: "还没有配置 MCP 服务器。添加一个，即可让它的工具进入对话。",
 		statusOk: "已连接；{tools} 个工具可用。",
 		statusError: "上次连接失败：{error}",
+		statusConnecting: "正在连接…",
 		statusDisabled: "已停用。开启后才会连接。",
 		statusUntested: "尚未连接。保存设置或重新加载插件时会连接。",
 		testTitle: "连接",
@@ -576,6 +577,12 @@ export const zhCN: DeepPartial<EnCopy> = {
 		mcpServer: "它的工具不再提供给代理。为它保存的令牌会从此笔记库的配置中移除。",
 	},
 
+	// 第一下 Esc 落在带着未保存修改的配置弹窗上时，就地显示的这句话。
+	// 三个表单共用一句：机制完全相同，只是字段不同，学一次规则到处通用。
+	discard: {
+		warning: "这个表单有未保存的修改——再按一次 Esc 就会丢弃。",
+	},
+
 	test: {
 		button: "测试",
 		running: "测试中…",
@@ -630,6 +637,7 @@ export const zhCN: DeepPartial<EnCopy> = {
 		displayNamePlaceholder: "我的模型",
 		contextWindow: "上下文窗口",
 		contextWindowDesc: "该模型接受的 token 数。整理会据此规划；留空则使用默认值。",
+		positiveNumberHint: "需要正整数——留空表示使用默认。",
 		contextWindowPlaceholder: "128000",
 		maxTokens: "最大输出 token 数",
 		maxTokensDesc: "单次回复的上限。留空则使用默认值（8192）。",

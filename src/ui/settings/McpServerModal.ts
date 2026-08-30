@@ -2,6 +2,7 @@ import { Modal, Notice, Setting, type App } from "obsidian";
 import { generateMcpServerId, type McpServerConfig } from "../../mcp/mcpConfig";
 import type { Translator } from "../../i18n";
 import { attachTestButton } from "./testResult";
+import { createModalStatus, DiscardGuard, type ModalStatus } from "./modalGuards";
 
 export interface McpServerModalOptions {
 	app: App;
@@ -34,6 +35,10 @@ export class McpServerModal extends Modal {
 	private draft: McpServerConfig;
 	private readonly isNew: boolean;
 	private readonly options: McpServerModalOptions;
+	/** The draft as it stood at open, serialized — the baseline the dirty check compares against. */
+	private readonly originalDraft: string;
+	private readonly guard: DiscardGuard;
+	private status: ModalStatus | null = null;
 
 	constructor(options: McpServerModalOptions) {
 		super(options.app);
@@ -42,6 +47,10 @@ export class McpServerModal extends Modal {
 		// A new draft carries its real id from the start: the panel upserts by id,
 		// so add and edit share one submit path and a reopened form keeps its row.
 		this.draft = options.server ? { ...options.server } : { id: generateMcpServerId(), name: "", url: "", token: "", enabled: true };
+		this.originalDraft = JSON.stringify(normalizeServerDraft(this.draft));
+		this.guard = new DiscardGuard(() => {
+			this.status?.showError(options.t.t("discard.warning"));
+		});
 	}
 
 	onOpen(): void {
@@ -58,6 +67,7 @@ export class McpServerModal extends Modal {
 				text.setValue(this.draft.name);
 				text.onChange((value) => {
 					this.draft.name = value;
+					this.onEdit();
 					this.testRow?.reset();
 				});
 			});
@@ -70,6 +80,7 @@ export class McpServerModal extends Modal {
 				text.setValue(this.draft.url);
 				text.onChange((value) => {
 					this.draft.url = value;
+					this.onEdit();
 					this.testRow?.reset();
 				});
 			});
@@ -82,6 +93,7 @@ export class McpServerModal extends Modal {
 				text.setValue(this.draft.token);
 				text.onChange((value) => {
 					this.draft.token = value;
+					this.onEdit();
 					this.testRow?.reset();
 				});
 			});
@@ -100,13 +112,21 @@ export class McpServerModal extends Modal {
 			return { ok: true, detail: t.t("mcp.testOk", { tools: count }) };
 		});
 
+		// Between the last field and the buttons: a failing verdict is read on the
+		// way to save, and it stays until the next edit instead of expiring.
+		this.status = createModalStatus(contentEl);
+
 		// Sticks to the modal's bottom edge so the save row stays reachable however
 		// far the body has scrolled.
 		new Setting(contentEl)
 			.setClass("piem-settings-modal-footer")
 			.addButton((button) => {
 				button.setButtonText(t.t("mcp.cancelButton"));
-				button.onClick(() => this.close());
+				// Cancel is an explicit discard, so it earns its close.
+				button.onClick(() => {
+					this.guard.allowClose();
+					this.close();
+				});
 			})
 			.addButton((button) => {
 				button.setButtonText(t.t(this.isNew ? "mcp.addButton" : "mcp.saveButton"));
@@ -115,31 +135,64 @@ export class McpServerModal extends Modal {
 			});
 	}
 
+	/**
+	 * A stray Esc must not silently throw away a half-filled form: the first
+	 * press warns and stays, the second — or a clean draft — closes.
+	 */
+	close(): void {
+		if (this.guard.shouldClose(this.isDirty())) {
+			super.close();
+		}
+	}
+
 	onClose(): void {
 		this.contentEl.empty();
 	}
 
 	private testRow: ReturnType<typeof attachTestButton> | undefined;
 
+	/** One fresh edit clears the old verdict — it no longer describes this draft. */
+	private onEdit(): void {
+		this.guard.edited();
+		this.status?.clear();
+	}
+
+	/** True when the draft no longer matches what the form opened with. */
+	private isDirty(): boolean {
+		return JSON.stringify(normalizeServerDraft(this.draft)) !== this.originalDraft;
+	}
+
 	/** The draft as it would be persisted, with incidental whitespace removed. */
 	private normalizedDraft(): McpServerConfig {
-		return { ...this.draft, name: this.draft.name.trim(), url: this.draft.url.trim() };
+		return normalizeServerDraft(this.draft);
 	}
 
 	private async submit(): Promise<void> {
 		const { t } = this.options;
 		const problem = validateDraft(this.draft, t);
 		if (problem) {
+			// Inline first, so the problem survives being read; the Notice is the
+			// redundant shout for a user whose eyes were elsewhere.
+			this.status?.showError(problem);
 			new Notice(problem);
 			return;
 		}
+		this.status?.clear();
 		try {
 			await this.options.onSubmit(this.normalizedDraft());
+			this.guard.allowClose();
 			this.close();
 		} catch (cause) {
-			new Notice(cause instanceof Error ? cause.message : String(cause));
+			const message = cause instanceof Error ? cause.message : String(cause);
+			this.status?.showError(message);
+			new Notice(message);
 		}
 	}
+}
+
+/** The draft as it would be persisted, with incidental whitespace removed. */
+function normalizeServerDraft(draft: McpServerConfig): McpServerConfig {
+	return { ...draft, name: draft.name.trim(), url: draft.url.trim() };
 }
 
 /** The two fields the form cannot do anything sensible without. */
