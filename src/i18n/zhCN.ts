@@ -99,6 +99,7 @@ export const zhCN: DeepPartial<EnCopy> = {
 		commandKindTemplate: "提示",
 		commandKindSkill: "技能",
 		unknownCommand: "未知命令：/{name}",
+		unknownCommandSkillProblems: "有技能没能读取成功。请查看「设置 \u2192 扩展能力」。",
 		commandConflict: "提示和技能都使用 /{name}。本次已使用提示；如需技能，请输入 /skill:{name}。",
 		templatesLoadedWithWarnings: "已加载提示命令，但有 {count} 条警告。",
 		nothingToCompact: "暂时没有可整理的内容。",
@@ -374,6 +375,13 @@ export const zhCN: DeepPartial<EnCopy> = {
 		conflict: "{name} 有本地修改，未覆盖任何内容。冲突的文件：{files}。",
 		couldNotUpdate: "无法更新 {name}：{message}",
 		couldNotDelete: "无法删除 {name}：{message}",
+		reload: "重新加载",
+		// 「就是」而不是「是」：这句承诺的是「完全一致」，不只是「有关系」。
+		reloadClean: "已重新读取技能，没有发现问题。代理现在用的就是磁盘上的内容。",
+		reloadProblems: "已重新读取技能。返回的问题列在各自的分区下方。",
+		couldNotReload: "无法重新读取技能：{message}",
+		problemsHeading: "读取技能文件时的问题",
+		problemsDesc: "这些文件找到了，但无法作为技能读取，所以上面的列表里没有它们。其余技能都正常加载了。",
 		userHeading: "用户级技能",
 		userDesc: "自动从这台电脑上、笔记库之外的文件夹加载。下面列出了实际读取的文件夹。",
 		userEmpty: "这台电脑上没有用户级技能。",
@@ -392,6 +400,11 @@ export const zhCN: DeepPartial<EnCopy> = {
 		// 文件夹」：权限问题挡住了我们的读取时，说「这里没有文件夹」会把人引去
 		// 完全错误的方向。
 		userSearchedUnknown: "无法检查该文件夹。",
+		userProblemsHeading: "读取本机文件夹时的问题",
+		// 「原样返回」是这句话的关键：它告诉读者下面那段英文是操作系统吐出来的，
+		// 不是插件自己坏了——否则一行 EACCES 看起来就像崩溃日志。后两句分别交代
+		// 后果，以及「其他文件夹不受影响」，免得一个读不了的文件夹显得整段都不可信。
+		userProblemsDesc: "以下是这台电脑的文件系统原样返回的内容。这些路径上的技能没有加载。能正常读取的文件夹不受影响。",
 		userSkillOne: "1 个技能",
 		userSkillMany: "{count} 个技能",
 	},

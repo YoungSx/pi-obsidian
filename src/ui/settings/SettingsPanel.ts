@@ -71,7 +71,15 @@ import {
 import { DEFAULT_SESSION_DIR, normalizeSessionDir } from "../../session/sessionDir";
 import type { FetchedSkill, FetchedSource, UpdatePlan } from "../../skills/skillImport";
 import type { SkillInventory, SkillRow } from "../../skills/skillManager";
-import type { UserSkillsLoad } from "../../skills/userSkills";
+import type { SkillLoadReport } from "../../agent/skillLoader";
+import type { SkillDiagnostic } from "@earendil-works/pi-agent-core";
+import {
+	describeSkillReload,
+	skillProblemRow,
+	userSkillProblemsCopy,
+	vaultSkillProblemsCopy,
+	type SkillProblemsCopy,
+} from "./skillsCopy";
 import { ImportSkillModal } from "./ImportSkillModal";
 
 /**
@@ -188,18 +196,29 @@ export interface SkillsHost {
 	update(dirName: string): Promise<UpdatePlan>;
 	/** Deletes a skill directory, provenance sidecar included. */
 	remove(dirName: string): Promise<void>;
-	/** Re-reads skill files into the running agent after a change on disk. */
+	/**
+	 * Re-reads skill files into the running agent after a change on disk, and
+	 * makes {@link lastSkillLoad} current.
+	 *
+	 * Awaited before every render of this tab, not only after a mutation: the
+	 * report below describes the agent's load, so the panel must have caused one
+	 * to exist. A settings tab opened before any chat would otherwise render the
+	 * empty report the service starts with.
+	 */
 	refreshAgent(): Promise<void>;
 	/**
-	 * User-level skills on this machine, read-only in the panel.
+	 * Warnings from the agent's most recent skill load, split by layer.
 	 *
-	 * Returns the whole load rather than the skills alone, because the panel's
-	 * job here is not only to list what arrived: pi's loader treats a missing
-	 * directory as "no skills here" and says nothing, so a path that resolved
-	 * somewhere the user did not mean is indistinguishable from an empty folder
-	 * unless the directories actually consulted are reported too.
+	 * Read rather than loaded, which is the whole point: an earlier revision had
+	 * the panel walk the folders itself, so the tab presented as *the* place skill
+	 * problems are reported could describe a read the agent never performed. Two
+	 * loads a moment apart disagree whenever a network folder reattaches between
+	 * them — the panel says clean, and the prompt was built without those skills.
+	 *
+	 * Synchronous because it is a field read; {@link refreshAgent} is what makes
+	 * it current, and it resolves only once the load has finished.
 	 */
-	loadUserSkills(): Promise<UserSkillsLoad>;
+	lastSkillLoad(): SkillLoadReport;
 	/**
 	 * Whether user-level skills can be read on this device.
 	 *
@@ -923,17 +942,19 @@ function renderLanguageRows(containerEl: HTMLElement, host: SettingsPanelHost): 
 function renderSkillsTab(containerEl: HTMLElement, host: SettingsPanelHost): void {
 	const { t } = host;
 
-	// Every async fill below targets a container created synchronously, in
-	// final order: the diagnostics banner never jumps below the rows when it
-	// arrives late, and the user-level section never lands between the heading
-	// and the vault rows.
-	const diagnosticsEl = containerEl.createEl("p", { cls: "piem-settings-warning" });
-	diagnosticsEl.hidden = true;
-
 	new Setting(containerEl)
 		.setName(t.t("skills.heading"))
 		.setHeading()
 		.setDesc(t.t("skills.desc"))
+		// Reload before Import, so the CTA stays rightmost and keeps the eye. It is
+		// the recovery for every problem the two reports below can name: fix the
+		// file, fix the folder's permissions, then press this. It is also the only
+		// way to re-trigger a load with the log panel open, which is how the
+		// underlying failure gets diagnosed at all.
+		.addButton((button) => {
+			button.setButtonText(t.t("skills.reload"));
+			button.onClick(() => void runSkillReload(host, button, () => afterMutation()));
+		})
 		.addButton((button) => {
 			button.setButtonText(t.t("skills.import"));
 			button.setCta();
@@ -948,13 +969,20 @@ function renderSkillsTab(containerEl: HTMLElement, host: SettingsPanelHost): voi
 			});
 		});
 
+	// Created synchronously, in final order, so no async fill can land in the
+	// wrong place: rows, then the problems that explain what is missing from them,
+	// then the whole user-level section. The vault problems sit *below* the rows
+	// for the reason `fillUserSkillsBody` puts its own report second — a reader's
+	// first question is what the agent can do, and only the second is why
+	// something is missing from that answer. It also makes the copy's "the list
+	// above" literally true. Its own div rather than inside `vaultEl`, which
+	// `reload` empties.
 	const vaultEl = containerEl.createDiv();
+	const vaultProblemsEl = containerEl.createDiv();
 	const userEl = containerEl.createDiv();
 
 	const reload = async (): Promise<void> => {
 		const inventory = await host.skills.list();
-		diagnosticsEl.hidden = inventory.diagnostics.length === 0;
-		diagnosticsEl.setText(inventory.diagnostics.join("\n"));
 		vaultEl.empty();
 		if (inventory.rows.length === 0) {
 			vaultEl.createEl("p", { cls: "piem-settings-empty", text: t.t("skills.empty") });
@@ -962,17 +990,83 @@ function renderSkillsTab(containerEl: HTMLElement, host: SettingsPanelHost): voi
 		for (const row of inventory.rows) {
 			renderSkillRow(vaultEl, host, row, afterMutation);
 		}
+		renderSkillProblems(vaultProblemsEl, host.skills.lastSkillLoad().vault, vaultSkillProblemsCopy(t));
 		await renderUserSkillsGroup(userEl, host);
 	};
 
-	// Mutations rewrite vault files the running agent has already read, so the
-	// agent reloads before the panel redraws. Plain reads never go through this.
+	// Every render goes through the agent, not only the ones after a mutation.
+	// Mutations need it because they rewrite files the agent has already read;
+	// plain reads need it because the reports below describe *the agent's* load,
+	// so the panel has to have caused one — a settings tab opened before any chat
+	// would otherwise render the empty report the service starts with.
 	const afterMutation = async (): Promise<void> => {
 		await host.skills.refreshAgent();
 		await reload();
 	};
 
-	void reload();
+	void afterMutation();
+}
+
+/**
+ * Re-reads skills and reports the outcome.
+ *
+ * The verdict is a `Notice` because a clean reload changes nothing on screen —
+ * the problem lists simply stay empty — and a button that appears to do nothing
+ * reads as broken. It cannot be inline either: the reload redraws both lists,
+ * so any element inside them is destroyed before it could be read. That is the
+ * same reasoning `runSkillUpdate` records, and the toast is also the only one of
+ * the two that assistive technology is told about.
+ *
+ * The problems themselves are not restated in the toast. They are listed under
+ * the section each belongs to, where the path sits beside the message, and a
+ * count in a toast that vanishes would be the less useful copy of both.
+ */
+async function runSkillReload(host: SettingsPanelHost, button: ButtonComponent, reload: () => Promise<void>): Promise<void> {
+	const { t } = host;
+	button.setDisabled(true);
+	try {
+		await reload();
+		new Notice(describeSkillReload(host.skills.lastSkillLoad(), t));
+	} catch (cause) {
+		// Unlike the startup path, a failure here is not swallowed: someone pressed
+		// a control and is waiting for its verdict.
+		new Notice(t.t("skills.couldNotReload", { message: cause instanceof Error ? cause.message : String(cause) }));
+	} finally {
+		button.setDisabled(false);
+	}
+}
+
+/**
+ * The problems from one skill layer, or nothing at all when it loaded cleanly.
+ *
+ * Framed rather than dumped. The messages here are the filesystem's own words —
+ * `EACCES: permission denied, realpath '…'` — and a raw errno under no heading
+ * reads as a crash in the plugin. So the frame is ordinary prose in the normal
+ * text colour and only the message carries the warning colour, which also keeps
+ * colour from being the only signal.
+ *
+ * One row per diagnostic, path as the name and message as the description,
+ * rather than the messages joined into one paragraph. `SkillDiagnostic` carries
+ * the two separately and they genuinely differ: for the reported case the path
+ * names a symlink and the message names the resolved target it could not read.
+ * Joining them throws away exactly the comparison the reader needs — what I
+ * pointed at, versus what was actually touched.
+ *
+ * `code` stays off the screen. It is a jargon token with no consequence attached
+ * (`file_info_failed`); it goes to the log, where a bug report gets assembled.
+ */
+function renderSkillProblems(containerEl: HTMLElement, diagnostics: readonly SkillDiagnostic[], copy: SkillProblemsCopy): void {
+	containerEl.empty();
+	if (diagnostics.length === 0) {
+		return;
+	}
+	containerEl.createEl("p", { cls: "piem-settings-searched-label", text: copy.heading });
+	containerEl.createEl("p", { cls: "piem-settings-searched-desc", text: copy.description });
+	for (const diagnostic of diagnostics) {
+		const { path, message } = skillProblemRow(diagnostic);
+		const setting = new Setting(containerEl).setName(path);
+		setting.descEl.createDiv({ cls: "piem-settings-problem", text: message });
+	}
 }
 
 /**
@@ -1233,7 +1327,7 @@ async function renderUserSkillsGroup(containerEl: HTMLElement, host: SettingsPan
 	// Created before the first await so a late load never lands above the row,
 	// matching the tab's own containers-in-final-order property.
 	const bodyEl = containerEl.createDiv();
-	await fillUserSkillsBody(bodyEl, host);
+	fillUserSkillsBody(bodyEl, host);
 }
 
 /**
@@ -1298,13 +1392,19 @@ async function applyUserSkillsDirChange(containerEl: HTMLElement, host: Settings
 /**
  * Fills the section below the folder field.
  *
- * Skills first — the list the heading promises — then the searched report,
- * because a reader's first question is what the agent can do, and only the
- * second is why something is missing from that answer.
+ * Skills first — the list the heading promises — then the searched report, then
+ * the problems, because a reader's first question is what the agent can do, the
+ * second is why something is missing from that answer, and the third is what the
+ * machine said about it.
+ *
+ * Every part comes from the agent's own load. The panel used to run its own,
+ * which meant a section presented as the report of what loaded could describe a
+ * different read entirely — and it dropped the diagnostics on the floor, so the
+ * one place the reported `EACCES` belonged was the one place it never appeared.
  */
-async function fillUserSkillsBody(containerEl: HTMLElement, host: SettingsPanelHost): Promise<void> {
+function fillUserSkillsBody(containerEl: HTMLElement, host: SettingsPanelHost): void {
 	const { t } = host;
-	const { skills, searched } = await host.skills.loadUserSkills();
+	const { skills, searched, diagnostics } = host.skills.lastSkillLoad().user;
 	containerEl.empty();
 
 	if (skills.length === 0) {
@@ -1326,6 +1426,12 @@ async function fillUserSkillsBody(containerEl: HTMLElement, host: SettingsPanelH
 	// would render the label and its prose over an empty list.
 	heading.hidden = searched.length === 0;
 	framing.hidden = searched.length === 0;
+
+	// Last, and inside this section rather than at the top of the tab. This is
+	// where someone already is when they ask why a folder was skipped, and it is
+	// the long-form answer to a row reading "Could not be checked." An unreadable
+	// third-party folder does not belong above the user's own skills list.
+	renderSkillProblems(containerEl.createDiv(), diagnostics, userSkillProblemsCopy(t));
 }
 
 /**

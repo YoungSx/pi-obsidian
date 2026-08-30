@@ -1,6 +1,10 @@
 import type { SkillDiagnostic, Skill } from "@earendil-works/pi-agent-core";
 import { formatSkillInvocation, formatSkillsForSystemPrompt, loadSkills } from "@earendil-works/pi-agent-core";
 import type { ExecutionEnv } from "@earendil-works/pi-agent-core";
+// Type-only, and it must stay that way: `../skills/userSkills` reaches the node
+// filesystem through `NodeHomeEnv`, and `src/subagent/` is allowed to import
+// this module. A value import here would pull a `require` into that bundle.
+import type { UserSkillsLoad } from "../skills/userSkills";
 
 /**
  * Folder user-authored skills live in, relative to the vault root.
@@ -84,12 +88,44 @@ export function expandSkill(skill: Skill, additionalInstructions?: string): stri
 	return formatSkillInvocation(skill, additionalInstructions);
 }
 
-/** One line per warning, ready for the notice banner. */
-export function formatSkillDiagnostics(diagnostics: SkillDiagnostic[]): string {
-	if (diagnostics.length === 0) {
-		return "";
-	}
-	return diagnostics.map((diagnostic) => diagnostic.message).join("\n");
+/**
+ * What one skill load produced, kept split by layer.
+ *
+ * The layers stay apart all the way to the settings panel because their
+ * consequences differ, not merely their location. A vault warning is about a
+ * file the user can open from the row beside it; a user-level one is about a
+ * folder on the host that only the operating system can explain, and whose
+ * message is raw filesystem text. Merging them — which an earlier revision did,
+ * joining every message into one string for the chat banner — produced a block
+ * of text in which neither kind could be acted on.
+ *
+ * The user half is the loader's whole return value rather than its diagnostics
+ * alone. That is what lets the panel report the folders consulted, the skills
+ * that reached the prompt, and the problems from **one** load: the panel used to
+ * run its own, and two loads a moment apart can disagree — a network folder that
+ * reattaches between them leaves the panel reporting clean while the prompt was
+ * built without those skills.
+ *
+ * Builtins contribute nothing here: they are constants, so only the two layers
+ * read off disk can fail.
+ */
+export interface SkillLoadReport {
+	/** Warnings from the vault's own skills folder. */
+	vault: SkillDiagnostic[];
+	/** The user-level load in full: skills, warnings, and the folders consulted. */
+	user: UserSkillsLoad;
+}
+
+/**
+ * The report before anything has been loaded.
+ *
+ * Every list empty, `searched` included: no folder has been consulted yet, and a
+ * report listing folders would claim a look that never happened — the same
+ * distinction {@link UserSkillsSearchEntry.found} draws between "absent" and
+ * "nobody asked".
+ */
+export function emptySkillLoadReport(): SkillLoadReport {
+	return { vault: [], user: { skills: [], diagnostics: [], searched: [] } };
 }
 
 /**
