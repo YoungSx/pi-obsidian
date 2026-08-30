@@ -16,8 +16,30 @@ import {
  * the composer reads the parsed shape to drive autocomplete.
  */
 
-/** Directory inside the vault where user-defined prompt templates live. */
-export const VAULT_PROMPT_TEMPLATES_DIR = "/.piem/prompts";
+/**
+ * Directory inside the vault where user-defined prompt templates live.
+ *
+ * Visible, not `.piem/prompts`, and the dot path it replaces was not a working
+ * feature. Obsidian does not index dot-directories, so `getFolderByPath` — which
+ * is what {@link import("../vault/VaultExecutionEnv").VaultExecutionEnv}
+ * resolves every path through — returned null for it. pi's loader treats that as
+ * `not_found` and skips the path *without a diagnostic*, by design: a missing
+ * folder is the ordinary state of a vault that defines no templates. The two
+ * behaviours composed into silence. No template ever loaded, no warning was ever
+ * produced, and the notice this plugin raised about template warnings was
+ * unreachable code.
+ *
+ * {@link import("./skillLoader").DEFAULT_SKILLS_DIR} reached the same conclusion
+ * for skills and moved for the same three reasons, one release earlier: the API
+ * cannot read a dot-directory, the user cannot see or edit one from inside
+ * Obsidian, and `sessionDir.ts` had already set the precedent for content the
+ * user authors. Templates are the same category — hand-written `.md` with
+ * frontmatter — and were simply never revisited.
+ *
+ * Nothing needs migrating. A template under the old path was unreadable, so no
+ * vault can be relying on one.
+ */
+export const VAULT_PROMPT_TEMPLATES_DIR = "/Piem/prompts";
 
 /** Templates plus the diagnostics their loading produced. */
 export interface LoadedTemplates {
@@ -26,7 +48,7 @@ export interface LoadedTemplates {
 }
 
 /**
- * Loads user-defined prompt templates from the vault's `.piem/prompts` folder.
+ * Loads user-defined prompt templates from the vault's `Piem/prompts` folder.
  *
  * A missing folder is not an error: pi's `loadPromptTemplates` skips paths
  * whose `fileInfo` reports `not_found`, so an empty vault simply yields no

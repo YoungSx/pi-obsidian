@@ -13,7 +13,6 @@ import {
 	type ExecutionEnv,
 	type PrepareNextTurnContext,
 	type PromptTemplate,
-	type PromptTemplateDiagnostic,
 	type StreamFn,
 	type ThinkingLevel,
 } from "@earendil-works/pi-agent-core";
@@ -43,7 +42,7 @@ import { createSubagentExtension } from "../subagent/extension";
 import { OBSIDIAN_AGENT_SYSTEM_PROMPT } from "./systemPrompt";
 import { composeSystemPrompt, emptySkillLoadReport, expandSkill, findSkill, loadVaultSkills, mergeSkills, type SkillLoadReport } from "./skillLoader";
 import { loadUserSkills, type UserSkillsLoad } from "../skills/userSkills";
-import type { Skill, SkillDiagnostic } from "@earendil-works/pi-agent-core";
+import type { Skill } from "@earendil-works/pi-agent-core";
 import { describeAgentEvent } from "./agentEventLog";
 import { summarizeToolContent } from "../ui/traceSummary";
 import { NOOP_LOGGER, type LoggerLike } from "../logging/Logger";
@@ -509,15 +508,13 @@ export class ObsidianAgentService {
 	/** Mid-run compactions spent on the active run; the budget is per run. */
 	private midRunCompactions = 0;
 	/**
-	 * Loaded prompt templates: builtins first, then the vault's `.piem/prompts`.
+	 * Loaded prompt templates: builtins first, then the vault's `Piem/prompts`.
 	 *
 	 * Reloaded each `initializeAgent` so a template file added mid-session is
 	 * picked up on the next panel open. A `/name` that matches nothing here is
 	 * reported as unknown rather than sent.
 	 */
 	private promptTemplates: PromptTemplate[] = [];
-	/** Non-fatal warnings from the last vault template load, surfaced as a notice. */
-	private templateDiagnostics: PromptTemplateDiagnostic[] = [];
 	/** Prevents two retries from racing while the branch pointer is being persisted. */
 	private retryInFlight = false;
 	/**
@@ -1265,9 +1262,11 @@ export class ObsidianAgentService {
 		// every settings change, and the panel re-reads the folder with it, so a
 		// newly saved skill reaches the running conversation without a reload.
 		// Contained, for the reason `reloadSkillsSafely` documents: `sendPrompt`
-		// awaits this outside its own `try`, so a throwing skill layer would
-		// reject the send rather than merely arrive without skills.
-		await this.reloadSkillsSafely();
+		// awaits this outside its own `try`, so a throwing loader would reject the
+		// send rather than merely arrive without skills. Prompt templates ride the
+		// same call so an edited `/name` takes effect on the next message whichever
+		// kind it is — the asymmetry where only skills did was not explicable.
+		await this.reloadCommandsSafely();
 		await this.sessionManager.ensureConfiguration(defaults);
 		await this.refreshSessionInfo();
 		this.notify();
@@ -1427,31 +1426,57 @@ export class ObsidianAgentService {
 	}
 
 	private async initializeAgent(): Promise<void> {
-		await this.reloadSkillsSafely();
+		await this.reloadCommandsSafely();
 		const defaults = this.getSessionDefaults();
 		this.sessionInfo = await this.sessionManager.continueRecentSession(defaults);
 		const context = await this.sessionManager.buildSessionContext();
 		this.lastCompaction = await this.sessionManager.getLastCompaction();
 		await this.adoptSessionContext(context);
-		await this.refreshPromptTemplates();
 		this.notify();
 	}
 
 	/**
 	 * Reloads prompt templates from the vault and merges them with the builtins.
 	 *
-	 * Non-fatal diagnostics are surfaced as a notice rather than blocking init: a
-	 * malformed `.md` in `.piem/prompts` should not stop the panel from opening,
-	 * and every well-formed sibling still loads. Builtins are constant, so only
+	 * The diagnostics do not reach the chat panel, for the reason
+	 * {@link reloadSkills} documents at length: they are warnings about the user's
+	 * own files, and the banner carries no control that could act on one. They are
+	 * stored on {@link lastSkillLoad} and logged. Builtins are constants, so only
 	 * the vault half can produce warnings.
+	 *
+	 * Runs on every configuration refresh rather than only at startup. It used to
+	 * load once in `initializeAgent`, so a template edited on disk did nothing
+	 * until the plugin was reloaded — while an edited *skill* took effect on the
+	 * very next message. Both are `.md` under a vault folder and both are `/name`
+	 * commands in the same autocomplete menu, so nothing made that difference
+	 * explicable. The cost is a non-recursive listing of one folder plus a read per
+	 * `.md` child, set against the recursive skill walk and node-filesystem
+	 * traversal already paid on the same call.
 	 */
 	private async refreshPromptTemplates(): Promise<void> {
 		const loaded = await loadVaultPromptTemplates(this.env);
 		this.promptTemplates = [...BUILTIN_PROMPT_TEMPLATES, ...loaded.templates];
-		this.templateDiagnostics = loaded.diagnostics;
-		if (loaded.diagnostics.length > 0) {
-			const t = this.t();
-			this.setNotice(t.t("chat.templatesLoadedWithWarnings", { count: loaded.diagnostics.length }));
+		this.lastSkillLoad = { ...this.lastSkillLoad, templates: loaded.diagnostics };
+		this.logCommandDiagnostics();
+	}
+
+	/**
+	 * Both command loaders, with their failures contained.
+	 *
+	 * One method because the two always run together and the settings panel reports
+	 * on them as a single load — see {@link SkillLoadReport}. Containment is what
+	 * {@link reloadSkillsSafely} documents: on the startup and per-send paths a
+	 * throwing loader must not take the agent, or the send, down with it. A vault
+	 * whose template folder cannot be read still has its builtins.
+	 */
+	private async reloadCommandsSafely(): Promise<void> {
+		await this.reloadSkillsSafely();
+		try {
+			await this.refreshPromptTemplates();
+		} catch (error) {
+			this.log.error("Prompt template load failed; continuing with builtins", () => ({ error: String(error) }));
+			this.promptTemplates = [...BUILTIN_PROMPT_TEMPLATES];
+			this.lastSkillLoad = { ...this.lastSkillLoad, templates: [] };
 		}
 	}
 
@@ -1630,8 +1655,8 @@ export class ObsidianAgentService {
 		const userLoad = await this.loadUserSkillsFn(this.getSettings().userSkillsDir);
 		const skills = mergeSkills(createBuiltinSkills(this.t()), userLoad.skills, vaultSkills);
 		this.skills = skills;
-		this.lastSkillLoad = { vault: diagnostics, user: userLoad };
-		this.logSkillDiagnostics(diagnostics, userLoad.diagnostics);
+		this.lastSkillLoad = { ...this.lastSkillLoad, vault: diagnostics, user: userLoad };
+		this.logCommandDiagnostics();
 		if (this.agent) {
 			this.agent.state.systemPrompt = composeSystemPrompt(OBSIDIAN_AGENT_SYSTEM_PROMPT, skills);
 		}
@@ -1705,18 +1730,22 @@ export class ObsidianAgentService {
 	}
 
 	/**
-	 * Logs each diagnostic once per distinct set, at warn.
+	 * Logs each command-load diagnostic once per distinct set, at warn.
 	 *
-	 * `code` and `path` are logged though the panel does not show them: the code
-	 * is jargon with no consequence attached, and the log is where a bug report
-	 * gets assembled. The fingerprint is what keeps a standing problem — an
-	 * unreadable folder that is still unreadable next turn — from writing one
-	 * line per user message into a ring buffer that holds 2000 of them.
+	 * All three layers together, keyed as one set, because they load together and
+	 * a fingerprint per layer would re-log every layer whenever any one of them
+	 * changed. `code` and `path` are logged though no panel shows them: the code is
+	 * jargon with no consequence attached, and the log is where a bug report gets
+	 * assembled. The fingerprint is what keeps a standing problem — an unreadable
+	 * folder that is still unreadable next turn — from writing one line per user
+	 * message into a ring buffer that holds 2000 of them.
 	 */
-	private logSkillDiagnostics(vault: SkillDiagnostic[], user: SkillDiagnostic[]): void {
+	private logCommandDiagnostics(): void {
+		const { vault, user, templates } = this.lastSkillLoad;
 		const all = [
-			...vault.map((diagnostic) => ({ layer: "vault", diagnostic })),
-			...user.map((diagnostic) => ({ layer: "user", diagnostic })),
+			...vault.map((diagnostic) => ({ layer: "vault-skills", diagnostic })),
+			...user.diagnostics.map((diagnostic) => ({ layer: "user-skills", diagnostic })),
+			...templates.map((diagnostic) => ({ layer: "prompt-templates", diagnostic })),
 		];
 		const key = all.map(({ layer, diagnostic }) => `${layer}:${diagnostic.code}:${diagnostic.path}:${diagnostic.message}`).join("\n");
 		if (key === this.loggedDiagnosticsKey) {
@@ -1724,7 +1753,7 @@ export class ObsidianAgentService {
 		}
 		this.loggedDiagnosticsKey = key;
 		for (const { layer, diagnostic } of all) {
-			this.log.warn("Skill load warning", () => ({
+			this.log.warn("Command load warning", () => ({
 				layer,
 				code: diagnostic.code,
 				path: diagnostic.path,

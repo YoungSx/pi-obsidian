@@ -1,4 +1,4 @@
-import type { SkillDiagnostic, Skill } from "@earendil-works/pi-agent-core";
+import type { PromptTemplateDiagnostic, SkillDiagnostic, Skill } from "@earendil-works/pi-agent-core";
 import { formatSkillInvocation, formatSkillsForSystemPrompt, loadSkills } from "@earendil-works/pi-agent-core";
 import type { ExecutionEnv } from "@earendil-works/pi-agent-core";
 // Type-only, and it must stay that way: `../skills/userSkills` reaches the node
@@ -114,6 +114,21 @@ export interface SkillLoadReport {
 	vault: SkillDiagnostic[];
 	/** The user-level load in full: skills, warnings, and the folders consulted. */
 	user: UserSkillsLoad;
+	/**
+	 * Warnings from the vault's prompt-template folder.
+	 *
+	 * Here rather than in a report of their own because templates and skills share
+	 * the `/name` command namespace, load together on every configuration refresh,
+	 * and are reported on as one thing: a reader whose `/weekly` does not resolve
+	 * cannot know which kind it was, so a surface that made them guess first would
+	 * be the wrong shape. Two separate getters would also let one screen show a
+	 * skill report from load N beside a template report from load N±1.
+	 *
+	 * `PromptTemplateDiagnostic` is structurally identical to
+	 * {@link SkillDiagnostic} — same `type`, `code`, `message`, `path`, with a
+	 * narrower code union — so one renderer serves both.
+	 */
+	templates: PromptTemplateDiagnostic[];
 }
 
 /**
@@ -125,7 +140,7 @@ export interface SkillLoadReport {
  * "nobody asked".
  */
 export function emptySkillLoadReport(): SkillLoadReport {
-	return { vault: [], user: { skills: [], diagnostics: [], searched: [] } };
+	return { vault: [], user: { skills: [], diagnostics: [], searched: [] }, templates: [] };
 }
 
 /**
