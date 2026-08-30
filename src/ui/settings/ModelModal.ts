@@ -14,6 +14,7 @@ import { CatalogSuggest, type CatalogSuggestion } from "./CatalogSuggest";
 import { createCollapsibleSection } from "./collapsibleSection";
 import type { Translator } from "../../i18n";
 import { attachTestButton, type TestRowHandle } from "./testResult";
+import { createModalStatus, DiscardGuard, type ModalStatus } from "./modalGuards";
 
 /**
  * Add/edit form for one configured model.
@@ -262,12 +263,22 @@ export class ModelModal extends Modal {
 	private maxTokensInput: TextComponent | null = null;
 	/** The collapsible holding the capability fields, so a catalog answer landing in it can open it. */
 	private capabilityGroup: HTMLDetailsElement | null = null;
+	/** The draft as it stood at open, serialized — the baseline the dirty check compares against. */
+	private originalDraft: string;
+	/** Set by the first hand edit; programmatic fills before it fold into the baseline. */
+	private handEdited = false;
+	private readonly guard: DiscardGuard;
+	private status: ModalStatus | null = null;
 
 	constructor(options: ModelModalOptions) {
 		super(options.app);
 		this.options = options;
 		this.isNew = options.model === undefined;
 		this.draft = options.model ? { ...options.model } : emptyModelConfig(options.providers[0]?.id ?? "");
+		this.originalDraft = JSON.stringify(this.trimmedDraft());
+		this.guard = new DiscardGuard(() => {
+			this.status?.showError(options.t.t("discard.warning"));
+		});
 	}
 
 	onOpen(): void {
@@ -303,6 +314,7 @@ export class ModelModal extends Modal {
 				dropdown.setValue(this.draft.providerId);
 				dropdown.onChange((providerId) => {
 					this.draft.providerId = providerId;
+					this.onEdit();
 					this.testRow?.reset();
 					// Picking a different endpoint is the second deliberate action that
 					// earns a request. Still one endpoint, still nothing awaited here.
@@ -321,6 +333,7 @@ export class ModelModal extends Modal {
 				text.onChange((value) => {
 					this.draft.modelApiId = value;
 					this.idTouched = true;
+					this.onEdit();
 					this.testRow?.reset();
 					// The id decides what the catalog can recommend; a changed id is a
 					// changed question, so the stale answer must not survive it.
@@ -332,6 +345,7 @@ export class ModelModal extends Modal {
 				new CatalogSuggest(this.app, text.inputEl, () => buildModelSuggestions(this.listings), (value) => {
 					this.draft.modelApiId = value;
 					this.idTouched = true;
+					this.onEdit();
 					this.testRow?.reset();
 					this.refreshCatalogRecommendation(true);
 				});
@@ -345,6 +359,7 @@ export class ModelModal extends Modal {
 				text.setValue(this.draft.displayName);
 				text.onChange((value) => {
 					this.draft.displayName = value;
+					this.onEdit();
 				});
 			});
 
@@ -369,6 +384,10 @@ export class ModelModal extends Modal {
 		const contextWindowSetting = new Setting(capabilityBody)
 			.setName(t.t("modelModal.contextWindow"))
 			.setDesc(t.t("modelModal.contextWindowDesc"));
+		// A number this field will silently drop — 0, negative, or not a number —
+		// has to say so where the typing happened, not after a save that never
+		// picked the value up.
+		const contextWindowHint = contextWindowSetting.descEl.createDiv({ cls: "piem-settings-effect" });
 		contextWindowSetting.addText((text) => {
 			text.inputEl.type = "number";
 			text.setPlaceholder(t.t("modelModal.contextWindowPlaceholder"));
@@ -376,13 +395,17 @@ export class ModelModal extends Modal {
 			this.contextWindowInput = text;
 			text.onChange((value) => {
 				const parsed = Number.parseInt(value, 10);
-				this.draft.contextWindow = Number.isInteger(parsed) && parsed > 0 ? parsed : undefined;
+				const valid = Number.isInteger(parsed) && parsed > 0;
+				this.draft.contextWindow = valid ? parsed : undefined;
+				contextWindowHint.setText(value.trim() !== "" && !valid ? t.t("modelModal.positiveNumberHint") : "");
+				this.onEdit();
 			});
 		});
 
 		const maxTokensSetting = new Setting(capabilityBody)
 			.setName(t.t("modelModal.maxTokens"))
 			.setDesc(t.t("modelModal.maxTokensDesc"));
+		const maxTokensHint = maxTokensSetting.descEl.createDiv({ cls: "piem-settings-effect" });
 		maxTokensSetting.addText((text) => {
 			text.inputEl.type = "number";
 			text.setPlaceholder(t.t("modelModal.maxTokensPlaceholder"));
@@ -390,7 +413,10 @@ export class ModelModal extends Modal {
 			this.maxTokensInput = text;
 			text.onChange((value) => {
 				const parsed = Number.parseInt(value, 10);
-				this.draft.maxTokens = Number.isInteger(parsed) && parsed > 0 ? parsed : undefined;
+				const valid = Number.isInteger(parsed) && parsed > 0;
+				this.draft.maxTokens = valid ? parsed : undefined;
+				maxTokensHint.setText(value.trim() !== "" && !valid ? t.t("modelModal.positiveNumberHint") : "");
+				this.onEdit();
 			});
 		});
 
@@ -409,6 +435,7 @@ export class ModelModal extends Modal {
 				// recorded rather than recomputed on the next id edit.
 				this.reasoningTouched = true;
 				this.draft.reasoning = reasoning;
+				this.onEdit();
 				this.testRow?.reset();
 			});
 		});
@@ -423,6 +450,7 @@ export class ModelModal extends Modal {
 			toggle.onChange((supportsImages) => {
 				this.imagesTouched = true;
 				this.draft.supportsImages = supportsImages;
+				this.onEdit();
 				this.testRow?.reset();
 			});
 		});
@@ -433,19 +461,37 @@ export class ModelModal extends Modal {
 			.setDesc(t.t("modelModal.connectionDesc"));
 		this.testRow = attachTestButton(testSetting, t, () => this.runTest());
 
+		// Between the last field and the buttons: a failing verdict is read on the
+		// way to save, and it stays until the next edit instead of expiring.
+		this.status = createModalStatus(contentEl);
+
 		// Sticks to the modal's bottom edge so the save row stays reachable however
 		// far the body has scrolled.
 		new Setting(contentEl)
 			.setClass("piem-settings-modal-footer")
 			.addButton((button) => {
 				button.setButtonText(t.t("modelModal.cancel"));
-				button.onClick(() => this.close());
+				// Cancel is an explicit discard, so it earns its close.
+				button.onClick(() => {
+					this.guard.allowClose();
+					this.close();
+				});
 			})
 			.addButton((button) => {
 				button.setButtonText(t.t(this.isNew ? "modelModal.add" : "modelModal.save"));
 				button.setCta();
 				button.onClick(() => void this.submit());
 			});
+	}
+
+	/**
+	 * A stray Esc must not silently throw away a half-filled form: the first
+	 * press warns and stays, the second — or a clean draft — closes.
+	 */
+	close(): void {
+		if (this.guard.shouldClose(this.isDirty())) {
+			super.close();
+		}
 	}
 
 	onClose(): void {
@@ -478,6 +524,19 @@ export class ModelModal extends Modal {
 		}
 	}
 
+	/**
+	 * A numeric fill the form performed on its own is not the user's unsaved
+	 * work. While nothing has been hand-edited it folds into the open baseline,
+	 * so Esc does not warn about a value nobody typed; once the user has edited
+	 * anything — including the id that earned this fill — real changes exist
+	 * and the guard stays armed.
+	 */
+	private absorbProgrammaticFill(): void {
+		if (!this.handEdited) {
+			this.originalDraft = JSON.stringify(this.trimmedDraft());
+		}
+	}
+
 	private refreshCatalogRecommendation(apply: boolean): void {
 		const { t } = this.options;
 		const hint = findCatalogCapabilityHint(this.draft.modelApiId, this.modelsDevIndex);
@@ -492,11 +551,13 @@ export class ModelModal extends Modal {
 			this.contextWindowInput?.setValue(String(hint.contextWindow));
 			// The group holds what was just filled; opening it is the report.
 			this.revealCapabilityGroup();
+			this.absorbProgrammaticFill();
 		}
 		if (hint?.maxTokens !== undefined && this.draft.maxTokens === undefined) {
 			this.draft.maxTokens = hint.maxTokens;
 			this.maxTokensInput?.setValue(String(hint.maxTokens));
 			this.revealCapabilityGroup();
+			this.absorbProgrammaticFill();
 		}
 		if (hint && apply) {
 			if (!this.reasoningTouched) {
@@ -601,20 +662,39 @@ export class ModelModal extends Modal {
 		};
 	}
 
+	/** One fresh edit clears the old verdict — it no longer describes this draft. */
+	private onEdit(): void {
+		this.handEdited = true;
+		this.guard.edited();
+		this.status?.clear();
+	}
+
+	/** True when the draft no longer matches what the form opened with. */
+	private isDirty(): boolean {
+		return JSON.stringify(this.trimmedDraft()) !== this.originalDraft;
+	}
+
 	private async submit(): Promise<void> {
 		const { t } = this.options;
 		const draft = this.trimmedDraft();
 		const problem = validateModelDraft(draft, this.options.providers, t);
 		if (problem) {
+			// Inline first, so the problem survives being read; the Notice is the
+			// redundant shout for a user whose eyes were elsewhere.
+			this.status?.showError(problem);
 			new Notice(problem);
 			return;
 		}
+		this.status?.clear();
 		try {
 			await this.options.onSubmit(draft);
 			new Notice(t.t(this.isNew ? "modelModal.added" : "modelModal.saved"));
+			this.guard.allowClose();
 			this.close();
 		} catch (cause) {
-			new Notice(t.t("modelModal.couldNotSave", { message: cause instanceof Error ? cause.message : String(cause) }));
+			const message = t.t("modelModal.couldNotSave", { message: cause instanceof Error ? cause.message : String(cause) });
+			this.status?.showError(message);
+			new Notice(message);
 		}
 	}
 }

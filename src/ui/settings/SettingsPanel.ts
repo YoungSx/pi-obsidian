@@ -309,7 +309,7 @@ function renderModelsTab(containerEl: HTMLElement, host: SettingsPanelHost): voi
 	// enabled.
 	const status = containerEl.createDiv({ cls: "piem-settings-status" });
 	status.createSpan({ cls: "piem-settings-status__label", text: host.t.t("settings.statusActiveModel") });
-	status.createSpan({ cls: "piem-settings-status__value", text: host.describeTarget() });
+	const statusValue = status.createSpan({ cls: "piem-settings-status__value", text: host.describeTarget() });
 
 	// A vault configured against a builtin model this build no longer carries is
 	// silently answered by a different one. Saying so is the difference between a
@@ -323,7 +323,7 @@ function renderModelsTab(containerEl: HTMLElement, host: SettingsPanelHost): voi
 	}
 
 	renderProviderList(containerEl, host, refresh);
-	renderModelList(containerEl, host, refresh);
+	renderModelList(containerEl, host, refresh, statusValue);
 	renderNetworkGroup(containerEl, host);
 }
 
@@ -404,7 +404,7 @@ function renderProviderList(containerEl: HTMLElement, host: SettingsPanelHost, r
 	}
 }
 
-function renderModelList(containerEl: HTMLElement, host: SettingsPanelHost, refresh: () => void): void {
+function renderModelList(containerEl: HTMLElement, host: SettingsPanelHost, refresh: () => void, statusValue: HTMLSpanElement): void {
 	const { settings, t } = host;
 	const hasProviders = settings.providers.length > 0;
 
@@ -448,6 +448,12 @@ function renderModelList(containerEl: HTMLElement, host: SettingsPanelHost, refr
 		return;
 	}
 
+	// Each row's description carries the "· active" suffix, so a new active model
+	// rewrites every row's text. The handles are kept so that rewrite happens in
+	// place — a full re-render here would throw focus out of the dropdown the
+	// keyboard user is choosing with.
+	const modelRows: Array<{ model: ModelConfig; descEl: HTMLElement }> = [];
+
 	new Setting(containerEl)
 		.setName(t.t("settings.activeModelHeading"))
 		.setDesc(t.t("settings.activeModelDesc"))
@@ -459,8 +465,12 @@ function renderModelList(containerEl: HTMLElement, host: SettingsPanelHost, refr
 			dropdown.onChange(async (modelId) => {
 				settings.activeModelId = modelId;
 				await host.save();
-				// The status line names the model, so it has to follow the choice.
-				refresh();
+				// The status line names the model and the rows mark the active one;
+				// both follow the choice without rebuilding anything.
+				statusValue.setText(host.describeTarget());
+				for (const row of modelRows) {
+					row.descEl.setText(describeModelRow(settings, row.model, t));
+				}
 			});
 		});
 
@@ -490,6 +500,8 @@ function renderModelList(containerEl: HTMLElement, host: SettingsPanelHost, refr
 		// and the provider it rides on.
 		setting.settingEl.dataset.filterText =
 			`${describeModelConfig(model)} ${describeModelRow(settings, model, t)}`.toLowerCase();
+		// Kept so the dropdown's change can rewrite this row's text in place.
+		modelRows.push({ model, descEl: setting.descEl });
 
 		setting.addExtraButton((button) => {
 			button.setIcon("pencil");
@@ -1235,10 +1247,14 @@ function renderMcpRow(containerEl: HTMLElement, host: SettingsPanelHost, state: 
 	// description; the connection verdict hangs beneath it as an effect line,
 	// the same slot every other async status in this panel uses.
 	const setting = new Setting(containerEl).setName(state.name).setDesc(state.url);
-	setting.descEl.createDiv({ cls: "piem-settings-effect", text: describeMcpRow(state, t) });
+	const verdictEl = setting.descEl.createDiv({ cls: "piem-settings-effect" });
+	setMcpVerdict(verdictEl, state, t);
 
 	// The toggle writes the enabled flag and saves; whether the server connects
-	// or disconnects is decided on the save path, not here.
+	// or disconnects is decided on the save path, not here. While that save runs
+	// the verdict line promises the attempt, then reports the fresh verdict in
+	// place — a full reload here would rebuild the row out from under the very
+	// toggle the user just flipped.
 	setting.addToggle((toggle) => {
 		toggle.setValue(state.enabled);
 		toggle.onChange(async (enabled) => {
@@ -1246,7 +1262,17 @@ function renderMcpRow(containerEl: HTMLElement, host: SettingsPanelHost, state: 
 			if (server) {
 				server.enabled = enabled;
 			}
-			await afterMutation();
+			toggle.setDisabled(true);
+			verdictEl.setText(enabled ? t.t("mcp.statusConnecting") : t.t("mcp.statusDisabled"));
+			try {
+				await host.save();
+			} finally {
+				toggle.setDisabled(false);
+				const fresh = host.mcp.states().find((row) => row.id === state.id);
+				if (fresh) {
+					setMcpVerdict(verdictEl, fresh, t);
+				}
+			}
 		});
 	});
 
@@ -1285,6 +1311,16 @@ function describeMcpRow(state: McpServerState, t: Translator): string {
 				? t.t("mcp.statusError", { error: state.error ?? "" })
 				: t.t("mcp.statusUntested")
 		: t.t("mcp.statusDisabled");
+}
+
+/**
+ * Rewrites a row's verdict line in place — the sentence and the error tint
+ * together, so a failed connection reads as one through {@link describeMcpRow}'s
+ * words and the same effect-line styling every other failure in this panel uses.
+ */
+function setMcpVerdict(el: HTMLElement, state: McpServerState, t: Translator): void {
+	el.setText(describeMcpRow(state, t));
+	el.toggleClass("piem-settings-effect--error", state.enabled && state.status === "error");
 }
 
 function renderSkillRow(containerEl: HTMLElement, host: SettingsPanelHost, row: SkillRow, afterMutation: () => Promise<void>): void {

@@ -11,6 +11,7 @@ import {
 import type { Translator } from "../../i18n";
 import { describeApiKeyField, type SecretStorageState } from "./secretStorageCopy";
 import { attachTestButton } from "./testResult";
+import { createModalStatus, DiscardGuard, type ModalStatus } from "./modalGuards";
 
 export interface ProviderModalOptions {
 	app: App;
@@ -39,12 +40,20 @@ export class ProviderModal extends Modal {
 	private readonly draft: ProviderConfig;
 	private readonly isNew: boolean;
 	private readonly options: ProviderModalOptions;
+	/** The draft as it stood at open, serialized — the baseline the dirty check compares against. */
+	private readonly originalDraft: string;
+	private readonly guard: DiscardGuard;
+	private status: ModalStatus | null = null;
 
 	constructor(options: ProviderModalOptions) {
 		super(options.app);
 		this.options = options;
 		this.isNew = options.provider === undefined;
 		this.draft = options.provider ? { ...options.provider } : emptyProviderConfig();
+		this.originalDraft = JSON.stringify(normalizeProviderDraft(this.draft));
+		this.guard = new DiscardGuard(() => {
+			this.status?.showError(options.t.t("discard.warning"));
+		});
 	}
 
 	onOpen(): void {
@@ -62,6 +71,7 @@ export class ProviderModal extends Modal {
 				text.setValue(this.draft.name);
 				text.onChange((value) => {
 					this.draft.name = value;
+					this.onEdit();
 				});
 			});
 
@@ -73,6 +83,7 @@ export class ProviderModal extends Modal {
 				text.setValue(this.draft.baseUrl);
 				text.onChange((value) => {
 					this.draft.baseUrl = value;
+					this.onEdit();
 					this.testRow?.reset();
 				});
 			});
@@ -87,6 +98,7 @@ export class ProviderModal extends Modal {
 				dropdown.setValue(this.draft.protocol ?? DEFAULT_WIRE_PROTOCOL);
 				dropdown.onChange((value) => {
 					this.draft.protocol = value as WireProtocol;
+					this.onEdit();
 					this.testRow?.reset();
 				});
 			});
@@ -100,6 +112,7 @@ export class ProviderModal extends Modal {
 				text.setValue(this.draft.apiKey);
 				text.onChange((value) => {
 					this.draft.apiKey = value;
+					this.onEdit();
 					this.testRow?.reset();
 				});
 			});
@@ -119,13 +132,21 @@ export class ProviderModal extends Modal {
 			return this.options.test(this.normalizedDraft());
 		});
 
+		// Between the last field and the buttons: a failing verdict is read on the
+		// way to save, and it stays until the next edit instead of expiring.
+		this.status = createModalStatus(contentEl);
+
 		// Sticks to the modal's bottom edge so the save row stays reachable however
 		// far the body has scrolled.
 		new Setting(contentEl)
 			.setClass("piem-settings-modal-footer")
 			.addButton((button) => {
 				button.setButtonText(t.t("providerModal.cancel"));
-				button.onClick(() => this.close());
+				// Cancel is an explicit discard, so it earns its close.
+				button.onClick(() => {
+					this.guard.allowClose();
+					this.close();
+				});
 			})
 			.addButton((button) => {
 				button.setButtonText(t.t(this.isNew ? "providerModal.add" : "providerModal.save"));
@@ -134,36 +155,69 @@ export class ProviderModal extends Modal {
 			});
 	}
 
+	/**
+	 * A stray Esc must not silently throw away a half-filled form: the first
+	 * press warns and stays, the second — or a clean draft — closes.
+	 */
+	close(): void {
+		if (this.guard.shouldClose(this.isDirty())) {
+			super.close();
+		}
+	}
+
 	onClose(): void {
 		this.contentEl.empty();
 	}
 
 	private testRow: ReturnType<typeof attachTestButton> | undefined;
 
+	/** One fresh edit clears the old verdict — it no longer describes this draft. */
+	private onEdit(): void {
+		this.guard.edited();
+		this.status?.clear();
+	}
+
+	/** True when the draft no longer matches what the form opened with. */
+	private isDirty(): boolean {
+		return JSON.stringify(normalizeProviderDraft(this.draft)) !== this.originalDraft;
+	}
+
 	/** The draft as it would be persisted, with incidental whitespace removed. */
 	private normalizedDraft(): ProviderConfig {
-		return {
-			...this.draft,
-			name: this.draft.name.trim(),
-			baseUrl: this.draft.baseUrl.trim(),
-			apiKey: this.draft.apiKey.trim(),
-		};
+		return normalizeProviderDraft(this.draft);
 	}
 
 	private async submit(): Promise<void> {
 		const { t } = this.options;
 		const problem = validateProviderDraft(this.draft, t);
 		if (problem) {
+			// Inline first, so the problem survives being read; the Notice is the
+			// redundant shout for a user whose eyes were elsewhere.
+			this.status?.showError(problem);
 			new Notice(problem);
 			return;
 		}
+		this.status?.clear();
 		try {
 			await this.options.onSubmit(this.normalizedDraft());
+			this.guard.allowClose();
 			this.close();
 		} catch (cause) {
-			new Notice(t.t("providerModal.couldNotSave", { message: cause instanceof Error ? cause.message : String(cause) }));
+			const message = t.t("providerModal.couldNotSave", { message: cause instanceof Error ? cause.message : String(cause) });
+			this.status?.showError(message);
+			new Notice(message);
 		}
 	}
+}
+
+/** The draft as it would be persisted, with incidental whitespace removed. */
+function normalizeProviderDraft(draft: ProviderConfig): ProviderConfig {
+	return {
+		...draft,
+		name: draft.name.trim(),
+		baseUrl: draft.baseUrl.trim(),
+		apiKey: draft.apiKey.trim(),
+	};
 }
 
 /**
