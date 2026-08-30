@@ -123,7 +123,11 @@ export class ImportSkillModal extends Modal {
 			this.actionButton.setButtonText(t.t("skillImport.preview"));
 			return;
 		}
-		this.preview.skills.length === 0 ? this.status.show(t.t("skillImport.noneFound")) : this.status.clear();
+		if (this.preview.skills.length === 0) {
+			this.status.show(t.t("skillImport.noneFound"));
+		} else {
+			this.status.clear();
+		}
 		for (const skill of this.preview.skills) {
 			new Setting(this.previewEl).setName(skill.name).setDesc(skill.description);
 		}
