@@ -35,7 +35,7 @@
 		"@earendil-works/pi-agent-core": "^0.84.3",
 		"@earendil-works/pi-ai": "^0.84.3",
 		"@modelcontextprotocol/client": "^2.0.0",
-		"obsidian": "latest",
+		"obsidian": "1.13.1",
 		"react": "^19.2.5",
 		"react-dom": "^19.2.5",
 		"typebox": "^1.1.37",

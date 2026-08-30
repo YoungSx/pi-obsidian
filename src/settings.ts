@@ -494,6 +494,18 @@ export class PiemSettingTab extends PluginSettingTab {
 		return !!codec && codec.canRoundTrip;
 	}
 
+	/**
+	 * Renders the panel imperatively.
+	 *
+	 * Obsidian marks `display` deprecated since 1.13.0 in favour of the
+	 * declarative `getSettingDefinitions`, but its own docstring names the
+	 * exception this plugin falls under: "Only implement display() as a fallback
+	 * for plugins that need to support Obsidian versions older than 1.13.0."
+	 * `minAppVersion` is 1.5.7, so the imperative path is the only one that
+	 * renders anything at all on most supported versions. Switching would also
+	 * mean re-expressing the whole tab strip as `SettingDefinition[]`, which is
+	 * a separate piece of work from anything the panel needs today.
+	 */
 	display(): void {
 		const language = resolveLanguage(this.app.vault as LanguageHost, this.plugin.settings.language);
 		renderSettingsPanel(this.containerEl, {
@@ -506,6 +518,7 @@ export class PiemSettingTab extends PluginSettingTab {
 			save: async () => {
 				await this.plugin.saveSettings();
 				if (resolveLanguage(this.app.vault as LanguageHost, this.plugin.settings.language) !== language) {
+					// eslint-disable-next-line @typescript-eslint/no-deprecated -- imperative render is deliberate; see the docstring above
 					this.display();
 				}
 			},
