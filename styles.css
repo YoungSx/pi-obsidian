@@ -206,9 +206,13 @@ button.piem-settings-tab {
 	font-size: var(--font-ui-smaller);
 	gap: var(--size-4-2);
 	/*
-	 * Sits on the transcript's text column: container padding + message padding
-	 * put assistant text at 2 × --size-4-2, and this padding matches it, so the
-	 * status line reads as the same column of words rather than a stray edge.
+	 * Sits on the composer's text column, not the transcript's: the draft sits at
+	 * container padding (4-2) + shell padding (4-2) = 2 × --size-4-2 from the
+	 * panel edge — the shell's own fill needs that inset, so the draft cannot
+	 * join the transcript's column, which the assistant holds at 1 × 4-2 (it
+	 * carries no inline padding; see `.piem-chat__message--assistant`). The status
+	 * line matches the draft it sits above, so the pair reads as one column of
+	 * words rather than two stray edges.
 	 */
 	padding: var(--size-4-1) var(--size-4-2) 0;
 }
@@ -1134,21 +1138,33 @@ button.piem-chat__latest {
  * `:focus-within` does above, gated on `hover: hover` for the pointer half so
  * a touch tap cannot latch a permanent "active" look.
  */
+/*
+ * No `margin-top`: both parents that host this row (`.piem-chat__messages`,
+ * `.piem-chat__empty`) already separate their children with a `--size-4-2` gap,
+ * and a margin on top of the gap doubles the space above the row to 16px while
+ * everything below it stays at 8px. The container owns separation; the row owns
+ * only what is inside it.
+ */
 .piem-chat__quick-actions {
 	display: flex;
 	flex-wrap: wrap;
 	gap: var(--size-4-2);
 	justify-content: center;
-	margin-top: var(--size-4-2);
 }
 
 /*
  * Inside the transcript the row hangs under the newest reply, so it left-aligns
  * with the message column rather than centering like the empty screen's row.
+ *
+ * Zero inline padding puts the chip's own left edge on the assistant's text
+ * column — the reply sits at the messages edge (the assistant carries no inline
+ * padding; see `.piem-chat__message--assistant`), so the chips must not carry
+ * any either. The trailing padding is the row's own breathing room at the list's
+ * end, where no gap follows it.
  */
 .piem-chat__messages .piem-chat__quick-actions {
 	justify-content: flex-start;
-	padding: 0 var(--size-4-3) var(--size-4-2);
+	padding: 0 0 var(--size-4-2);
 }
 
 .piem-chat__quick-action {
@@ -1159,12 +1175,23 @@ button.piem-chat__latest {
 	cursor: pointer;
 	font-size: var(--font-ui-smaller);
 	min-height: var(--size-4-7);
+	/* Paint-only, the panel's one shared convention: hover and focus fade rather
+	 * than snap, and `prefers-reduced-motion` below switches the fade off. */
+	transition: background-color 0.15s ease-out, border-color 0.15s ease-out,
+		box-shadow 0.15s ease-out, color 0.15s ease-out;
 	padding: 0 var(--size-4-3);
 }
 
 .piem-chat__quick-action:focus-visible {
 	box-shadow: 0 0 0 2px var(--background-modifier-border-focus);
 	outline: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+
+	.piem-chat__quick-action {
+		transition: none;
+	}
 }
 
 /*
@@ -1510,10 +1537,12 @@ button.piem-chat__latest {
 	flex-direction: column;
 	gap: var(--size-4-2);
 	/* `--size-4-2`, not a roomier `--size-4-3`: container padding + this padding
-	 * must land the draft, the chips and the send bar on the transcript's text
-	 * column (assistant text sits 2 × --size-4-2 from the panel edge). A shell
-	 * inset deeper than the messages made three left edges where the eye
-	 * expects one. */
+	 * land the draft, the context chips and the send bar on one column at
+	 * 2 × --size-4-2 from the panel edge — the column the statusbar matches.
+	 * The transcript's own text column sits shallower (assistant text at
+	 * 1 × 4-2; it carries no inline padding), and the draft cannot join it
+	 * because the shell's fill needs its own inset from the panel rim. Chrome
+	 * aligns with chrome; the page reads at its own depth. */
 	padding: var(--size-4-2);
 	/* The command menu floats above the shell; it needs a positioning context. */
 	position: relative;
@@ -1988,6 +2017,18 @@ button.piem-chat__latest {
 
 	.piem-chat__trace-summary,
 	.piem-chat__trace--flat {
+		min-height: var(--size-4-9);
+	}
+
+	/*
+	 * The quick-action chip is a whole-surface target like a trace row, so it
+	 * takes the 36px tier rather than the 48px one: it is a dense row of up to
+	 * three labels that must share a narrow panel, and 48px pills would wrap a
+	 * two-chip row into three lines. Its resting 28px is below even the 24px
+	 * WCAG floor plus margin for error, so on touch it joins this block instead
+	 * of staying desktop-sized.
+	 */
+	.piem-chat__quick-action {
 		min-height: var(--size-4-9);
 	}
 }
