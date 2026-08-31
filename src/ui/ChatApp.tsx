@@ -15,6 +15,7 @@ import { ChatHeader } from "./ChatHeader";
 import { ChatStatusBar } from "./ChatStatusBar";
 import { countRunSteps } from "./chatStatus";
 import { ContextGauge } from "./ContextGauge";
+import { contextLevel } from "./headerCopy";
 import { ContextRow } from "./ContextRow";
 import { SubagentEntryIcon } from "./SubagentEntryIcon";
 import { MessageList } from "./MessageList";
@@ -255,6 +256,41 @@ export function ChatApp({ service, inputController, component, draftStore, onOpe
 	}, [runStartedAt, snapshot.messages, snapshot.pendingToolCalls.length]);
 
 	/*
+	 * The context wall: while occupancy sits in the band where compaction acts
+	 * on its own, the banner carries the offer the gauge's popover hides behind
+	 * a hover. Derived from the same measurement the gauge colours, so the
+	 * notice and the ring can never disagree about where the line is.
+	 *
+	 * An offer, not an outcome report: it stands until acted on or dismissed,
+	 * which is why it does not ride `noticeMessage` — that slot belongs to
+	 * things that happened and are read once. It also does not go through
+	 * `service.dismissMessages()`: acknowledging a standing state must not be
+	 * mistaken for acknowledging an outcome the service reported. Dismissal is
+	 * remembered for the session; the next time occupancy *enters* the band —
+	 * a session switch, a fresh wall after the earlier offer was acted on — the
+	 * offer returns. A compaction pulling occupancy back under the line and a
+	 * new turn easing it over again re-arms it the same way, which is correct:
+	 * each entry is worth one offer.
+	 */
+	const [wallDismissed, setWallDismissed] = useState(false);
+	const contextWall = useMemo(() => {
+		if (!snapshot.contextFill || wallDismissed) {
+			return undefined;
+		}
+		if (contextLevel(snapshot.contextFill) !== "near") {
+			return undefined;
+		}
+		// Both busy states make the button a lie: `compactNow` returns early
+		// during a stream, and a second press during an in-flight compaction
+		// reads as "nothing to compact" — a wrong report about a request that is
+		// actually running. The offer returns when the panel is idle again.
+		if (snapshot.isStreaming || snapshot.isCompacting) {
+			return undefined;
+		}
+		return { onTidy: () => void service.compactNow(), onDismiss: () => setWallDismissed(true) };
+	}, [snapshot.contextFill, snapshot.isStreaming, snapshot.isCompacting, wallDismissed, service]);
+
+	/*
 	 * Whether an armed edit still names its turn. A session switch leaves the
 	 * state behind but points it at a foreign transcript; a rewind, a compaction,
 	 * or a turn absorbed into a summary moves or replaces the message the index
@@ -450,6 +486,7 @@ export function ChatApp({ service, inputController, component, draftStore, onOpe
 					errorMessage={snapshot.errorMessage}
 					errorOpensSettings={snapshot.errorOpensSettings}
 					noticeMessage={snapshot.noticeMessage}
+					contextWall={contextWall}
 					onDismiss={() => service.dismissMessages()}
 					onOpenSettings={canOpenSettings ? () => openPluginSettings(app) : undefined}
 				/>

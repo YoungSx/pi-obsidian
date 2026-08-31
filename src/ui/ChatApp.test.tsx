@@ -127,6 +127,12 @@ class FakeAgentService {
 	abort(): void {}
 	dismissMessages(): void {}
 	notifyImagesBlocked(): void {}
+	/** Logged, so a wall offer's button that reached the service shows up as a count. */
+	readonly tidyCalls: number[] = [];
+
+	async compactNow(): Promise<void> {
+		this.tidyCalls.push(this.tidyCalls.length + 1);
+	}
 	async retryFrom(): Promise<boolean> {
 		return false;
 	}
@@ -949,3 +955,98 @@ function sessionInfo(): ActiveSessionInfo {
 		firstMessage: "",
 	};
 }
+
+/**
+ * A fill sitting exactly on the compaction line — the same occupancy the gauge
+ * colours red and the automatic compaction would act on. `near` is derived from
+ * `ratio >= compactionRatio`, so the two numbers, not a third threshold, decide
+ * whether the wall shows.
+ */
+function nearFill(): NonNullable<ChatSnapshot["contextFill"]> {
+	return {
+		tokens: 900,
+		contextWindow: 1000,
+		ratio: 0.9,
+		compactionRatio: 0.9,
+		heuristicOnly: false,
+	};
+}
+
+describe("ChatApp context wall", () => {
+	let mounted: Mounted | undefined;
+
+	beforeEach(() => {
+		document.body.replaceChildren();
+	});
+
+	afterEach(async () => {
+		await mounted?.unmount();
+		mounted = undefined;
+		document.body.replaceChildren();
+	});
+
+	it("offers the tidy action once occupancy reaches the compaction line", async () => {
+		mounted = await mountChat({ snapshot: { contextFill: nearFill() } });
+
+		const banner = mounted.host.querySelector(".piem-chat__banner--wall");
+		expect(banner?.querySelector(".piem-chat__banner-text")?.textContent).toContain(t.t("chat.contextWall"));
+		// It rides the standing polite region, not the alert channel.
+		expect(banner?.parentElement?.getAttribute("aria-live")).toBe("polite");
+	});
+
+	it("stays silent below the line, since the gauge already owns the colouring", async () => {
+		mounted = await mountChat({
+			snapshot: { contextFill: { ...nearFill(), ratio: 0.89 } },
+		});
+
+		expect(mounted.host.querySelector(".piem-chat__banner--wall")).toBeNull();
+	});
+
+	it("runs the service's compaction when the tidy button is pressed", async () => {
+		mounted = await mountChat({ snapshot: { contextFill: nearFill() } });
+
+		mounted.host.querySelector<HTMLButtonElement>(".piem-chat__banner--wall .piem-chat__banner-action")?.click();
+		await flushRender();
+
+		expect(mounted.service.tidyCalls).toHaveLength(1);
+	});
+
+	it("clears only the offer on dismiss, not the service's reported outcomes", async () => {
+		mounted = await mountChat({ snapshot: { contextFill: nearFill() } });
+
+		mounted.host.querySelector<HTMLButtonElement>(".piem-chat__banner--wall .piem-chat__banner-dismiss")?.click();
+		await flushRender();
+
+		expect(mounted.host.querySelector(".piem-chat__banner--wall")).toBeNull();
+	});
+
+	it("yields to an outcome report, which still outranks a standing offer", async () => {
+		mounted = await mountChat({ snapshot: { contextFill: nearFill() } });
+		mounted.service.emit({ noticeMessage: "Nothing to compact yet." });
+		await flushRender();
+
+		expect(mounted.host.querySelector(".piem-chat__banner--notice")).not.toBeNull();
+		expect(mounted.host.querySelector(".piem-chat__banner--wall")).toBeNull();
+	});
+
+	it("withdraws while a stream runs, since the tidy button would be a lie", async () => {
+		mounted = await mountChat({ snapshot: { contextFill: nearFill() } });
+		mounted.service.emit({ isStreaming: true });
+		await flushRender();
+
+		expect(mounted.host.querySelector(".piem-chat__banner--wall")).toBeNull();
+
+		mounted.service.emit({ isStreaming: false });
+		await flushRender();
+		// The offer returns with the panel idle — the state is still true.
+		expect(mounted.host.querySelector(".piem-chat__banner--wall")).not.toBeNull();
+	});
+
+	it("withdraws while a compaction is in flight, for the same reason", async () => {
+		mounted = await mountChat({ snapshot: { contextFill: nearFill() } });
+		mounted.service.emit({ isCompacting: true });
+		await flushRender();
+
+		expect(mounted.host.querySelector(".piem-chat__banner--wall")).toBeNull();
+	});
+});
