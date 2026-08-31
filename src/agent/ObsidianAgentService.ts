@@ -1890,8 +1890,9 @@ export class ObsidianAgentService {
 		this.branchSummaryController?.abort();
 		this.suggestionController?.abort();
 		this.agent?.abort();
-		// Orphaned subagents outlive their parent run otherwise — the reaper is
-		// a 30-minute backstop, not a teardown path.
+		// Orphaned subagents outlive their parent run otherwise: a run that ends
+		// normally never aborts its signal, and a child has no deadline of its
+		// own, so this is the backstop that actually collects them.
 		this.subagentExtension.disposeAll();
 		this.listeners.clear();
 	}

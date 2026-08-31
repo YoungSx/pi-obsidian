@@ -18,9 +18,11 @@ export interface SubagentEntry {
 	 * Why this child was cut short, when something cut it short.
 	 *
 	 * Recorded at the moment the kill is ordered rather than derived afterwards:
-	 * once the run unwinds, a parent-stop, a reaper, and an explicit
+	 * once the run unwinds, a parent-stop, a teardown, and an explicit
 	 * `kill_subagent` are indistinguishable from the aborted signal alone, and
-	 * the parent needs to know which one it was to word its own next move.
+	 * the parent needs to know which one it was to word its own next move. With
+	 * no deadline on a run, this is the only account of why a child stopped
+	 * early.
 	 */
 	killedBy?: "parent" | "teardown" | "tool";
 	/** The spawn call's run signal; a wait only sees children of its own run. */

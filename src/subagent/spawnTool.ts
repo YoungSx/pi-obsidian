@@ -214,7 +214,7 @@ export function createSpawnSubagentTool(context: SubagentToolsContext, depth: nu
 			// The linked controller is the child's kill switch: it fires with the
 			// parent run's signal (panel stop) and with disposeAll, and the runner
 			// listens on it to abort the child `Agent`.
-			const linked: LinkedSignals = linkSignals(signal, undefined);
+			const linked: LinkedSignals = linkSignals(signal);
 			context.registry.spawn({
 				id,
 				role: role.name,

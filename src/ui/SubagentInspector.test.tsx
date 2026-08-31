@@ -222,7 +222,7 @@ describe("the detail page answers in the order a reader asks", () => {
 		// A caveat under 400 words of findings arrives after the reader has already
 		// believed them.
 		const host = await renderInspector({
-			snapshots: [snapshot({ status: "incomplete", incomplete: "reaped" })],
+			snapshots: [snapshot({ status: "incomplete", incomplete: true })],
 			selectedId: "subagent-1",
 		});
 		const caveat = host.querySelector(".piem-subagents__caveat");

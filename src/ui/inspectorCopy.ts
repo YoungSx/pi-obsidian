@@ -70,10 +70,8 @@ export function timingLine(snapshot: SubagentSnapshot, t: Translator): string {
  */
 export function incompleteNote(snapshot: SubagentSnapshot, t: Translator): string | null {
 	const parts: string[] = [];
-	if (snapshot.incomplete === "reaped") {
-		parts.push(t.t("subagents.incompleteReaped"));
-	} else if (snapshot.incomplete === "aborted") {
-		parts.push(t.t("subagents.incompleteAborted"));
+	if (snapshot.incomplete) {
+		parts.push(t.t("subagents.incompletePartial"));
 	}
 	if (snapshot.killedBy === "parent") {
 		parts.push(t.t("subagents.killedByParent"));

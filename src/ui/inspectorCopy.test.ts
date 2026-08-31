@@ -71,10 +71,12 @@ describe("a partial report says so, and says whose decision it was", () => {
 		expect(incompleteNote(snapshot(), t)).toBeNull();
 	});
 
-	it("names the reaper and the 30-minute limit", () => {
-		const note = incompleteNote(snapshot({ status: "incomplete", incomplete: "reaped" }), t);
+	it("says the report is partial without inventing a cause", () => {
+		// A run only ever stops because something stopped it, and `killedBy`
+		// answers whose decision that was — so the caveat's own job is narrower:
+		// warn that the text below is a fragment.
+		const note = incompleteNote(snapshot({ status: "incomplete", incomplete: true }), t);
 
-		expect(note).toContain("30-minute limit");
 		expect(note).toContain("partial");
 	});
 
@@ -82,7 +84,7 @@ describe("a partial report says so, and says whose decision it was", () => {
 		// Two separate questions — "can I trust this?" and "whose decision was
 		// that?" — and a reader hitting a partial report reads a sentence, not a
 		// legend of two badges.
-		const note = incompleteNote(snapshot({ status: "incomplete", incomplete: "aborted", killedBy: "tool" }), t);
+		const note = incompleteNote(snapshot({ status: "incomplete", incomplete: true, killedBy: "tool" }), t);
 
 		expect(note).toContain("Stopped before it finished");
 		expect(note).toContain("no longer needed");
@@ -254,7 +256,7 @@ describe("every sentence is translated, not only the labels", () => {
 	});
 
 	it("translates the caveat a reader most needs to understand", () => {
-		expect(incompleteNote(snapshot({ status: "incomplete", incomplete: "reaped" }), zh)).toContain("30 分钟");
+		expect(incompleteNote(snapshot({ status: "incomplete", incomplete: true }), zh)).toContain("残稿");
 	});
 
 	it("translates the process record's step names", () => {

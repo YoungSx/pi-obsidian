@@ -5,10 +5,20 @@ import { sliceTextByLines, truncateToolOutputDetailed } from "../vault/truncate"
 import type { SubagentEntry } from "./registry";
 import type { SubagentToolsContext } from "./spawnTool";
 
-/** Pacing constants, lifted verbatim from Codex's multi-agent wait. */
+/**
+ * Wait pacing. The default and the floor are Codex's; the ceiling is gone.
+ *
+ * How long to wait is the model's own call — it is the one that knows whether it
+ * asked for a two-file grep or a whole-vault sweep, and a run has no deadline of
+ * its own for a wait to have to fit inside. A ceiling here could only ever
+ * override that judgement with a number picked in the dark.
+ *
+ * The floor stays, and it is not a cap in disguise: a sub-second wait is a busy
+ * loop that bills a turn per poll, so the ten seconds buy the model nothing it
+ * wanted and cost it nothing it can use.
+ */
 export const WAIT_DEFAULT_MS = 30_000;
 export const WAIT_MIN_MS = 10_000;
-export const WAIT_MAX_MS = 3_600_000;
 
 /**
  * How much of a report the model may see per wait.
@@ -24,10 +34,9 @@ const REPORT_BUDGET: TextResultBudget = { maxLines: Number.POSITIVE_INFINITY };
 export interface WaitPacing {
 	defaultMs: number;
 	minMs: number;
-	maxMs: number;
 }
 
-const DEFAULT_PACING: WaitPacing = { defaultMs: WAIT_DEFAULT_MS, minMs: WAIT_MIN_MS, maxMs: WAIT_MAX_MS };
+const DEFAULT_PACING: WaitPacing = { defaultMs: WAIT_DEFAULT_MS, minMs: WAIT_MIN_MS };
 
 /** A wait window plus whether the caller's request survived the clamp. */
 export interface ClampedWait {
@@ -36,20 +45,24 @@ export interface ClampedWait {
 }
 
 /**
- * Clamps a caller-supplied wait into the pacing window.
+ * Raises a caller-supplied wait to the floor, and otherwise takes it as given.
  *
- * Waiting is the parent's own pacing knob, so a wild value is a nudged dial,
- * not an attack: undefined takes the default, and anything outside the window
- * lands on the nearest edge — Codex's `wait.rs` does the same. It also says so
- * in its result, which is the part worth copying: a model whose 50ms request
- * silently became 10s otherwise reads the delay as a slow child. Bounds are
- * injectable so tests can shrink the window to milliseconds.
+ * Waiting is the parent's own pacing knob, so a wild value is a nudged dial, not
+ * an attack: undefined takes the default and anything under the floor lands on
+ * it. Long values pass through untouched — the model is the one that knows what
+ * it asked for. The result says whether the dial moved, which is the part worth
+ * copying from Codex's `wait.rs`: a model whose 50ms request silently became 10s
+ * otherwise reads the delay as a slow child. Bounds are injectable so tests can
+ * shrink the floor to milliseconds.
  */
 export function clampWait(timeoutMs: number | undefined, pacing: WaitPacing = DEFAULT_PACING): ClampedWait {
 	if (timeoutMs === undefined) {
 		return { value: pacing.defaultMs, clamped: false };
 	}
-	const value = Math.min(pacing.maxMs, Math.max(pacing.minMs, timeoutMs));
+	// NaN fails every comparison, so it would slip through a bare `<` guard and
+	// arm a `setTimeout` that fires immediately — a busy loop, which is the one
+	// thing the floor exists to prevent.
+	const value = Number.isFinite(timeoutMs) ? Math.max(pacing.minMs, timeoutMs) : pacing.defaultMs;
 	return { value, clamped: value !== timeoutMs };
 }
 
@@ -67,7 +80,8 @@ const WaitParameters = Type.Object({
 	),
 	timeoutMs: Type.Optional(
 		Type.Number({
-			description: "How long to wait before reporting progress, in milliseconds (10s–1h; default 30s).",
+			description:
+				"How long to wait before reporting progress, in milliseconds. Default 30s, floor 10s, no ceiling — set it to what the task is worth, and a long wait costs one turn instead of many polls.",
 		}),
 	),
 	offset: Type.Optional(
@@ -94,11 +108,7 @@ function describeEntry(entry: SubagentEntry): string {
 	if (result.incomplete) {
 		// The parent's next move depends entirely on knowing this is a fragment:
 		// folded in as a finding, a half-finished sweep reads as a complete one.
-		const why =
-			result.incomplete === "reaped"
-				? "was stopped by the lifetime limit before it finished"
-				: killedNote(entry);
-		return `${who} ${why}. Its work so far — INCOMPLETE, the task was NOT finished:\n${result.text}`;
+		return `${who} ${killedNote(entry)}. Its work so far — INCOMPLETE, the task was NOT finished:\n${result.text}`;
 	}
 	if (!result.text) {
 		// A clean run that had nothing to say. Distinguished from a failure on
@@ -242,7 +252,7 @@ function pagedResult(
 	// that reads page one and stops must not have been told only "there is more",
 	// or a half-finished sweep is folded in as a finding.
 	const warning = result?.incomplete
-		? `INCOMPLETE — the task was NOT finished; it ${result.incomplete === "reaped" ? "was stopped by the lifetime limit" : killedNote(entry)}. What it wrote before stopping:\n`
+		? `INCOMPLETE — the task was NOT finished; it ${killedNote(entry)}. What it wrote before stopping:\n`
 		: "";
 	const ending = result?.incomplete ? " (end of what it wrote)." : " (complete).";
 	const header =
