@@ -1,6 +1,8 @@
 import { Modal, Notice, Setting, type App } from "obsidian";
 import { generateMcpServerId, type McpServerConfig } from "../../mcp/mcpConfig";
 import type { Translator } from "../../i18n";
+import { type SecretStorageState } from "./secretStorageCopy";
+import { addSecretKeyField } from "./secretField";
 import { attachTestButton } from "./testResult";
 import { createModalStatus, DiscardGuard, submitOnEnter, type ModalStatus } from "./modalGuards";
 
@@ -8,6 +10,10 @@ export interface McpServerModalOptions {
 	app: App;
 	/** Existing row to edit; omitted to add a new one. */
 	server?: McpServerConfig;
+	/** Where tokens actually land on this device, for honest field copy. */
+	secretStorage: SecretStorageState;
+	/** Resolves a picked keychain id to its plaintext, as in the provider form. */
+	readSecret(id: string): string;
 	/** Copy for every label, description, and button in this form. */
 	t: Translator;
 	/**
@@ -87,19 +93,32 @@ export class McpServerModal extends Modal {
 				submitOnEnter(text.inputEl, () => void this.submit());
 			});
 
-		new Setting(contentEl)
-			.setName(t.t("mcp.tokenName"))
-			.setDesc(t.t("mcp.tokenDesc"))
-			.addText((text) => {
-				text.inputEl.type = "password";
-				text.setValue(this.draft.token);
-				text.onChange((value) => {
-					this.draft.token = value;
-					this.onEdit();
-					this.testRow?.reset();
-				});
-				submitOnEnter(text.inputEl, () => void this.submit());
-			});
+		// Same tier-driven shape as the provider form's key row: picker where the
+		// device delegates, typed field where it cannot (see secretField.ts).
+		addSecretKeyField(contentEl, {
+			app: this.app,
+			tier: this.options.secretStorage,
+			t,
+			readSecret: this.options.readSecret,
+			title: t.t("mcp.tokenName"),
+			placeholder: "",
+			target: t.t("mcp.tokenTarget"),
+			inlineKey: this.draft.token,
+			secretRef: this.draft.secretRef,
+			onRefChange: (ref, plaintext) => {
+				this.draft.secretRef = ref;
+				this.draft.token = plaintext;
+				this.onEdit();
+				this.testRow?.reset();
+			},
+			onInlineChange: (value) => {
+				// Typing retires the binding: one slot, one owner at a time.
+				this.draft.secretRef = "";
+				this.draft.token = value;
+				this.onEdit();
+				this.testRow?.reset();
+			},
+		});
 
 		// Placed before the save row so a failing verdict is read before
 		// committing. The probe builds a throwaway client against the draft, so

@@ -9,7 +9,8 @@ import {
 	type WireProtocol,
 } from "../../modelConfig";
 import type { Translator } from "../../i18n";
-import { describeApiKeyField, type SecretStorageState } from "./secretStorageCopy";
+import { type SecretStorageState } from "./secretStorageCopy";
+import { addSecretKeyField } from "./secretField";
 import { attachTestButton } from "./testResult";
 import { createModalStatus, DiscardGuard, submitOnEnter, type ModalStatus } from "./modalGuards";
 
@@ -19,6 +20,11 @@ export interface ProviderModalOptions {
 	provider?: ProviderConfig;
 	/** Where keys actually land on this device, for honest field copy. */
 	secretStorage: SecretStorageState;
+	/**
+	 * Resolves a keychain id to its plaintext, so a pick can fill the draft's
+	 * in-memory key the moment it is made.
+	 */
+	readSecret(id: string): string;
 	/** Copy for every label, description, and button in this form. */
 	t: Translator;
 	/** Runs a live request against the draft. */
@@ -105,20 +111,33 @@ export class ProviderModal extends Modal {
 				});
 			});
 
-		new Setting(contentEl)
-			.setName(t.t("providerModal.apiKey"))
-			.setDesc(describeApiKeyField(this.options.secretStorage, t.t("secretStorage.providerTarget"), t))
-			.addText((text) => {
-				text.inputEl.type = "password";
-				text.setPlaceholder(t.t("providerModal.apiKeyPlaceholder"));
-				text.setValue(this.draft.apiKey);
-				text.onChange((value) => {
-					this.draft.apiKey = value;
-					this.onEdit();
-					this.testRow?.reset();
-				});
-				submitOnEnter(text.inputEl, () => void this.submit());
-			});
+		// The key row changes shape with the tier: a keychain picker where the
+		// device can delegate, the typed field where it cannot (or collapsed
+		// beneath the picker, as the road not taken). See secretField.ts.
+		addSecretKeyField(contentEl, {
+			app: this.app,
+			tier: this.options.secretStorage,
+			t,
+			readSecret: this.options.readSecret,
+			title: t.t("providerModal.apiKey"),
+			placeholder: t.t("providerModal.apiKeyPlaceholder"),
+			target: t.t("secretStorage.providerTarget"),
+			inlineKey: this.draft.apiKey,
+			secretRef: this.draft.secretRef,
+			onRefChange: (ref, plaintext) => {
+				this.draft.secretRef = ref;
+				this.draft.apiKey = plaintext;
+				this.onEdit();
+				this.testRow?.reset();
+			},
+			onInlineChange: (value) => {
+				// Typing retires the binding: one slot, one owner at a time.
+				this.draft.secretRef = "";
+				this.draft.apiKey = value;
+				this.onEdit();
+				this.testRow?.reset();
+			},
+		});
 
 		// Placed before the save row so a failing verdict is read before
 		// committing. The check needs no model id of its own: the caller probes with
