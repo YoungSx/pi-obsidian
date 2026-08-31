@@ -46,7 +46,6 @@ import { describeMissingBuiltinModel } from "./modelsCopy";
 import { createCollapsibleSection } from "./collapsibleSection";
 import { isSendShortcutSetting, type SendShortcut } from "../keyboard";
 import {
-	compactionEnabledCopy,
 	compactionGroupHint,
 	compactionGroupLabel,
 	compactionKeepCopy,
@@ -54,7 +53,7 @@ import {
 	describeTokenFloor,
 	type CompactionRowCopy,
 } from "./compactionCopy";
-import { MIN_COMPACTION_TOKENS, readTokenCount, resolveCompactionSettings, type CompactionConfig } from "../../agent/compactionSettings";
+import { MIN_COMPACTION_TOKENS, readTokenCount, type CompactionConfig } from "../../agent/compactionSettings";
 import { readRetentionLimit, UNLIMITED_SESSION_RETENTION } from "../../session/retention";
 import {
 	describeLegacyChats,
@@ -692,13 +691,14 @@ function renderSendShortcutRow(containerEl: HTMLElement, host: SettingsPanelHost
 }
 
 /**
- * The three compaction controls, behind a disclosure.
+ * The two compaction token fields, behind a disclosure.
  *
  * Collapsed rather than laid out flat because they are the only settings in the
  * panel a reader can make worse by touching: the defaults are pi's own, tuned
  * against real conversations, and the reason to change them is narrow. The group
  * starts open when the vault already holds a value, so a user who configured it
- * once is not made to hunt for what they set.
+ * once is not made to hunt for what they set. Automatic compaction itself has no
+ * row here — it is a hard rule, so there is nothing left to turn off.
  */
 function renderCompactionGroup(containerEl: HTMLElement, host: SettingsPanelHost): void {
 	const { settings, t } = host;
@@ -720,21 +720,9 @@ function renderCompactionGroup(containerEl: HTMLElement, host: SettingsPanelHost
 		await host.save();
 	};
 
-	const resolved = resolveCompactionSettings(settings.compaction, host.contextWindow());
-
-	const enabledCopy = compactionEnabledCopy(t);
-	new Setting(body)
-		.setName(enabledCopy.name)
-		.setDesc(enabledCopy.description)
-		.addToggle((toggle) => {
-			toggle.setValue(resolved.enabled);
-			toggle.onChange(async (enabled) => {
-				// Written even when it matches pi's default: the user made this
-				// choice explicitly, and dropping it would silently re-enable
-				// compaction if pi ever flipped its own default.
-				await update({ enabled });
-			});
-		});
+	// The toggle that used to sit here is gone: automatic compaction is a hard
+	// rule (see `resolveCompactionSettings`), so these rows only shape *when* it
+	// fires, never whether.
 
 	renderTokenRow(body, {
 		copy: compactionReserveCopy(t),

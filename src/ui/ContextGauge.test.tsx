@@ -227,15 +227,6 @@ describe("ContextGauge popover", () => {
 		);
 	});
 
-	it("stops promising a threshold when automatic compaction is off", async () => {
-		// The one claim this line must not make: naming a percentage nothing acts on.
-		const host = await renderGauge({ fill: fill({ heuristicOnly: false, compactionEnabled: false }) });
-
-		const note = (await openPopover(host))?.querySelector(".piem-chat__context-note")?.textContent;
-		expect(note).toContain("Automatic tidying is off");
-		expect(note).not.toContain("98%");
-	});
-
 	it("is not a tooltip, which may not own the button inside it", async () => {
 		// ARIA forbids focusable content in a tooltip, and a screen reader may skip
 		// the subtree — taking the tidy button with it.
@@ -453,7 +444,6 @@ function fill(overrides: Partial<ContextFill> = {}): ContextFill {
 		contextWindow: 1_000_000,
 		ratio: 0.0124,
 		compactionRatio: (1_000_000 - 16_384) / 1_000_000,
-		compactionEnabled: true,
 		heuristicOnly: true,
 		...overrides,
 	};

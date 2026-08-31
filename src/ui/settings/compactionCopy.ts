@@ -31,14 +31,6 @@ export function compactionGroupHint(t: Translator): string {
 	return t.t("compaction.groupHint");
 }
 
-export function compactionEnabledCopy(t: Translator): CompactionRowCopy {
-	return {
-		name: t.t("compaction.enabledName"),
-		description: t.t("compaction.enabledDesc"),
-		placeholder: "",
-	};
-}
-
 export function compactionReserveCopy(t: Translator): CompactionRowCopy {
 	return {
 		name: t.t("compaction.reserveName"),

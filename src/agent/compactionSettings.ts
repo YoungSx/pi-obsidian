@@ -13,11 +13,17 @@ import { DEFAULT_COMPACTION_SETTINGS, type CompactionSettings } from "@earendil-
  * Stored as a partial: a vault that has never opened the advanced group holds
  * nothing, and every field the user did not touch has to keep following pi's
  * default rather than freezing whatever it happened to be at install time.
+ *
+ * Automatic compaction itself is not configurable: it is a hard rule, on by
+ * construction. Letting the transcript outgrow the window is what turns a long
+ * chat into a broken one, so the only user-facing choice is *when* it happens —
+ * the two token fields below, or pressing tidy up early. The previously
+ * supported `enabled` off switch is gone; `normalizeCompactionConfig` drops it,
+ * so a vault that turned it off returns to the safe behaviour on next load.
  */
 
 /** Persisted form. Every field optional; absent means "follow pi's default". */
 export interface CompactionConfig {
-	enabled?: boolean;
 	reserveTokens?: number;
 	keepRecentTokens?: number;
 }
@@ -76,7 +82,11 @@ export function resolveCompactionSettings(config: CompactionConfig | undefined, 
 	const budget = Math.min(Math.max(Math.floor(window * MAX_COMPACTION_FRACTION), floor * 2), window - 1);
 	const reserveTokens = clamp(config?.reserveTokens ?? DEFAULT_COMPACTION_SETTINGS.reserveTokens, floor, budget - floor);
 	return {
-		enabled: config?.enabled ?? DEFAULT_COMPACTION_SETTINGS.enabled,
+		// A hard rule, not a setting: compaction must never be disabled, so the
+		// `enabled` flag pi reads is pinned on regardless of what an older vault
+		// may still carry. The resolver is the one place both the trigger and the
+		// meter agree on, which makes this the single point that enforces it.
+		enabled: true,
 		reserveTokens,
 		keepRecentTokens: clamp(config?.keepRecentTokens ?? DEFAULT_COMPACTION_SETTINGS.keepRecentTokens, floor, budget - reserveTokens),
 	};
@@ -137,6 +147,11 @@ export function canMakeProgress(settings: CompactionSettings, contextWindow: num
  * A field that fails validation is dropped rather than replaced with the
  * default, so `resolveCompactionSettings` keeps following pi's default for it —
  * the two paths cannot disagree about what "unset" means.
+ *
+ * The retired `enabled` field is dropped unconditionally: it is read as an
+ * unknown key and left out of the rebuilt config, so the next save quietly
+ * scrubs it from data.json and an old "compaction off" choice cannot outlive
+ * the off switch.
  */
 export function normalizeCompactionConfig(data: unknown): CompactionConfig | undefined {
 	if (!data || typeof data !== "object" || Array.isArray(data)) {
@@ -144,9 +159,6 @@ export function normalizeCompactionConfig(data: unknown): CompactionConfig | und
 	}
 	const raw = data as { enabled?: unknown; reserveTokens?: unknown; keepRecentTokens?: unknown };
 	const config: CompactionConfig = {};
-	if (typeof raw.enabled === "boolean") {
-		config.enabled = raw.enabled;
-	}
 	const reserveTokens = readTokenCount(raw.reserveTokens);
 	if (reserveTokens !== undefined) {
 		config.reserveTokens = reserveTokens;

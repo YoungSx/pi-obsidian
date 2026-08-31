@@ -284,7 +284,6 @@ function fill(overrides: Partial<ContextFill> = {}): ContextFill {
 		contextWindow: 1_000_000,
 		ratio: 0.0124,
 		compactionRatio: (1_000_000 - 16_384) / 1_000_000,
-		compactionEnabled: true,
 		heuristicOnly: true,
 		...overrides,
 	};
