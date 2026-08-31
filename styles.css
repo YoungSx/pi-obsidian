@@ -2358,9 +2358,17 @@ button.piem-chat__latest {
 		flex-wrap: wrap;
 	}
 
+	/*
+	 * Only the basis changes: the toolbar becomes its own full-width row instead
+	 * of a sibling of the title. Alignment is deliberately left to the base rule,
+	 * which is already `flex-end` — the buttons sit against the panel's right edge
+	 * whether they are beside the title or under it, so the wrap moves the row
+	 * without moving the controls sideways. Pinning them left here instead made
+	 * the toolbar jump the full width of the panel at the breakpoint, and left a
+	 * reader who had just been reaching for the right edge with nothing there.
+	 */
 	.piem-chat__header-actions {
 		flex-basis: 100%;
-		justify-content: flex-start;
 	}
 
 	.piem-chat__message--user {
@@ -2401,6 +2409,10 @@ button.piem-chat__latest {
 	 * left (React, keyed on `Platform.isMobile`, for the same reason); these two
 	 * declarations only retire the wrap that row used to need. The narrow-leaf
 	 * block above still fires first; cascade order puts this one on top.
+	 *
+	 * Alignment needs no clause here either: the base rule right-aligns the
+	 * toolbar and neither block overrides it, so the buttons end up against the
+	 * right edge on all three layouts.
 	 */
 	@container piem-chat (max-width: 32rem) {
 		.piem-chat__header {
@@ -2409,7 +2421,6 @@ button.piem-chat__latest {
 
 		.piem-chat__header-actions {
 			flex-basis: auto;
-			justify-content: flex-end;
 		}
 	}
 }
