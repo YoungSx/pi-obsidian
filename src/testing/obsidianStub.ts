@@ -198,6 +198,56 @@ interface MenuItemLike {
 	onClick(handler: () => void): MenuItemLike;
 }
 
+/** A bare menu recording, with the navigation helpers a test reads it through. */
+function createMenuRecording(): MenuRecording {
+	const recording: MenuRecording = {
+		items: [],
+		shown: false,
+		titles: () => recording.items.filter((item) => !item.separator).map((item) => item.title ?? ""),
+		click: (title: string) => {
+			const found = recording.items.find((item) => item.title === title);
+			if (!found?.click) {
+				throw new Error(`no menu item titled ${title}`);
+			}
+			found.click();
+		},
+	};
+	return recording;
+}
+
+/** A chainable row builder over one recorded entry; shared by `Menu` and submenus. */
+function createMenuItem(entry: MenuItemRecording): MenuItemLike {
+	const item: MenuItemLike = {
+		setTitle: (title: string) => {
+			entry.title = title;
+			return item;
+		},
+		setIcon: (icon: string) => {
+			entry.icon = icon;
+			return item;
+		},
+		setWarning: (warning: boolean) => {
+			entry.warning = warning;
+			return item;
+		},
+		setSection: () => item,
+		setDisabled: () => item,
+		setChecked: (checked: boolean | null) => {
+			entry.checked = checked;
+			return item;
+		},
+		setIsLabel: (isLabel: boolean) => {
+			entry.isLabel = isLabel;
+			return item;
+		},
+		onClick: (handler: () => void) => {
+			entry.click = handler;
+			return item;
+		},
+	};
+	return item;
+}
+
 /**
  * Every menu built since the last {@link resetMenus}, oldest first.
  *
@@ -431,18 +481,7 @@ const obsidianStub = {
 		}
 	},
 	Menu: class Menu {
-		private readonly recording: MenuRecording = {
-			items: [],
-			shown: false,
-			titles: () => this.recording.items.filter((item) => !item.separator).map((item) => item.title ?? ""),
-			click: (title: string) => {
-				const found = this.recording.items.find((item) => item.title === title);
-				if (!found?.click) {
-					throw new Error(`no menu item titled ${title}`);
-				}
-				found.click();
-			},
-		};
+		private readonly recording: MenuRecording = createMenuRecording();
 
 		constructor() {
 			openedMenus.push(this.recording);
@@ -453,35 +492,7 @@ const obsidianStub = {
 			this.recording.items.push(entry);
 			// The builder is chainable in Obsidian, and production code relies on
 			// that, so every setter returns the same object rather than `undefined`.
-			const item: MenuItemLike = {
-				setTitle: (title: string) => {
-					entry.title = title;
-					return item;
-				},
-				setIcon: (icon: string) => {
-					entry.icon = icon;
-					return item;
-				},
-				setWarning: (warning: boolean) => {
-					entry.warning = warning;
-					return item;
-				},
-				setSection: () => item,
-				setDisabled: () => item,
-				setChecked: (checked: boolean | null) => {
-					entry.checked = checked;
-					return item;
-				},
-				setIsLabel: (isLabel: boolean) => {
-					entry.isLabel = isLabel;
-					return item;
-				},
-				onClick: (handler: () => void) => {
-					entry.click = handler;
-					return item;
-				},
-			};
-			build(item);
+			build(createMenuItem(entry));
 			return this;
 		}
 

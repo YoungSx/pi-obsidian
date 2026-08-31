@@ -2,6 +2,7 @@ import React from "react";
 import { Menu, Platform, type App } from "obsidian";
 import type { ChatSnapshot } from "../agent/ObsidianAgentService";
 import type { ActiveSessionInfo } from "../session/ObsidianSessionManager";
+import type { CommandEntry } from "./CommandMenu";
 import { IconButton } from "./ObsidianIcon";
 import { useT } from "./TranslatorContext";
 import {
@@ -20,6 +21,12 @@ interface ChatHeaderProps {
 	onNewSession: () => void;
 	onRenameSession: (name: string) => void;
 	onDeleteSession: (path: string) => void;
+	/**
+	 * Inserts a slash command as the start of a draft. Absent handling is not
+	 * modelled — the composer always exists below this header — but the command
+	 * block keys off the list itself: no templates or skills, no item.
+	 */
+	onInsertCommand: (invocation: string) => void;
 	/**
 	 * Opens the plugin's settings tab. Absent when the host cannot reach it, in
 	 * which case the overflow menu simply does not offer the item — the same
@@ -51,11 +58,13 @@ export function ChatHeader({
 	onNewSession,
 	onRenameSession,
 	onDeleteSession,
+	onInsertCommand,
 	onOpenSettings,
 }: ChatHeaderProps): React.JSX.Element {
 	const t = useT();
 	const activeSession = snapshot.session;
 	const isBusy = snapshot.isStreaming || snapshot.isCompacting;
+	const commands: CommandEntry[] = snapshot.availableCommands;
 	// Narrowed to a single binding so the menu's three conditional blocks agree on
 	// one answer, and so TypeScript carries the non-undefined session into the
 	// click handlers without a second check inside each one.
@@ -116,6 +125,28 @@ export function ChatHeader({
 			}
 			menu.addItem((item) => item.setTitle(t.t("chat.openSettings")).setIcon("settings").onClick(onOpenSettings));
 		}
+		/*
+		 * The standing door to slash commands. Their only other advertisement is
+		 * one line of composer placeholder that vanishes with the first keystroke,
+		 * so a user who never typed `/` on a hunch never learned templates or
+		 * skills exist. One row per invocation, mirroring the in-composer menu;
+		 * sections carry the kind, so a native menu groups the two sorts apart
+		 * without this row having to say it twice.
+		 */
+		if (commands.length > 0) {
+			if (editableSession || historyItem || onOpenSettings) {
+				menu.addSeparator();
+			}
+			for (const command of commands) {
+				menu.addItem((item) =>
+					item
+						.setTitle(`/${command.invocation}`)
+						.setIcon("slash")
+						.setSection(command.kind)
+						.onClick(() => onInsertCommand(command.invocation)),
+				);
+			}
+		}
 		if (editableSession) {
 			menu.addSeparator();
 			menu.addItem((item) =>
@@ -157,13 +188,15 @@ export function ChatHeader({
 					/>
 				)}
 				<IconButton icon="square-pen" label={t.t("chat.newChat")} onClick={onNewSession} disabled={isBusy} />
-				{/* Disabled only when the menu would open empty — see `openMenu`. */}
+				{/* Disabled only when the menu would open empty — see `openMenu`. The
+				    command block participates: with nothing to rename and no settings
+				    door, a vault with skills still has this menu to offer. */}
 				<IconButton
 					icon="ellipsis"
 					label={t.t("chat.moreActions")}
 					onClick={openMenu}
 					hasPopup="menu"
-					disabled={!editableSession && !onOpenSettings && !(Platform.isMobile && canPickSession)}
+					disabled={!editableSession && !onOpenSettings && !(Platform.isMobile && canPickSession) && commands.length === 0}
 				/>
 			</div>
 		</header>

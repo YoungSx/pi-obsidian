@@ -43,6 +43,7 @@ async function renderHeader(snapshot: ChatSnapshot): Promise<HTMLElement> {
 			onNewSession={() => undefined}
 			onRenameSession={() => undefined}
 			onDeleteSession={() => undefined}
+			onInsertCommand={() => undefined}
 		/>,
 	);
 	await flushRender();
@@ -316,6 +317,7 @@ function snapshot(overrides: Partial<ChatSnapshot> = {}): ChatSnapshot {
 		isCompacting: false,
 		session: undefined,
 		showAgentDetails: true,
+		availableCommands: [],
 		...overrides,
 	} as ChatSnapshot;
 }
