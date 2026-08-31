@@ -274,6 +274,26 @@ describe("transcript keyboard bypass", () => {
 
 		expect(document.activeElement).toBe(textarea);
 	});
+
+	it("runs the bypass backwards: a link after the composer's position returns to the transcript", async () => {
+		// The forward link fixes the trip down; this fixes the trip back up, the
+		// one a keyboard user takes more often. It sits after the log, so one
+		// Shift+Tab from the composer reaches it instead of walking every reply's
+		// buttons.
+		const transcript = await renderTranscript({ messages: [userMessage("q")], composerAnchorId: "composer-1" });
+
+		const links = transcript.querySelectorAll<HTMLAnchorElement>(".piem-chat__skip-link");
+		expect(links).toHaveLength(2);
+		const back = links[1]!;
+		expect(back.textContent).toBe("Back to conversation");
+		const log = transcript.querySelector(".piem-chat__messages")!;
+		// Behind the log it returns to — mirror image of the forward link's placement.
+		expect(log.compareDocumentPosition(back) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+
+		back.click();
+		await flushRender();
+		expect(document.activeElement).toBe(log);
+	});
 });
 
 /** Shaped like the helper in `MessageList.test.tsx`, so both files model a turn the same way. */

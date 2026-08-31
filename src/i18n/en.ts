@@ -72,6 +72,8 @@ export const en = {
 		conversationAria: "Conversation",
 		/** Skip link above the transcript; see WCAG 2.4.1 (Bypass Blocks). */
 		skipToComposer: "Skip to message box",
+		/** Reverse skip link: from the composer back to the transcript, the same bypass read backwards. */
+		skipToTranscript: "Back to conversation",
 		working: "Working: ",
 		/**
 		 * The typing indicator shown between sending and the first token, in the

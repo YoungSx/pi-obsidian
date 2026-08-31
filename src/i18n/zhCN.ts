@@ -54,6 +54,7 @@ export const zhCN: DeepPartial<EnCopy> = {
 		contextWallAction: "整理",
 		conversationAria: "对话",
 		skipToComposer: "跳到输入框",
+		skipToTranscript: "回到对话",
 		working: "正在处理：",
 		/**
 		 * 输入指示器，在发送到首个 token 之间显示在助手在消息流中的位置。
