@@ -140,31 +140,35 @@ describe("createObsidianRequestUrlFetch", () => {
 		expect(pending).rejects.toThrow(/aborted/i);
 	});
 
-	it("rejects with a timeout error when the provider never responds", async () => {
-		// `requestUrl` has no timeout of its own, so without this guard a stalled
-		// endpoint leaves the agent streaming forever.
-		requestUrlMock.mockReturnValue(new Promise<never>(() => undefined));
-		const obsidianFetch = createObsidianRequestUrlFetch(25);
+	it("imposes no deadline of its own on a slow provider", async () => {
+		// pi-ai leaves `timeoutMs` unset, so the transport must not invent an
+		// expiry: from here a long reasoning pass is indistinguishable from a
+		// stall, and cutting it off would end requests the provider layer chose
+		// to leave unbounded. A wedged endpoint is the user's stop to press.
+		let settle: ((response: unknown) => void) | undefined;
+		requestUrlMock.mockReturnValue(
+			new Promise((resolve) => {
+				settle = resolve;
+			}),
+		);
+		const obsidianFetch = createObsidianRequestUrlFetch();
 
 		const pending = obsidianFetch("https://api.example.com/v1/chat", { method: "POST", body: "{}" });
-		expect(pending).rejects.toThrow(/did not respond within/);
-	});
+		let settled = false;
+		void pending.then(
+			() => {
+				settled = true;
+			},
+			() => {
+				settled = true;
+			},
+		);
 
-	it("aborts through the caller's signal even while the timeout is armed", async () => {
-		requestUrlMock.mockReturnValue(new Promise<never>(() => undefined));
-		const obsidianFetch = createObsidianRequestUrlFetch(60_000);
-		const controller = new AbortController();
+		await new Promise((resolve) => setTimeout(resolve, 50));
+		expect(settled).toBe(false);
 
-		const pending = obsidianFetch("https://api.example.com/v1/chat", {
-			method: "POST",
-			body: "{}",
-			signal: controller.signal,
-		});
-		controller.abort();
-
-		// The user pressed stop: that must surface as an abort, not as the
-		// provider-side timeout wording.
-		expect(pending).rejects.toThrow(/aborted/i);
+		settle?.({ status: 200, headers: { "content-type": "text/plain" }, arrayBuffer: new TextEncoder().encode("late").buffer });
+		expect((await pending).status).toBe(200);
 	});
 
 	// The `Response` constructor is stricter than HTTP, and `requestUrl` hands

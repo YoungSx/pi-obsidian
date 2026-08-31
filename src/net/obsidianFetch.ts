@@ -23,31 +23,8 @@ import { requestUrl, type RequestUrlParam, type RequestUrlResponse } from "obsid
 /** Header names that Obsidian's `requestUrl` sets itself; forwarding ours breaks the request. */
 const STRIPPED_REQUEST_HEADERS = new Set(["host", "content-length", "connection"]);
 
-/**
- * Ceiling on a single buffered provider request.
- *
- * `requestUrl` has no timeout of its own, so a provider that accepts the
- * connection and then stalls leaves the returned promise pending forever. The
- * agent stays `isStreaming` with no way back except reloading Obsidian, since
- * abort only rejects the race below when the user actually presses stop.
- *
- * Generous on purpose: this is a whole buffered completion, including a long
- * reasoning pass on a slow endpoint, not a single round trip. It exists to
- * bound a hang, not to cut off honest work.
- */
-export const REQUEST_TIMEOUT_MS = 300_000;
-
 function abortError(): DOMException {
 	return new DOMException("The operation was aborted.", "AbortError");
-}
-
-/**
- * Distinct from {@link abortError} so the transcript can say which happened.
- * A user who pressed stop knows why the turn ended; someone whose endpoint went
- * quiet needs to be told, or the only symptom is a reply that never arrives.
- */
-function timeoutError(timeoutMs: number): DOMException {
-	return new DOMException(`The provider did not respond within ${Math.round(timeoutMs / 1000)}s.`, "TimeoutError");
 }
 
 function normalizeHeaders(init: RequestInit | undefined, input: RequestInfo | URL): Record<string, string> {
@@ -237,8 +214,14 @@ function toResponse(response: RequestUrlResponse): Response {
  * tradeoff is that the response is fully buffered: pi-ai's SSE parser receives
  * the entire body as one chunk, so tokens appear all at once instead of
  * incrementally.
+ *
+ * No deadline of its own. pi-ai treats `timeoutMs` as opt-in and leaves it
+ * unset, so a transport that invented one would cut off requests the provider
+ * layer deliberately left unbounded — a long reasoning pass reads exactly like
+ * a stall from down here. A wedged endpoint is ended by the user pressing stop,
+ * which the race below turns into a real rejection.
  */
-export function createObsidianRequestUrlFetch(timeoutMs = REQUEST_TIMEOUT_MS): typeof globalThis.fetch {
+export function createObsidianRequestUrlFetch(): typeof globalThis.fetch {
 	const obsidianFetch = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
 		const url = resolveUrl(input);
 		const method = resolveMethod(input, init);
@@ -264,34 +247,23 @@ export function createObsidianRequestUrlFetch(timeoutMs = REQUEST_TIMEOUT_MS): t
 
 		const requestPromise = requestUrl(params);
 
-		// Both losers of this race are cleaned up in the `finally` below: a
-		// pending timer would keep Obsidian's event loop alive after a fast
-		// response, and an un-removed abort listener leaks for as long as the
-		// caller's controller does — which for the agent is the whole turn.
-		let timer: ReturnType<typeof setTimeout> | undefined;
+		// `requestUrl` ignores signals and keeps its promise pending, so abort has
+		// to reject the wait rather than merely flag it — otherwise pressing stop
+		// leaves the turn hanging. The listener is removed in the `finally`; an
+		// un-removed one lives as long as the caller's controller, which for the
+		// agent is the whole turn.
+		if (!signal) {
+			return toResponse(await requestPromise);
+		}
 		let onAbort: (() => void) | undefined;
 		try {
-			const guards: Promise<never>[] = [
-				new Promise<never>((_resolve, reject) => {
-					timer = setTimeout(() => reject(timeoutError(timeoutMs)), timeoutMs);
-				}),
-			];
-			if (signal) {
-				guards.push(
-					new Promise<never>((_resolve, reject) => {
-						onAbort = () => reject(abortError());
-						signal.addEventListener("abort", onAbort, { once: true });
-					}),
-				);
-			}
-
-			const response = await Promise.race([requestPromise, ...guards]);
-			return toResponse(response);
+			const aborted = new Promise<never>((_resolve, reject) => {
+				onAbort = () => reject(abortError());
+				signal.addEventListener("abort", onAbort, { once: true });
+			});
+			return toResponse(await Promise.race([requestPromise, aborted]));
 		} finally {
-			if (timer !== undefined) {
-				clearTimeout(timer);
-			}
-			if (signal && onAbort) {
+			if (onAbort) {
 				signal.removeEventListener("abort", onAbort);
 			}
 		}
