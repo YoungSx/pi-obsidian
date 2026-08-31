@@ -15,10 +15,13 @@ import { probeModelListing, type ModelListingResult } from "./net/modelListing";
  * Two probe shapes exist, because a provider and a model are answerable to
  * different questions:
  *
- * - A **chat probe** sends a one-token completion for a named model. A pass
- *   means the credential, base URL, protocol, and that model id all agree with
- *   the server — the strongest statement available, and the only one that
- *   exercises the request body a real turn will send.
+ * - A **chat probe** asks a named model for a one-word answer. A pass means the
+ *   credential, base URL, protocol, and that model id all agree with the server
+ *   — the strongest statement available, and the only one that exercises the
+ *   request body a real turn will send. "Smallest" is the prompt, never the
+ *   configured fields: the probe overrides nothing the user filled in, so a
+ *   server that rejects one of those values says so here rather than at the
+ *   user's first real message.
  * - A **listing probe** asks the endpoint which models it serves. A pass means
  *   the base URL, protocol, and credential agree; it says nothing about any
  *   particular model id, because none was sent.
@@ -51,13 +54,11 @@ export interface ConnectionTestOptions {
  * Prompt for the chat probe.
  *
  * Deliberately trivial: the request exists to prove reachability and auth, not
- * to sample quality, and a one-token reply keeps a paid endpoint's cost at
- * effectively zero.
+ * to sample quality. A one-word answer is also what keeps a paid endpoint's cost
+ * at effectively zero — billing follows the tokens actually produced, so the
+ * short prompt is the whole saving, and no output cap is needed to achieve it.
  */
 const PROBE_PROMPT = "Reply with the single word: ok";
-
-/** Output cap for the chat probe. One token is enough to prove the round trip. */
-const PROBE_MAX_TOKENS = 1;
 
 /**
  * Turns an unknown thrown value into a message worth showing a user.
@@ -107,7 +108,11 @@ export async function testModelConnection(
 		const response = await models.completeSimple(
 			buildConfiguredModel(model, provider),
 			{ messages: [{ role: "user", content: PROBE_PROMPT, timestamp: Date.now() }] },
-			{ apiKey: provider.apiKey.trim(), maxTokens: PROBE_MAX_TOKENS, signal: options.signal, fetch: options.fetch },
+			// No `maxTokens` override: pi-ai resolves the cap as
+			// `options.maxTokens ?? model.maxTokens`, so passing one here would
+			// silently replace the value the user configured — the one thing this
+			// probe exists to verify. See the note above the function.
+			{ apiKey: provider.apiKey.trim(), signal: options.signal, fetch: options.fetch },
 		);
 		// A stream can terminate with an error message rather than throwing, so
 		// the reported stop reason decides the verdict, not the absence of a throw.
