@@ -1877,6 +1877,10 @@ button.piem-chat__latest {
 	font-family: var(--font-interface);
 	font-size: var(--font-ui-smaller);
 	min-width: 0;
+	/* Skill and MCP descriptions come from outside with no length limit, and a
+	 * picker row answers one question — is this the item I want. One line with
+	 * an ellipsis keeps that scan; the settings fold (descFold.ts) is the
+	 * read-the-whole-thing surface, and it folds instead. */
 	overflow: hidden;
 	text-overflow: ellipsis;
 	white-space: nowrap;
@@ -2589,27 +2593,70 @@ button.piem-chat__latest {
  * expand button and the MCP verdict line share that element — clamping the
  * element would clamp them away with the text. `-webkit-line-clamp` is the
  * only way to get a real ellipsis on wrapped prose; `display: -webkit-box` is
- * scoped to this span so nothing else in the row inherits the layout.
+ * scoped to this span so nothing else in the row inherits the layout. The
+ * folded class rides the body span itself, one selector with no descendant
+ * hop — the clamp lives and dies with the one element that owns the text.
  */
 .piem-settings-desc-body {
 	overflow-wrap: anywhere;
 }
 
-.piem-settings-desc--folded .piem-settings-desc-body {
+.piem-settings-desc-body.piem-settings-desc--folded {
 	display: -webkit-box;
 	-webkit-box-orient: vertical;
 	-webkit-line-clamp: 2;
 	overflow: hidden;
 }
 
+/*
+ * The fold toggle: a chevron plus a word, not a bare text link.
+ *
+ * The chevron is the affordance a colour-blind or scanning reader gets when
+ * the label is skimmed past; the label is the one a screen-reader user's
+ * browser announces as the accessible name. Hover deepens the tone rather
+ * than underlining — this is a control, not a link, and the chevron already
+ * points somewhere. The icon rides `--icon-xs` so it matches the label's
+ * cap height instead of floating above it.
+ */
 .piem-settings-desc-toggle {
-	font-size: var(--font-ui-smaller);
-	color: var(--text-muted);
-	cursor: var(--cursor);
-	padding: 0;
+	align-items: center;
 	background: none;
 	border: none;
+	border-radius: var(--radius-s);
 	box-shadow: none;
+	color: var(--text-muted);
+	cursor: var(--cursor);
+	display: inline-flex;
+	font-size: var(--font-ui-smaller);
+	gap: var(--size-2-1);
+	margin-top: var(--size-2-1);
+	padding: 0;
+	transition: color 0.15s ease-out;
+}
+
+.piem-settings-desc-toggle:focus-visible {
+	box-shadow: 0 0 0 2px var(--background-modifier-border-focus);
+	outline: none;
+}
+
+.piem-settings-desc-toggle-icon {
+	display: inline-flex;
+	transition: transform 0.15s ease-out;
+}
+
+.piem-settings-desc-toggle-icon svg {
+	--icon-size: var(--icon-xs);
+}
+
+.piem-settings-desc-toggle[aria-expanded="true"] .piem-settings-desc-toggle-icon {
+	transform: rotate(180deg);
+}
+
+@media (prefers-reduced-motion: reduce) {
+	.piem-settings-desc-toggle,
+	.piem-settings-desc-toggle-icon {
+		transition: none;
+	}
 }
 
 /* A tap latches :hover on a phone, so the hover state rides the same gate
@@ -2617,8 +2664,17 @@ button.piem-chat__latest {
 @media (hover: hover) {
 	.piem-settings-desc-toggle:hover {
 		color: var(--text-normal);
-		text-decoration: underline;
 	}
+}
+
+/* A finger, not a cursor, taps this: the label sits at `--font-ui-smaller`,
+ * well under any tap-target guidance, so the padding adds height without
+ * asking the row for more room than a nudge. */
+@media (pointer: coarse) {
+	.piem-settings-desc-toggle {
+		padding: var(--size-2-2) 0;
+	}
+}
 }
 
 /*
