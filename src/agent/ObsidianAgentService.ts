@@ -2265,7 +2265,25 @@ export class ObsidianAgentService {
 			// asked for when they typed. Runs the user aborted are excluded
 			// inside the resume itself, and `abort()` also empties the mirror
 			// directly, so the two guards are belt and braces.
-			await this.resumeQueuedPrompts(event.messages);
+			//
+			// Not awaited, and not yet: pi awaits this listener inside the
+			// run's executor, so at this moment `activeRun` is still held and
+			// `state.isStreaming` still true — a prompt dispatched here dies on
+			// "Agent is already processing" (or, worse, bails on the resume's
+			// own streaming guard). `waitForIdle()` resolves exactly after
+			// `finishRun()` has cleared that state, which pi documents as the
+			// definition of "idle"; the resume picks the dispatch up from
+			// there. Awaiting `waitForIdle()` here instead would deadlock — the
+			// run cannot finish until this listener returns — so the promise is
+			// deliberately left unchained into this handler's control flow.
+			void this.agent
+				?.waitForIdle()
+				.then(() => this.resumeQueuedPrompts(event.messages))
+				.catch((error) => {
+					this.log.error("Failed to dispatch stranded queued prompts", () => ({
+						error: error instanceof Error ? error.message : String(error),
+					}));
+				});
 		}
 		await this.refreshSessionInfo();
 		this.notify();

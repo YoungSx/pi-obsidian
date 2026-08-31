@@ -1536,6 +1536,35 @@ describe("ObsidianAgentService queued prompts (mid-run sends)", () => {
 		expect(userTexts(service)).toEqual(["First question"]);
 	});
 
+	it("dispatches stranded queue entries itself once the run's end has fully settled", async () => {
+		// This pins the dispatch *timing*, which the direct-call rescue tests
+		// above cannot: pi awaits its listeners inside the run's executor, so
+		// during `agent_end` the run is still held — `isStreaming` true,
+		// `agent.prompt` forbidden. The rescue must wait for `waitForIdle()` and
+		// only then start its own run; dispatching inline would bail on the
+		// resume's streaming guard and the words would sit on chips forever.
+		const gated = createGatedStreamFn();
+		const service = createService(new MemoryAdapter(), { streamFn: gated.streamFn });
+
+		const run = service.sendPrompt("First question");
+		await gated.waitForFirstRequest();
+		// Into the mirror only, bypassing `agent.steer`: pi never learns of
+		// these words, so no drain point can inject them and the mirror is
+		// full when the run ends — exactly the stranded shape.
+		addStranded(service, "Too late for the drain point");
+		expect(service.getSnapshot().queuedPrompts).toHaveLength(1);
+
+		gated.release();
+		await run;
+
+		await waitFor(() => userTexts(service).includes("Too late for the drain point"));
+
+		// The rescue ran as its own run (the gated stream's second request
+		// answered it) and the mirror is spent.
+		expect(userTexts(service)).toEqual(["First question", "Too late for the drain point"]);
+		expect(service.getSnapshot().queuedPrompts).toEqual([]);
+	});
+
 	it("carries stranded queue entries ahead of the next direct send", async () => {
 		// A run that ended before its drain point leaves the mirror full; the
 		// next ordinary send must dispatch those words first, not behind the new one.
