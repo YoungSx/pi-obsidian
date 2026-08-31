@@ -1,7 +1,7 @@
 import { Type } from "typebox";
 import type { AgentTool } from "@earendil-works/pi-agent-core";
 import { textResult, throwIfAborted } from "../tools/toolResult";
-import type { SubagentEntry } from "./registry";
+import { statusOf, type SubagentEntry } from "./registry";
 import type { SubagentToolsContext } from "./spawnTool";
 
 /**
@@ -109,18 +109,6 @@ export function createListSubagentsTool(context: SubagentToolsContext): AgentToo
 			});
 		},
 	};
-}
-
-type SubagentState = "running" | "done" | "incomplete" | "failed";
-
-function statusOf(entry: SubagentEntry): SubagentState {
-	if (!entry.settled) {
-		return "running";
-	}
-	if (entry.error) {
-		return "failed";
-	}
-	return entry.result?.incomplete ? "incomplete" : "done";
 }
 
 /** One line per child: enough to decide, without reproducing the report. */

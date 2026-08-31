@@ -13,6 +13,7 @@ import { clampWait, clampWaitTimeoutMs, WAIT_DEFAULT_MS, WAIT_MAX_MS, WAIT_MIN_M
 import { runSubagent, SUBAGENT_MAX_COMPACTIONS, SUBAGENT_MAX_LIFETIME_MS } from "./runner";
 import { SUBAGENT_CONCURRENCY_LIMIT } from "./spawnTool";
 import { createSubagentExtension, type SubagentHost } from "./extension";
+import { anyRunning, snapshotSubagents } from "./inspectorModel";
 import {
 	DEFAULT_SUBAGENT_ROLE_NAME,
 	SUBAGENT_ROLES,
@@ -1275,5 +1276,136 @@ describe("spawn/wait extension", () => {
 		expect(textBlock(result)).toContain("finished with no report");
 		expect(textBlock(result)).not.toContain("failed");
 		expect(result.details).toMatchObject({ status: "settled", subagents: [{ subagentId: "subagent-1", status: "done" }] });
+	});
+});
+
+describe("inspector data", () => {
+	function makeHost(streamFn: StreamFn): SubagentHost {
+		return {
+			createVaultTools: () => [],
+			getModel: () => MODEL,
+			getStreamFn: () => streamFn,
+			getThinkingLevel: () => "off" as never,
+			getSkills: () => [],
+		};
+	}
+
+	it("the run result carries the child's transcript for the inspector", async () => {
+		const result = await runSubagent({
+			task: "Sweep the vault",
+			role: findSubagentRole("general")!,
+			tools: [recordingTool("grep", [])],
+			model: MODEL,
+			streamFn: scriptedStreamFn([
+				{ toolCall: { id: "call_1", name: "grep" } },
+				{ text: "Found it." },
+			]),
+			thinkingLevel: "off" as never,
+		});
+		// The process record is the point: user prompt, the tool-call turn, and
+		// the report turn, all readable after settlement.
+		expect(result.messages.map((message) => message.role)).toEqual(["user", "assistant", "toolResult", "assistant"]);
+	});
+
+	it("the registry records spawn metadata and exposes change events", async () => {
+		const extension = createSubagentExtension(makeHost(hangingStreamFn()));
+		const events: string[] = [];
+		const unsubscribe = extension.registry.subscribe(() => events.push("change"));
+		const controller = new AbortController();
+		try {
+			await toolNamed(extension.createTools(), "spawn_subagent").execute(
+				"c1",
+				{ task: "Sweep", role: "scout", instructions: "Be brief." },
+				controller.signal,
+			);
+			const entry = extension.registry.get("subagent-1");
+			expect(entry).toMatchObject({
+				task: "Sweep",
+				instructions: "Be brief.",
+				role: "scout",
+				depth: 1,
+				modelId: "test-model",
+				thinkingLevel: "off",
+			});
+			expect(entry?.spawnedAt).toBeGreaterThan(0);
+			expect(entry?.settledAt).toBeUndefined();
+			// One event so far: the spawn. Nothing settles while the child hangs.
+			expect(events).toEqual(["change"]);
+
+			unsubscribe();
+			controller.abort();
+			await entry?.promise.catch(() => undefined);
+			// Unsubscribed, so no further events reach the listener even though
+			// the settle fired.
+			expect(events).toEqual(["change"]);
+			expect(entry?.settledAt).toBeGreaterThan(entry!.spawnedAt);
+		} finally {
+			extension.disposeAll();
+		}
+	});
+
+	it("snapshots copy entries without exposing the live handles", async () => {
+		const extension = createSubagentExtension(makeHost(scriptedStreamFn([{ text: "The report." }])));
+		try {
+			await toolNamed(extension.createTools(), "spawn_subagent").execute("c1", { task: "Sweep" }, undefined);
+			await toolNamed(extension.createTools(), "wait_subagent").execute("c2", {}, undefined);
+			const now = Date.now();
+			const snapshots = snapshotSubagents(extension.registry, now);
+			expect(snapshots).toHaveLength(1);
+			const snapshot = snapshots[0]!;
+			expect(snapshot).toMatchObject({
+				id: "subagent-1",
+				task: "Sweep",
+				depth: 1,
+				status: "done",
+				report: "The report.",
+				turns: 1,
+			});
+			expect(snapshot.durationMs).toBe((snapshot.settledAt ?? 0) - snapshot.spawnedAt);
+			// A settled snapshot carries the transcript; a plain copy, not the entry.
+			expect(snapshot.messages.length).toBeGreaterThan(0);
+			expect(snapshot).not.toHaveProperty("abort");
+			expect(snapshot).not.toHaveProperty("promise");
+		} finally {
+			extension.disposeAll();
+		}
+	});
+
+	it("a running child's duration anchors on the caller's clock", async () => {
+		const extension = createSubagentExtension(makeHost(hangingStreamFn()));
+		const controller = new AbortController();
+		try {
+			await toolNamed(extension.createTools(), "spawn_subagent").execute("c1", { task: "Sweep" }, controller.signal);
+			const snapshots = snapshotSubagents(extension.registry, Date.now() + 5_000);
+			expect(snapshots[0]!.status).toBe("running");
+			// `now` is the anchor, not `settledAt`, which is still unset — this is
+			// what makes a rendered "elapsed" deterministic in a test.
+			expect(snapshots[0]!.durationMs).toBeGreaterThanOrEqual(5_000);
+			expect(anyRunning(snapshots)).toBe(true);
+		} finally {
+			controller.abort();
+			extension.disposeAll();
+		}
+	});
+
+	it("a failed child snapshots its error and an empty process record", async () => {
+		const extension = createSubagentExtension(
+			{
+				...makeHost(scriptedStreamFn([{ toolCall: { id: "t1", name: "grep" } }, { text: "" }])),
+				createVaultTools: () => [failingTool()],
+			},
+			{ waitPacing: TEST_PACING },
+		);
+		try {
+			await toolNamed(extension.createTools(), "spawn_subagent").execute("c1", { task: "a" }, undefined);
+			await new Promise((resolve) => setTimeout(resolve, 60));
+			const snapshots = snapshotSubagents(extension.registry, Date.now());
+			expect(snapshots[0]!.status).toBe("failed");
+			expect(snapshots[0]!.errorMessage).toContain("vault exploded");
+			expect(snapshots[0]!.messages).toEqual([]);
+			expect(anyRunning(snapshots)).toBe(false);
+		} finally {
+			extension.disposeAll();
+		}
 	});
 });

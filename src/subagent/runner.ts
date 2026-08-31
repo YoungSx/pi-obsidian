@@ -106,6 +106,16 @@ export interface SubagentRunResult {
 	 * the parent has to interpret.
 	 */
 	incomplete?: "reaped" | "aborted";
+	/**
+	 * The child's full transcript, as it stood when the run ended.
+	 *
+	 * The wait tool never needed this — the report text is its whole answer — but
+	 * the inspector shows the process, and a transcript read from the entry after
+	 * settlement is the only way to show it without streaming plumbing through
+	 * every turn. Session memory only, never written to disk, and bounded by the
+	 * same lifetime the entry already has: it dies with the service.
+	 */
+	messages: readonly AgentMessage[];
 }
 
 export interface LinkedSignals {
@@ -390,7 +400,7 @@ export async function runSubagent(options: SubagentRunOptions): Promise<Subagent
 		if (!salvaged) {
 			throw abortError();
 		}
-		return { text: salvaged, ...accounting, incomplete: linked.timedOut() ? "reaped" : "aborted" };
+		return { text: salvaged, ...accounting, messages, incomplete: linked.timedOut() ? "reaped" : "aborted" };
 	}
 
 	// A message that requested tools has no report in it — even when it also
@@ -408,7 +418,7 @@ export async function runSubagent(options: SubagentRunOptions): Promise<Subagent
 		if (failure) {
 			throw new Error(`Subagent failed: ${describeFailure(failure, lastAssistant, model, accounting.turns)}`);
 		}
-		return { text: "", ...accounting };
+		return { text: "", ...accounting, messages };
 	}
-	return { text, ...accounting };
+	return { text, ...accounting, messages };
 }

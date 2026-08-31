@@ -1560,6 +1560,17 @@ export class ObsidianAgentService {
 		return this.subagentExtension.createTools();
 	}
 
+	/**
+	 * The subagent registry, for the read-only inspector surface.
+	 *
+	 * Same instance the delegation tools write: one source of truth, no mirror.
+	 * Read-only in spirit — nothing in the UI layer should call `spawn`/`kill`
+	 * on it, and the registry's own docs say observers copy what they render.
+	 */
+	getSubagentRegistry(): ReturnType<typeof createSubagentExtension>["registry"] {
+		return this.subagentExtension.registry;
+	}
+
 	/** External tools for the current settings; empty when no provider is wired. */
 	private fetchExternalTools(): Promise<AgentTool[]> {
 		return this.getExternalToolsFn();
