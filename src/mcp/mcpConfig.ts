@@ -7,11 +7,12 @@
  * a renderer — off-limits on mobile, where this plugin is first-class.
  *
  * `token` follows the same lifecycle as provider API keys: plaintext in memory,
- * sealed to `enc:v1:…` by {@link sealMcpServerTokens} at the data.json boundary
- * and unsealed on load. `normalizeSettings` runs before unsealing, so it must
- * pass sealed strings through untouched — trimming or rejecting `enc:v1:` would
- * corrupt the round trip.
+ * but on disk the field is `""` whenever {@link secretRef} names a keychain
+ * entry — the token itself lives in the keychain and `data.json` holds only the
+ * reference.
  */
+
+import { isValidSecretId } from "../keychain";
 
 /** One configured MCP server. */
 export interface McpServerConfig {
@@ -23,6 +24,12 @@ export interface McpServerConfig {
 	url: string;
 	/** Optional bearer token sent as `Authorization: Bearer …`. */
 	token: string;
+	/**
+	 * Id of the keychain entry this server's token is bound to, or `""` for
+	 * inline tokens. Same exclusivity rule as a provider's: a set `secretRef`
+	 * means the on-disk `token` is always `""`.
+	 */
+	secretRef: string;
 	/** Disabled servers are skipped at connect time but kept in the list. */
 	enabled: boolean;
 }
@@ -84,11 +91,16 @@ export function normalizeMcpServer(data: unknown): McpServerConfig | null {
 		return null;
 	}
 	const name = typeof raw.name === "string" ? raw.name.trim() : "";
+	const secretRef = typeof raw.secretRef === "string" ? raw.secretRef.trim() : "";
 	return {
 		id,
 		name: name === "" ? url : name,
 		url,
 		token: typeof raw.token === "string" ? raw.token : "",
+		// Same rule as providers: a string that cannot name an entry is hand-edit
+		// junk and reads as "nothing bound", while a well-formed id naming nothing
+		// stays — a dangling reference the panel reports, not a lost binding.
+		secretRef: isValidSecretId(secretRef) ? secretRef : "",
 		enabled: raw.enabled !== false,
 	};
 }

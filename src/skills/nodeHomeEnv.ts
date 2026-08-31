@@ -40,7 +40,7 @@ interface NodeModules {
  */
 declare const require: (id: string) => unknown;
 
-/** The host's module lookup, as {@link secretsStore}'s `HostRequire` models it. */
+/** The host's module lookup, as {@link import("../keychainEnv").createSecretEnvironment}'s `HostRequire` models it. */
 export type HostRequire = (id: string) => unknown;
 
 /**
@@ -136,7 +136,7 @@ export class NodeHomeEnv implements ExecutionEnv {
 	 * @param options.home Overrides the detected home directory. Tests inject
 	 * one; the default is the real `os.homedir()`.
 	 * @param options.hostRequire Overrides the module lookup. Following
-	 * {@link import("../secretsStore").createSecretEnvironment}, `undefined`
+	 * {@link import("../keychainEnv").createSecretEnvironment}, `undefined`
 	 * means "use the host's", and an explicit `null` models a shell exposing
 	 * none — the only way a test can reach the mobile branch, since the bundle's
 	 * `require` is resolved at evaluation time.

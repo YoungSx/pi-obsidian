@@ -107,20 +107,6 @@ export interface SettingsPanelHost {
 	save(): Promise<void>;
 	/** Whether this device can encrypt secrets at rest. */
 	secretStorage: SecretStorageState;
-	/**
-	 * Drops a deleted provider's key from the vault tier.
-	 *
-	 * Called at the moment the deletion is confirmed, before {@link save}: the
-	 * panel owns the semantics, the host owns the id derivation, and without
-	 * this the store would keep the key until something reuses its id.
-	 */
-	forgetProviderSecret(providerId: string): void;
-	/**
-	 * Drops a deleted MCP server's token from the vault tier.
-	 *
-	 * Same contract as {@link forgetProviderSecret}, one family over.
-	 */
-	forgetMcpServerSecret(serverId: string): void;
 	/** Names whatever requests currently target, for the status line. */
 	describeTarget(): string;
 	/** Copy for the whole panel, resolved from {@link SettingsPanelSettings.language}. */
@@ -423,11 +409,12 @@ function renderProviderList(containerEl: HTMLElement, host: SettingsPanelHost, r
 					subject: t.t("confirmDelete.providerSubject", { name: describeProviderConfig(provider) }),
 					consequences: describeProviderDeletion(boundModels, t),
 					t,
-					// The key may exist nowhere else — offer it before it goes.
-					copySecret: provider.apiKey === "" ? undefined : provider.apiKey,
+					// An inline key may exist nowhere else — offer it before it goes. A
+					// keychain-bound provider's key is not the vault's to offer: the
+					// entry outlives the row, in a store the plugin only reads.
+					copySecret: provider.secretRef === "" && provider.apiKey !== "" ? provider.apiKey : undefined,
 					onConfirm: async () => {
 						removeProvider(settings, provider.id);
-						host.forgetProviderSecret(provider.id);
 						await host.save();
 						refresh();
 					},
@@ -1371,8 +1358,10 @@ function renderMcpRow(containerEl: HTMLElement, host: SettingsPanelHost, state: 
 				consequences: [t.t("deletion.mcpServer")],
 				t,
 				onConfirm: async () => {
+					// No keychain cleanup on purpose: a bound token's entry belongs to
+					// the user and may be shared, so the plugin — read-only there —
+					// leaves it alone.
 					host.settings.mcpServers = host.settings.mcpServers.filter((row) => row.id !== state.id);
-					host.forgetMcpServerSecret(state.id);
 					await afterMutation();
 				},
 			});
@@ -1656,9 +1645,19 @@ function renderLinkRow(containerEl: HTMLElement, row: AboutLink): void {
 	});
 }
 
-/** Row description for a provider: protocol, key state, and how many models use it. */
+/**
+ * Row description for a provider: protocol, key state, and how many models use
+ * it.
+ *
+ * Key state is three-way on purpose: bound-and-present, bound-but-dangling (the
+ * entry was deleted from Obsidian's own UI, and the row is the only place that
+ * can say so), and inline. A dangling binding shows as missing rather than
+ * "no key" because the fix is not typing a key — it is re-picking an entry.
+ */
 function describeProviderRow(provider: ProviderConfig, modelCount: number, t: Translator): string {
-	const key = t.t(provider.apiKey.trim() ? "settings.keySet" : "settings.noKey");
+	const key = provider.secretRef
+		? t.t(provider.apiKey.trim() ? "settings.keyBound" : "settings.keyMissing")
+		: t.t(provider.apiKey.trim() ? "settings.keySet" : "settings.noKey");
 	const models = t.t(modelCount === 1 ? "settings.modelCount" : "settings.modelsCount", { count: modelCount });
 	return `${provider.baseUrl} · ${wireProtocolLabel(provider.protocol, t)} · ${key} · ${models}`;
 }

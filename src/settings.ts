@@ -3,7 +3,7 @@ import { getBuiltinModels } from "./net/builtinCatalog";
 import type { Model } from "@earendil-works/pi-ai";
 import type PiemPlugin from "./main";
 import { CUSTOM_ENDPOINT_PROVIDER, DEFAULT_MODEL_ID, DEFAULT_PROVIDER } from "./constants";
-import type { SecretEnvironment, SecretStorageTier } from "./secretsStore";
+import type { SecretEnvironment, SecretStorageTier } from "./keychainEnv";
 import type { NetworkTransport } from "./net/obsidianFetch";
 import {
 	buildConfiguredModel,
@@ -492,11 +492,11 @@ export class PiemSettingTab extends PluginSettingTab {
 	 *
 	 * Reads through to the resolved environment rather than caching, so the panel
 	 * and the storage layer can never disagree about which tier is in effect.
-	 * Defaults to `plaintext` when no environment was injected, which is the
-	 * honest answer for a tab constructed without one.
+	 * Defaults to `manual` when no environment was injected, which is the honest
+	 * answer for a tab constructed without one.
 	 */
 	get secretStorageTier(): SecretStorageTier {
-		return this.secretEnvironment?.tier() ?? "plaintext";
+		return this.secretEnvironment?.tier() ?? "manual";
 	}
 
 	/**
@@ -528,8 +528,6 @@ export class PiemSettingTab extends PluginSettingTab {
 				}
 			},
 			secretStorage: this.secretStorageTier,
-			forgetProviderSecret: (providerId) => this.plugin.forgetProviderSecret(providerId),
-			forgetMcpServerSecret: (serverId) => this.plugin.forgetMcpServerSecret(serverId),
 			openLogView: () => this.plugin.openLogView(),
 			describeTarget: () => describeModelTarget(this.plugin.settings, getT(language)),
 			t: getT(language),

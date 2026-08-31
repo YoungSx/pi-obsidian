@@ -339,6 +339,8 @@ export const zhCN: DeepPartial<EnCopy> = {
 		editModel: "编辑模型",
 		deleteModel: "删除模型",
 		keySet: "已设置密钥",
+		keyBound: "密钥在 Obsidian 钥匙串中",
+		keyMissing: "钥匙串条目已缺失",
 		noKey: "无密钥",
 		modelCount: "{count} 个模型",
 		modelsCount: "{count} 个模型",
@@ -585,7 +587,7 @@ export const zhCN: DeepPartial<EnCopy> = {
 		modelWasActive: "它是当前模型，移除后由 {model} 接替。",
 		modelWasLast: "它是唯一的模型，移除后没有继任——请先添加另一个再发消息。",
 		skillFiles: "技能的文件会移入回收站，并不再对代理可用。",
-		mcpServer: "它的工具不再提供给代理。为它保存的令牌会从此笔记库的配置中移除。",
+		mcpServer: "它的工具不再提供给代理。其令牌绑定的钥匙串条目会保留不动。",
 	},
 
 	// 第一下 Esc 落在带着未保存修改的配置弹窗上时，就地显示的这句话。
@@ -607,11 +609,18 @@ export const zhCN: DeepPartial<EnCopy> = {
 	},
 
 	secretStorage: {
-		vault: "存储在 Obsidian 的密钥存储中，也就是操作系统的钥匙串，不在此笔记库内。",
-		plaintext: "此版本的 Obsidian 没有密钥存储，因此密钥以明文形式存储在此笔记库的插件配置中。",
-		keyField: "仅发送给 {target}。{storage} 请使用受限、低限额的密钥。",
-		noSync: "密钥存储不会同步，因此每台设备都需要各自的一份密钥。在另一台设备上重新输入是正常的。",
+		delegated: "绑定的密钥保存在 Obsidian 的钥匙串里，不在此笔记库内。",
+		delegatedUnencrypted: "绑定的密钥保存在 Obsidian 的钥匙串里，但此设备不加密存储。它们仍不在此笔记库内。",
+		manual: "此设备不支持钥匙串，此处输入的密钥会以明文形式存储在此笔记库的插件配置中。",
+		manualKeyField: "仅发送给 {target}。{storage} 请使用受限、低限额的密钥。",
+		noSync: "钥匙串不会同步，因此每台设备都要各自选取一次。在另一台设备上重新选取是正常的。",
 		providerTarget: "此提供方的基础 URL",
+		boundTo: "已绑定钥匙串条目「{name}」。",
+		danglingRef: "此提供方绑定的钥匙串条目已被删除。请重新选取。",
+		openKeychain: "打开钥匙串",
+		openKeychainDesc: "在 Obsidian 的设置里创建或选取钥匙串条目。",
+		manualGroup: "手动填写密钥",
+		manualGroupHint: "密钥无法放进钥匙串时使用。会存储在此笔记库的配置中。",
 	},
 
 	providerModal: {

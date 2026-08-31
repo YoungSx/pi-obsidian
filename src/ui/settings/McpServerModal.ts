@@ -46,7 +46,7 @@ export class McpServerModal extends Modal {
 		this.isNew = options.server === undefined;
 		// A new draft carries its real id from the start: the panel upserts by id,
 		// so add and edit share one submit path and a reopened form keeps its row.
-		this.draft = options.server ? { ...options.server } : { id: generateMcpServerId(), name: "", url: "", token: "", enabled: true };
+		this.draft = options.server ? { ...options.server } : { id: generateMcpServerId(), name: "", url: "", token: "", secretRef: "", enabled: true };
 		this.originalDraft = JSON.stringify(normalizeServerDraft(this.draft));
 		this.guard = new DiscardGuard(() => {
 			this.status?.showError(options.t.t("discard.warning"));
