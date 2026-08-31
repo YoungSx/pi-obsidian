@@ -35,6 +35,7 @@ export interface ActiveSessionInfo {
 	updatedAt: string;
 	name?: string;
 	messageCount: number;
+	/** Opening user message; empty until the session has one. UI owns the fallback copy. */
 	firstMessage: string;
 }
 
@@ -414,7 +415,9 @@ export class ObsidianSessionManager {
 			updatedAt: new Date(effectiveModifiedTime).toISOString(),
 			name: name?.trim() || undefined,
 			messageCount: stats.messageCount,
-			firstMessage: firstMessage ? extractMessageText(firstMessage.message) || "(no messages)" : "(no messages)",
+			// Empty string, not a placeholder: sessionTitle's fallback to
+			// session.untitled only triggers on emptiness.
+			firstMessage: firstMessage ? extractMessageText(firstMessage.message) : "",
 			modifiedTime: effectiveModifiedTime,
 		};
 	}
