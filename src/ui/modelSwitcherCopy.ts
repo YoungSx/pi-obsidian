@@ -39,6 +39,13 @@ export interface ModelTarget {
 	 */
 	provider: string;
 	modelId: string;
+	/**
+	 * Obsidian icon id of the vendor mark for the active target, already
+	 * resolved by the snapshot — undefined when the model id and endpoint name
+	 * no vendor this plugin ships a mark for, which is the switcher's cue to
+	 * render none rather than a placeholder.
+	 */
+	vendorIcon?: string;
 }
 
 /**

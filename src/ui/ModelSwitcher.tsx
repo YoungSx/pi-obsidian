@@ -1,6 +1,6 @@
 import React from "react";
 import { Menu } from "obsidian";
-import { IconButton } from "./ObsidianIcon";
+import { IconButton, ObsidianIcon } from "./ObsidianIcon";
 import { activeModelName, modelChoiceLabel, modelSwitcherTitle, type ModelTarget } from "./modelSwitcherCopy";
 import { useT } from "./TranslatorContext";
 
@@ -110,6 +110,9 @@ export function ModelSwitcher({ target, onSelect, onOpenSettings, isBusy }: Mode
 			 * the model and its endpoint, so reading this too would repeat the
 			 * first third of it.
 			 */}
+			{target.vendorIcon !== undefined && (
+				<ObsidianIcon name={target.vendorIcon} className="piem-chat__model-switcher-mark" />
+			)}
 			<span className="piem-chat__model-switcher-name" aria-hidden="true">
 				{activeModelName(target)}
 			</span>

@@ -34,8 +34,11 @@ describe("vendorIcons", () => {
 		const registered = new Map(addIconMock.mock.calls.map(([id, svg]) => [id, svg]));
 		expect(registered.size).toBe(ALL_VENDORS.length);
 		for (const vendor of ALL_VENDORS) {
-			expect(registered.get(vendorIconName(vendor))).toBeDefined();
-			expect(vendorIconName(vendor)).toStartWith(VENDOR_ICON_ID_PREFIX);
+			const name = vendorIconName(vendor) ?? "";
+			expect(name).toStartWith(VENDOR_ICON_ID_PREFIX);
+			expect(registered.get(name)).toBeDefined();
+			// The no-vendor answer is "no icon", not a prefixed empty id.
+			expect(vendorIconName(undefined)).toBeUndefined();
 		}
 	});
 
