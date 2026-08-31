@@ -3,7 +3,7 @@ import { installObsidianStub, requestUrlMock } from "../testing/obsidianStub";
 import type { App, DataAdapter, ListedFiles, Stat, TFile, TFolder } from "obsidian";
 import type { Api, AssistantMessage, Context, Model, SimpleStreamOptions } from "@earendil-works/pi-ai";
 import { createAssistantMessageEventStream } from "@earendil-works/pi-ai";
-import type { AgentMessage, StreamFn } from "@earendil-works/pi-agent-core";
+import type { AgentMessage, OperationStartedRecord, StreamFn } from "@earendil-works/pi-agent-core";
 import type { PromptQueue } from "./promptQueue";
 import { ObsidianSessionManager } from "../session/ObsidianSessionManager";
 import { DEFAULT_SESSION_RETENTION } from "../session/retention";
@@ -101,6 +101,14 @@ class LocalTrashOnlyAdapter extends MemoryAdapter {
 	async trashSystem(): Promise<boolean> {
 		return false;
 	}
+}
+
+/** Polls until the condition holds; the run's steps are async, not observable by await alone. */
+function waitFor(condition: () => boolean): Promise<void> {
+	return new Promise((resolve) => {
+		const tick = () => (condition() ? resolve() : setTimeout(tick, 1));
+		tick();
+	});
 }
 
 class UntrashableAdapter extends MemoryAdapter {
@@ -1387,14 +1395,6 @@ describe("ObsidianAgentService", () => {
 });
 
 describe("ObsidianAgentService queued prompts (mid-run sends)", () => {
-	/** Polls until the condition holds; the run's steps are async, not observable by await alone. */
-	function waitFor(condition: () => boolean): Promise<void> {
-		return new Promise((resolve) => {
-			const tick = () => (condition() ? resolve() : setTimeout(tick, 1));
-			tick();
-		});
-	}
-
 	/** The first text of a message, for asserting on what the transcript actually says. */
 	function firstText(message: { content: unknown }): string {
 		const block = (message.content as { type: string; text?: string }[])[0];
@@ -1635,6 +1635,177 @@ describe("ObsidianAgentService queued prompts (mid-run sends)", () => {
 
 		expect((service as unknown as { promptQueue: PromptQueue }).promptQueue.size).toBe(0);
 		expect(service.getSnapshot().queuedPrompts).toEqual([]);
+	});
+});
+
+/**
+ * The run ledger and crash recovery.
+ *
+ * The ledger is the durability half: every run opens an `operation_started`
+ * before it departs and closes it on `agent_end`, so a crash mid-run leaves
+ * an orphan a later load reads. Recovery is the other half: the load settles
+ * orphans and — when the user's words are still the transcript's tail —
+ * raises the continue offer the banner renders.
+ */
+describe("ObsidianAgentService run ledger and recovery", () => {
+	/** The active session's ledger, read off disk the way a later process would. */
+	async function openOperations(service: ObsidianAgentServiceType): Promise<OperationStartedRecord[]> {
+		return (service as unknown as { sessionManager: ObsidianSessionManager }).sessionManager
+			.getSession()
+			.findOpenOperations("main");
+	}
+
+	it("closes the run it opened, so a normal conversation leaves no orphans", async () => {
+		const service = createService();
+
+		await service.sendPrompt("Hello");
+
+		expect(await openOperations(service)).toEqual([]);
+		const finished = await (service as unknown as { sessionManager: ObsidianSessionManager }).sessionManager
+			.getSession()
+			.findRecords({ type: "operation_finished" });
+		expect(finished).toHaveLength(1);
+		expect(finished[0]).toMatchObject({ outcome: "completed" });
+	});
+
+	it("closes an aborted run as aborted", async () => {
+		// A stream that ends only when aborted — the abort has to be what ends
+		// the run, so the ledger close can be attributed to the abort rather
+		// than to a run that had already settled on its own. Ending with an
+		// aborted-stop message is what a real provider does; abort only
+		// signals, and the run settles when the stream honours that signal.
+		let gate: ReturnType<typeof createAssistantMessageEventStream> | undefined;
+		let gateModel: Model<Api> | undefined;
+		const streamFn: StreamFn = (model, _context, _options) => {
+			gate = createAssistantMessageEventStream();
+			gateModel = model;
+			return gate;
+		};
+		const service = createService(undefined, { streamFn });
+		await service.initialize();
+		const settledPrompt = service.sendPrompt("Long answer, please");
+		await waitFor(() => gate !== undefined);
+
+		const abortSignal = service.getSnapshot().isStreaming;
+		expect(abortSignal).toBe(true);
+		service.abort();
+		// The provider's answer to an abort: the aborted-stop reply, which is
+		// what lets the run settle at all.
+		const model = gateModel!;
+		const message: AssistantMessage = {
+			role: "assistant",
+			content: [{ type: "text", text: "Cut off" }],
+			api: model.api,
+			provider: model.provider,
+			model: model.id,
+			usage: {
+				input: 1_000,
+				output: 1,
+				cacheRead: 0,
+				cacheWrite: 0,
+				totalTokens: 1_001,
+				cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+			},
+			stopReason: "aborted",
+			timestamp: Date.now(),
+		};
+		gate!.push({ type: "error", reason: "aborted", error: message });
+		gate!.end(message);
+		await settledPrompt;
+
+		const finished = await (service as unknown as { sessionManager: ObsidianSessionManager }).sessionManager
+			.getSession()
+			.findRecords({ type: "operation_finished" });
+		expect(finished).toHaveLength(1);
+		// The aborted-stop reply maps to the aborted outcome, not to a failure.
+		expect(finished[0]).toMatchObject({ outcome: "aborted" });
+	});
+
+	it("raises the continue offer when a load finds a run cut before its reply", async () => {
+		// Crash simulation, end to end: a first process opens a run and dies
+		// before its finish record; a second process loads the session off the
+		// same adapter and must find the orphan where the user can act on it.
+		const memory = new MemoryAdapter();
+		const crashed = createService(memory);
+		await crashed.initialize();
+		await crashed.sendPrompt("First question");
+		// The orphan write stands in for the crash: an open operation with no
+		// finish, exactly the shape a killed Obsidian leaves behind.
+		const manager = (crashed as unknown as { sessionManager: ObsidianSessionManager }).sessionManager;
+		await manager.beginRunOperation([
+			{ role: "user", content: [{ type: "text", text: "Second question" }], timestamp: Date.now() },
+		]);
+		await manager.appendMessage({ role: "user", content: [{ type: "text", text: "Second question" }], timestamp: Date.now() });
+
+		const revived = createService(memory);
+		await revived.initialize();
+
+		expect(revived.getSnapshot().canResumeInterrupted).toBe(true);
+		expect(await openOperations(revived)).toEqual([]);
+
+		// Continuing answers the stranded words as its own run, and the offer
+		// clears with it.
+		await revived.resumeInterruptedRun();
+		const snapshot = revived.getSnapshot();
+		expect(snapshot.canResumeInterrupted).toBe(false);
+		const assistantText = snapshot.messages.at(-1);
+		expect(assistantText?.role).toBe("assistant");
+		// The ledger is clean again: the recovery's own run opened and closed.
+		expect(await openOperations(revived)).toEqual([]);
+	});
+
+	it("keeps the offer silent when the tail is the assistant's own words", async () => {
+		// The reply arrived; only the close was lost. Re-offering would invite a
+		// duplicate turn, so the orphan closes silently.
+		const memory = new MemoryAdapter();
+		const crashed = createService(memory);
+		await crashed.initialize();
+		await crashed.sendPrompt("First question");
+		const manager = (crashed as unknown as { sessionManager: ObsidianSessionManager }).sessionManager;
+		await manager.beginRunOperation([{ role: "user", content: [{ type: "text", text: "Second question" }], timestamp: Date.now() }]);
+		await manager.appendMessage({
+			role: "assistant",
+			content: [{ type: "text", text: "Arrived before the crash" }],
+			api: "anthropic-messages",
+			provider: "anthropic",
+			model: "claude-opus-5",
+			usage: {
+				input: 0,
+				output: 0,
+				cacheRead: 0,
+				cacheWrite: 0,
+				totalTokens: 0,
+				cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+			},
+			timestamp: Date.now(),
+			stopReason: "stop",
+		});
+
+		const revived = createService(memory);
+		await revived.initialize();
+
+		expect(revived.getSnapshot().canResumeInterrupted).toBe(false);
+		expect(await openOperations(revived)).toEqual([]);
+	});
+
+	it("dismisses the offer without acting on it", async () => {
+		const memory = new MemoryAdapter();
+		const crashed = createService(memory);
+		await crashed.initialize();
+		await crashed.sendPrompt("First question");
+		const manager = (crashed as unknown as { sessionManager: ObsidianSessionManager }).sessionManager;
+		await manager.beginRunOperation([
+			{ role: "user", content: [{ type: "text", text: "Second question" }], timestamp: Date.now() },
+		]);
+		await manager.appendMessage({ role: "user", content: [{ type: "text", text: "Second question" }], timestamp: Date.now() });
+
+		const revived = createService(memory);
+		await revived.initialize();
+		expect(revived.getSnapshot().canResumeInterrupted).toBe(true);
+
+		revived.dismissInterruptedRun();
+
+		expect(revived.getSnapshot().canResumeInterrupted).toBe(false);
 	});
 });
 

@@ -69,6 +69,15 @@ export const en = {
 		 */
 		contextWall: "Context is almost full. Tidy up earlier messages to keep going longer.",
 		contextWallAction: "Tidy up",
+		/**
+		 * The crash-recovery banner and its button: a run the previous session
+		 * never finished left the user's words as the transcript's tail, and
+		 * one click lets the model answer them. A standing offer like the
+		 * context wall, announced politely — the panel's own continuation, not
+		 * a failure the reader must drop everything for.
+		 */
+		recoveryOffer: "The last reply was cut off before it finished. Continue from where it stopped?",
+		recoveryResume: "Continue",
 		conversationAria: "Conversation",
 		/** Skip link above the transcript; see WCAG 2.4.1 (Bypass Blocks). */
 		skipToComposer: "Skip to message box",
