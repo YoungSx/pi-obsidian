@@ -169,6 +169,58 @@ describe("ObsidianSessionManager", () => {
 	});
 });
 
+/**
+ * The run ledger piem writes for crash recovery: `operation_started` when a
+ * run departs, `operation_finished` with the same id as its `runId` when it
+ * lands. These pin the write discipline the recovery path depends on —
+ * including the pair's id contract, which pi's storage enforces by refusing
+ * to open a second operation while one is still open.
+ */
+describe("ObsidianSessionManager run ledger", () => {
+	it("opens a ledger entry for a run and closes it with the same id", async () => {
+		const adapter = new MemoryAdapter() as unknown as DataAdapter;
+		const manager = new ObsidianSessionManager(adapter, SESSION_DIR, "obsidian-vault:Test");
+		await manager.createSession(DEFAULTS);
+
+		const runId = await manager.beginRunOperation([{ role: "user", content: [{ type: "text", text: "Hello" }], timestamp: 1 }]);
+		expect(await manager.findOpenRunOperations()).toHaveLength(1);
+
+		await manager.endRunOperation(runId, "completed");
+		expect(await manager.findOpenRunOperations()).toEqual([]);
+	});
+
+	it("writes the ledger to the session file so another load can see it", async () => {
+		const adapter = new MemoryAdapter() as unknown as DataAdapter;
+		const manager = new ObsidianSessionManager(adapter, SESSION_DIR, "obsidian-vault:Test");
+		await manager.createSession(DEFAULTS);
+		const runId = await manager.beginRunOperation([{ role: "user", content: [{ type: "text", text: "Hello" }], timestamp: 1 }]);
+
+		// A fresh manager over the same vault reads the crash signature off
+		// disk, not from any in-memory state.
+		const reloaded = new ObsidianSessionManager(adapter as unknown as DataAdapter, SESSION_DIR, "obsidian-vault:Test");
+		await reloaded.loadSession(manager.getActiveSessionPath()!);
+		const open = await reloaded.findOpenRunOperations();
+		expect(open).toHaveLength(1);
+		expect(open[0]?.id).toBe(runId);
+		expect(open[0]?.intent).toMatchObject({ kind: "run", originalPrompt: [{ role: "user" }] });
+	});
+
+	it("carries the failure reason onto the closing record", async () => {
+		const adapter = new MemoryAdapter() as unknown as DataAdapter;
+		const manager = new ObsidianSessionManager(adapter, SESSION_DIR, "obsidian-vault:Test");
+		await manager.createSession(DEFAULTS);
+		const runId = await manager.beginRunOperation([{ role: "user", content: [{ type: "text", text: "Hello" }], timestamp: 1 }]);
+
+		await manager.endRunOperation(runId, "failed", { code: "provider_error", message: "boom" });
+
+		const open = await manager.findOpenRunOperations();
+		expect(open).toEqual([]);
+		const finished = await manager.getSession().findRecords({ type: "operation_finished" });
+		expect(finished).toHaveLength(1);
+		expect(finished[0]).toMatchObject({ runId, outcome: "failed", error: { code: "provider_error", message: "boom" } });
+	});
+});
+
 describe("ObsidianSessionManager branch summary", () => {
 	it("persists a branch summary so a reload keeps the abandoned fork in context", async () => {
 		const adapter = new MemoryAdapter() as unknown as DataAdapter;

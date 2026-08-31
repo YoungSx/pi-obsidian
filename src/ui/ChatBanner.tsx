@@ -14,6 +14,18 @@ interface ContextWallOffer {
 	onDismiss: () => void;
 }
 
+/** The crash-recovery offer: what continuing does, and how it alone is dismissed. */
+interface RecoveryOffer {
+	/** Resumes the reply the crashed run never delivered. */
+	onResume: () => void;
+	/**
+	 * Dismisses this offer alone. Not the shared {@link ChatBannerProps.onDismiss}:
+	 * acknowledging a standing offer must not be mistaken for acknowledging an
+	 * outcome the service reported.
+	 */
+	onDismiss: () => void;
+}
+
 interface ChatBannerProps {
 	/** A failure; announced assertively. */
 	errorMessage?: string;
@@ -32,6 +44,13 @@ interface ChatBannerProps {
 	 * {@link noticeMessage}: that slot belongs to things that happened.
 	 */
 	contextWall?: ContextWallOffer;
+	/**
+	 * The crash-recovery offer, shown while a run the previous process never
+	 * finished left the user's words as the transcript's tail. Standing like
+	 * the wall — it describes a state, not an event — and outranks it: the
+	 * reply behind this offer is one the user already asked for.
+	 */
+	recoveryOffer?: RecoveryOffer;
 	onDismiss: () => void;
 	/**
 	 * Opens the plugin's settings tab. Absent when the host cannot reach it, in
@@ -60,6 +79,7 @@ export function ChatBanner({
 	errorOpensSettings,
 	noticeMessage,
 	contextWall,
+	recoveryOffer,
 	onDismiss,
 	onOpenSettings,
 }: ChatBannerProps): React.JSX.Element {
@@ -81,9 +101,21 @@ export function ChatBanner({
 			<IconButton icon="x" label={t.t("chat.dismissMessage")} onClick={contextWall.onDismiss} className="piem-chat__banner-dismiss" />
 		</div>
 	) : null;
-	// An outcome outranks the standing offer: both live on the polite channel,
-	// and the offer is still true after the outcome has been read.
-	const polite = errorMessage ? null : (notice ?? wall);
+	const recovery = recoveryOffer ? (
+		<div className="piem-chat__banner piem-chat__banner--recovery">
+			<ObsidianIcon name="rotate-ccw" className="piem-chat__banner-icon" />
+			<span className="piem-chat__banner-text">{t.t("chat.recoveryOffer")}</span>
+			<button type="button" className="piem-chat__banner-action" onClick={recoveryOffer.onResume}>
+				{t.t("chat.recoveryResume")}
+			</button>
+			<IconButton icon="x" label={t.t("chat.dismissMessage")} onClick={recoveryOffer.onDismiss} className="piem-chat__banner-dismiss" />
+		</div>
+	) : null;
+	// An outcome outranks the standing offers: both live on the polite channel,
+	// and an offer is still true after the outcome has been read. Between the
+	// offers, the recovery outranks the wall — the reply behind it is one the
+	// user already asked for, and the wall's tidy can wait a turn.
+	const polite = errorMessage ? null : (notice ?? recovery ?? wall);
 
 	return (
 		<>

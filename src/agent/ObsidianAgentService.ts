@@ -11,6 +11,7 @@ import {
 	type AgentMessage,
 	type AgentTool,
 	type ExecutionEnv,
+	type OperationStartedRecord,
 	type PrepareNextTurnContext,
 	type PromptTemplate,
 	type StreamFn,
@@ -143,6 +144,13 @@ export interface ChatSnapshot {
 	 * screen reader interrupt the user to report that nothing had happened.
 	 */
 	noticeMessage?: string;
+	/**
+	 * Whether the last session load found a run the previous process never
+	 * finished, with the user's words still the transcript's tail. The banner
+	 * turns this into the "continue" offer; absent from older snapshots means
+	 * "no", the same reading a fresh install has.
+	 */
+	canResumeInterrupted?: boolean;
 	provider: string;
 	modelId: string;
 	/**
@@ -472,6 +480,19 @@ export class ObsidianAgentService {
 	 */
 	private panelError: PanelError | undefined;
 	private noticeMessage: string | undefined;
+	/**
+	 * Whether the last session load found a run the previous process never
+	 * finished, with the user's words still the transcript's tail. Set by
+	 * {@link settleInterruptedRuns}; cleared by the recovery itself, a
+	 * dismissal, or a fresh send that supersedes the offer.
+	 */
+	private resumableInterrupted = false;
+	/**
+	 * The run ledger entry opened for the run in flight, between
+	 * {@link beginRunOperation} and {@link endRunOperation}. One run at a
+	 * time — pi serializes runs — so one id is the whole state.
+	 */
+	private activeRunLedgerId: string | undefined;
 	/** Agent-reported error the user already dismissed; see {@link dismissMessages}. */
 	private dismissedAgentError: string | undefined;
 	/** Why the last {@link initialize} failed, if it did; rides the error banner until dismissed. */
@@ -874,22 +895,30 @@ export class ObsidianAgentService {
 			// The budget is per run, and `compactBetweenTurns` spends it.
 			this.midRunCompactions = 0;
 			const stranded = this.promptQueue.drain();
+			const message: AgentMessage = {
+				role: "user",
+				content: [{ type: "text", text: promptText }, ...allImages],
+				timestamp: Date.now(),
+			};
+			const dispatch = stranded.length > 0 ? [...stranded.map((entry) => entry.message), message] : [message];
+			// The ledger entry opens before the run departs: a crash between
+			// this write and the run's own finish is the orphan signature
+			// recovery reads on the next load.
+			await this.beginRunOperation(dispatch);
 			if (stranded.length === 0) {
-				await agent.prompt(promptText, allImages.length > 0 ? allImages : undefined);
+				await agent.prompt([message]);
 			} else {
 				// Queued messages a run never injected — most often because
 				// `shouldStopAfterTurn` ended it before the next drain point —
 				// must not wait behind this one: the user typed the correction
 				// first. Order of arrival is the order of dispatch.
 				agent.clearAllQueues();
-				const message: AgentMessage = {
-					role: "user",
-					content: [{ type: "text", text: promptText }, ...allImages],
-					timestamp: Date.now(),
-				};
-				await agent.prompt([...stranded.map((entry) => entry.message), message]);
+				await agent.prompt(dispatch);
 			}
 			sent = true;
+			// A fresh send supersedes the continue offer: the user has moved on
+			// and the crashed run's words are no longer the transcript's tail.
+			this.resumableInterrupted = false;
 		} catch (error) {
 			this.panelError = { message: error instanceof Error ? error.message : String(error), opensSettings: false };
 		} finally {
@@ -966,6 +995,7 @@ export class ObsidianAgentService {
 			// draining them first keeps the run's first turn-end poll from
 			// injecting the same words a second time.
 			agent.clearAllQueues();
+			await this.beginRunOperation(stranded.map((entry) => entry.message));
 			await agent.prompt(stranded.map((entry) => entry.message));
 		} catch (error) {
 			// Back onto the chips, oldest first: the words are still the
@@ -976,6 +1006,155 @@ export class ObsidianAgentService {
 			this.activeRunContext = null;
 			await this.notifySettledState();
 		}
+	}
+
+	/**
+	 * Continues the reply a crashed run never delivered.
+	 *
+	 * The transcript's tail is the user's words — that is what made the offer —
+	 * so `continue()` picks the reply up from exactly where the crash cut it,
+	 * with the context pi already holds. A run like any other: ledgered before
+	 * departure, settled by its own `agent_end`, interruptible through
+	 * {@link abort}.
+	 */
+	async resumeInterruptedRun(): Promise<void> {
+		this.resumableInterrupted = false;
+		const agent = this.agent;
+		if (!agent || agent.state.isStreaming) {
+			return;
+		}
+		try {
+			this.activeRunContext = this.contextRefs.list();
+			this.notify();
+			await this.compactContextIfNeeded(agent);
+			// The budget is per run, and `compactBetweenTurns` spends it.
+			this.midRunCompactions = 0;
+			const last = agent.state.messages.at(-1);
+			await this.beginRunOperation(last ? [last] : []);
+			await agent.continue();
+		} catch (error) {
+			this.panelError = { message: error instanceof Error ? error.message : String(error), opensSettings: false };
+		} finally {
+			this.activeRunContext = null;
+			await this.notifySettledState();
+		}
+	}
+
+	/** Withdraws the continue offer without acting on it. */
+	dismissInterruptedRun(): void {
+		if (!this.resumableInterrupted) {
+			return;
+		}
+		this.resumableInterrupted = false;
+		this.notify();
+	}
+
+	/**
+	 * Opens the session's run ledger for the run about to depart.
+	 *
+	 * The ledger is crash recovery's durable half: an `operation_started`
+	 * record that survives the process, so a crash mid-run leaves the orphan a
+	 * later load reads via {@link settleInterruptedRuns}. Best-effort by
+	 * design — the ledger is diagnostics, not the product, and a failed write
+	 * must never block the send the user asked for. The cost of a missing
+	 * entry is only that a crash during that run leaves nothing for recovery
+	 * to find.
+	 */
+	private async beginRunOperation(originalPrompt: readonly AgentMessage[]): Promise<void> {
+		this.activeRunLedgerId = undefined;
+		try {
+			this.activeRunLedgerId = await this.sessionManager.beginRunOperation([...originalPrompt]);
+		} catch (error) {
+			this.log.error("Failed to record run start", () => ({
+				error: error instanceof Error ? error.message : String(error),
+			}));
+		}
+	}
+
+	/**
+	 * Closes the current run's ledger entry with `outcome`.
+	 *
+	 * A no-op without an open entry — a run whose open write failed has
+	 * nothing to close, and closing twice is impossible because the id clears
+	 * as it is read.
+	 */
+	private async endRunOperation(outcome: "completed" | "aborted" | "failed", error?: { code: string; message: string }): Promise<void> {
+		const runId = this.activeRunLedgerId;
+		this.activeRunLedgerId = undefined;
+		if (!runId) {
+			return;
+		}
+		try {
+			await this.sessionManager.endRunOperation(runId, outcome, error);
+		} catch (failure) {
+			// The orphan this leaves is exactly what recovery looks for, so a
+			// failed close degrades to a spurious recovery offer — never to a
+			// lost reply.
+			this.log.error("Failed to record run finish", () => ({
+				error: failure instanceof Error ? failure.message : String(failure),
+			}));
+		}
+	}
+
+	/**
+	 * Closes the current run's ledger from the run's own last words.
+	 *
+	 * Runs on `agent_end`, which every run shape reaches: a completed reply
+	 * (`stop`), a user abort (`aborted`), a provider failure (`error`, with
+	 * the message the banner shows). `length` and any other stop reason mean
+	 * the model said its piece — the run did what was asked.
+	 */
+	private async settleRunLedger(messages: readonly AgentMessage[]): Promise<void> {
+		const lastAssistant = [...messages].reverse().find((message) => message.role === "assistant");
+		if (lastAssistant?.stopReason === "error") {
+			await this.endRunOperation("failed", {
+				code: "provider_error",
+				message: lastAssistant.errorMessage ?? "Provider error",
+			});
+			return;
+		}
+		await this.endRunOperation(lastAssistant?.stopReason === "aborted" ? "aborted" : "completed");
+	}
+
+	/**
+	 * Reads the session's run ledger for runs the previous process never
+	 * finished, and settles them.
+	 *
+	 * An open entry means a crash — or a killed Obsidian — cut a run
+	 * mid-flight. pi's storage refuses a second `operation_started` on the
+	 * lane while one is open, so these must close before anything new can
+	 * depart. The close records `aborted`: the run reached no outcome, and
+	 * neither `completed` nor `failed` would be honest.
+	 *
+	 * When the cut run's words are still the transcript's tail, the continue
+	 * offer stands. pi persists the prompt before streaming starts, so a run
+	 * killed mid-reply leaves the user message last, and `continue()` picks
+	 * the reply up from exactly there. An assistant tail means the reply did
+	 * arrive and only the close was lost; re-offering would invite a duplicate
+	 * turn, so those close silently.
+	 */
+	private async settleInterruptedRuns(context: SessionContext): Promise<void> {
+		this.resumableInterrupted = false;
+		let orphans: OperationStartedRecord[];
+		try {
+			orphans = await this.sessionManager.findOpenRunOperations();
+		} catch (error) {
+			this.log.error("Failed to read the run ledger", () => ({
+				error: error instanceof Error ? error.message : String(error),
+			}));
+			return;
+		}
+		for (const orphan of orphans) {
+			try {
+				await this.sessionManager.endRunOperation(orphan.id, "aborted");
+			} catch (error) {
+				this.log.error("Failed to close an interrupted run's ledger entry", () => ({
+					error: error instanceof Error ? error.message : String(error),
+				}));
+			}
+		}
+		const last = context.messages.at(-1);
+		this.resumableInterrupted = orphans.length > 0 && (last?.role === "user" || last?.role === "toolResult");
 	}
 
 	/**
@@ -1327,7 +1506,15 @@ export class ObsidianAgentService {
 			return;
 		}
 		agent.abort();
-		void agent.waitForIdle().then(() => this.notifySettledState());
+		void agent.waitForIdle().then(async () => {
+			// The run's own `agent_end` may not reach the settle: an abort that
+			// lands before the reply's last events still fires the end event, but
+			// a race against this handler leaves the mapping below as the only
+			// writer. Writing both is idempotent — the ledger id clears as it is
+			// read.
+			await this.endRunOperation("aborted");
+			await this.notifySettledState();
+		});
 	}
 
 	async newSession(): Promise<void> {
@@ -1344,6 +1531,9 @@ export class ObsidianAgentService {
 		const defaults = this.getSessionDefaults();
 		this.sessionInfo = await this.sessionManager.createSession({ ...defaults, thinkingLevel: seed });
 		this.messageEntryIds = new WeakMap<object, string>();
+		// A brand-new session has no ledger and no stranded reply; any offer the
+		// session just left was its own.
+		this.resumableInterrupted = false;
 		this.lastCompaction = undefined;
 		this.overheadUsage = [];
 		// Pins and a dismissed follow belong to the conversation that collected them;
@@ -1389,6 +1579,9 @@ export class ObsidianAgentService {
 		// follow state and no inherited pins.
 		this.contextRefs.reset();
 		await this.adoptSessionContext(context);
+		// Same placement as `initializeAgent`: the offer describes the
+		// transcript now on screen, so it is settled only after adoption.
+		await this.settleInterruptedRuns(context);
 		this.panelError = undefined;
 		await this.sessionManager.ensureConfiguration(this.getSessionDefaults());
 		this.sessionInfo = await this.sessionManager.getActiveSessionInfo();
@@ -1758,6 +1951,7 @@ export class ObsidianAgentService {
 			// would refuse, instead of the send gate explaining the refusal after.
 			supportsImages: modelSupportsImages(model),
 			noticeMessage: this.noticeMessage,
+			canResumeInterrupted: this.resumableInterrupted,
 			provider: model.provider,
 			modelId: model.id,
 			vendorIcon: vendorIconName(matchVendorForModel(model.id, model.baseUrl)),
@@ -1856,6 +2050,9 @@ export class ObsidianAgentService {
 		const context = await this.sessionManager.buildSessionContext();
 		this.lastCompaction = await this.sessionManager.getLastCompaction();
 		await this.adoptSessionContext(context);
+		// After the context is adopted — the offer is about the transcript this
+		// panel now shows, so it must not stand before the messages are in.
+		await this.settleInterruptedRuns(context);
 		this.notify();
 	}
 
@@ -2243,6 +2440,7 @@ export class ObsidianAgentService {
 				for (const message of event.messages) {
 					await this.persistMessage(message);
 				}
+				await this.settleRunLedger(event.messages);
 			}
 		} catch (error) {
 			const message = error instanceof Error ? error.message : String(error);

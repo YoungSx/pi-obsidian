@@ -52,6 +52,13 @@ export const zhCN: DeepPartial<EnCopy> = {
 		 */
 		contextWall: "上下文快满了。整理较早的消息可以继续聊更久。",
 		contextWallAction: "整理",
+		/**
+		 * 崩溃恢复横幅及其按钮：上一次会话有没跑完的运行、用户的话还留在
+		 * 记录末尾，点一下就能让模型接着回答。和上下文横幅一样是常驻提议，
+		 * 走 polite 通道播报——是面板自己的接续，不是要读者立刻处理的故障。
+		 */
+		recoveryOffer: "上一次回复没写完就断了。从断掉的地方继续吗？",
+		recoveryResume: "继续",
 		conversationAria: "对话",
 		skipToComposer: "跳到输入框",
 		skipToTranscript: "回到对话",

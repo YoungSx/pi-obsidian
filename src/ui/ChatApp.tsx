@@ -297,6 +297,23 @@ export function ChatApp({ service, inputController, component, draftStore, onOpe
 	}, [snapshot.contextFill, snapshot.isStreaming, snapshot.isCompacting, wallDismissed, service]);
 
 	/*
+	 * The crash-recovery offer, derived from the snapshot the service computes
+	 * at session load: a run the previous process never finished left the
+	 * user's words as the transcript's tail. Standing like the wall — it
+	 * describes a state, not an event — so it does not ride `noticeMessage`,
+	 * and dismissal goes to `service.dismissInterruptedRun()` rather than the
+	 * shared clear: acknowledging an offer must not read as acknowledging an
+	 * outcome. Hidden while a stream or compaction holds the panel, the same
+	 * reason the wall hides — the service declines the work itself when busy.
+	 */
+	const recoveryOffer = useMemo(() => {
+		if (!snapshot.canResumeInterrupted || snapshot.isStreaming || snapshot.isCompacting) {
+			return undefined;
+		}
+		return { onResume: () => void service.resumeInterruptedRun(), onDismiss: () => service.dismissInterruptedRun() };
+	}, [snapshot.canResumeInterrupted, snapshot.isStreaming, snapshot.isCompacting, service]);
+
+	/*
 	 * Whether an armed edit still names its turn. A session switch leaves the
 	 * state behind but points it at a foreign transcript; a rewind, a compaction,
 	 * or a turn absorbed into a summary moves or replaces the message the index
@@ -523,6 +540,7 @@ export function ChatApp({ service, inputController, component, draftStore, onOpe
 					errorOpensSettings={snapshot.errorOpensSettings}
 					noticeMessage={snapshot.noticeMessage}
 					contextWall={contextWall}
+					recoveryOffer={recoveryOffer}
 					onDismiss={() => service.dismissMessages()}
 					onOpenSettings={canOpenSettings ? () => openPluginSettings(app) : undefined}
 				/>

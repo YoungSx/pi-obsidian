@@ -9,10 +9,13 @@ import {
 	type CompactResult,
 	type Entry,
 	type JsonlSessionMetadata,
+	type OperationFinishedRecord,
+	type OperationStartedRecord,
 	type Session,
 	type ThinkingLevel,
 } from "@earendil-works/pi-agent-core";
 import { normalizeFolderPath } from "../vault/path";
+import { sanitizeMessageForLog } from "../vault/image";
 import { DEFAULT_THINKING_LEVEL } from "../constants";
 import { ObsidianSessionFileSystem } from "./ObsidianSessionFileSystem";
 import { selectSessionsToEvict, UNLIMITED_SESSION_RETENTION } from "./retention";
@@ -231,6 +234,74 @@ export class ObsidianSessionManager {
 		const session = this.getSession();
 		await session.setName(name);
 		return (await session.getMetadata()).id;
+	}
+
+	/**
+	 * Opens a run in pi's operation ledger: an `operation_started` record whose
+	 * id the matching `operation_finished` must carry back as its `runId`.
+	 *
+	 * This is the durability half of crash recovery. A live run is in-memory
+	 * agent state; the ledger is the session file's own record that a run was
+	 * in flight. A crash between the two writes — the only way a started entry
+	 * survives without its finish — is exactly the signature a later load
+	 * looks for via {@link findOpenRunOperations}.
+	 *
+	 * `originalPrompt` is the caller's input as the caller shaped it, pi's
+	 * "normalized caller input" — deliberately not a claim about transcript
+	 * truth, which pi itself persists separately. Message objects may carry
+	 * optional fields as explicit `undefined`, which pi's durable payload
+	 * contract rejects, so they pass through the same JSON round-trip
+	 * {@link appendMessage} applies.
+	 *
+	 * Throws when no session is active or the ledger write fails; the caller
+	 * decides whether a run may start with its ledger entry missing.
+	 */
+	async beginRunOperation(originalPrompt: AgentMessage[]): Promise<string> {
+		const session = this.getSession();
+		// The ledger stores the prompt, and the prompt can carry image bytes.
+		// The same placeholder treatment {@link appendMessage} applies keeps
+		// both writers to one rule: no base64 ever reaches the session log.
+		const sanitized = originalPrompt.map((message) => sanitizeMessageForLog(message));
+		const started = await session.appendRecord({
+			type: "operation_started",
+			id: session.idGenerator.next(),
+			lane: "main",
+			sourceLeafId: await session.getLeafId(),
+			intent: {
+				kind: "run",
+				originalPrompt: JSON.parse(JSON.stringify(sanitized)) as AgentMessage[],
+				initialMessages: [],
+			},
+		});
+		return started.id;
+	}
+
+	/**
+	 * Closes the ledger entry {@link beginRunOperation} opened. `runId` must be
+	 * the started record's id — pi's storage keys the close off it, and a
+	 * mismatched id leaves the original entry open forever.
+	 */
+	async endRunOperation(runId: string, outcome: OperationFinishedRecord["outcome"], error?: { code: string; message: string }): Promise<void> {
+		const session = this.getSession();
+		await session.appendRecord({
+			type: "operation_finished",
+			id: session.idGenerator.next(),
+			lane: "main",
+			runId,
+			outcome,
+			...(error ? { error } : {}),
+		});
+	}
+
+	/**
+	 * Reads the lane's unfinished operations, newest first. An empty result is
+	 * the steady state — every run opened here has been closed. Entries
+	 * surviving into a later load mean a run was cut off mid-flight, and pi's
+	 * storage refuses to open a second operation on a lane that already has
+	 * one, so recovery must close these before anything new can start.
+	 */
+	async findOpenRunOperations(): Promise<OperationStartedRecord[]> {
+		return this.getSession().findOpenOperations("main");
 	}
 
 	async buildSessionContext(): Promise<SessionContext> {
