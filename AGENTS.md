@@ -40,6 +40,25 @@ npm run build
 bun test
 ```
 
+### Rendered layout check (opt-in, needs Chromium)
+
+`bun test` runs on happy-dom, which does no layout: it can assert that a rule
+*declares* `text-overflow: ellipsis`, never that the right span is the one that
+truncates in a 300px sidebar. For CSS whose correctness is a layout consequence,
+two scripts answer that in a real engine:
+
+```bash
+node scripts/preview-command-menu.mjs   # writes .preview/command-menu.html
+node scripts/measure-command-menu.mjs   # measures it, exits non-zero on regressions
+```
+
+The preview extracts its rules *from* `styles.css` rather than restating them,
+so it cannot drift from what ships. Not part of `npm run verify` — Chromium is
+not a project dependency — so the invariants worth keeping green in CI are
+mirrored as structural gates in `src/ui/panelA11y.test.ts`. Override the browser
+with `CHROME=`; a snap-packaged Chromium cannot read a checkout under a dotted
+path (`~/.paseo/...`), which `PREVIEW_DIR=` works around.
+
 ## Linting
 
 - Run the project's lint script: `npm run lint` (wraps `eslint .` with the flat config in `eslint.config.mts`).

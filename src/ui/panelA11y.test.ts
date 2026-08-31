@@ -317,6 +317,87 @@ describe("touch targets (WCAG 2.5.5 / 2.5.8)", () => {
 	});
 });
 
+describe("command menu rows are one line (issue #167)", () => {
+	/*
+	 * Each row was a two-line stack whose internal gap equalled the gap between
+	 * rows, so the list read as stripes rather than rows. It is one flex line now,
+	 * and three of that line's properties are load-bearing in a way no rendering
+	 * test here can see: happy-dom does no layout, so it cannot report which span
+	 * ellipsizes when a 300px sidebar runs out of room.
+	 *
+	 * Measured in Chromium against these rules (see `scripts/measure-command-menu.mjs`,
+	 * which extracts them from this stylesheet rather than restating them): 23px
+	 * rows at both 300px and 520px, the kind tag flush to the trailing edge in all
+	 * twelve rendered rows including the description-less one, and at 300px the
+	 * long description truncating while its name stayed whole.
+	 */
+	it("lays a row out as one flex line, not a column", () => {
+		const body = declarations(ruleBody(".piem-chat__command-menu-button"));
+
+		expect(body).toContain("display: flex");
+		// The stack's `flex-direction: column` is what put the description on a
+		// second line; a row is flex's default, so the property is simply absent.
+		expect(body).not.toContain("flex-direction");
+	});
+
+	it("charges the shortfall to the description, so the name is the last to give up room", () => {
+		// Shrink is weighted by basis: a basis of 0 contributes nothing to the
+		// split, so the description absorbs the whole overflow before the name —
+		// the command's identity, and the string being scanned for — narrows at all.
+		expect(declarations(ruleBody(".piem-chat__command-menu-desc"))).toContain("flex: 1 1 0");
+		expect(declarations(ruleBody(".piem-chat__command-menu-name"))).toContain("flex: 0 1 auto");
+	});
+
+	it("clips both flexible spans, which is what lets them shrink and what draws the ellipsis", () => {
+		/*
+		 * `overflow: hidden` is the load-bearing declaration, and it does two jobs:
+		 * it zeroes the flex item's automatic minimum size — otherwise the content
+		 * width, which is why a nowrap span classically refuses to shrink and pushes
+		 * the row wide — and it gives `text-overflow` something to draw into.
+		 *
+		 * Measured in Chromium across four variants of the description rule: with
+		 * `overflow: hidden` and no `min-width: 0` the layout is byte-identical to
+		 * the shipped one (desc 170px, ellipsized, row intact); with `min-width: 0`
+		 * and no `overflow: hidden` the width is constrained but nothing clips, so
+		 * the text paints across the trailing tag; with neither the span takes its
+		 * full 461px and the row overflows. So `min-width: 0` is pinned here as the
+		 * explicit statement of intent, not as a load-bearing value.
+		 */
+		for (const selector of [".piem-chat__command-menu-desc", ".piem-chat__command-menu-name"]) {
+			const body = declarations(ruleBody(selector));
+			expect(body).toContain("overflow: hidden");
+			expect(body).toContain("text-overflow: ellipsis");
+			expect(body).toContain("white-space: nowrap");
+			expect(body).toContain("min-width: 0");
+		}
+	});
+
+	it("pins the kind tag to the trailing edge even when the row has no description", () => {
+		// With a description present the growing middle claims the free space and
+		// this margin resolves to zero; without one it is the only thing holding the
+		// trailing column, and the rendered check above covers both cases.
+		const body = declarations(ruleBody(".piem-chat__command-menu-kind"));
+
+		expect(body).toContain("margin-left: auto");
+		expect(body).toContain("flex-shrink: 0");
+	});
+
+	it("keeps the row's two gaps unequal, which is what makes it read as a pair plus an aside", () => {
+		// The defect being fixed was equal spacing, so the fix is not merely "one
+		// line" — the name/description pair is tighter than the run-up to the
+		// trailing tag (8px against 8+4), and collapsing that padding would restore
+		// the monotone the stack had.
+		expect(declarations(ruleBody(".piem-chat__command-menu-button"))).toContain("gap: var(--size-4-2)");
+		expect(declarations(ruleBody(".piem-chat__command-menu-kind"))).toContain("padding-left: var(--size-4-1)");
+	});
+
+	it("leaves no rule behind for the wrapper the stack needed", () => {
+		// The heading span that paired name with kind is gone from the markup; a
+		// rule still matching it would be dead weight the next reader has to price.
+		expect(styles).not.toContain("command-menu-heading");
+	});
+});
+
 describe("typing dots (issue #86)", () => {
 	/*
 	 * The pending-reply indicator is three empty spans whose only signal is a
