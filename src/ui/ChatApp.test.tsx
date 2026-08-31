@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from "bun:test";
+import { afterEach, beforeEach, describe, expect, it, setSystemTime } from "bun:test";
 import type { App, Component } from "obsidian";
 import { flushRender, installDom } from "../testing/dom";
 import { installObsidianStub, lastMenu, resetMenus } from "../testing/obsidianStub";
@@ -793,6 +793,117 @@ describe("ChatApp edit and resend", () => {
 
 		expect(service.sentPrompts).toEqual(["Summarize this note"]);
 		expect(service.editResends).toEqual([]);
+	});
+});
+
+describe("ChatStatusBar run readout", () => {
+	/** A settled question-and-answer pair to stream over. */
+	const answered: Partial<ChatSnapshot> = {
+		isConfigured: true,
+		messages: [userQuestion("What is in my vault?"), assistantReply("Notes about pi.")] as ChatSnapshot["messages"],
+	};
+
+	function userQuestion(text: string) {
+		return {
+			role: "user",
+			content: [{ type: "text", text }],
+			timestamp: Date.now(),
+		};
+	}
+
+	function assistantReply(text: string) {
+		return {
+			role: "assistant",
+			content: [{ type: "text", text }],
+			api: "anthropic-messages",
+			provider: "deepseek",
+			model: "deepseek-v4-pro",
+			usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } },
+			stopReason: "stop",
+			timestamp: Date.now(),
+		};
+	}
+
+	function toolResult() {
+		return {
+			role: "toolResult",
+			toolCallId: "call-1",
+			toolName: "read",
+			content: [{ type: "text", text: "done" }],
+			isError: false,
+			timestamp: Date.now(),
+		};
+	}
+
+	function runReadout(host: HTMLElement): HTMLElement | null {
+		return host.querySelector(".piem-chat__run");
+	}
+
+	it("times a run from its streaming edge and counts its finished tool calls", async () => {
+		setSystemTime(1_000_000);
+		const { host, service } = await mountChat({ snapshot: answered });
+
+		service.emit({ isStreaming: true });
+		await flushRender();
+		setSystemTime(1_000_000 + 47_000);
+		service.emit({
+			isStreaming: true,
+			messages: [userQuestion("What is in my vault?"), toolResult()] as ChatSnapshot["messages"],
+		});
+		await flushRender();
+
+		const readout = runReadout(host);
+		expect(readout?.textContent).toContain("0:47");
+		expect(readout?.textContent).toContain("step 1");
+	});
+
+	it("hides the readout while the run is too young, then shows it", async () => {
+		setSystemTime(1_000_000);
+		const { host, service } = await mountChat({ snapshot: answered });
+
+		service.emit({ isStreaming: true });
+		await flushRender();
+		expect(runReadout(host)).toBeNull();
+
+		setSystemTime(1_000_000 + 3_000);
+		service.emit({ isStreaming: true });
+		await flushRender();
+
+		expect(runReadout(host)?.textContent).toContain("0:03");
+	});
+
+	it("takes the readout down when the run settles", async () => {
+		setSystemTime(1_000_000);
+		const { host, service } = await mountChat({ snapshot: answered });
+
+		service.emit({ isStreaming: true });
+		await flushRender();
+		setSystemTime(1_000_000 + 47_000);
+		service.emit({ isStreaming: true });
+		await flushRender();
+		expect(runReadout(host)).not.toBeNull();
+
+		setSystemTime(1_000_000 + 48_000);
+		service.emit({ isStreaming: false });
+		await flushRender();
+
+		expect(runReadout(host)).toBeNull();
+	});
+
+	it("shows no measurement on a panel reopened mid-run", async () => {
+		// Its first snapshot already streams, with no edge to witness. Starting the
+		// clock there would count from the wrong moment; the next turn it saw begin
+		// is the next turn it times.
+		setSystemTime(1_000_000);
+		const { host } = await mountChat({ snapshot: { ...answered, isStreaming: true } });
+		setSystemTime(1_000_000 + 47_000);
+		await flushRender();
+
+		expect(runReadout(host)).toBeNull();
+	});
+
+	afterEach(() => {
+		setSystemTime();
 	});
 });
 

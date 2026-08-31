@@ -155,6 +155,8 @@ export const zhCN: DeepPartial<EnCopy> = {
 	chatStatus: {
 		opening: "正在打开对话…",
 		tidyingUp: "正在整理较早的消息…",
+		// 序数而非总数：轮次还在飞，总数尚不存在。
+		turnSteps: "第 {count} 步",
 	},
 
 	// 快捷键字形是键帽而非词语，各语言一律保持原样。
