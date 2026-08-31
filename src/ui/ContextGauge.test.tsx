@@ -88,6 +88,7 @@ describe("ContextGauge ring", () => {
 	});
 
 	afterEach(() => {
+		unmountAllRoots();
 		document.body.replaceChildren();
 	});
 
@@ -171,6 +172,7 @@ describe("ContextGauge popover", () => {
 	});
 
 	afterEach(() => {
+		unmountAllRoots();
 		document.body.replaceChildren();
 	});
 
@@ -250,6 +252,7 @@ describe("ContextGauge open and close", () => {
 	});
 
 	afterEach(() => {
+		unmountAllRoots();
 		document.body.replaceChildren();
 	});
 
@@ -340,6 +343,7 @@ describe("ContextGauge spend tier", () => {
 	});
 
 	afterEach(() => {
+		unmountAllRoots();
 		document.body.replaceChildren();
 	});
 
@@ -374,6 +378,7 @@ describe("ContextGauge tidy action", () => {
 	});
 
 	afterEach(() => {
+		unmountAllRoots();
 		document.body.replaceChildren();
 	});
 
@@ -421,6 +426,7 @@ describe("ContextGauge in Chinese", () => {
 	});
 
 	afterEach(() => {
+		unmountAllRoots();
 		document.body.replaceChildren();
 	});
 
@@ -457,4 +463,22 @@ function usageTotals(): UsageTotals {
 	return { tokens: 0, cost: 0, requests: 0 };
 }
 
-const roots = new WeakMap<HTMLElement, import("react-dom/client").Root>();
+const roots = new Map<HTMLElement, import("react-dom/client").Root>();
+
+/**
+ * Tears down every live root between tests.
+ *
+ * `document.body.replaceChildren()` alone leaves React roots mounted with their
+ * effects still attached — including `ContextGauge`'s `document`-level capture
+ * listeners for the press-outside dismissal. Thirty such ghosts survive one full
+ * file run, and the next test that asserts a dismissal races all of them: the
+ * listener of an *earlier*, already-abandoned gauge re-opens or re-closes state
+ * the current test did not ask for, and the case ran ~98s while poisoned and
+ * 0.6s alone. Unmounting is the cleanup `replaceChildren` pretends to do.
+ */
+function unmountAllRoots(): void {
+	for (const root of roots.values()) {
+		root.unmount();
+	}
+	roots.clear();
+}
