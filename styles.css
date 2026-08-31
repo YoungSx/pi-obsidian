@@ -2440,6 +2440,41 @@ button.piem-chat__latest {
 }
 
 /*
+ * A row description past the fold budget (descFold.ts).
+ *
+ * The body span carries the clamp, not the description element, because the
+ * expand button and the MCP verdict line share that element — clamping the
+ * element would clamp them away with the text. `-webkit-line-clamp` is the
+ * only way to get a real ellipsis on wrapped prose; `display: -webkit-box` is
+ * scoped to this span so nothing else in the row inherits the layout.
+ */
+.piem-settings-desc-body {
+	overflow-wrap: anywhere;
+}
+
+.piem-settings-desc--folded .piem-settings-desc-body {
+	display: -webkit-box;
+	-webkit-box-orient: vertical;
+	-webkit-line-clamp: 2;
+	overflow: hidden;
+}
+
+.piem-settings-desc-toggle {
+	font-size: var(--font-ui-smaller);
+	color: var(--text-muted);
+	cursor: var(--cursor);
+	padding: 0;
+	background: none;
+	border: none;
+	box-shadow: none;
+}
+
+.piem-settings-desc-toggle:hover {
+	color: var(--text-normal);
+	text-decoration: underline;
+}
+
+/*
  * Notice about chats left in the folder an earlier release used.
  *
  * Rendered as a paragraph after the rows rather than inside one: it belongs to

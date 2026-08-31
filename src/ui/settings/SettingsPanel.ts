@@ -25,6 +25,7 @@ import {
 	replaceById,
 } from "./configLists";
 import { openConfirmDelete } from "./confirmDelete";
+import { setFoldableDescription } from "./descFold";
 import { createEffectLine } from "./effectLine";
 import { ModelModal } from "./ModelModal";
 import { McpServerModal } from "./McpServerModal";
@@ -309,11 +310,16 @@ export function renderSettingsPanel(containerEl: HTMLElement, host: SettingsPane
  * the user left it.
  */
 function refreshModelsTab(containerEl: HTMLElement, host: SettingsPanelHost): void {
+	// The filter query lives in a DOM input, which this rebuild is about to
+	// destroy. Reading it out first keeps the redraw filtering by what the user
+	// typed instead of silently showing the whole list again.
+	const filterQuery =
+		containerEl.querySelector<HTMLInputElement>("input[data-piem-models-filter]")?.value ?? "";
 	containerEl.empty();
-	renderModelsTab(containerEl, host);
+	renderModelsTab(containerEl, host, filterQuery);
 }
 
-function renderModelsTab(containerEl: HTMLElement, host: SettingsPanelHost): void {
+function renderModelsTab(containerEl: HTMLElement, host: SettingsPanelHost, filterQuery = ""): void {
 	const refresh = (): void => refreshModelsTab(containerEl, host);
 
 	// The panel's answer to "where is my prompt actually going", which the old
@@ -335,7 +341,7 @@ function renderModelsTab(containerEl: HTMLElement, host: SettingsPanelHost): voi
 	}
 
 	renderProviderList(containerEl, host, refresh);
-	renderModelList(containerEl, host, refresh, statusValue);
+	renderModelList(containerEl, host, refresh, statusValue, filterQuery);
 	renderNetworkGroup(containerEl, host);
 }
 
@@ -416,7 +422,13 @@ function renderProviderList(containerEl: HTMLElement, host: SettingsPanelHost, r
 	}
 }
 
-function renderModelList(containerEl: HTMLElement, host: SettingsPanelHost, refresh: () => void, statusValue: HTMLSpanElement): void {
+function renderModelList(
+	containerEl: HTMLElement,
+	host: SettingsPanelHost,
+	refresh: () => void,
+	statusValue: HTMLSpanElement,
+	filterQuery: string,
+): void {
 	const { settings, t } = host;
 	const hasProviders = settings.providers.length > 0;
 
@@ -495,6 +507,10 @@ function renderModelList(containerEl: HTMLElement, host: SettingsPanelHost, refr
 			.setName(t.t("settings.modelsFilterLabel"))
 			.addText((text) => {
 				text.setPlaceholder(t.t("settings.modelsFilterPlaceholder"));
+				// The marker is how a tab refresh finds and restores the query; the
+				// value is what the restored filter applies before the first keystroke.
+				text.inputEl.setAttribute("data-piem-models-filter", "");
+				text.setValue(filterQuery);
 				filterInput = text.inputEl;
 			});
 	}
@@ -575,6 +591,9 @@ function renderModelList(containerEl: HTMLElement, host: SettingsPanelHost, refr
 			emptyNote.hidden = visible > 0;
 		};
 		input.addEventListener("input", applyFilter);
+		// Runs once even on a fresh render: with a restored query the new rows
+		// must meet the filter the moment they exist, not on the next keystroke.
+		applyFilter();
 	}
 }
 
@@ -1256,7 +1275,10 @@ function renderMcpRow(containerEl: HTMLElement, host: SettingsPanelHost, state: 
 	// The URL is the address requests leave to, so it reads as the row's main
 	// description; the connection verdict hangs beneath it as an effect line,
 	// the same slot every other async status in this panel uses.
-	const setting = new Setting(containerEl).setName(state.name).setDesc(state.url);
+	const setting = new Setting(containerEl).setName(state.name);
+	// URLs are handed in verbatim and can be very long; the fold keeps the row
+	// scannable, and the verdict line below still appends after the folded body.
+	setFoldableDescription(setting, state.url, t);
 	const verdictEl = createEffectLine(setting.descEl);
 	setMcpVerdict(verdictEl, state, t);
 
@@ -1553,7 +1575,10 @@ function fillUserSkillsBody(containerEl: HTMLElement, host: SettingsPanelHost): 
 		containerEl.createEl("p", { cls: "piem-settings-empty", text: t.t("skills.userEmpty") });
 	} else {
 		for (const skill of skills) {
-			new Setting(containerEl).setName(skill.name).setDesc(skill.description);
+			const row = new Setting(containerEl).setName(skill.name);
+			// Frontmatter descriptions are written by outside hands with no length
+			// limit; past the budget the row folds instead of stretching the list.
+			setFoldableDescription(row, skill.description, t);
 		}
 	}
 

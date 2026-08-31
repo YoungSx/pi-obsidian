@@ -944,6 +944,12 @@ export const en = {
 		warning: "This form has unsaved changes — press Esc again to discard them.",
 	},
 
+	/** The expand/collapse toggle on an over-long row description. */
+	descFold: {
+		more: "Show more",
+		less: "Show less",
+	},
+
 	/** Connection-test row. */
 	test: {
 		button: "Test",
