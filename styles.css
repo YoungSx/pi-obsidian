@@ -1863,6 +1863,17 @@ button.piem-chat__latest {
 }
 
 /*
+ * The vendor mark rides the same quiet tier as the text around it — it inherits
+ * the button's --icon-color, so no colour of its own. Flex-shrink 0 keeps it
+ * whole while the name beside it ellipsizes: a squashed mark reads as a rendering
+ * bug, and an absent one is the documented fallback for "no vendor matched".
+ */
+.piem-chat__model-switcher-mark {
+	flex-shrink: 0;
+	opacity: 0.85;
+}
+
+/*
  * The thinking-level selector, right of the model switcher.
  *
  * Shares the switcher's quiet tier — Send must stay the row's only emphasized

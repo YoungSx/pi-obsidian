@@ -32,6 +32,7 @@ import { PiemChatView } from "./ui/PiemChatView";
 import { PiemSubagentView } from "./ui/PiemSubagentView";
 import { requestNoteReference, warnIfTruncated } from "./ui/noteReferenceCommand";
 import { BRAND_ICON_ID, registerBrandIcon } from "./brandIcon";
+import { registerVendorIcons } from "./net/vendorIcons";
 import { getT, resolveLanguage, type LanguageHost, type Translator } from "./i18n";
 
 export default class PiemPlugin extends Plugin {
@@ -124,6 +125,7 @@ export default class PiemPlugin extends Plugin {
 		// exists. The level closure reads `this.settings`, so it sees the
 		// persisted value the moment `loadSettings` assigns it.
 		registerBrandIcon();
+		registerVendorIcons();
 		this.pluginLogger = createPluginLogger({
 			adapter: this.app.vault.adapter,
 			configDir: this.app.vault.configDir,

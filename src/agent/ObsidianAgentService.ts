@@ -17,6 +17,8 @@ import {
 	type ThinkingLevel,
 } from "@earendil-works/pi-agent-core";
 import { createObsidianModels, withRequestDefaults, type ObsidianModelsBundle } from "../net/streamFn";
+import { matchVendorForModel } from "../net/vendorMatch";
+import { vendorIconName } from "../net/vendorIcons";
 import { compactIfNeeded, needsCompaction, DEFAULT_COMPACTION_RETRY, type CompactResult } from "./compaction";
 import { measureContextFill, sumUsage, type ContextFill, type UsageTotals } from "./usage";
 import { resolveCompactionSettings, type CompactionSettings } from "./compactionSettings";
@@ -134,6 +136,15 @@ export interface ChatSnapshot {
 	noticeMessage?: string;
 	provider: string;
 	modelId: string;
+	/**
+	 * The resolved vendor mark for the active target, or undefined when neither
+	 * its model id nor its endpoint names a vendor this plugin ships a mark for.
+	 *
+	 * Resolved here rather than in the switcher: the match tables live behind
+	 * `matchVendorForModel`, and the component has no business re-deriving what
+	 * the snapshot can hand it — or re-running it on every render.
+	 */
+	vendorIcon?: string;
 	/**
 	 * The level this conversation runs at, read from the live agent — which the
 	 * session file drives — rather than from settings. A global field would
@@ -1353,6 +1364,7 @@ export class ObsidianAgentService {
 			noticeMessage: this.noticeMessage,
 			provider: model.provider,
 			modelId: model.id,
+			vendorIcon: vendorIconName(matchVendorForModel(model.id, model.baseUrl)),
 			// The session's own level, not a settings fallback: with no agent yet
 			// there is no conversation either, so "off" is the honest default.
 			thinkingLevel: agent?.state.thinkingLevel ?? "off",
