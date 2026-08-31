@@ -830,7 +830,11 @@ function ToolResultTrace({ message, context }: { message: ToolResultMessage; con
 	const classes = ["piem-chat__trace", "piem-chat__trace--result", message.isError ? "piem-chat__trace--error" : null].filter(Boolean).join(" ");
 	const detail = diff ? formatDiffCounts(diff) : summarizeToolResult(message, context.t);
 	return (
-		<details className={classes}>
+		// A diff-bearing result opens itself: the critique called the undo story
+		// the panel's biggest gap, and this is the previewable half of the answer
+		// (C option) — what the tool changed should be visible without a second
+		// interaction, while the call row above it stays closed.
+		<details className={classes} open={diff !== null}>
 			<summary className="piem-chat__trace-summary">
 				<ObsidianIcon name={message.isError ? "alert-triangle" : "check"} className="piem-chat__trace-icon" />
 				<span className={traceNameClass(isToolIdentifier(message.toolName, context.showAgentDetails))}>

@@ -629,16 +629,25 @@ describe("MessageList streaming marks", () => {
 });
 
 describe("MessageList tool-result diff", () => {
-	it("puts the add/remove counts on the collapsed row instead of nesting a second disclosure", async () => {
+	it("opens a diff-bearing result on arrival, so the write is visible without a second interaction", async () => {
+		// The previewable half of the undo story: a collapsed diff hid the one
+		// thing the reader most needs to check — what actually landed in the note.
 		const host = renderMessages([toolResult({ diff: " 1 unchanged\n+2 added\n-3 removed" })]);
 		await flushRender();
 
 		const trace = host.querySelector("details.piem-chat__trace--result");
 		expect(trace).not.toBeNull();
-		expect(trace?.hasAttribute("open")).toBe(false);
+		expect(trace?.hasAttribute("open")).toBe(true);
 		expect(trace?.querySelector(".piem-chat__trace-detail")?.textContent).toBe("+1 -1");
 		// The old shape nested a `<details>` inside an always-expanded result block.
 		expect(trace?.querySelector("details")).toBeNull();
+	});
+
+	it("keeps a result without a diff collapsed, since there is nothing to preview", async () => {
+		const host = renderMessages([toolResult({ path: "Note.md", editCount: 2 })]);
+		await flushRender();
+
+		expect(host.querySelector("details.piem-chat__trace--result")?.hasAttribute("open")).toBe(false);
 	});
 
 	it("sends the diff through the Markdown renderer as a diff fence", async () => {
