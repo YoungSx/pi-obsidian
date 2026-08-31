@@ -44,10 +44,11 @@ export function describeSecretStorage(state: SecretStorageState, t: Translator):
  * Description for a hand-filled key field: where it goes, plus the standing
  * advice.
  *
- * Only the manual tier renders a plaintext field, which is why the copy says
- * what typing here costs. The restricted-key advice is worth repeating next to
- * it because it is the one mitigation that holds regardless of where the key
- * is stored.
+ * Only the manual tier renders a primary plaintext field (the delegated tiers'
+ * typed field is a collapsed fallback with plainer copy), which is why the
+ * copy says what typing here costs. The restricted-key advice is worth
+ * repeating next to it because it is the one mitigation that holds regardless
+ * of where the key is stored.
  */
 export function describeApiKeyField(state: SecretStorageState, target: string, t: Translator): string {
 	return t.t("secretStorage.manualKeyField", { target, storage: describeSecretStorage(state, t) });

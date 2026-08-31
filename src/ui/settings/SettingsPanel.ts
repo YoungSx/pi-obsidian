@@ -106,6 +106,13 @@ export interface SettingsPanelHost {
 	save(): Promise<void>;
 	/** Whether this device can encrypt secrets at rest. */
 	secretStorage: SecretStorageState;
+	/**
+	 * Resolves a keychain id to its plaintext, for the modals' pickers.
+	 *
+	 * Always available: the panel runs even on the `manual` tier, where the
+	 * resolver answers `""` and the picker is never shown anyway.
+	 */
+	readSecret(id: string): string;
 	/** Names whatever requests currently target, for the status line. */
 	describeTarget(): string;
 	/** Copy for the whole panel, resolved from {@link SettingsPanelSettings.language}. */
@@ -358,6 +365,7 @@ function renderProviderList(containerEl: HTMLElement, host: SettingsPanelHost, r
 				new ProviderModal({
 					app: host.app,
 					secretStorage: host.secretStorage,
+					readSecret: host.readSecret,
 					t,
 					test: (draft) => testDraftProvider(host, draft),
 					onSubmit: async (provider) => {
@@ -390,6 +398,7 @@ function renderProviderList(containerEl: HTMLElement, host: SettingsPanelHost, r
 					app: host.app,
 					provider,
 					secretStorage: host.secretStorage,
+					readSecret: host.readSecret,
 					t,
 					test: (draft) => testDraftProvider(host, draft),
 					onSubmit: async (updated) => {
@@ -1244,6 +1253,8 @@ function openMcpServerModal(
 ): void {
 	new McpServerModal({
 		app: host.app,
+		secretStorage: host.secretStorage,
+		readSecret: host.readSecret,
 		t: host.t,
 		server,
 		test: (draft) => host.mcp.test(draft),

@@ -528,6 +528,7 @@ export class PiemSettingTab extends PluginSettingTab {
 				}
 			},
 			secretStorage: this.secretStorageTier,
+			readSecret: (id) => this.secretEnvironment?.keychain().read(id) ?? "",
 			openLogView: () => this.plugin.openLogView(),
 			describeTarget: () => describeModelTarget(this.plugin.settings, getT(language)),
 			t: getT(language),

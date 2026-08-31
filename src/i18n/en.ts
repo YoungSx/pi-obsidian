@@ -784,6 +784,7 @@ export const en = {
 		urlRequired: "Enter an http(s) URL.",
 		tokenName: "Bearer token",
 		tokenDesc: "Sent as an Authorization header with every request to this server. Leave it empty for open servers.",
+		tokenTarget: "this server's URL",
 		addTitle: "Add MCP server",
 		editTitle: "Edit MCP server",
 		addButton: "Add",
@@ -997,6 +998,8 @@ export const en = {
 		/** `manual`: no usable keychain; plaintext in the vault config. */
 		manual: "This device has no keychain support, so keys typed here are stored as plaintext in this vault's plugin config.",
 		manualKeyField: "Sent only to {target}. {storage} Use a restricted, low-limit key.",
+		/** The collapsed typed field under a delegated tier: the group hint already said where it lands. */
+		manualKeyFieldPlain: "Sent only to {target}. Use a restricted, low-limit key.",
 		noSync: "The keychain does not sync, so each device needs its own binding. Picking the entry again on another device is expected.",
 		providerTarget: "this provider's base URL",
 		/** Description under a keychain-bound key row: which entry it points at. */

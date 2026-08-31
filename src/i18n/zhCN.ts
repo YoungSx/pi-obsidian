@@ -504,6 +504,7 @@ export const zhCN: DeepPartial<EnCopy> = {
 		urlRequired: "请填写 http(s) 地址。",
 		tokenName: "Bearer 令牌",
 		tokenDesc: "每次请求都会作为 Authorization 头发给这台服务器。公开服务器可留空。",
+		tokenTarget: "这台服务器的 URL",
 		addTitle: "添加 MCP 服务器",
 		editTitle: "编辑 MCP 服务器",
 		addButton: "添加",
@@ -634,6 +635,8 @@ export const zhCN: DeepPartial<EnCopy> = {
 		delegatedUnencrypted: "绑定的密钥保存在 Obsidian 的钥匙串里，但此设备不加密存储。它们仍不在此笔记库内。",
 		manual: "此设备不支持钥匙串，此处输入的密钥会以明文形式存储在此笔记库的插件配置中。",
 		manualKeyField: "仅发送给 {target}。{storage} 请使用受限、低限额的密钥。",
+		/** 委托层级下折叠的手填字段：分组提示已说明存到哪里。 */
+		manualKeyFieldPlain: "仅发送给 {target}。请使用受限、低限额的密钥。",
 		noSync: "钥匙串不会同步，因此每台设备都要各自选取一次。在另一台设备上重新选取是正常的。",
 		providerTarget: "此提供方的基础 URL",
 		boundTo: "已绑定钥匙串条目「{name}」。",
