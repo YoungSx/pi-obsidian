@@ -174,6 +174,8 @@ export const zhCN: DeepPartial<EnCopy> = {
 	chatStatus: {
 		opening: "正在打开对话…",
 		tidyingUp: "正在整理较早的消息…",
+		// 重发窗口：先为被舍弃的分支写摘要，再发新问题，消息流全程不报。
+		resending: "正在重发您的消息…",
 		// 序数而非总数：轮次还在飞，总数尚不存在。
 		turnSteps: "第 {count} 步",
 	},

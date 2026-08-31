@@ -347,7 +347,7 @@ export function ChatApp({ service, inputController, component, draftStore, onOpe
 
 	const sendPrompt = async (): Promise<void> => {
 		const prompt = input.trim();
-		if (!prompt || snapshot.isStreaming || snapshot.isCompacting || isInitializing) {
+		if (!prompt || snapshot.isStreaming || snapshot.isCompacting || snapshot.isRewinding || isInitializing) {
 			return;
 		}
 		const images = toImageContents(pendingImages);
@@ -476,7 +476,10 @@ export function ChatApp({ service, inputController, component, draftStore, onOpe
 
 	return (
 		<TranslatorProvider language={snapshot.language}>
-			<div className="piem-chat" aria-busy={snapshot.isStreaming || snapshot.isCompacting || isInitializing}>
+			<div
+			className="piem-chat"
+			aria-busy={snapshot.isStreaming || snapshot.isCompacting || snapshot.isRewinding || isInitializing}
+		>
 				<ChatHeader
 					app={service.getApp()}
 					snapshot={snapshot}
@@ -522,8 +525,14 @@ export function ChatApp({ service, inputController, component, draftStore, onOpe
 					isConfigured={snapshot.isConfigured ?? false}
 					showAgentDetails={snapshot.showAgentDetails}
 					onOpenSettings={canOpenSettings ? () => openPluginSettings(app) : undefined}
-					onRetry={snapshot.isStreaming || snapshot.isCompacting ? undefined : (index) => void service.retryFrom(index)}
-					onEditMessage={snapshot.isStreaming || snapshot.isCompacting ? undefined : handleEditMessage}
+					onRetry={
+						snapshot.isStreaming || snapshot.isCompacting || snapshot.isRewinding
+							? undefined
+							: (index) => void service.retryFrom(index)
+					}
+					onEditMessage={
+						snapshot.isStreaming || snapshot.isCompacting || snapshot.isRewinding ? undefined : handleEditMessage
+					}
 					app={app}
 					component={component}
 					sourcePath={sourcePath}
@@ -543,6 +552,7 @@ export function ChatApp({ service, inputController, component, draftStore, onOpe
 				<ChatStatusBar
 					isInitializing={isInitializing}
 					isCompacting={snapshot.isCompacting}
+					isRewinding={snapshot.isRewinding}
 					showAgentDetails={snapshot.showAgentDetails}
 					run={run}
 				/>
@@ -553,6 +563,7 @@ export function ChatApp({ service, inputController, component, draftStore, onOpe
 					onCancelEdit={handleCancelEdit}
 					isStreaming={snapshot.isStreaming}
 					isCompacting={snapshot.isCompacting}
+					isRewinding={snapshot.isRewinding}
 					isInitializing={isInitializing}
 					isConfigured={snapshot.isConfigured ?? false}
 					sendShortcut={snapshot.sendShortcut}
@@ -570,7 +581,7 @@ export function ChatApp({ service, inputController, component, draftStore, onOpe
 							target={snapshot}
 							onSelect={(modelId) => void service.setActiveModel(modelId)}
 							onOpenSettings={canOpenSettings ? () => openPluginSettings(app) : undefined}
-							isBusy={snapshot.isStreaming || snapshot.isCompacting}
+							isBusy={snapshot.isStreaming || snapshot.isCompacting || snapshot.isRewinding}
 						/>
 					}
 					thinkingSelector={
@@ -580,7 +591,7 @@ export function ChatApp({ service, inputController, component, draftStore, onOpe
 							// parameter, so nothing else has to gate on support.
 							target={snapshot}
 							onSelect={(level) => void service.setThinkingLevel(level)}
-							isBusy={snapshot.isStreaming || snapshot.isCompacting}
+							isBusy={snapshot.isStreaming || snapshot.isCompacting || snapshot.isRewinding}
 						/>
 					}
 					pendingImages={pendingImages}

@@ -27,7 +27,7 @@ async function renderBar(overrides: Partial<Props> = {}): Promise<HTMLElement> {
 	document.body.appendChild(host);
 	const root = roots.get(host) ?? createRoot(host);
 	roots.set(host, root);
-	root.render(<ChatStatusBar isInitializing={false} isCompacting={false} showAgentDetails={true} {...overrides} />);
+	root.render(<ChatStatusBar isInitializing={false} isCompacting={false} isRewinding={false} showAgentDetails={true} {...overrides} />);
 	await flushRender();
 	return host;
 }

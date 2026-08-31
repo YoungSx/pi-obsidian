@@ -6,6 +6,8 @@ import { useT } from "./TranslatorContext";
 export interface ChatStatusBarProps {
 	isInitializing: boolean;
 	isCompacting: boolean;
+	/** True while a retry/edit-resend runs its branch summary and rewind. */
+	isRewinding: boolean;
 	/** Whether the panel may show agent-internal readouts at all. */
 	showAgentDetails: boolean;
 	/**
@@ -43,7 +45,7 @@ export interface ChatStatusBarProps {
  * screen-reader-only treatment, so an idle chat spends no height on an empty row
  * while its live region stays in the DOM. See `isQuiet`.
  */
-export function ChatStatusBar({ isInitializing, isCompacting, showAgentDetails, run }: ChatStatusBarProps): React.JSX.Element {
+export function ChatStatusBar({ isInitializing, isCompacting, isRewinding, showAgentDetails, run }: ChatStatusBarProps): React.JSX.Element {
 	const t = useT();
 	/*
 	 * The elapsed readout reads the clock at render time, not from state: every
@@ -65,7 +67,7 @@ export function ChatStatusBar({ isInitializing, isCompacting, showAgentDetails, 
 		return () => window.clearInterval(timer);
 	}, [isRunning]);
 	const progress = run ? runProgressText(run, Date.now(), t) : null;
-	const status = chatStatusText({ isInitializing, isCompacting, showAgentDetails }, t);
+	const status = chatStatusText({ isInitializing, isCompacting, isRewinding, showAgentDetails }, t);
 	/*
 	 * Nothing to show, but still something to keep: the bar collapses to the
 	 * screen-reader-only treatment rather than unmounting.

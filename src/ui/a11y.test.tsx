@@ -105,6 +105,7 @@ async function renderComposer(overrides: Partial<ComposerProps> = {}): Promise<H
 			input="what is in this note?"
 			isStreaming={false}
 			isCompacting={false}
+			isRewinding={false}
 			isInitializing={false}
 			isConfigured={true}
 			sendShortcut="enter"
@@ -314,6 +315,7 @@ function snapshot(overrides: Partial<ChatSnapshot> = {}): ChatSnapshot {
 		usage: usageTotals(),
 		contextFill: fill(),
 		isCompacting: false,
+		isRewinding: false,
 		session: undefined,
 		showAgentDetails: true,
 		availableCommands: [],

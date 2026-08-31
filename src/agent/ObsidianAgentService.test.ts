@@ -638,6 +638,109 @@ describe("ObsidianAgentService", () => {
 		expect(service.getSnapshot().messages).toEqual(before);
 	});
 
+	it("declines an edit without a key before touching the transcript", async () => {
+		// The rewind throws the original turn away. Refusing the replacement only
+		// at send time — after the branch summary ran and the transcript was cut —
+		// loses the question the user was trying to fix. The credential check
+		// belongs to the preflight, with the same banner a fresh send raises.
+		const { service, settings } = createServiceWithSettings();
+		settings.providerApiKeys = {};
+		await service.sendPrompt("What is in my vault?");
+		const before = service.getSnapshot().messages;
+
+		expect(await service.editAndResend(before.length - 2, "Which notes mention pi?")).toBe(false);
+		expect(service.getSnapshot().messages).toEqual(before);
+		expect(service.getSnapshot().errorMessage).toContain("key");
+	});
+
+	it("declines an image edit on a text-only model before touching the transcript", async () => {
+		// Same preflight, other gate: pictures a text-only model would refuse must
+		// stop the rewind while the original turn is still on the main line.
+		const service = createService();
+		await service.sendPrompt("What is in my vault?");
+		const before = service.getSnapshot().messages;
+
+		const sent = await service.editAndResend(before.length - 2, "What is this?", [
+			{ type: "image", data: "AAAA", mimeType: "image/png" },
+		]);
+
+		expect(sent).toBe(false);
+		expect(service.getSnapshot().messages).toEqual(before);
+		expect(service.getSnapshot().errorMessage).toContain("does not accept images");
+	});
+
+	it("reports the rewind window on the snapshot while the branch summary runs", async () => {
+		// Between the guards and the replacement send the agent streams nothing
+		// and no compaction runs — the one window the panel used to report as
+		// fully idle while a real LLM request (the abandoned branch's summary)
+		// was in flight. That silence is what read as "the edit did nothing".
+		let release: (() => void) | undefined;
+		const gated = async (): Promise<unknown> =>
+			new Promise((resolve) => {
+				release = () => resolve(sseResponse([summaryChunk("ABANDONED BRANCH"), usageChunk()]));
+			});
+		requestUrlMock.mockImplementation(gated);
+		const service = createService();
+		await service.sendPrompt("What is in my vault?");
+		const seen = [service.getSnapshot()];
+		service.subscribe((snapshot) => seen.push(snapshot));
+
+		const resend = service.editAndResend(service.getSnapshot().messages.length - 2, "Which notes mention pi?");
+		// The branch summary request is gated until the flag is witnessed, so the
+		// assertion cannot pass on a run where no window ever opened.
+		for (let i = 0; i < 200 && release === undefined; i += 1) {
+			await new Promise((r) => setTimeout(r, 5));
+		}
+		const during = service.getSnapshot();
+		expect(during.isRewinding).toBe(true);
+		expect(during.isStreaming).toBe(false);
+		expect(during.isCompacting).toBe(false);
+		release?.();
+		expect(await resend).toBe(true);
+
+		const finalSnapshot = seen[seen.length - 1];
+		expect(finalSnapshot?.isRewinding).toBe(false);
+		// The busy trio that gates every control never shows all-false mid-rewind:
+		// streaming covers the replacement run itself.
+		expect(finalSnapshot?.isStreaming).toBe(false);
+	});
+
+	it("refuses a fresh send that lands inside the rewind window", async () => {
+		// The rewind truncates the transcript to before the edited question. A
+		// message appended during the branch summary would be cut away by that
+		// truncation — the user's words vanishing without a trace — so a send
+		// that lands in the window is refused outright rather than accepted and
+		// silently discarded.
+		let release: (() => void) | undefined;
+		const gated = async (): Promise<unknown> =>
+			new Promise((resolve) => {
+				release = () => resolve(sseResponse([summaryChunk("ABANDONED BRANCH"), usageChunk()]));
+			});
+		requestUrlMock.mockImplementation(gated);
+		const service = createService();
+		await service.sendPrompt("What is in my vault?");
+
+		const resend = service.editAndResend(service.getSnapshot().messages.length - 2, "Which notes mention pi?");
+		for (let i = 0; i < 200 && release === undefined; i += 1) {
+			await new Promise((r) => setTimeout(r, 5));
+		}
+		const sent = await service.sendPrompt("A brand new question");
+		// Grab the refusal before releasing the summary: the edit's own send
+		// clears the banner when it runs, so the busy report is transient by
+		// design — visible to the user during the window, gone once the turn lands.
+		const refusal = service.getSnapshot().errorMessage;
+		release?.();
+		expect(await resend).toBe(true);
+
+		// The refusal is reported the way a busy send always is, and the edit's
+		// own turn still went through with nothing appended above it.
+		expect(sent).toBe(false);
+		expect(refusal).toContain("already responding");
+		const after = service.getSnapshot().messages;
+		expect(JSON.stringify(after)).toContain("Which notes mention pi?");
+		expect(JSON.stringify(after)).not.toContain("A brand new question");
+	});
+
 	it("reports pending tool calls by name, never the provider's call ids", async () => {
 		let snapshotDuringTool: { name: string; progress?: string }[] | undefined;
 		const service = createService(new MemoryAdapter(), {
