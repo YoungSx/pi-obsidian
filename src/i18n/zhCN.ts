@@ -592,6 +592,12 @@ export const zhCN: DeepPartial<EnCopy> = {
 		warning: "这个表单有未保存的修改——再按一次 Esc 就会丢弃。",
 	},
 
+	// 过长行描述的展开/收起按钮。
+	descFold: {
+		more: "展开",
+		less: "收起",
+	},
+
 	test: {
 		button: "测试",
 		running: "测试中…",

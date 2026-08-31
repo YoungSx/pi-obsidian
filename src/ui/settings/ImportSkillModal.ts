@@ -1,7 +1,8 @@
 import { ButtonComponent, Modal, Notice, Setting, type App } from "obsidian";
 import type { Translator } from "../../i18n";
 import type { FetchedSkill, FetchedSource } from "../../skills/skillImport";
-import { createModalStatus, type ModalStatus } from "./modalGuards";
+import { setFoldableDescription } from "./descFold";
+import { createModalStatus, DiscardGuard, type ModalStatus } from "./modalGuards";
 
 export interface ImportSkillModalOptions {
 	app: App;
@@ -35,10 +36,16 @@ export class ImportSkillModal extends Modal {
 	private status!: ModalStatus;
 	private previewEl!: HTMLElement;
 	private actionButton!: ButtonComponent;
+	private readonly guard: DiscardGuard;
 
 	constructor(options: ImportSkillModalOptions) {
 		super(options.app);
 		this.options = options;
+		// A typed URL or a fetched preview is work the user did, so a stray Esc
+		// owes the same two-press warning every other config form gives.
+		this.guard = new DiscardGuard(() => {
+			this.status?.showError(options.t.t("discard.warning"));
+		});
 	}
 
 	onOpen(): void {
@@ -55,6 +62,7 @@ export class ImportSkillModal extends Modal {
 				text.setPlaceholder(t.t("skillImport.urlPlaceholder"));
 				text.onChange((value) => {
 					this.url = value.trim();
+					this.guard.edited();
 					// A new URL invalidates whatever the old one fetched.
 					if (this.preview) {
 						this.preview = null;
@@ -80,7 +88,13 @@ export class ImportSkillModal extends Modal {
 		// however far the body has scrolled.
 		new Setting(contentEl)
 			.setClass("piem-settings-modal-footer")
-			.addButton((button) => button.setButtonText(t.t("skillImport.cancel")).onClick(() => this.close()))
+			.addButton((button) =>
+				// Cancel is an explicit discard, so it earns its close.
+				button.setButtonText(t.t("skillImport.cancel")).onClick(() => {
+					this.guard.allowClose();
+					this.close();
+				}),
+			)
 			.addButton((button) => {
 				this.actionButton = button;
 				button.setCta();
@@ -91,6 +105,22 @@ export class ImportSkillModal extends Modal {
 
 	onClose(): void {
 		this.contentEl.empty();
+	}
+
+	/**
+	 * A stray Esc must not silently throw away a half-typed URL or a fetched
+	 * preview: the first press warns and stays, the second — or a clean form —
+	 * closes. The same override {@link McpServerModal} uses.
+	 */
+	close(): void {
+		if (this.guard.shouldClose(this.isDirty())) {
+			super.close();
+		}
+	}
+
+	/** Anything typed or fetched counts: the preview is as hard to rebuild as the URL. */
+	private isDirty(): boolean {
+		return this.url !== "" || this.preview !== null;
 	}
 
 	private async runPreview(): Promise<void> {
@@ -129,7 +159,10 @@ export class ImportSkillModal extends Modal {
 			this.status.clear();
 		}
 		for (const skill of this.preview.skills) {
-			new Setting(this.previewEl).setName(skill.name).setDesc(skill.description);
+			const row = new Setting(this.previewEl).setName(skill.name);
+			// A fetched frontmatter description has no length limit; fold long ones
+			// so one verbose skill cannot push its siblings below the fold.
+			setFoldableDescription(row, skill.description, t);
 		}
 		this.actionButton.setButtonText(
 			this.preview.skills.length === 1
@@ -156,6 +189,8 @@ export class ImportSkillModal extends Modal {
 			if (installed > 0) {
 				new Notice(t.t("skillImport.installed", { count: installed }));
 			}
+			// The work is committed; the close is earned, not a discard.
+			this.guard.allowClose();
 			this.close();
 		} catch (cause) {
 			new Notice(t.t("skillImport.installFailed", { message: describeError(cause) }));
