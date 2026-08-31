@@ -25,6 +25,37 @@ export interface SubagentEntry {
 	killedBy?: "parent" | "teardown" | "tool";
 	/** The spawn call's run signal; a wait only sees children of its own run. */
 	parentSignal: AbortSignal | undefined;
+	/** The task text the spawn was given, verbatim — what the inspector shows first. */
+	task: string;
+	/** The caller's standing framing, when it passed one. */
+	instructions?: string;
+	/** Tree level: 0 is the chat panel itself, so a direct child is always 1. */
+	depth: number;
+	/** The model the child actually runs on, after the host resolved the choice. */
+	modelId: string;
+	/** The level the child actually thinks at, after the clamp. */
+	thinkingLevel: string;
+	/** When the spawn call ran, so the inspector can show elapsed time. */
+	spawnedAt: number;
+	/** When the run settled, so the inspector can show duration. */
+	settledAt?: number;
+}
+
+/**
+ * Where one child stands, in the vocabulary the wait tool already reports.
+ *
+ * Lives on the registry rather than in the control tools so every reader of an
+ * entry — the `list_subagents` tool and the UI inspector alike — derives the
+ * same status from the same fields and the two cannot drift.
+ */
+export function statusOf(entry: SubagentEntry): "running" | "done" | "incomplete" | "failed" {
+	if (!entry.settled) {
+		return "running";
+	}
+	if (entry.error) {
+		return "failed";
+	}
+	return entry.result?.incomplete ? "incomplete" : "done";
 }
 /**
  * The live bookkeeping for one extension instance: every subagent spawned
@@ -38,6 +69,30 @@ export interface SubagentEntry {
 export class SubagentRegistry {
 	private entries = new Map<string, SubagentEntry>();
 	private counter = 0;
+	/**
+	 * Change listeners, notified on spawn and settlement.
+	 *
+	 * For the UI inspector: it renders from snapshots and must not poll, so the
+	 * registry — the one place every state transition already lands — is where
+	 * the "something changed" signal comes from. Listeners receive no payload;
+	 * a change means the snapshot should be rebuilt, not that a particular
+	 * entry moved.
+	 */
+	private listeners = new Set<() => void>();
+
+	/** Subscribes to spawn/settle changes; the return value unsubscribes. */
+	subscribe(listener: () => void): () => void {
+		this.listeners.add(listener);
+		return () => {
+			this.listeners.delete(listener);
+		};
+	}
+
+	private emitChange(): void {
+		for (const listener of this.listeners) {
+			listener();
+		}
+	}
 
 	nextId(): string {
 		this.counter += 1;
@@ -61,6 +116,12 @@ export class SubagentRegistry {
 		abort: () => void;
 		dispose: () => void;
 		start: () => Promise<SubagentRunResult>;
+		/** The spawn's own metadata, recorded verbatim for the inspector. */
+		task: string;
+		instructions?: string;
+		depth: number;
+		modelId: string;
+		thinkingLevel: string;
 	}): SubagentEntry {
 		// The promise placeholder is assigned before the function returns, before
 		// any caller could read it — the cast only bridges the two statements.
@@ -72,18 +133,28 @@ export class SubagentRegistry {
 			promise: null as unknown as Promise<SubagentRunResult>,
 			settled: false,
 			parentSignal: spec.parentSignal,
+			task: spec.task,
+			instructions: spec.instructions,
+			depth: spec.depth,
+			modelId: spec.modelId,
+			thinkingLevel: spec.thinkingLevel,
+			spawnedAt: Date.now(),
 		};
 		entry.promise = spec.start().then(
 			(result) => {
 				entry.settled = true;
 				entry.result = result;
+				entry.settledAt = Date.now();
 				entry.dispose();
+				this.emitChange();
 				return result;
 			},
 			(error) => {
 				entry.settled = true;
 				entry.error = error instanceof Error ? error : new Error(String(error));
+				entry.settledAt = Date.now();
 				entry.dispose();
+				this.emitChange();
 				throw entry.error;
 			},
 		);
@@ -92,6 +163,7 @@ export class SubagentRegistry {
 		// out of the unhandled-rejection lane until something inspects the entry.
 		entry.promise.catch(() => undefined);
 		this.entries.set(spec.id, entry);
+		this.emitChange();
 		return entry;
 	}
 

@@ -224,6 +224,13 @@ export function createSpawnSubagentTool(context: SubagentToolsContext, depth: nu
 				parentSignal: signal,
 				abort: linked.abort,
 				dispose: linked.dispose,
+				// Verbatim for the inspector: what it was asked to do, and the config
+				// it actually runs under (post-resolution, post-clamp).
+				task: params.task,
+				instructions: params.instructions,
+				depth: depth + 1,
+				modelId: model.id,
+				thinkingLevel,
 				start: () =>
 					runSubagent({
 						task: params.task,

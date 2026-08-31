@@ -87,6 +87,15 @@ export function createSubagentExtension(
 ): {
 	createTools(): AgentTool[];
 	disposeAll(): void;
+	/**
+	 * The registry behind the tools, for read-only observers.
+	 *
+	 * The UI inspector renders from registry entries and subscribes to its
+	 * spawn/settle events; handing it the same instance the tools write is what
+	 * keeps one source of truth. The registry's own class documents that entries
+	 * are live bookkeeping, so observers must copy what they render.
+	 */
+	registry: SubagentRegistry;
 } {
 	const registry = new SubagentRegistry();
 
@@ -129,5 +138,6 @@ export function createSubagentExtension(
 	return {
 		createTools: () => buildTools(0),
 		disposeAll: () => registry.disposeAll(),
+		registry,
 	};
 }
