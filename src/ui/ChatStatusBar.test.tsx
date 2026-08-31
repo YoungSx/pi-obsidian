@@ -141,4 +141,48 @@ describe("ChatStatusBar scope", () => {
 	});
 });
 
+describe("ChatStatusBar run readout", () => {
+	beforeEach(() => {
+		document.body.replaceChildren();
+	});
+
+	afterEach(() => {
+		document.body.replaceChildren();
+	});
+
+	it("measures a long run: elapsed and step count at the bar's trailing edge", async () => {
+		const host = await renderBar({ run: { startedAt: Date.now() - 47_000, steps: 12 } });
+
+		const readout = host.querySelector(".piem-chat__run");
+		expect(readout?.textContent).toContain("0:47");
+		expect(readout?.textContent).toContain("step 12");
+	});
+
+	it("stays hidden while the run is too young to be worth timing", async () => {
+		const host = await renderBar({ run: { startedAt: Date.now(), steps: 0 } });
+
+		expect(host.querySelector(".piem-chat__run")).toBeNull();
+		expect(host.querySelector(".piem-chat__statusbar")?.className).toContain("piem-chat__visually-hidden");
+	});
+
+	it("keeps the bar out of the live region, so the clock is not re-announced every second", async () => {
+		const host = await renderBar({ run: { startedAt: Date.now() - 47_000, steps: 12 } });
+
+		const readout = host.querySelector(".piem-chat__run");
+		expect(readout?.getAttribute("role")).toBe("timer");
+		expect(host.querySelector(".piem-chat__status")?.textContent).toBe("");
+	});
+
+	it("collapses the bar once the run settles", async () => {
+		const host = await renderBar({ run: { startedAt: Date.now() - 47_000, steps: 12 } });
+		expect(host.querySelector(".piem-chat__run")).not.toBeNull();
+
+		document.body.replaceChildren();
+		const idle = await renderBar({ run: null });
+
+		expect(idle.querySelector(".piem-chat__run")).toBeNull();
+		expect(idle.querySelector(".piem-chat__statusbar")?.className).toContain("piem-chat__visually-hidden");
+	});
+});
+
 const roots = new WeakMap<HTMLElement, import("react-dom/client").Root>();

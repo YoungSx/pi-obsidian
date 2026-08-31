@@ -1,6 +1,6 @@
-import React from "react";
+import React, { useEffect, useState } from "react";
 import { ObsidianIcon } from "./ObsidianIcon";
-import { chatStatusText } from "./chatStatus";
+import { chatStatusText, runProgressText, type TurnProgress } from "./chatStatus";
 import { useT } from "./TranslatorContext";
 
 export interface ChatStatusBarProps {
@@ -8,6 +8,12 @@ export interface ChatStatusBarProps {
 	isCompacting: boolean;
 	/** Whether the panel may show agent-internal readouts at all. */
 	showAgentDetails: boolean;
+	/**
+	 * The run now in flight, carried while the turn streams and dropped when it
+	 * settles. Present drives the elapsed-and-steps readout; absent means idle,
+	 * compacting, or a panel that has not started a turn yet.
+	 */
+	run?: TurnProgress | null;
 }
 
 /**
@@ -37,8 +43,28 @@ export interface ChatStatusBarProps {
  * screen-reader-only treatment, so an idle chat spends no height on an empty row
  * while its live region stays in the DOM. See `isQuiet`.
  */
-export function ChatStatusBar({ isInitializing, isCompacting, showAgentDetails }: ChatStatusBarProps): React.JSX.Element {
+export function ChatStatusBar({ isInitializing, isCompacting, showAgentDetails, run }: ChatStatusBarProps): React.JSX.Element {
 	const t = useT();
+	/*
+	 * The elapsed readout reads the clock at render time, not from state: every
+	 * snapshot event re-renders the bar with a fresh figure, and the tick below
+	 * exists only for the stretches between events. A turn can think for a
+	 * minute without emitting anything, and a clock that only moved when a token
+	 * arrived would read as frozen mid-wait — the exact "it ignored me" the
+	 * readout exists to prevent. One-second cadence, stopped when there is no
+	 * run to time; keyed on presence rather than identity, so a stream of
+	 * tool-call events does not tear the interval down and rebuild it per event.
+	 */
+	const isRunning = run !== null && run !== undefined;
+	const [, setTick] = useState(0);
+	useEffect(() => {
+		if (!isRunning) {
+			return undefined;
+		}
+		const timer = window.setInterval(() => setTick((tick) => tick + 1), 1000);
+		return () => window.clearInterval(timer);
+	}, [isRunning]);
+	const progress = run ? runProgressText(run, Date.now(), t) : null;
 	const status = chatStatusText({ isInitializing, isCompacting, showAgentDetails }, t);
 	/*
 	 * Nothing to show, but still something to keep: the bar collapses to the
@@ -51,7 +77,7 @@ export function ChatStatusBar({ isInitializing, isCompacting, showAgentDetails }
 	 * announce at all. Hiding it visually costs no height and keeps the region
 	 * discovered.
 	 */
-	const isQuiet = !status;
+	const isQuiet = !status && !progress;
 
 	return (
 		<div
@@ -72,6 +98,20 @@ export function ChatStatusBar({ isInitializing, isCompacting, showAgentDetails }
 					</>
 				) : null}
 			</span>
+			{progress ? (
+				/*
+				 * `role="timer"`, and deliberately *not* inside the live region beside
+				 * it: a polite region would re-announce the whole line every second the
+				 * clock turns over, interrupting the reader sixty times a minute to say
+				 * nothing new. A timer is a value that is consulted, not announced —
+				 * assistive tech reads it on arrival and on request, which is the same
+				 * contract the sighted reader gets.
+				 */
+				<span className="piem-chat__run" role="timer">
+					<ObsidianIcon name="loader-circle" className="piem-chat__spinner" />
+					{progress}
+				</span>
+			) : null}
 		</div>
 	);
 }

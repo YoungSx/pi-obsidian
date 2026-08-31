@@ -13,6 +13,7 @@ import { ChatBanner } from "./ChatBanner";
 import { ChatComposer } from "./ChatComposer";
 import { ChatHeader } from "./ChatHeader";
 import { ChatStatusBar } from "./ChatStatusBar";
+import { countRunSteps } from "./chatStatus";
 import { ContextGauge } from "./ContextGauge";
 import { ContextRow } from "./ContextRow";
 import { SubagentEntryIcon } from "./SubagentEntryIcon";
@@ -224,6 +225,34 @@ export function ChatApp({ service, inputController, component, draftStore, onOpe
 		const replyPlacement = snapshot.messages.length > 0 && suggestions.scope === "reply";
 		return emptyPlacement || replyPlacement ? suggestions.actions : [];
 	}, [suggestions, snapshot.messages.length, snapshot.sessionRevision]);
+
+	/*
+	 * The run in flight, measured: when this turn was accepted and how many tool
+	 * calls it has taken. The start is captured on the streaming edge, so a panel
+	 * reopened mid-run — whose first snapshot already streams, with no edge to
+	 * witness — reports no measurement rather than one that starts counting from
+	 * the wrong moment; the next turn it times is the next turn it saw begin.
+	 */
+	const prevRunStreamingRef = useRef(snapshot.isStreaming);
+	const [runStartedAt, setRunStartedAt] = useState<number | null>(null);
+	useEffect(() => {
+		const wasStreaming = prevRunStreamingRef.current;
+		prevRunStreamingRef.current = snapshot.isStreaming;
+		if (!wasStreaming && snapshot.isStreaming) {
+			setRunStartedAt(Date.now());
+		} else if (!snapshot.isStreaming) {
+			setRunStartedAt(null);
+		}
+	}, [snapshot.isStreaming]);
+	const run = useMemo(() => {
+		if (runStartedAt === null) {
+			return null;
+		}
+		return {
+			startedAt: runStartedAt,
+			steps: countRunSteps(snapshot.messages, snapshot.pendingToolCalls.length),
+		};
+	}, [runStartedAt, snapshot.messages, snapshot.pendingToolCalls.length]);
 
 	/*
 	 * Whether an armed edit still names its turn. A session switch leaves the
@@ -455,6 +484,7 @@ export function ChatApp({ service, inputController, component, draftStore, onOpe
 					isInitializing={isInitializing}
 					isCompacting={snapshot.isCompacting}
 					showAgentDetails={snapshot.showAgentDetails}
+					run={run}
 				/>
 
 				<ChatComposer

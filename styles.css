@@ -232,6 +232,23 @@ button.piem-settings-tab {
 	white-space: nowrap;
 }
 
+/*
+ * The in-flight run's measurement — `0:47 · step 12` — parked at the bar's
+ * trailing edge, opposite the sentence it qualifies. The figures are
+ * right-aligned because that is where a reader scans for a duration; the
+ * leading sentence gives up width first (min-width rules above), so a long
+ * compaction notice clips before the clock does.
+ */
+.piem-chat__run {
+	align-items: center;
+	color: var(--text-muted);
+	display: inline-flex;
+	flex-shrink: 0;
+	font-variant-numeric: tabular-nums;
+	gap: var(--size-4-1);
+	margin-left: auto;
+}
+
 /* --- context-window indicator --- */
 
 /*

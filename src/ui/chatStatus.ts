@@ -1,5 +1,83 @@
+import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import type { Translator } from "../i18n";
 import type { SendShortcut } from "./keyboard";
+
+/** A run in flight, measured. */
+export interface TurnProgress {
+	/** Epoch ms when the turn was accepted; the clock the elapsed readout runs from. */
+	startedAt: number;
+	/**
+	 * Steps the run has taken so far: tool calls finished in this turn plus the
+	 * ones still executing. The transcript names each one as it happens; this is
+	 * the count for a reader who wants to know how far along — or how far from
+	 * done — a long run is without reading every row.
+	 */
+	steps: number;
+}
+
+/**
+ * How long a run must go before the bar spends a row on timing it.
+ *
+ * A fast reply would flash the readout for a fraction of a second on its way
+ * out — an appearance for its own sake. The readout exists for the run the
+ * reader starts to wonder about, and that wondering begins after a couple of
+ * seconds, not at the first frame.
+ */
+const TURN_VISIBLE_AFTER_MS = 2000;
+
+/**
+ * Elapsed time as `m:ss` — and `h:mm:ss` past the hour, so a run that long
+ * keeps sorting by length rather than wrapping into a new shape.
+ */
+export function formatElapsed(ms: number): string {
+	const totalSeconds = Math.max(0, Math.floor(ms / 1000));
+	const hours = Math.floor(totalSeconds / 3600);
+	const minutes = Math.floor((totalSeconds % 3600) / 60);
+	const seconds = totalSeconds % 60;
+	const mm = hours > 0 ? String(minutes).padStart(2, "0") : String(minutes);
+	return `${hours > 0 ? `${hours}:` : ""}${mm}:${String(seconds).padStart(2, "0")}`;
+}
+
+/**
+ * Counts the steps of the run now in flight.
+ *
+ * A step is a tool call; the transcript renders each one's result as it lands.
+ * Everything since the last user turn belongs to this run — a rewind or a new
+ * prompt resets the count by construction, since the counting stops at that
+ * turn's own words — and the calls still executing ride in on
+ * `runningTools`, because a running call has no result row yet.
+ */
+export function countRunSteps(messages: readonly AgentMessage[], runningTools: number): number {
+	let steps = Math.max(0, runningTools);
+	for (let cursor = messages.length - 1; cursor >= 0; cursor -= 1) {
+		const message = messages[cursor];
+		if (!message || message.role === "user") {
+			break;
+		}
+		if (message.role === "toolResult") {
+			steps += 1;
+		}
+	}
+	return steps;
+}
+
+/**
+ * The run's measurement as one line, or `null` while it is too young to show.
+ *
+ * `null` — rather than an empty segment — is what keeps a quick reply from
+ * flashing a readout: the caller renders nothing, exactly as when idle.
+ */
+export function runProgressText(run: TurnProgress, now: number, t: Translator): string | null {
+	const elapsed = now - run.startedAt;
+	if (elapsed < TURN_VISIBLE_AFTER_MS) {
+		return null;
+	}
+	const segments = [formatElapsed(elapsed)];
+	if (run.steps > 0) {
+		segments.push(t.t("chatStatus.turnSteps", { count: run.steps }));
+	}
+	return segments.join(" · ");
+}
 
 /**
  * Copy for the chat status bar and the Send button's chord hint.
@@ -8,11 +86,12 @@ import type { SendShortcut } from "./keyboard";
  * renderer; `ChatStatusBar.tsx` and `ChatComposer.tsx` own the markup.
  *
  * The status bar reports only what cannot be shown as part of the conversation
- * itself: opening, compaction, context-window occupancy, and spend. A turn in
- * flight is not here — the transcript shows that as a typing indicator at the
- * assistant's own position, the way a chat app names "the other side is typing"
- * rather than labelling a wait. Reporting it in two places said one thing two
- * ways and made the panel shout.
+ * itself: opening, compaction, and the run's measurement — elapsed time and
+ * step count, which are not messages and so have no transcript home. A turn's
+ * *state* is still not here — the transcript shows that as a typing indicator
+ * at the assistant's own position, the way a chat app names "the other side is
+ * typing" rather than labelling a wait. Reporting it in two places said one
+ * thing two ways and made the panel shout.
  */
 
 export interface ChatStatusInput {
@@ -41,7 +120,9 @@ export interface ChatStatusInput {
  * opening is the panel starting up before there is a conversation, and
  * compaction is a request of its own that the reader did not initiate and the
  * message stream does not narrate. A reply in flight does have a place — the
- * typing indicator at the assistant's position — so it is not duplicated here.
+ * typing indicator at the assistant's position — so its state is not
+ * duplicated here; its elapsed-and-steps readout ({@link runProgressText}) is,
+ * because that is a measurement of the wait, not a narration of it.
  *
  * The idle slot used to carry the send chord. That hint now lives on the Send
  * button itself — see {@link sendShortcutLabel} — where it describes the control

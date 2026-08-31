@@ -240,6 +240,8 @@ export const en = {
 	chatStatus: {
 		opening: "Opening chat…",
 		tidyingUp: "Tidying up earlier messages…",
+		// Ordinal, not a total: the run is mid-flight, so no total exists to name.
+		turnSteps: "step {count}",
 	},
 
 	/**
