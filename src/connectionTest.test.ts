@@ -2,8 +2,16 @@ import { describe, expect, it } from "bun:test";
 import { createModels, fauxAssistantMessage, fauxProvider } from "@earendil-works/pi-ai";
 import type { Models } from "@earendil-works/pi-ai";
 import { testModelConnection, testProviderConnection } from "./connectionTest";
+import { DEFAULT_CUSTOM_ENDPOINT_MAX_TOKENS } from "./customEndpoint";
 import type { ModelConfig, ProviderConfig, WireProtocol } from "./modelConfig";
 import { getT } from "./i18n";
+import { installObsidianStub } from "./testing/obsidianStub";
+
+// The wire-body tests below build their provider through the plugin's own
+// `createObsidianModels`, which reaches `obsidian` for its transport; the module
+// ships types only, so it has to be stubbed before that import resolves.
+installObsidianStub();
+const { createObsidianModels } = await import("./net/streamFn");
 
 /** Verdicts are phrased through a translator, so each test states which language it reads. */
 const t = getT("en");
@@ -340,5 +348,86 @@ describe("testProviderConnection", () => {
 		const result = await testProviderConnection(models, provider(), [], t, { fetch });
 		expect(result.ok).toBe(false);
 		expect(result.detail).toBe("net::ERR_NAME_NOT_RESOLVED");
+	});
+});
+
+/**
+ * SSE body for a minimal completed chat-completions turn.
+ *
+ * Enough of the wire format for pi-ai's parser to finish a stream cleanly, so a
+ * captured request can be asserted on without the verdict masking it as an error.
+ */
+function sseBody(text: string): string {
+	const chunk = (delta: object, finish: string | null) =>
+		`data: ${JSON.stringify({ id: "c1", choices: [{ delta, finish_reason: finish }] })}\n\n`;
+	return `${chunk({ role: "assistant", content: text }, null)}${chunk({}, "stop")}data: [DONE]\n\n`;
+}
+
+/**
+ * Runs a probe against the plugin's own provider stack and returns what went out.
+ *
+ * The faux provider above cannot answer these tests: it substitutes for the
+ * protocol implementation, so it never builds a request body. Registering the
+ * real `openai-completions` api through `createObsidianModels` — the same call
+ * the settings panel makes — is what puts the actual wire format under
+ * assertion, which is the only level at which a field the server rejects is
+ * visible.
+ */
+async function captureProbeBody(
+	modelConfig: ModelConfig,
+	providerConfig: ProviderConfig = provider(),
+): Promise<Record<string, unknown>> {
+	const bodies: Record<string, unknown>[] = [];
+	const fetchImpl = (async (_input: RequestInfo | URL, init?: RequestInit) => {
+		// Narrowed rather than coerced: `BodyInit` covers streams and blobs whose
+		// stringification would silently yield "[object Object]" and a parse error
+		// far from its cause. The SDK sends a JSON string, so anything else means
+		// the request was not the one this helper is written to inspect.
+		if (typeof init?.body !== "string") {
+			throw new Error(`expected a JSON string body, got ${typeof init?.body}`);
+		}
+		bodies.push(JSON.parse(init.body) as Record<string, unknown>);
+		return new Response(sseBody("ok"), { status: 200, headers: { "content-type": "text/event-stream" } });
+	}) as typeof globalThis.fetch;
+
+	const { models } = createObsidianModels({ transport: "fetch", providers: [providerConfig] });
+	const result = await testModelConnection(models, modelConfig, providerConfig, t, { fetch: fetchImpl });
+	// A probe that never reached the transport would leave an empty array and an
+	// inscrutable assertion, so the verdict is surfaced as the failure instead.
+	if (bodies.length !== 1) {
+		throw new Error(`expected exactly one request, got ${bodies.length}; verdict: ${result.detail}`);
+	}
+	return bodies[0] as Record<string, unknown>;
+}
+
+describe("the request a chat probe puts on the wire", () => {
+	it("caps output at the value the user configured, not one of its own", async () => {
+		// Regression guard for issue #158. The probe used to send `maxTokens: 1` to
+		// keep a paid endpoint cheap, and pi-ai resolves the cap as
+		// `options.maxTokens ?? model.maxTokens` — so that 1 replaced whatever the
+		// user had filled in. Servers with a floor above it (b.ai's DeepSeek
+		// endpoints require more than 2) answered `400 max_tokens must be greater
+		// than 2`, reporting a working configuration as broken.
+		const body = await captureProbeBody(
+			model({ modelApiId: "deepseek-v4-flash", contextWindow: 1_000_000, maxTokens: 384_000 }),
+		);
+		expect(body.max_tokens).toBe(384_000);
+	});
+
+	it("falls back to the same default a real turn would use when the field is blank", async () => {
+		// An unset cap has to resolve through `buildConfiguredModel`, exactly as it
+		// does for an ordinary message — not to a probe-specific number.
+		const body = await captureProbeBody(model({ maxTokens: undefined }));
+		expect(body.max_tokens).toBe(DEFAULT_CUSTOM_ENDPOINT_MAX_TOKENS);
+	});
+
+	it("sends the model id and prompt the caller asked for, under the legacy field name", async () => {
+		// The compat pin travels with the probe too: a gateway that only knows
+		// `max_tokens` must not be tested through `max_completion_tokens`, or the
+		// test would exercise a wire format no real turn sends.
+		const body = await captureProbeBody(model({ modelApiId: "deepseek-v4-flash" }));
+		expect(body.model).toBe("deepseek-v4-flash");
+		expect(body.max_completion_tokens).toBeUndefined();
+		expect(body.messages).toEqual([{ role: "user", content: "Reply with the single word: ok" }]);
 	});
 });
