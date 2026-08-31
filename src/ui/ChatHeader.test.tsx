@@ -38,16 +38,12 @@ async function renderHeader(snapshot: ChatSnapshot, options: RenderOptions = {})
 			onNewSession={() => undefined}
 			onRenameSession={() => undefined}
 			onDeleteSession={() => undefined}
-			onInsertCommand={(invocation) => insertions.push(invocation)}
 			onOpenSettings={options.onOpenSettings}
 		/>,
 	);
 	await flushRender();
 	return host;
 }
-
-/** Records every command the menu's submenu asked to insert, order of use first. */
-const insertions: string[] = [];
 
 /** Presses the overflow button and returns the menu production code built. */
 async function openOverflow(host: HTMLElement): Promise<ReturnType<typeof lastMenu>> {
@@ -69,6 +65,10 @@ async function openOverflow(host: HTMLElement): Promise<ReturnType<typeof lastMe
  * `ChatStatusBar.test.tsx` with their markup. The model line went to
  * `ModelSwitcher.test.tsx`, which is where the control that changes it now lives.
  * What is asserted here is that none of them come back.
+ *
+ * A third evicted thing is pinned one describe down, in the overflow menu rather
+ * than the row: the slash-command catalogue, which now lives only in the
+ * composer's `/` menu (`CommandMenu.test.tsx`).
  */
 describe("ChatHeader scope", () => {
 	beforeEach(() => {
@@ -196,7 +196,6 @@ describe("ChatHeader overflow menu", () => {
 	beforeEach(() => {
 		createRootSync = createRootImpl;
 		resetMenus();
-		insertions.length = 0;
 		document.body.replaceChildren();
 	});
 
@@ -257,9 +256,11 @@ describe("ChatHeader overflow menu", () => {
 		expect((await openOverflow(host)).titles()).toEqual(["Rename chat", "Delete chat"]);
 	});
 
-	it("lists each slash command as its own menu row", async () => {
-		// The commands' only other advertisement was one line of placeholder that
-		// vanished with the first keystroke; this is the standing door.
+	it("keeps the slash-command catalogue out of the menu, however many the vault has", async () => {
+		// A mirror of the composer's `/` list lived here, one row per invocation.
+		// It is gone: a catalogue that grows with the vault does not belong among
+		// four verbs about this chat, and past a handful of skills it pushed Delete
+		// off the bottom of a phone screen. The menu is session actions only.
 		const host = await renderHeader(
 			snapshot({
 				session: sessionInfo(),
@@ -271,10 +272,13 @@ describe("ChatHeader overflow menu", () => {
 		);
 
 		const menu = await openOverflow(host);
-		expect(menu.titles()).toEqual(["Rename chat", "/summarize", "/skill:tagger", "Delete chat"]);
+		expect(menu.titles()).toEqual(["Rename chat", "Delete chat"]);
 	});
 
-	it("routes a chosen command to insertion as the start of a prompt", async () => {
+	it("greys the overflow button when only commands would have filled it", async () => {
+		// The command block used to be a fourth door keeping this button alive. With
+		// no session and no settings, a vault full of skills now leaves the menu
+		// genuinely empty — so the button must say so rather than open onto nothing.
 		const host = await renderHeader(
 			snapshot({
 				session: undefined,
@@ -282,9 +286,8 @@ describe("ChatHeader overflow menu", () => {
 			}),
 		);
 
-		(await openOverflow(host)).click("/summarize");
-
-		expect(insertions).toEqual(["summarize"]);
+		const button = host.querySelector<HTMLButtonElement>('.piem-chat__header-actions button[aria-label="More chat actions"]');
+		expect(button?.disabled).toBe(true);
 	});
 });
 
