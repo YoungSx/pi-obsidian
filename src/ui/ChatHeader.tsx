@@ -22,6 +22,13 @@ interface ChatHeaderProps {
 	onRenameSession: (name: string) => void;
 	onDeleteSession: (path: string) => void;
 	/**
+	 * Writes the transcript into the vault as a Markdown note and opens it.
+	 * Offered only while a settled session with at least one message exists —
+	 * the same door as rename, since an empty or in-flight chat has nothing to
+	 * export yet.
+	 */
+	onExportSession?: () => void;
+	/**
 	 * Inserts a slash command as the start of a draft. Absent handling is not
 	 * modelled — the composer always exists below this header — but the command
 	 * block keys off the list itself: no templates or skills, no item.
@@ -59,6 +66,7 @@ export function ChatHeader({
 	onRenameSession,
 	onDeleteSession,
 	onInsertCommand,
+	onExportSession,
 	onOpenSettings,
 }: ChatHeaderProps): React.JSX.Element {
 	const t = useT();
@@ -118,6 +126,11 @@ export function ChatHeader({
 					.setIcon("pencil")
 					.onClick(() => openSessionRename(app, editableSession, onRenameSession, t)),
 			);
+			// An export needs a transcript worth writing; an empty chat's note
+			// would be a heading and nothing under it.
+			if (onExportSession && snapshot.messages.length > 0) {
+				menu.addItem((item) => item.setTitle(t.t("chat.exportNote")).setIcon("file-down").onClick(() => onExportSession()));
+			}
 		}
 		if (onOpenSettings) {
 			if (editableSession || historyItem) {

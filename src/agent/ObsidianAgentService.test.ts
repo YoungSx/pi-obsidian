@@ -9,7 +9,6 @@ import { DEFAULT_SESSION_RETENTION } from "../session/retention";
 import { DEFAULT_SESSION_DIR } from "../session/sessionDir";
 import { DEFAULT_LOG_LEVEL } from "../logging/logLevel";
 import type { PiemSettings } from "../settings";
-import { DEFAULT_SETTINGS } from "../settings";
 import type { ObsidianAgentService as ObsidianAgentServiceType } from "./ObsidianAgentService";
 import type { UserSkillsLoad } from "../skills/userSkills";
 import { spyLogger } from "../testing/logSpy";
@@ -23,6 +22,9 @@ const { ObsidianAgentService } = await import("./ObsidianAgentService");
 const { OBSIDIAN_AGENT_SYSTEM_PROMPT } = await import("./systemPrompt");
 const { TFile: TFileClass, TFolder: TFolderClass } = await import("obsidian");
 const { MAX_ACTIVE_NOTE_CHARS } = await import("./contextInjection");
+// `settings.ts` imports `obsidian` at runtime; this import must stay behind
+// the stub registration above.
+const { DEFAULT_SETTINGS } = await import("../settings");
 
 // Tests drive ObsidianSessionManager directly, so the directory is supplied here
 // rather than derived from a Vault; `Vault#configDir` is used in production code.
@@ -1426,6 +1428,52 @@ function usageChunk(): object {
  * what decides whether one of them may become the endpoint every subsequent
  * request goes to.
  */
+/*
+ * Exporting the transcript as a vault note. The note is written through the
+ * vault API — not the adapter — so `createFakeApp`'s create/createFolder pair
+ * registers what a reader would open, and each assertion reads the note back
+ * the same way the panel's "open the file" step resolves it.
+ */
+describe("exporting a session as a note", () => {
+	it("writes the transcript beside its session log and returns the path", async () => {
+		const vaultFiles: Record<string, string> = {};
+		const service = createService(new MemoryAdapter(), { vaultFiles });
+		await service.sendPrompt("First ask");
+		await service.sendPrompt("Second ask");
+
+		const path = await service.exportSessionAsNote();
+
+		expect(path).toBe(`${DEFAULT_SESSION_DIR}/First ask.md`);
+		const note = vaultFiles[`${DEFAULT_SESSION_DIR}/First ask.md`] ?? "";
+		expect(note).toContain("# First ask");
+		expect(note).toContain("First ask");
+		expect(note).toContain("Second ask");
+		expect(note).toContain("Done");
+	});
+
+	it("numbers a second export of an identically named chat instead of overwriting", async () => {
+		const vaultFiles: Record<string, string> = {};
+		const service = createService(new MemoryAdapter(), { vaultFiles });
+		await service.sendPrompt("Hello");
+
+		const first = await service.exportSessionAsNote();
+		const second = await service.exportSessionAsNote();
+
+		expect(first).toBe(`${DEFAULT_SESSION_DIR}/Hello.md`);
+		expect(second).toBe(`${DEFAULT_SESSION_DIR}/Hello 2.md`);
+		expect(vaultFiles[`${DEFAULT_SESSION_DIR}/Hello.md`]).toBeDefined();
+		expect(vaultFiles[`${DEFAULT_SESSION_DIR}/Hello 2.md`]).toBeDefined();
+	});
+
+	it("answers null for an empty chat instead of writing a heading with nothing under it", async () => {
+		const service = createService();
+
+		expect(await service.exportSessionAsNote()).toBeNull();
+	});
+	// No "transcript without a session" case: the manager creates the session
+	// entry before the first message lands, so a transcript always has one.
+});
+
 describe("switching the active model", () => {
 	it("offers the configured models to the panel, named rather than as ids", () => {
 		const { service, settings } = createServiceWithSettings();
@@ -2403,6 +2451,14 @@ function createFakeApp(
 			read: async (file: TFile) => vaultFiles[file.path] ?? "",
 			cachedRead: async (file: TFile) => vaultFiles[file.path] ?? "",
 			readBinary: async (file: { path: string }) => imageFiles?.get(file.path) ?? new ArrayBuffer(0),
+			// Writes register the file in the same map the readers resolve, so a
+			// test that creates a note can read it back through the same stub.
+			create: async (path: string, content: string) => {
+				registerFile(path, content.length);
+				vaultFiles[path] = content;
+				return files.get(path)!;
+			},
+			createFolder: async (path: string) => folderAt(path),
 		},
 		workspace: {
 			getActiveViewOfType: () => null,

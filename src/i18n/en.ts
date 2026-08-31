@@ -146,6 +146,18 @@ export const en = {
 		agentBusy: "The agent is already responding.",
 		/** Notice when a finished reply could not be written to the vault. The reader has the text either way, so this is a notice, not an alert. */
 		persistFailed: "This reply could not be saved to the vault: {error}",
+		/** Overflow-menu item that writes the transcript into the vault as a Markdown note. */
+		exportNote: "Save as note",
+		/** Role heading in an exported note. */
+		exportUser: "You",
+		/** Role heading in an exported note. */
+		exportAssistant: "Assistant",
+		/** One-line attribution for a tool call inside an exported note. */
+		exportTool: "tool",
+		/** Note title fallback when a chat has neither a name nor a first message. */
+		exportUntitled: "Chat",
+		/** Notice when writing the exported note failed. */
+		exportFailed: "Saving the chat as a note failed: {error}",
 		/** alt text for a staged image thumbnail. */
 		imageThumbAlt: "Image attached: {mimeType}",
 		/** aria-label for the button removing the Nth staged image (1-based). */

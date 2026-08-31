@@ -94,6 +94,18 @@ export const zhCN: DeepPartial<EnCopy> = {
 		agentBusy: "Piem 已经在回复中了。",
 		/** 回复已生成但没能写进 vault。读者反正已看到正文，所以这是通知而不是警报。 */
 		persistFailed: "这条回复没能保存进笔记库：{error}",
+		/** 溢出菜单项：把对话记录写成 vault 里的 Markdown 笔记。 */
+		exportNote: "存为笔记",
+		/** 导出笔记里的角色标题。 */
+		exportUser: "我",
+		/** 导出笔记里的角色标题。 */
+		exportAssistant: "助手",
+		/** 导出笔记里一行工具调用的署名。 */
+		exportTool: "工具",
+		/** 对话既无名字也无首条消息时的笔记标题兜底。 */
+		exportUntitled: "对话",
+		/** 导出笔记写入失败时的通知。 */
+		exportFailed: "把对话存为笔记失败：{error}",
 		imageThumbAlt: "已附图片：{mimeType}",
 		removeImage: "移除图片 {index}",
 		imageNotFound: "在 vault 中找不到 {path}，未发送。",

@@ -40,6 +40,7 @@ import {
 import { ObsidianSessionManager, type ActiveSessionInfo, type SessionContext, type SessionDefaults } from "../session/ObsidianSessionManager";
 import { arrayBufferToBase64, extractImageRefs, mimeTypeForPath, sanitizeMessageForLog, stripImageRefs } from "../vault/image";
 import { injectContext, type InjectedNote } from "./contextInjection";
+import { noteFileName, renderTranscriptMarkdown, type ExportableMessage } from "./exportNote";
 import { ContextRefs, type ContextRef } from "./contextRefs";
 import { createSubagentExtension } from "../subagent/extension";
 import { OBSIDIAN_AGENT_SYSTEM_PROMPT } from "./systemPrompt";
@@ -1162,6 +1163,59 @@ export class ObsidianAgentService {
 		this.sessionInfo = await this.sessionManager.getActiveSessionInfo();
 		this.sessionRevision += 1;
 		this.notify();
+	}
+
+	/**
+	 * Writes the active transcript into the vault as a Markdown note and returns
+	 * its path — or null when there is nothing to write (no chat, no messages)
+	 * or the write failed, the failure surfacing as a panel notice rather than a
+	 * thrown error, since the caller's only follow-up on success is opening the
+	 * note it gets a path back for.
+	 *
+	 * The note lands in the session directory, beside the `.jsonl` it mirrors:
+	 * that folder is already the plugin's own territory, so an export never
+	 * mixes a machine-named file into the reader's curated notes uninvited.
+	 */
+	async exportSessionAsNote(): Promise<string | null> {
+		const transcript = (this.agent?.state.messages ?? []).filter(
+			(message): message is ExportableMessage =>
+				message.role === "user" || message.role === "assistant" || message.role === "toolResult",
+		);
+		const session = this.sessionInfo;
+		if (transcript.length === 0 || !session) {
+			return null;
+		}
+
+		const t = this.t();
+		const base = noteFileName(session.name ?? session.firstMessage ?? t.t("chat.exportUntitled"));
+		const dir = this.getSettings().sessionDir;
+		try {
+			let path = `${dir}/${base}.md`;
+			let suffix = 2;
+			while (this.app.vault.getAbstractFileByPath(path)) {
+				path = `${dir}/${base} ${suffix}.md`;
+				suffix += 1;
+			}
+			if (!this.app.vault.getAbstractFileByPath(dir)) {
+				await this.app.vault.createFolder(dir);
+			}
+			const model = getSelectedModel(this.getSettings());
+			const content = renderTranscriptMarkdown(transcript, {
+				title: session.name ?? base,
+				exportedAt: new Date(),
+				model: `${model.provider}/${model.id}`,
+				roles: {
+					user: t.t("chat.exportUser"),
+					assistant: t.t("chat.exportAssistant"),
+					tool: t.t("chat.exportTool"),
+				},
+			});
+			await this.app.vault.create(path, content);
+			return path;
+		} catch (error) {
+			this.appendNotice(t.t("chat.exportFailed", { error: error instanceof Error ? error.message : String(error) }));
+			return null;
+		}
 	}
 
 	/**
