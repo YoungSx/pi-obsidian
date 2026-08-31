@@ -2469,9 +2469,13 @@ button.piem-chat__latest {
 	box-shadow: none;
 }
 
-.piem-settings-desc-toggle:hover {
-	color: var(--text-normal);
-	text-decoration: underline;
+/* A tap latches :hover on a phone, so the hover state rides the same gate
+ * Obsidian wraps every one of its own hover rules in. */
+@media (hover: hover) {
+	.piem-settings-desc-toggle:hover {
+		color: var(--text-normal);
+		text-decoration: underline;
+	}
 }
 
 /*
