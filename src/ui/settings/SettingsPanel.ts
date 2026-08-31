@@ -116,13 +116,11 @@ export interface SettingsPanelHost {
 	 */
 	forgetProviderSecret(providerId: string): void;
 	/**
-	 * Drops a deleted provider's key from the vault tier.
+	 * Drops a deleted MCP server's token from the vault tier.
 	 *
-	 * Called at the moment the deletion is confirmed, before {@link save}: the
-	 * panel owns the semantics, the host owns the id derivation, and without
-	 * this the store would keep the key until something reuses its id.
+	 * Same contract as {@link forgetProviderSecret}, one family over.
 	 */
-	forgetProviderSecret(providerId: string): void;
+	forgetMcpServerSecret(serverId: string): void;
 	/** Names whatever requests currently target, for the status line. */
 	describeTarget(): string;
 	/** Copy for the whole panel, resolved from {@link SettingsPanelSettings.language}. */
@@ -1374,6 +1372,7 @@ function renderMcpRow(containerEl: HTMLElement, host: SettingsPanelHost, state: 
 				t,
 				onConfirm: async () => {
 					host.settings.mcpServers = host.settings.mcpServers.filter((row) => row.id !== state.id);
+					host.forgetMcpServerSecret(state.id);
 					await afterMutation();
 				},
 			});

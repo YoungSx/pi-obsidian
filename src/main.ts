@@ -482,6 +482,16 @@ export default class PiemPlugin extends Plugin {
 	}
 
 	/**
+	 * Drops a deleted MCP server's token from the vault tier.
+	 *
+	 * Same contract as {@link forgetProviderSecret}, one family over: without it
+	 * the store would keep the token until a future server id collided with it.
+	 */
+	forgetMcpServerSecret(serverId: string): void {
+		this.requireSecretEnvironment().vault().remove(secretIdFor("mcp", serverId));
+	}
+
+	/**
 	 * Persists settings, routing every secret to wherever this device keeps them.
 	 *
 	 * On the `vault` tier each key is written to Obsidian's secret store and its
