@@ -111,6 +111,39 @@ describe("CommandMenu", () => {
 		expect(items[0]?.querySelector(".piem-chat__command-menu-kind")?.textContent).toBe("Skill");
 	});
 
+	it("puts a row's three strings on one flex line, in reading order", async () => {
+		// The row was a two-line stack: a name-and-kind heading over a description.
+		// The wrapper is gone with it — the button is the flex line now — and the
+		// three spans are direct children in the order they are read as well as the
+		// order they are seen, so nothing has to be reordered in CSS and a screen
+		// reader cannot disagree with the eye about which kind qualifies which name.
+		const { host } = await renderMenu("");
+
+		expect(host.querySelector(".piem-chat__command-menu-heading")).toBeNull();
+		const row = host.querySelector(".piem-chat__command-menu-button");
+		expect(Array.from(row?.children ?? [], (child) => child.className)).toEqual([
+			"piem-chat__command-menu-name",
+			"piem-chat__command-menu-desc",
+			"piem-chat__command-menu-kind",
+		]);
+	});
+
+	it("keeps the kind tag at the trailing edge of a row with no description", async () => {
+		// A description-less row has no growing middle to push the tag over, so the
+		// trailing column is held by `margin-left: auto` in the stylesheet rather
+		// than by the layout. What the markup must not do is emit an empty span to
+		// stand in for the missing description — a blank flex child would take the
+		// row's slack and defeat the margin.
+		const commands: CommandEntry[] = [{ name: "bare", description: "", kind: "template", invocation: "bare" }];
+		const { host } = await renderMenu("", commands);
+
+		const row = host.querySelector(".piem-chat__command-menu-button");
+		expect(Array.from(row?.children ?? [], (child) => child.className)).toEqual([
+			"piem-chat__command-menu-name",
+			"piem-chat__command-menu-kind",
+		]);
+	});
+
 	it("keeps duplicate names distinct by source and selects the skill's disambiguated invocation", async () => {
 		const commands: CommandEntry[] = [
 			{ name: "summarize", description: "Prompt version", kind: "template", invocation: "summarize" },

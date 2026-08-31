@@ -27,3 +27,6 @@ sessions/
 
 # Agent worktrees and local agent config
 .claude
+
+# Rendered output of scripts/preview-command-menu.mjs, for eyeballing layout.
+.preview/

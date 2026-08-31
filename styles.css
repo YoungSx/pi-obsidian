@@ -1765,25 +1765,29 @@ button.piem-chat__latest {
 	margin: 0;
 }
 
+/*
+ * One row per command, not a two-line stack.
+ *
+ * The stack's defect was not its height but its spacing: the gap between a name
+ * and its own description was `--size-4-1`, the same 4px as the padding between
+ * one row and the next. Organisms group by proximity, so equal gaps inside and
+ * between meant the list stopped reading as rows at all — squint at it and only
+ * a stripe pattern of alternating weights survives. Twelve commands then cost
+ * twenty-four lines, and the `space-between` heading opened a gap between the
+ * name and the kind tag that qualifies it.
+ *
+ * `baseline`, not `center`: three spans at two font sizes sharing one line, so
+ * they must sit on a common baseline or the smaller two float mid-glyph.
+ */
 .piem-chat__command-menu-button {
 	align-items: baseline;
 	border: none;
 	border-radius: var(--radius-s);
 	color: var(--text-normal);
 	display: flex;
-	flex-direction: column;
-	gap: var(--size-4-1);
+	gap: var(--size-4-2);
 	padding: var(--size-4-1) var(--size-4-2);
 	text-align: left;
-	width: 100%;
-}
-
-.piem-chat__command-menu-heading {
-	align-items: baseline;
-	display: flex;
-	gap: var(--size-4-2);
-	justify-content: space-between;
-	min-width: 0;
 	width: 100%;
 }
 
@@ -1795,28 +1799,87 @@ button.piem-chat__latest {
 	background: var(--background-modifier-hover);
 }
 
+/*
+ * The command's identity, and the one string the user is scanning for, so it is
+ * the last thing allowed to give up room: `flex-basis: auto` against the
+ * description's `0` means the description absorbs the whole shortfall before
+ * this shrinks at all (shrink is weighted by basis, and a basis of 0 contributes
+ * nothing to the split). The ellipsis is the floor under a pathological name in
+ * a 300px sidebar, not the expected behaviour.
+ */
 .piem-chat__command-menu-name {
 	color: var(--text-normal);
+	flex: 0 1 auto;
 	font-family: var(--font-interface);
 	font-size: var(--font-ui-small);
 	font-weight: var(--font-medium);
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
 }
 
+/*
+ * The kind tag, held at the trailing edge as a scannable column.
+ *
+ * `margin-left: auto` is what pins it there when a row has no description — the
+ * two commands in a vault with none would otherwise sit tag-against-name. With a
+ * description present the growing middle has already claimed the free space, so
+ * the auto margin resolves to zero and contributes nothing: one declaration
+ * covering both rows rather than a `:only-child`-style special case.
+ *
+ * The `padding-left` is deliberate rhythm, not a second gap for its own sake:
+ * 8px + 4px puts more air before the trailing column than between the name and
+ * the description it belongs with, so the row reads as a tight pair plus an
+ * aside. It is also the clearance the ellipsis needs — truncation lands here,
+ * and 8px alone left the dots crowding the tag.
+ *
+ * `--text-muted`, not the fainter tier this slot wore: the kind tag is small
+ * text against `--background-primary`, and `--text-faint` falls below the
+ * 4.5:1 body-text floor in most themes. The description reads in the same
+ * token, so the row's two secondary strings agree.
+ */
 .piem-chat__command-menu-kind {
-	/* `--text-muted`, not the fainter tier this slot wore: the kind tag is small
-	 * text against `--background-primary`, and `--text-faint` falls below the
-	 * 4.5:1 body-text floor in most themes. The description already reads in
-	 * `--text-muted`, so the row's two secondary strings now agree, too. */
 	color: var(--text-muted);
 	flex-shrink: 0;
 	font-family: var(--font-interface);
 	font-size: var(--font-ui-smaller);
+	margin-left: auto;
+	padding-left: var(--size-4-1);
 }
 
+/*
+ * The description: takes the row's slack and gives it back first.
+ *
+ * `flex: 1 1 0` on a nowrap span is what makes the row degrade in the right
+ * order — it grows to push the kind tag to the edge, and it is the span that
+ * ellipsizes when the panel narrows, because a basis of 0 means the whole
+ * shortfall is charged here before the name is touched.
+ *
+ * `overflow: hidden` is the load-bearing half of the truncation pair, and it is
+ * load-bearing twice: it clips (so `text-overflow` has something to draw an
+ * ellipsis into) *and* it zeroes the flex item's automatic minimum size, which
+ * is otherwise the content width — the reason a nowrap span in a flex row
+ * classically refuses to shrink and pushes the row wide instead. The
+ * `min-width: 0` beside it is therefore redundant rather than required;
+ * measured in Chromium, removing it changes nothing while removing
+ * `overflow: hidden` spills the text across the trailing tag. It is kept as the
+ * explicit statement of the intent, so a later edit that reaches for
+ * `overflow: visible` finds the shrink still spelled out rather than silently
+ * losing both behaviours to one deletion.
+ *
+ * Weaker than the name on three axes at once — size, weight and colour — which
+ * is what lets it sit on the same line without competing with it.
+ */
 .piem-chat__command-menu-desc {
 	color: var(--text-muted);
+	flex: 1 1 0;
 	font-family: var(--font-interface);
 	font-size: var(--font-ui-smaller);
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
 }
 
 /*
@@ -2192,15 +2255,19 @@ button.piem-chat__latest {
 	 * The command menu's rows are bare <button>s wearing a class, so the shared
 	 * icon-button selector never reaches them — the same gap that left the
 	 * jump-to-latest button and the context ring in the thumb zone. Each row is
-	 * a two-line stack (name and description), so height is what the thumb aims
-	 * at; the width comes from the menu and needs no floor.
+	 * one line now, which makes this floor do more work than it used to: the
+	 * intrinsic height is ~26px, so the row is padded to the 48px target rather
+	 * than merely clearing it. The width comes from the menu and needs no floor.
+	 *
+	 * The single-line row is also what makes the floor affordable — at two lines
+	 * per command, 48px rows and this viewport ceiling fit half as many choices.
 	 */
 	.piem-chat__command-menu-button {
 		min-height: var(--size-4-12);
 	}
 
 	/*
-	 * Rows that just grew to 48px carve the 40vh list into fewer visible
+	 * Rows held at 48px for the thumb carve the 40vh list into fewer visible
 	 * choices — on a phone, where the composer already owns the bottom third.
 	 * The extra tenth of the viewport buys back a row or two of scan room.
 	 */

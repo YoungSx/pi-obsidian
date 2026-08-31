@@ -196,6 +196,17 @@ export function CommandMenu({ commands, query, menuId, onActiveChange, onSelect,
 					aria-selected={index === activeIndex}
 					className="piem-chat__command-menu-item"
 				>
+					{/*
+					 * One row, three spans, in the order they are read as well as the order
+					 * they are seen: name, what it does, which sort it is. No wrapper around
+					 * the first and last — the row itself is the flex line now, and the
+					 * `<span>` that used to pair name with kind only existed to hold them on
+					 * a line above the description.
+					 *
+					 * Nothing here reorders in CSS. The trailing kind sits last in the DOM
+					 * too, so a screen reader's reading order and the visual left-to-right
+					 * cannot disagree.
+					 */}
 					<button
 						type="button"
 						className="piem-chat__command-menu-button"
@@ -203,13 +214,11 @@ export function CommandMenu({ commands, query, menuId, onActiveChange, onSelect,
 						onClick={() => onSelect(match)}
 						tabIndex={-1}
 					>
-						<span className="piem-chat__command-menu-heading">
-							<span className="piem-chat__command-menu-name">/{match.name}</span>
-							<span className="piem-chat__command-menu-kind">
-								{t.t(match.kind === "template" ? "chat.commandKindTemplate" : "chat.commandKindSkill")}
-							</span>
-						</span>
+						<span className="piem-chat__command-menu-name">/{match.name}</span>
 						{match.description ? <span className="piem-chat__command-menu-desc">{match.description}</span> : null}
+						<span className="piem-chat__command-menu-kind">
+							{t.t(match.kind === "template" ? "chat.commandKindTemplate" : "chat.commandKindSkill")}
+						</span>
 					</button>
 				</li>
 			))}
