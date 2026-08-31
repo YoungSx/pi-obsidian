@@ -3,6 +3,7 @@ import type { Translator } from "./i18n";
 import type { Model } from "@earendil-works/pi-ai";
 import type { CustomEndpointConfig } from "./customEndpoint";
 import { DEFAULT_CUSTOM_ENDPOINT_CONTEXT_WINDOW, DEFAULT_CUSTOM_ENDPOINT_MAX_TOKENS } from "./customEndpoint";
+import { isValidSecretId } from "./keychain";
 
 /**
  * Provider and model configuration for user-supplied endpoints.
@@ -62,10 +63,19 @@ export interface ProviderConfig {
 	baseUrl: string;
 	protocol: WireProtocol;
 	/**
-	 * Plaintext in memory; sealed at the persistence boundary by the same codec
-	 * that handles every other secret in this plugin.
+	 * Plaintext in memory. On disk this field is always `""` when
+	 * {@link secretRef} is set: the credential lives in the keychain, and
+	 * `data.json` holds only the reference. Non-empty on disk only on devices
+	 * without keychain support, where this field is the storage.
 	 */
 	apiKey: string;
+	/**
+	 * Id of the keychain entry this provider is bound to, or `""` for inline
+	 * keys. Exactly one of the two carries the credential: a set `secretRef`
+	 * with a non-empty `apiKey` on disk is the manual field's copy that a
+	 * load overwrites, never a second source of truth to merge.
+	 */
+	secretRef: string;
 	/**
 	 * Where this provider came from. Only `user` exists today; the field is
 	 * present so partner and subscription entries can be distinguished later
@@ -137,7 +147,7 @@ function readProviderSource(value: unknown): ProviderSource {
 
 /** A blank provider for the "add provider" form to fill in. */
 export function emptyProviderConfig(): ProviderConfig {
-	return { id: uuidv7(), name: "", baseUrl: "", protocol: DEFAULT_WIRE_PROTOCOL, apiKey: "", source: "user" };
+	return { id: uuidv7(), name: "", baseUrl: "", protocol: DEFAULT_WIRE_PROTOCOL, apiKey: "", secretRef: "", source: "user" };
 }
 
 /** A blank model bound to `providerId`. */
@@ -172,12 +182,18 @@ export function normalizeProviderConfig(data: unknown): ProviderConfig | undefin
 	if (!id || !baseUrl) {
 		return undefined;
 	}
+	const secretRef = readTrimmedString(raw.secretRef);
 	return {
 		id,
 		name: readTrimmedString(raw.name),
 		baseUrl,
 		protocol: isWireProtocol(raw.protocol) ? raw.protocol : DEFAULT_WIRE_PROTOCOL,
 		apiKey: readTrimmedString(raw.apiKey),
+		// A reference that cannot name a keychain entry is junk from a hand-edit,
+		// and keeping it would mask the real state (nothing bound). A well-formed
+		// one that names nothing stays — that is a dangling reference, which the
+		// panel reports, and dropping it would silently lose the binding.
+		secretRef: isValidSecretId(secretRef) ? secretRef : "",
 		source: readProviderSource(raw.source),
 	};
 }
@@ -338,6 +354,7 @@ export function migrateCustomEndpoint(
 		baseUrl: endpoint.baseUrl,
 		protocol: DEFAULT_WIRE_PROTOCOL,
 		apiKey: endpoint.apiKey,
+		secretRef: "",
 		source: "user",
 	};
 	const model: ModelConfig = {

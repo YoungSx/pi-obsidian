@@ -556,6 +556,8 @@ export const en = {
 		editModel: "Edit model",
 		deleteModel: "Delete model",
 		keySet: "key set",
+		keyBound: "key in Obsidian's keychain",
+		keyMissing: "keychain entry missing",
 		noKey: "no key",
 		modelCount: "{count} model",
 		modelsCount: "{count} models",
@@ -957,7 +959,7 @@ export const en = {
 		modelWasActive: "It is the active model, so {model} takes over when it goes.",
 		modelWasLast: "It is the only model, and nothing takes its place — add another before your next message.",
 		skillFiles: "The skill's files move to the trash and stop being available to the agent.",
-		mcpServer: "Its tools stop being offered to the agent. The token stored for it is removed from this vault's config.",
+		mcpServer: "Its tools stop being offered to the agent. Any keychain entry its token was bound to is left in place.",
 	},
 
 	/**
@@ -982,13 +984,31 @@ export const en = {
 		pending: "Sending a test request…",
 	},
 
-	/** Where API keys are stored on this device. */
+	/** Where API keys are stored on this device, one sentence per tier. */
 	secretStorage: {
-		vault: "Stored in Obsidian's secret storage, which is your operating system's keychain — not in this vault.",
-		plaintext: "This version of Obsidian has no secret storage, so keys are stored as plaintext in this vault's plugin config.",
-		keyField: "Sent only to {target}. {storage} Use a restricted, low-limit key.",
-		noSync: "Secret storage does not sync, so each device needs its own copy of a key. Entering it again on another device is expected.",
+		/** `delegated`: the keychain reads and encrypts. */
+		delegated: "Bound keys live in Obsidian's keychain — not in this vault.",
+		/**
+		 * `delegated-unencrypted`: the keychain reads but does not encrypt (Linux
+		 * with no keyring service). Delegation still works; the panel must say so.
+		 */
+		delegatedUnencrypted:
+			"Bound keys live in Obsidian's keychain, which stores them unencrypted on this device. They are still kept out of this vault.",
+		/** `manual`: no usable keychain; plaintext in the vault config. */
+		manual: "This device has no keychain support, so keys typed here are stored as plaintext in this vault's plugin config.",
+		manualKeyField: "Sent only to {target}. {storage} Use a restricted, low-limit key.",
+		noSync: "The keychain does not sync, so each device needs its own binding. Picking the entry again on another device is expected.",
 		providerTarget: "this provider's base URL",
+		/** Description under a keychain-bound key row: which entry it points at. */
+		boundTo: "Bound to keychain entry “{name}”.",
+		/** The bound entry is gone from the keychain; the binding dangles. */
+		danglingRef: "The keychain entry this provider was bound to is gone. Pick an entry again.",
+		/** Button that opens Obsidian's own keychain settings page. */
+		openKeychain: "Open keychain",
+		openKeychainDesc: "Create or pick a keychain entry in Obsidian's settings.",
+		/** Collapsible manual-entry fallback, offered when the keychain is available. */
+		manualGroup: "Type a key manually",
+		manualGroupHint: "For when a key cannot live in the keychain. Stored in this vault's config.",
 	},
 
 	/** Provider modal. */
