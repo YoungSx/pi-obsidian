@@ -38,12 +38,16 @@ async function renderHeader(snapshot: ChatSnapshot, options: RenderOptions = {})
 			onNewSession={() => undefined}
 			onRenameSession={() => undefined}
 			onDeleteSession={() => undefined}
+			onInsertCommand={(invocation) => insertions.push(invocation)}
 			onOpenSettings={options.onOpenSettings}
 		/>,
 	);
 	await flushRender();
 	return host;
 }
+
+/** Records every command the menu's submenu asked to insert, order of use first. */
+const insertions: string[] = [];
 
 /** Presses the overflow button and returns the menu production code built. */
 async function openOverflow(host: HTMLElement): Promise<ReturnType<typeof lastMenu>> {
@@ -192,6 +196,7 @@ describe("ChatHeader overflow menu", () => {
 	beforeEach(() => {
 		createRootSync = createRootImpl;
 		resetMenus();
+		insertions.length = 0;
 		document.body.replaceChildren();
 	});
 
@@ -250,6 +255,36 @@ describe("ChatHeader overflow menu", () => {
 		const host = await renderHeader(snapshot({ session: sessionInfo() }));
 
 		expect((await openOverflow(host)).titles()).toEqual(["Rename chat", "Delete chat"]);
+	});
+
+	it("lists each slash command as its own menu row", async () => {
+		// The commands' only other advertisement was one line of placeholder that
+		// vanished with the first keystroke; this is the standing door.
+		const host = await renderHeader(
+			snapshot({
+				session: sessionInfo(),
+				availableCommands: [
+					{ name: "Summarize", description: "", kind: "template", invocation: "summarize" },
+					{ name: "Tagger", description: "", kind: "skill", invocation: "skill:tagger" },
+				],
+			}),
+		);
+
+		const menu = await openOverflow(host);
+		expect(menu.titles()).toEqual(["Rename chat", "/summarize", "/skill:tagger", "Delete chat"]);
+	});
+
+	it("routes a chosen command to insertion as the start of a prompt", async () => {
+		const host = await renderHeader(
+			snapshot({
+				session: undefined,
+				availableCommands: [{ name: "Summarize", description: "", kind: "template", invocation: "summarize" }],
+			}),
+		);
+
+		(await openOverflow(host)).click("/summarize");
+
+		expect(insertions).toEqual(["summarize"]);
 	});
 });
 

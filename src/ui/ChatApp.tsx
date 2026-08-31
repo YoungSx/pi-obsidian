@@ -479,6 +479,9 @@ export function ChatApp({ service, inputController, component, draftStore, onOpe
 					onNewSession={() => void service.newSession()}
 					onRenameSession={(name) => void service.renameSession(name)}
 					onDeleteSession={(path) => void service.deleteSession(path)}
+					// Same insertion the in-composer menu's Enter performs: invocation
+					// plus a trailing space, appended so an existing draft survives.
+					onInsertCommand={(invocation) => setInput(`${input}/${invocation} `)}
 					onOpenSettings={canOpenSettings ? () => openPluginSettings(app) : undefined}
 				/>
 
