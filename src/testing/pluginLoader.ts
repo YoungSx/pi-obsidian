@@ -271,7 +271,7 @@ export function createObsidianHostModule(record: PluginHostRecord, platform: Rec
  * incomplete stub rather than a defect in the plugin — so the shape here tracks
  * what production code actually calls.
  */
-export function createStubApp(): unknown {
+export function createStubApp(options: { secretStorage?: unknown } = {}): unknown {
 	const adapter = {
 		exists: async (): Promise<boolean> => false,
 		read: async (): Promise<string> => "",
@@ -284,7 +284,7 @@ export function createStubApp(): unknown {
 		trashSystem: async (): Promise<boolean> => true,
 	};
 
-	return {
+	const app: Record<string, unknown> = {
 		workspace: {
 			getLeavesOfType: () => [],
 			getRightLeaf: () => null,
@@ -339,4 +339,11 @@ export function createStubApp(): unknown {
 		keymap: {},
 		scope: {},
 	};
+
+	// Keychain probing reads the store off the app itself (src/keychainEnv.ts),
+	// so the smoke test describes a device by what this one property carries.
+	if (options.secretStorage !== undefined) {
+		(app as { secretStorage: unknown }).secretStorage = options.secretStorage;
+	}
+	return app;
 }

@@ -118,7 +118,7 @@ export class ProviderModal extends Modal {
 			app: this.app,
 			tier: this.options.secretStorage,
 			t,
-			readSecret: this.options.readSecret,
+			readSecret: (id) => this.options.readSecret(id),
 			title: t.t("providerModal.apiKey"),
 			placeholder: t.t("providerModal.apiKeyPlaceholder"),
 			target: t.t("secretStorage.providerTarget"),

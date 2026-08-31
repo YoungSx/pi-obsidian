@@ -24,7 +24,7 @@ describe("slugifyServerName", () => {
 describe("normalizeMcpServer", () => {
 	it("fills defaults and trims fields", () => {
 		const server = normalizeMcpServer({ id: "a", name: "  Notes  ", url: " https://mcp.example.com ", token: " t " });
-		expect(server).toEqual({ id: "a", name: "Notes", url: "https://mcp.example.com", token: " t ", enabled: true });
+		expect(server).toEqual({ id: "a", name: "Notes", url: "https://mcp.example.com", token: " t ", secretRef: "", enabled: true });
 	});
 
 	it("passes a sealed token through untouched", () => {

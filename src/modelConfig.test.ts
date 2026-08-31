@@ -25,6 +25,7 @@ function provider(overrides: Partial<ProviderConfig> = {}): ProviderConfig {
 		baseUrl: "https://api.deepseek.com/v1",
 		protocol: "openai-completions",
 		apiKey: "sk-1",
+		secretRef: "",
 		source: "user",
 		...overrides,
 	};
@@ -97,6 +98,7 @@ describe("normalizeProviderConfig", () => {
 			baseUrl: "https://x/v1",
 			protocol: DEFAULT_WIRE_PROTOCOL,
 			apiKey: "sk-1",
+			secretRef: "",
 			source: "user",
 		});
 	});
