@@ -1,3 +1,4 @@
+import { setIcon } from "obsidian";
 import type { Setting } from "obsidian";
 import type { Translator } from "../../i18n";
 
@@ -40,16 +41,19 @@ export function setFoldableDescription(setting: Setting, text: string, t: Transl
 	body.classList.add(FOLDED_CLASS);
 	const toggle = desc.createEl("button", {
 		cls: "piem-settings-desc-toggle",
-		text: t.t("descFold.more"),
-		attr: { "aria-expanded": "false" },
+		attr: { "aria-expanded": "false", type: "button" },
 	});
+	// The chevron states the direction, the word states the action; each half
+	// stays legible where the other fails (colour-blind themes, icon scanning).
+	setIcon(toggle.createSpan({ cls: "piem-settings-desc-toggle-icon" }), "chevron-down");
+	toggle.createSpan({ cls: "piem-settings-desc-toggle-text" }).setText(t.t("descFold.more"));
 	toggle.addEventListener("click", (event) => {
 		// The row has no click behaviour to protect today, but the setting row is
 		// Obsidian's event surface — a fold must stay a fold, not trigger a row.
 		event.stopPropagation();
 		const folded = !body.classList.contains(FOLDED_CLASS);
 		body.classList.toggle(FOLDED_CLASS, folded);
-		toggle.setText(t.t(folded ? "descFold.more" : "descFold.less"));
+		toggle.querySelector(".piem-settings-desc-toggle-text")!.setText(t.t(folded ? "descFold.more" : "descFold.less"));
 		toggle.setAttribute("aria-expanded", String(!folded));
 	});
 }
