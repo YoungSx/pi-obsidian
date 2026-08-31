@@ -27,6 +27,7 @@ function provider(overrides: Partial<ProviderConfig> = {}): ProviderConfig {
 		baseUrl: "https://gw.internal/v1",
 		protocol: "openai-completions",
 		apiKey: "sk-1",
+		secretRef: "",
 		source: "user",
 		...overrides,
 	};

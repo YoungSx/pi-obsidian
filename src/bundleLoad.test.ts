@@ -33,14 +33,16 @@ interface LoadedPlugin {
 /**
  * Loads the bundle under one platform shape and returns the constructed plugin.
  *
- * `modules` models which host modules the shell exposes, so a test can describe
- * a real device (mobile: nothing; Linux without a keyring: electron present but
- * safeStorage unavailable) rather than a hypothetical one.
+ * `modules` models which host modules the shell exposes, and `secretStorage`
+ * what the app itself carries — together they describe a real device (mobile:
+ * neither; Linux without a keyring: a store that answers but does not encrypt)
+ * rather than a hypothetical one.
  */
 function instantiate(options: {
 	platform: Record<string, boolean>;
 	modules?: Record<string, unknown>;
 	exposeGlobalRequire?: boolean;
+	secretStorage?: unknown;
 }): { plugin: LoadedPlugin; record: PluginHostRecord } {
 	const record = emptyRecord();
 	const modules: Record<string, unknown> = {
@@ -50,25 +52,29 @@ function instantiate(options: {
 	const exports = loadPluginBundle({ modules, exposeGlobalRequire: options.exposeGlobalRequire });
 	const PluginClass = (exports as { default?: unknown }).default ?? exports;
 	expect(typeof PluginClass).toBe("function");
-	const plugin = new (PluginClass as new (app: unknown, manifest: unknown) => LoadedPlugin)(createStubApp(), {
-		id: "piem",
-		version: "test",
-	});
+	const plugin = new (PluginClass as new (app: unknown, manifest: unknown) => LoadedPlugin)(
+		createStubApp({ secretStorage: options.secretStorage }),
+		{
+			id: "piem",
+			version: "test",
+		},
+	);
 	return { plugin, record };
 }
 
-/** A working safeStorage, as a desktop with an available OS keychain provides. */
-function workingSafeStorage(): unknown {
+/** A full read surface, as a desktop Obsidian with keychain support provides. */
+function workingSecretStorage(): unknown {
+	const entries = new Map<string, string>();
 	return {
+		peekSecret: (id: string) => entries.get(id) ?? null,
 		isEncryptionAvailable: () => true,
-		encryptString: (plaintext: string) => Buffer.from(`sealed:${plaintext}`, "utf8"),
-		decryptString: (buffer: Buffer) => buffer.toString("utf8").replace(/^sealed:/, ""),
+		listSecrets: () => [...entries.keys()],
 	};
 }
 
 describe("built bundle loads under Obsidian's loader", () => {
 	it("exports a constructible plugin class", () => {
-		const { plugin } = instantiate({ platform: DESKTOP, modules: { electron: { safeStorage: workingSafeStorage() } } });
+		const { plugin } = instantiate({ platform: DESKTOP, secretStorage: workingSecretStorage() });
 
 		expect(typeof plugin.onload).toBe("function");
 	});
@@ -76,7 +82,7 @@ describe("built bundle loads under Obsidian's loader", () => {
 	it("completes onload on desktop with a working keychain", async () => {
 		const { plugin, record } = instantiate({
 			platform: DESKTOP,
-			modules: { electron: { safeStorage: workingSafeStorage() } },
+			secretStorage: workingSecretStorage(),
 		});
 
 		await plugin.onload();
@@ -86,10 +92,25 @@ describe("built bundle loads under Obsidian's loader", () => {
 		expect(record.settingTabs).toBe(1);
 	});
 
-	it("completes onload on desktop where safeStorage lives behind the remote bridge", async () => {
+	it("completes onload on desktop where the store cannot encrypt — Linux without a keyring", async () => {
+		const secretStorage = {
+			peekSecret: () => null,
+			isEncryptionAvailable: () => false,
+			listSecrets: () => [],
+		};
+		const { plugin, record } = instantiate({ platform: DESKTOP, secretStorage });
+
+		await plugin.onload();
+
+		expect(record.settingTabs).toBe(1);
+	});
+
+	it("completes onload on desktop where the store is only a partial shape", async () => {
+		// A store missing `peekSecret` is treated as absent, the same as none at
+		// all — calling into an incomplete store would throw somewhere deeper.
 		const { plugin, record } = instantiate({
 			platform: DESKTOP,
-			modules: { electron: { remote: { safeStorage: workingSafeStorage() } } },
+			secretStorage: { listSecrets: () => [] },
 		});
 
 		await plugin.onload();
@@ -97,18 +118,7 @@ describe("built bundle loads under Obsidian's loader", () => {
 		expect(record.settingTabs).toBe(1);
 	});
 
-	it("completes onload on desktop where electron exposes no safeStorage", async () => {
-		// The renderer-process shape: safeStorage is a main-process module, so
-		// `require("electron")` alone does not carry it. This is the configuration
-		// 0.1.0-alpha.3 crashed on.
-		const { plugin, record } = instantiate({ platform: DESKTOP, modules: { electron: { clipboard: {}, shell: {} } } });
-
-		await plugin.onload();
-
-		expect(record.settingTabs).toBe(1);
-	});
-
-	it("completes onload on desktop with no electron module at all", async () => {
+	it("completes onload on desktop with no secretStorage on the app at all", async () => {
 		const { plugin, record } = instantiate({ platform: DESKTOP });
 
 		await plugin.onload();
@@ -125,22 +135,25 @@ describe("built bundle loads under Obsidian's loader", () => {
 	});
 
 	it("completes onload on desktop when the keychain probe throws", async () => {
-		// A Linux desktop with no running keyring service.
-		const safeStorage = {
+		const secretStorage = {
+			peekSecret: () => {
+				throw new Error("Secure storage is not available.");
+			},
 			isEncryptionAvailable: () => {
 				throw new Error("libsecret is not available");
 			},
-			encryptString: () => Buffer.from(""),
-			decryptString: () => "",
+			listSecrets: () => {
+				throw new Error("Secure storage is not available.");
+			},
 		};
-		const { plugin, record } = instantiate({ platform: DESKTOP, modules: { electron: { safeStorage } } });
+		const { plugin, record } = instantiate({ platform: DESKTOP, secretStorage });
 
 		await plugin.onload();
 
 		expect(record.settingTabs).toBe(1);
 	});
 
-	it("completes onload on mobile, where no electron exists", async () => {
+	it("completes onload on mobile, where no keychain exists either", async () => {
 		const { plugin, record } = instantiate({ platform: MOBILE, exposeGlobalRequire: false });
 
 		await plugin.onload();

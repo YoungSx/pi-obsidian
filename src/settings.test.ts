@@ -27,7 +27,7 @@ const {
 /** Two models behind one named provider, as the switcher tests read them. */
 function configured(): PiemSettings {
 	return normalizeSettings({
-		providers: [{ id: "p1", name: "My gateway", baseUrl: "https://gw/v1", protocol: "openai-completions", apiKey: "", source: "user" }],
+		providers: [{ id: "p1", name: "My gateway", baseUrl: "https://gw/v1", protocol: "openai-completions", apiKey: "", secretRef: "", source: "user" }],
 		models: [
 			{ id: "m1", providerId: "p1", modelApiId: "qwen-token-plan-individual", displayName: "Qwen Plus", reasoning: false, supportsImages: false },
 			{ id: "m2", providerId: "p1", modelApiId: "raw-id", displayName: "", reasoning: false, supportsImages: false },
@@ -233,6 +233,7 @@ describe("normalizeSettings with configured providers", () => {
 		baseUrl: "https://api.deepseek.com/v1",
 		protocol: "anthropic-messages",
 		apiKey: "sk-1",
+		secretRef: "",
 		source: "user",
 	};
 	const model: ModelConfig = { id: "m1", providerId: "p1", modelApiId: "deepseek-v4-pro", displayName: "DeepSeek V4 Pro", reasoning: true, supportsImages: false };
@@ -270,7 +271,7 @@ describe("normalizeSettings with configured providers", () => {
 describe("getSelectedModel for configured providers", () => {
 	function configured(protocol: WireProtocol) {
 		return normalizeSettings({
-			providers: [{ id: "p1", name: "Gateway", baseUrl: "https://gw.internal/v1", protocol, apiKey: "sk-1", source: "user" }],
+			providers: [{ id: "p1", name: "Gateway", baseUrl: "https://gw.internal/v1", protocol, apiKey: "sk-1", secretRef: "", source: "user" }],
 			models: [{ id: "m1", providerId: "p1", modelApiId: "some-model", displayName: "Some Model", reasoning: false, supportsImages: false }],
 			activeModelId: "m1",
 		});
@@ -286,7 +287,7 @@ describe("getSelectedModel for configured providers", () => {
 		const settings = normalizeSettings({
 			provider: "anthropic",
 			modelId: "claude-something",
-			providers: [{ id: "p1", name: "GW", baseUrl: "https://gw/v1", protocol: "openai-responses", apiKey: "", source: "user" }],
+			providers: [{ id: "p1", name: "GW", baseUrl: "https://gw/v1", protocol: "openai-responses", apiKey: "", secretRef: "", source: "user" }],
 			models: [{ id: "m1", providerId: "p1", modelApiId: "m", displayName: "", reasoning: false, supportsImages: false }],
 			activeModelId: "m1",
 		});
@@ -302,7 +303,7 @@ describe("getSelectedModel for configured providers", () => {
 describe("getApiKeyForProvider", () => {
 	const settings = () =>
 		normalizeSettings({
-			providers: [{ id: "p1", name: "GW", baseUrl: "https://gw/v1", protocol: "openai-completions", apiKey: "configured-key", source: "user" }],
+			providers: [{ id: "p1", name: "GW", baseUrl: "https://gw/v1", protocol: "openai-completions", apiKey: "configured-key", secretRef: "", source: "user" }],
 			models: [{ id: "m1", providerId: "p1", modelApiId: "m", displayName: "", reasoning: false, supportsImages: false }],
 			activeModelId: "m1",
 			providerApiKeys: { deepseek: "builtin-key" },
@@ -324,7 +325,7 @@ describe("getApiKeyForProvider", () => {
 describe("describeModelTarget for configured providers", () => {
 	it("names the model and provider a user recognises, not internal ids", () => {
 		const settings = normalizeSettings({
-			providers: [{ id: "p1", name: "My gateway", baseUrl: "https://gw/v1", protocol: "openai-completions", apiKey: "", source: "user" }],
+			providers: [{ id: "p1", name: "My gateway", baseUrl: "https://gw/v1", protocol: "openai-completions", apiKey: "", secretRef: "", source: "user" }],
 			models: [{ id: "m1", providerId: "p1", modelApiId: "qwen-token-plan-individual", displayName: "Qwen Plus", reasoning: false, supportsImages: false }],
 			activeModelId: "m1",
 		});
@@ -333,7 +334,7 @@ describe("describeModelTarget for configured providers", () => {
 
 	it("falls back to the raw model id when no display name was given", () => {
 		const settings = normalizeSettings({
-			providers: [{ id: "p1", name: "", baseUrl: "https://gw/v1", protocol: "openai-completions", apiKey: "", source: "user" }],
+			providers: [{ id: "p1", name: "", baseUrl: "https://gw/v1", protocol: "openai-completions", apiKey: "", secretRef: "", source: "user" }],
 			models: [{ id: "m1", providerId: "p1", modelApiId: "raw-id", displayName: "", reasoning: false, supportsImages: false }],
 			activeModelId: "m1",
 		});
@@ -348,7 +349,7 @@ describe("getActiveConfiguration", () => {
 
 	it("pairs the active model with the provider that serves it", () => {
 		const settings = normalizeSettings({
-			providers: [{ id: "p1", name: "GW", baseUrl: "https://gw/v1", protocol: "openai-completions", apiKey: "", source: "user" }],
+			providers: [{ id: "p1", name: "GW", baseUrl: "https://gw/v1", protocol: "openai-completions", apiKey: "", secretRef: "", source: "user" }],
 			models: [{ id: "m1", providerId: "p1", modelApiId: "m", displayName: "", reasoning: false, supportsImages: false }],
 			activeModelId: "m1",
 		});
@@ -386,11 +387,11 @@ describe("normalizeSettings with mcpServers", () => {
 	it("keeps a stored server whole: token passes untrimmed, order preserved", () => {
 		const settings = normalizeSettings({
 			mcpServers: [
-				{ id: "srv-1", name: " GitHub ", url: " https://gh.example.com/mcp ", token: "enc:v1:AAAA", enabled: false },
+				{ id: "srv-1", name: " GitHub ", url: " https://gh.example.com/mcp ", token: "enc:v1:AAAA", secretRef: "", enabled: false },
 			],
 		});
 		expect(settings.mcpServers).toEqual([
-			{ id: "srv-1", name: "GitHub", url: "https://gh.example.com/mcp", token: "enc:v1:AAAA", enabled: false },
+			{ id: "srv-1", name: "GitHub", url: "https://gh.example.com/mcp", token: "enc:v1:AAAA", secretRef: "", enabled: false },
 		]);
 	});
 

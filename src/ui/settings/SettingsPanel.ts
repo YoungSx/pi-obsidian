@@ -365,7 +365,7 @@ function renderProviderList(containerEl: HTMLElement, host: SettingsPanelHost, r
 				new ProviderModal({
 					app: host.app,
 					secretStorage: host.secretStorage,
-					readSecret: host.readSecret,
+					readSecret: (id) => host.readSecret(id),
 					t,
 					test: (draft) => testDraftProvider(host, draft),
 					onSubmit: async (provider) => {
@@ -398,7 +398,7 @@ function renderProviderList(containerEl: HTMLElement, host: SettingsPanelHost, r
 					app: host.app,
 					provider,
 					secretStorage: host.secretStorage,
-					readSecret: host.readSecret,
+					readSecret: (id) => host.readSecret(id),
 					t,
 					test: (draft) => testDraftProvider(host, draft),
 					onSubmit: async (updated) => {
@@ -1254,7 +1254,7 @@ function openMcpServerModal(
 	new McpServerModal({
 		app: host.app,
 		secretStorage: host.secretStorage,
-		readSecret: host.readSecret,
+		readSecret: (id) => host.readSecret(id),
 		t: host.t,
 		server,
 		test: (draft) => host.mcp.test(draft),

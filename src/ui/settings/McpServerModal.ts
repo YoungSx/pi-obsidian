@@ -99,7 +99,7 @@ export class McpServerModal extends Modal {
 			app: this.app,
 			tier: this.options.secretStorage,
 			t,
-			readSecret: this.options.readSecret,
+			readSecret: (id) => this.options.readSecret(id),
 			title: t.t("mcp.tokenName"),
 			placeholder: "",
 			target: t.t("mcp.tokenTarget"),

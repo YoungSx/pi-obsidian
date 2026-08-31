@@ -418,6 +418,37 @@ export function debounce<T extends unknown[], V>(
 	return debounced;
 }
 
+/**
+ * Controllable stand-in for Obsidian's keychain picker.
+ *
+ * Production reaches it only inside the settings modals, so the stub does just
+ * enough for those to render: the fluent `setValue`/`onChange` chain, with the
+ * change callback captured for a test to fire.
+ */
+export class SecretComponentStub {
+	value = "";
+	change: ((value: string) => unknown) | undefined;
+
+	constructor(_app: unknown, containerEl: HTMLElement) {
+		containerEl.createEl("div", { cls: "piem-stub-secret-component" });
+	}
+
+	setValue(value: string): this {
+		this.value = value;
+		return this;
+	}
+
+	onChange(cb: (value: string) => unknown): this {
+		this.change = cb;
+		return this;
+	}
+
+	/** Fires the registered change callback, the way a user picking an entry does. */
+	pick(value: string): unknown {
+		return this.change?.(value);
+	}
+}
+
 const obsidianStub = {
 	getAllTags,
 	prepareFuzzySearch,
@@ -589,99 +620,44 @@ const obsidianStub = {
 	/**
 	 * Reports every version as present.
 	 *
-	 * Production code gates the secret-storage tier on this, so a stub that said
-	 * "no" would silently route every test through the plaintext path. Tests that
-	 * care about the gate inject `hasApiVersion` instead of relying on this.
+	 * Capability probing reads the runtime API surface directly rather than
+	 * versions, but tests may still assert on manifest floors via `hasApiVersion`;
+	 * tests that care inject their own expectation instead of relying on this.
 	 */
 	requireApiVersion: (): boolean => true,
 	setIcon: () => undefined,
 	setTooltip: (element: HTMLElement, tooltip: string): void => setTooltipMock(element, tooltip),
+	SecretComponent: SecretComponentStub,
 };
-
-/**
- * Controllable stand-in for Electron's `safeStorage`.
- *
- * The plugin no longer writes ciphertext — see `secrets.ts` — so this exists to
- * decode what earlier releases already put on users' disks, and to let tests
- * manufacture such a value in the first place (via {@link sealForTest}).
- * `encryptString` is therefore a test affordance, not something production
- * reaches: `SafeStorageLike` does not even declare it.
- *
- * Two independent instances model two machines' keychains: a value sealed by one
- * cannot be opened by the other, which is the cross-device failure the decoder
- * has to survive.
- */
-export class SafeStorageLikeMock {
-	available = true;
-	private readonly sealed = new Map<string, string>();
-	encryptStringCalls = 0;
-	decryptStringCalls = 0;
-
-	isEncryptionAvailable(): boolean {
-		return this.available;
-	}
-
-	encryptString(plainText: string): Buffer {
-		this.encryptStringCalls += 1;
-		if (!this.available) {
-			throw new Error("encryption unavailable");
-		}
-		const token = `sealed:${this.sealed.size}:${plainText}`;
-		this.sealed.set(token, plainText);
-		return Buffer.from(token, "utf8");
-	}
-
-	decryptString(encrypted: Buffer): string {
-		this.decryptStringCalls += 1;
-		const token = encrypted.toString("utf8");
-		const plain = this.sealed.get(token);
-		if (plain === undefined) {
-			throw new Error(`cannot decrypt: ${token.slice(0, 24)}`);
-		}
-		return plain;
-	}
-}
-
-/**
- * Produces the persisted form an older release of this plugin would have written.
- *
- * Lives in the stub rather than in production code because nothing ships that
- * seals any more; this is how a test builds the legacy value it wants to see
- * opened. The layout — `enc:v1:` plus base64 — is `secrets.ts`'s, restated here
- * on purpose: a test that reused the production encoder could not catch the
- * encoder and decoder drifting apart together.
- */
-export function sealForTest(safeStorage: SafeStorageLikeMock, plaintext: string): string {
-	return `enc:v1:${safeStorage.encryptString(plaintext).toString("base64")}`;
-}
 
 /**
  * Controllable stand-in for Obsidian's `app.secretStorage`.
  *
- * Sits beside {@link SafeStorageLikeMock} for the same reason: production code
- * reaches the store through the host, so tests inject this rather than
- * registering a module-wide mock that another file would inherit.
+ * Production code reads the store through the host, so tests inject this rather
+ * than registering a module-wide mock that another file would inherit.
  *
- * The failure modes are the ones the adapter and the relocation rules are built
- * around, so each is a separate switch rather than a single "broken" flag:
+ * The shape is the read surface the keychain adapter requires — `peekSecret`
+ * (undocumented, 1.11.5+) and `listSecrets` — plus `isEncryptionAvailable`
+ * (undocumented, 1.12.4+). There is no `setSecret` on purpose: the plugin never
+ * writes to the keychain, and a mock that accepted writes would let a future
+ * regression pass silently.
  *
- * - `swallowWrites` — accepts a write and keeps nothing, which is what an
- *   adapter save that fails after `setSecret` returned looks like from here.
- * - `throwOnWrite` / `throwOnRead` / `throwOnList` — the real store throws on an
- *   invalid id and when its backend is absent ("Secure storage is not
- *   available."), and those throws land on the onload path.
- * - `omitDelete` — `deleteSecret` exists at runtime but not in `obsidian.d.ts`,
- *   so a host without it has to stay a supported shape.
+ * The failure modes are the ones the adapter is built around, each its own
+ * switch rather than a single "broken" flag:
+ *
+ * - `throwOnRead` / `throwOnList` — the real store throws when its backend is
+ *   absent ("Secure storage is not available."), and those throws must degrade
+ *   to an empty answer, never reach the caller.
+ * - `encryptionAvailable` — flips the tier between `delegated` and
+ *   `delegated-unencrypted`; `undefined` models the method's absence (pre
+ *   1.12.4), which the adapter reads as "not encrypted".
  */
 export class SecretStorageMock {
 	readonly entries = new Map<string, string>();
-	swallowWrites = false;
-	throwOnWrite = false;
 	throwOnRead = false;
 	throwOnList = false;
-	omitDelete = false;
-	setSecretCalls: [id: string, secret: string][] = [];
-	deleteSecretCalls: string[] = [];
+	encryptionAvailable: boolean | undefined = true;
+	peekCalls: string[] = [];
 
 	constructor(initial: Record<string, string> = {}) {
 		for (const [id, value] of Object.entries(initial)) {
@@ -689,24 +665,22 @@ export class SecretStorageMock {
 		}
 	}
 
-	setSecret(id: string, secret: string): void {
-		this.setSecretCalls.push([id, secret]);
-		if (this.throwOnWrite) {
-			throw new Error("Secure storage is not available.");
-		}
-		if (this.swallowWrites) {
-			return;
-		}
-		this.entries.set(id, secret);
-	}
-
-	getSecret(id: string): string | null {
+	/** The side-effect-free read the adapter requires. */
+	peekSecret(id: string): string | null {
+		this.peekCalls.push(id);
 		if (this.throwOnRead) {
 			throw new Error("Secure storage is not available.");
 		}
 		// `null` rather than `""` for a missing entry: that is the real API's
 		// spelling, and code that conflates the two is what this catches.
 		return this.entries.get(id) ?? null;
+	}
+
+	isEncryptionAvailable(): boolean {
+		if (this.encryptionAvailable === undefined) {
+			throw new Error("isEncryptionAvailable should not have been called on a host without it");
+		}
+		return this.encryptionAvailable;
 	}
 
 	listSecrets(): string[] {
@@ -716,31 +690,8 @@ export class SecretStorageMock {
 		return [...this.entries.keys()];
 	}
 
-	deleteSecret(id: string): void {
-		if (this.omitDelete) {
-			throw new Error("deleteSecret should not have been called on a host without it");
-		}
-		this.deleteSecretCalls.push(id);
-		this.entries.delete(id);
-	}
-
-	/**
-	 * The host shape `createObsidianSecretVault` reads its store off.
-	 *
-	 * With `omitDelete` set, the store is rebuilt as a plain object carrying only
-	 * the three documented methods — an actual absent `deleteSecret`, which is
-	 * what a host predating it looks like, rather than one that throws.
-	 */
+	/** The host shape the keychain adapter reads its store off. */
 	asHost(): { secretStorage: unknown } {
-		if (!this.omitDelete) {
-			return { secretStorage: this };
-		}
-		return {
-			secretStorage: {
-				setSecret: (id: string, secret: string): void => this.setSecret(id, secret),
-				getSecret: (id: string): string | null => this.getSecret(id),
-				listSecrets: (): string[] => this.listSecrets(),
-			},
-		};
+		return { secretStorage: this };
 	}
 }
