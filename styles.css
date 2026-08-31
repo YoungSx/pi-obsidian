@@ -546,12 +546,14 @@ button.piem-settings-tab {
 	color: var(--text-error);
 }
 
-.piem-chat__banner--notice {
+.piem-chat__banner--notice,
+.piem-chat__banner--wall {
 	background: var(--background-secondary-alt);
 	color: var(--text-normal);
 }
 
-.piem-chat__banner--notice .piem-chat__banner-icon {
+.piem-chat__banner--notice .piem-chat__banner-icon,
+.piem-chat__banner--wall .piem-chat__banner-icon {
 	color: var(--text-muted);
 }
 

@@ -45,9 +45,10 @@ describe("ChatBanner", () => {
 	it("announces a notice politely, so 'nothing happened' never interrupts", async () => {
 		const host = await renderBanner({ noticeMessage: "Nothing to compact yet.", onDismiss: () => undefined });
 
-		const banner = host.querySelector(".piem-chat__banner--notice");
-		expect(banner?.getAttribute("role")).toBe("status");
-		expect(banner?.getAttribute("aria-live")).toBe("polite");
+		const live = host.querySelector(".piem-chat__banner-live");
+		expect(live?.getAttribute("role")).toBe("status");
+		expect(live?.getAttribute("aria-live")).toBe("polite");
+		expect(live?.querySelector(".piem-chat__banner--notice")?.textContent).toContain("Nothing to compact yet.");
 	});
 
 	it("lets the reader dismiss either kind", async () => {
@@ -105,6 +106,60 @@ describe("ChatBanner", () => {
 		const host = await renderBanner({ onDismiss: () => undefined });
 
 		expect(host.querySelector(".piem-chat__banner")).toBeNull();
+	});
+
+	it("keeps the polite region mounted while quiet, so its first message is announced", async () => {
+		// The region mounts with the panel and never leaves: a region inserted in
+		// the same commit as its first message is one a screen reader may never
+		// announce at all, which is exactly how the context wall would have been
+		// missed by the readers it exists for.
+		const host = await renderBanner({ onDismiss: () => undefined });
+
+		const live = host.querySelector(".piem-chat__banner-live");
+		expect(live).not.toBeNull();
+		expect(live?.getAttribute("aria-live")).toBe("polite");
+		expect(live?.textContent).toBe("");
+	});
+
+	it("offers the context wall with a tidy button, on the polite channel", async () => {
+		let tidied = 0;
+		let dismissed = 0;
+		const host = await renderBanner({
+			contextWall: {
+				onTidy: () => (tidied += 1),
+				onDismiss: () => (dismissed += 1),
+			},
+			onDismiss: () => undefined,
+		});
+
+		const banner = host.querySelector(".piem-chat__banner--wall");
+		expect(banner).not.toBeNull();
+		expect(banner?.textContent).toContain("Context is almost full.");
+		// It rides the standing polite region, not the alert channel: an offer is
+		// not an interruption.
+		expect(banner?.parentElement?.getAttribute("aria-live")).toBe("polite");
+
+		banner?.querySelector<HTMLButtonElement>(".piem-chat__banner-action")?.click();
+		await flushRender();
+		expect(tidied).toBe(1);
+		expect(dismissed).toBe(0);
+
+		banner?.querySelector<HTMLButtonElement>(".piem-chat__banner-dismiss")?.click();
+		await flushRender();
+		// Dismissing the offer clears only the offer — the shared onDismiss that
+		// reports an outcome stays untouched.
+		expect(dismissed).toBe(1);
+	});
+
+	it("an outcome outranks the standing wall offer, since both speak politely", async () => {
+		const host = await renderBanner({
+			noticeMessage: "Nothing to compact yet.",
+			contextWall: { onTidy: () => undefined, onDismiss: () => undefined },
+			onDismiss: () => undefined,
+		});
+
+		expect(host.querySelector(".piem-chat__banner--notice")).not.toBeNull();
+		expect(host.querySelector(".piem-chat__banner--wall")).toBeNull();
 	});
 });
 

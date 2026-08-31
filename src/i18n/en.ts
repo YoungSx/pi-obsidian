@@ -61,6 +61,14 @@ export const en = {
 		compacting: "Compacting context…",
 		openSettings: "Open settings",
 		dismissMessage: "Dismiss message",
+		/**
+		 * The banner notice and its button when the context crosses into the band
+		 * where automatic compaction will fire mid-conversation (the same threshold
+		 * the gauge colours). Announced politely, with the tidy action beside it,
+		 * because a screen reader has no way to notice a colour change.
+		 */
+		contextWall: "Context is almost full. Tidy up earlier messages to keep going longer.",
+		contextWallAction: "Tidy up",
 		conversationAria: "Conversation",
 		/** Skip link above the transcript; see WCAG 2.4.1 (Bypass Blocks). */
 		skipToComposer: "Skip to message box",

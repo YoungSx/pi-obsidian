@@ -46,6 +46,12 @@ export const zhCN: DeepPartial<EnCopy> = {
 		compacting: "正在整理上下文…",
 		openSettings: "打开设置",
 		dismissMessage: "关闭消息",
+		/**
+		 * 上下文越过自动压缩阈值的横幅提示及其按钮文案（阈值与圆环着色同源）。
+		 * 走 polite 通道播报并附带整理按钮：颜色变化是屏幕阅读器收不到的信号。
+		 */
+		contextWall: "上下文快满了。整理较早的消息可以继续聊更久。",
+		contextWallAction: "整理",
 		conversationAria: "对话",
 		skipToComposer: "跳到输入框",
 		working: "正在处理：",
