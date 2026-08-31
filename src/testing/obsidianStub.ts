@@ -503,6 +503,7 @@ const obsidianStub = {
 	AbstractInputSuggest: class AbstractInputSuggest {
 		constructor(_app: unknown, _inputEl: unknown) {}
 	},
+	PluginSettingTab: class PluginSettingTab {},
 	// DOM-backed row builder, like the Modal above: the elements land in the
 	// document so a test can assert on the markup production code produced.
 	// Only the members exercised so far are implemented — a method that is
