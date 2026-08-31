@@ -1207,7 +1207,9 @@ button.piem-chat__latest {
 	display: flex;
 	flex: 1 1 auto;
 	flex-direction: column;
-	font-size: var(--font-ui-smaller);
+	/* Sentence chrome, not footnote type: this is the only guidance a first
+	 * run gets, and the panel has no density pressure to pay for it with. */
+	font-size: var(--font-ui-small);
 	gap: var(--size-4-2);
 	justify-content: center;
 	padding: var(--size-4-4);
@@ -1221,7 +1223,8 @@ button.piem-chat__latest {
 
 .piem-chat__empty-title {
 	color: var(--text-normal);
-	font-size: var(--font-ui-small);
+	/* Read tier: a heading that is introducing the panel, not scanning it. */
+	font-size: var(--font-ui-medium);
 	font-weight: var(--font-semibold);
 	margin: 0;
 }

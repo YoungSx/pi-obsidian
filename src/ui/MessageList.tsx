@@ -410,6 +410,30 @@ export function MessageList({
 					{t.t("chat.latest")}
 				</button>
 			) : null}
+			{/*
+			 * The bypass read backwards. The forward link above fixes the trip
+			 * *down*; this one fixes the trip back up, which is the trip a keyboard
+			 * user takes more often — nothing sits between the composer and here
+			 * that takes focus, so one Shift+Tab lands on it. Same conditions and
+			 * same treatment as the forward link: nothing to skip to, nothing to
+			 * render, and hidden until focused. The transcript has no id to point
+			 * the `href` at (only the composer's is worth threading through state),
+			 * so the link focuses it directly — the element is already
+			 * `tabIndex={0}`, and the default action is prevented for the same
+			 * reason the forward link does not rely on fragment navigation.
+			 */}
+			{composerAnchorId && messages.length > 0 ? (
+				<a
+					href="#"
+					className="piem-chat__skip-link"
+					onClick={(event) => {
+						event.preventDefault();
+						transcriptRef.current?.focus();
+					}}
+				>
+					{t.t("chat.skipToTranscript")}
+				</a>
+			) : null}
 			<TurnAnnouncer messages={messages} isStreaming={isStreaming} />
 		</div>
 	);
