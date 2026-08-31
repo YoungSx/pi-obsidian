@@ -312,7 +312,13 @@ describe("ContextGauge open and close", () => {
 		await flushRender();
 
 		document.body.dispatchEvent(new window.PointerEvent("pointerdown", { bubbles: true }));
-		await flushRender();
+		// The dismissal lives in a passive effect (a document-level listener), and
+		// this press is dispatched on `body` — outside the React root, so React
+		// never gets its discrete-event chance to flush pending effects first. A
+		// bare flush assumed the effect had landed; under CI load it had not, and
+		// the popover was still open at the assert. Wait for the close itself:
+		// instant once it lands, loud after the timeout if the dismissal breaks.
+		await flushRender(() => popover(host) === null);
 
 		expect(popover(host)).toBeNull();
 	});
