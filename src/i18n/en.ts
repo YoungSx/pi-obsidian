@@ -142,8 +142,14 @@ export const en = {
 		imagePlaceholder: "[image: {mimeType}]",
 		/** Shown as a banner when the active model lacks image capability. */
 		imagesNotSupported: "{model} does not accept images. Switch models or remove the image.",
-		/** Banner error when a send lands while a reply is already streaming; the composer's controls make it a rare race. */
+		/** Banner error when a send lands while a compaction or rewind holds the turn; the composer's controls make it a rare race. */
 		agentBusy: "The agent is already responding.",
+		/** Queue region label (aria). Messages sent mid-reply wait here. */
+		queueLabel: "Waiting to be read",
+		/** Image count suffix on a queued chip. */
+		queueImages: "{count} images",
+		/** Retract button on a queued chip. */
+		queueCancel: "Take back",
 		/** Notice when a finished reply could not be written to the vault. The reader has the text either way, so this is a notice, not an alert. */
 		persistFailed: "This reply could not be saved to the vault: {error}",
 		/** Overflow-menu item that writes the transcript into the vault as a Markdown note. */

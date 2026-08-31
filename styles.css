@@ -2103,6 +2103,47 @@ button.piem-chat__latest {
 }
 
 /*
+ * Queued mid-run sends, between the composer's notice rows and the textarea.
+ * One chip per waiting message, oldest first, each with its own retract
+ * button — a queue of three is three decisions, not one. Muted text keeps the
+ * row from competing with the running reply it belongs to.
+ */
+.piem-chat__queue {
+	display: flex;
+	flex-direction: column;
+	gap: var(--size-4-1);
+	list-style: none;
+	margin: 0;
+	padding: 0;
+}
+
+.piem-chat__queue-item {
+	align-items: center;
+	display: flex;
+	gap: var(--size-4-1);
+}
+
+.piem-chat__queue-text {
+	color: var(--text-muted);
+	flex: 1;
+	font-size: var(--font-ui-smaller);
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.piem-chat__queue-images {
+	color: var(--text-faint);
+	margin-inline-start: var(--size-4-1);
+}
+
+.piem-chat__queue-cancel {
+	--icon-color: var(--text-muted);
+	--icon-color-hover: var(--text-normal);
+	flex-shrink: 0;
+}
+
+/*
  * Send rides on Obsidian's `mod-cta` (call-to-action) accent; Stop is a plain
  * icon button so it never competes visually with Send.
  *

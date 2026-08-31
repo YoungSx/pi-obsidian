@@ -16,6 +16,7 @@ import {
 	type StreamFn,
 	type ThinkingLevel,
 } from "@earendil-works/pi-agent-core";
+import { PromptQueue, type QueuedPrompt } from "./promptQueue";
 import { createObsidianModels, withRequestDefaults, type ObsidianModelsBundle } from "../net/streamFn";
 import { matchVendorForModel } from "../net/vendorMatch";
 import { vendorIconName } from "../net/vendorIcons";
@@ -119,6 +120,13 @@ export interface ChatSnapshot {
 	 * help.
 	 */
 	errorOpensSettings?: boolean;
+	/**
+	 * Messages sent while the agent was already answering, waiting for pi to
+	 * inject them — oldest first, each cancelable through
+	 * {@link ObsidianAgentService.removeQueuedPrompt} by its id. Empty when the
+	 * agent is idle, by construction: mid-run sends are the only way in.
+	 */
+	queuedPrompts: QueuedPrompt[];
 	/**
 	 * Whether the active model accepts image content. Staging (paste, drop,
 	 * attach) is gated on this *before* anything is staged, so a text-only
@@ -530,6 +538,13 @@ export class ObsidianAgentService {
 	 * the same object instead of one mirroring the other.
 	 */
 	private readonly contextRefs = new ContextRefs();
+	/**
+	 * The panel's mirror of pi's two write-only queues — what is waiting, in
+	 * order, cancelable one by one. Created once for the service's life; a
+	 * session switch or abort empties it alongside pi's own queues rather than
+	 * replacing it, so ids stay stable across a panel close/reopen.
+	 */
+	private readonly promptQueue = new PromptQueue();
 	/** Mid-run compactions spent on the active run; the budget is per run. */
 	private midRunCompactions = 0;
 	/**
@@ -687,7 +702,11 @@ export class ObsidianAgentService {
 		if (!agent) {
 			return false;
 		}
-		if (agent.state.isStreaming || this.isCompacting || this.retryInFlight) {
+		// A send that arrives while the agent is already answering is not
+		// refused: it becomes a steered message (see `enqueueSteer`).
+		// Compaction and the rewind still hold the turn exclusively — those
+		// are states a steered message cannot join.
+		if (this.isCompacting || this.retryInFlight) {
 			this.setError(this.t().t("chat.agentBusy"));
 			return false;
 		}
@@ -755,27 +774,42 @@ export class ObsidianAgentService {
 			return false;
 		}
 
-		// A real send ends the turn the suggestion was asked for — drop any
-		// in-flight request instead of letting it bill tokens whose chips are
-		// already superseded.
-		this.suggestionController?.abort();
-		// Stale banners are cleared exactly once, and before the work below rather
-		// than after it. The command resolution and the image resolution further
-		// down both raise notices — an unknown `/name`, a missing embed — and
-		// clearing after either would erase a warning before it was ever seen. The
-		// run's own error path still overwrites `panelError` in `catch`.
-		//
-		// Skill diagnostics used to be the other reason this order mattered. They
-		// no longer reach the banner at all (see `reloadSkills`), so the ordering
-		// now rests on the two per-turn notices alone.
-		this.panelError = undefined;
-		this.noticeMessage = undefined;
-		await this.refreshConfiguration();
+		// A send that arrives while the agent is already answering is not
+		// refused: it becomes a steered message (see `enqueueSteer`). The
+		// streaming check runs twice on purpose — here, to skip the work only
+		// a fresh run needs, and again at the departure point below, because
+		// the resolution between the two awaits vault reads and the run may
+		// end under them. What a queued send skips is deliberate:
+		// `refreshConfiguration` swaps the live agent's model and tools, which
+		// is safe while idle and a footgun mid-run; the banner clearing would
+		// wipe feedback the running reply still owns.
+		if (!agent.state.isStreaming) {
+			// A real send ends the turn the suggestion was asked for — drop any
+			// in-flight request instead of letting it bill tokens whose chips are
+			// already superseded. A queued send leaves the suggestion alone: it
+			// belongs to the turn still in flight.
+			this.suggestionController?.abort();
+			// Stale banners are cleared exactly once, and before the work below rather
+			// than after it. The command resolution and the image resolution further
+			// down both raise notices — an unknown `/name`, a missing embed — and
+			// clearing after either would erase a warning before it was ever seen. The
+			// run's own error path still overwrites `panelError` in `catch`.
+			//
+			// Skill diagnostics used to be the other reason this order mattered. They
+			// no longer reach the banner at all (see `reloadSkills`), so the ordering
+			// now rests on the two per-turn notices alone.
+			this.panelError = undefined;
+			this.noticeMessage = undefined;
+			await this.refreshConfiguration();
+		}
 
 		// Resolve slash commands only after the refresh above: skills are reloaded
 		// from the vault on every turn, so a SKILL.md saved moments ago is callable
 		// immediately. Templates keep the short name when both kinds collide; the
-		// skill remains explicitly reachable through `/skill:name`.
+		// skill remains explicitly reachable through `/skill:name`. A queued send
+		// skips the refresh, so it expands against the skills the running turn
+		// already has — a moment-stale expansion is the price of not swapping a
+		// live agent's tool list mid-run.
 		let modelPrompt = trimmedPrompt;
 		const command = parsePromptCommand(trimmedPrompt);
 		if (command) {
@@ -824,6 +858,14 @@ export class ObsidianAgentService {
 			return false;
 		}
 
+		// The departure point, and the second streaming check. Still running:
+		// steer into the live run and show the chip. The run ended while the
+		// reads above were awaited: fall through to a plain send, and whatever
+		// the mirror still holds rides along ahead of this message.
+		if (agent.state.isStreaming) {
+			return this.enqueueSteer(trimmedPrompt, promptText, allImages);
+		}
+
 		let sent = false;
 		try {
 			this.activeRunContext = this.contextRefs.list();
@@ -831,7 +873,22 @@ export class ObsidianAgentService {
 			await this.compactContextIfNeeded(agent);
 			// The budget is per run, and `compactBetweenTurns` spends it.
 			this.midRunCompactions = 0;
-			await agent.prompt(promptText, allImages.length > 0 ? allImages : undefined);
+			const stranded = this.promptQueue.drain();
+			if (stranded.length === 0) {
+				await agent.prompt(promptText, allImages.length > 0 ? allImages : undefined);
+			} else {
+				// Queued messages a run never injected — most often because
+				// `shouldStopAfterTurn` ended it before the next drain point —
+				// must not wait behind this one: the user typed the correction
+				// first. Order of arrival is the order of dispatch.
+				agent.clearAllQueues();
+				const message: AgentMessage = {
+					role: "user",
+					content: [{ type: "text", text: promptText }, ...allImages],
+					timestamp: Date.now(),
+				};
+				await agent.prompt([...stranded.map((entry) => entry.message), message]);
+			}
 			sent = true;
 		} catch (error) {
 			this.panelError = { message: error instanceof Error ? error.message : String(error), opensSettings: false };
@@ -840,6 +897,85 @@ export class ObsidianAgentService {
 			await this.notifySettledState();
 		}
 		return sent;
+	}
+
+	/**
+	 * Hands a mid-run send to pi's steering queue and mirrors it for the panel.
+	 *
+	 * Always a steer, never a follow-up: the panel has one send button, and a
+	 * correction ("not that file, the other one") is what a message typed
+	 * mid-reply overwhelmingly is. pi's own tail covers the other shape — a
+	 * steer arriving after the last drain point is rescued by
+	 * {@link resumeQueuedPrompts} once the run ends, which is the same moment a
+	 * follow-up would have fired. Splitting the two kinds would need an intent
+	 * the composer cannot express.
+	 *
+	 * The mirror records what pi was handed because pi's queues are write-only
+	 * from outside; `steer()` is the delivery, this is the bookkeeping.
+	 */
+	private enqueueSteer(originalText: string, resolvedText: string, images: ImageContent[]): boolean {
+		const agent = this.agent;
+		if (!agent) {
+			return false;
+		}
+		const message: AgentMessage = {
+			role: "user",
+			content: [{ type: "text", text: resolvedText }, ...images],
+			timestamp: Date.now(),
+		};
+		this.promptQueue.add({ kind: "steer", text: originalText, imageCount: images.length, message });
+		agent.steer(message);
+		this.notify();
+		return true;
+	}
+
+	/**
+	 * Dispatches messages the finished run never injected.
+	 *
+	 * Two windows strand a steer: `shouldStopAfterTurn` returns the loop before
+	 * its end-of-turn drain point, and the last drain point itself races a
+	 * steer typed during the final reply. Either way the mirror outlives the
+	 * run while the words sit unseen by the model — waiting for a next send
+	 * that may never come. When the run ended on its own, dispatching them is
+	 * what the user asked for when they typed.
+	 *
+	 * A run that died on a provider error stops here: re-sending into the same
+	 * failure would bill a second refusal, so the chips stay and the next
+	 * direct send carries them ahead of itself. An aborted run never reaches
+	 * this decision — {@link abort} empties the mirror first, and stopping is
+	 * the user retracting the queued intent along with the run.
+	 */
+	private async resumeQueuedPrompts(messages: readonly AgentMessage[]): Promise<void> {
+		if (this.promptQueue.size === 0) {
+			return;
+		}
+		const agent = this.agent;
+		if (!agent || agent.state.isStreaming) {
+			return;
+		}
+		const lastAssistant = [...messages].reverse().find((message) => message.role === "assistant");
+		if (lastAssistant?.stopReason === "error") {
+			return;
+		}
+		const stranded = this.promptQueue.drain();
+		try {
+			this.activeRunContext = this.contextRefs.list();
+			this.notify();
+			await this.compactContextIfNeeded(agent);
+			// pi's own queues may still hold what this dispatch is re-sending;
+			// draining them first keeps the run's first turn-end poll from
+			// injecting the same words a second time.
+			agent.clearAllQueues();
+			await agent.prompt(stranded.map((entry) => entry.message));
+		} catch (error) {
+			// Back onto the chips, oldest first: the words are still the
+			// user's, and hiding them behind an error banner loses them.
+			this.promptQueue.restore(stranded);
+			this.panelError = { message: error instanceof Error ? error.message : String(error), opensSettings: false };
+		} finally {
+			this.activeRunContext = null;
+			await this.notifySettledState();
+		}
 	}
 
 	/**
@@ -1177,7 +1313,16 @@ export class ObsidianAgentService {
 		this.compactionController?.abort();
 		this.branchSummaryController?.abort();
 		this.suggestionController?.abort();
+		// Stopping the run is also retracting what was queued for it. Cleared
+		// before `agent.abort()` so the `agent_end` that follows sees an empty
+		// mirror and does not dispatch the words the user just took back.
+		this.promptQueue.clear();
 		const agent = this.agent;
+		if (!agent) {
+			return;
+		}
+		agent.clearAllQueues();
+		agent.abort();
 		if (!agent) {
 			return;
 		}
@@ -1247,6 +1392,38 @@ export class ObsidianAgentService {
 		this.panelError = undefined;
 		await this.sessionManager.ensureConfiguration(this.getSessionDefaults());
 		this.sessionInfo = await this.sessionManager.getActiveSessionInfo();
+		this.notify();
+	}
+
+	/**
+	 * Takes one queued message back, by the chip's id.
+	 *
+	 * Unknown ids are a no-op, not an error: pi can inject the message in the
+	 * moment between the render that produced the chip and the click, and a
+	 * message that already went out is exactly what the user would have been
+	 * told anyway.
+	 *
+	 * pi cannot drop a single queued message, so a live run's queue is rebuilt
+	 * from the survivors — total clear, re-push in order. When the agent is
+	 * idle the message never reached pi at all (the mirror alone was waiting
+	 * for a dispatch), so there is nothing on the pi side to rebuild.
+	 */
+	removeQueuedPrompt(id: string): void {
+		const removal = this.promptQueue.remove(id);
+		if (!removal) {
+			return;
+		}
+		const agent = this.agent;
+		if (agent && agent.state.isStreaming) {
+			agent.clearAllQueues();
+			for (const survivor of removal.survivors) {
+				if (removal.kind === "steer") {
+					agent.steer(survivor);
+				} else {
+					agent.followUp(survivor);
+				}
+			}
+		}
 		this.notify();
 	}
 
@@ -1573,6 +1750,10 @@ export class ObsidianAgentService {
 				.filter((pending): pending is PendingToolCall => pending !== undefined),
 			errorMessage: this.panelError?.message ?? this.visibleAgentError(agent) ?? this.initializationError,
 			errorOpensSettings: this.panelError?.opensSettings ?? false,
+			// Mid-run sends, waiting for pi to inject. From the mirror rather
+			// than from pi because pi's queues are write-only from outside —
+			// the mirror is the only thing that can name them.
+			queuedPrompts: this.promptQueue.list(),
 			// Staging gate: the composer asks before collecting bytes the model
 			// would refuse, instead of the send gate explaining the refusal after.
 			supportsImages: modelSupportsImages(model),
@@ -1814,6 +1995,11 @@ export class ObsidianAgentService {
 	 */
 	private async replaceAgent(messages: AgentMessage[], thinkingLevel: ThinkingLevel): Promise<void> {
 		this.unsubscribeAgent?.();
+		// A fresh agent's queues are empty by construction, so the mirror has to
+		// say so too. Every caller of this method is a conversation switch
+		// (new session, loaded session, thinking-level change) — queued words
+		// belong to the conversation they were typed in, not the next one.
+		this.promptQueue.clear();
 		// An aborted run never delivers `tool_execution_end`, so anything keyed by a
 		// call that was in flight would otherwise accumulate for the life of the
 		// panel. Both maps are keyed that way and both are only ever cleared by that
@@ -1873,6 +2059,12 @@ export class ObsidianAgentService {
 			// from a current one.
 			prepareNextTurnWithContext: (turn, signal) => this.compactBetweenTurns(agent, turn, signal),
 			sessionId: this.sessionInfo?.id,
+			// pi's default is "one-at-a-time": of several messages steered in a
+			// row, only the first is injected at the next turn boundary and the
+			// rest wait for later runs. A chat panel's send button means "send
+			// all of it", so every queued message reaches the next turn.
+			steeringMode: "all",
+			followUpMode: "all",
 			toolExecution: "sequential",
 			// Pi normally feeds a failed tool result back to the model and starts
 			// another turn. A model that keeps retrying the same invalid call can
@@ -2039,6 +2231,12 @@ export class ObsidianAgentService {
 		this.logAgentEvent(event);
 		try {
 			if (event.type === "message_end") {
+				// First duty: if this is a queued message pi just injected, take
+				// its chip down. Identity matching means a user who queued the
+				// same words twice gets the right one settled. The message
+				// persists either way — an injected steer is transcript history
+				// like any other turn.
+				this.promptQueue.settle(event.message);
 				await this.persistMessage(event.message);
 			}
 			if (event.type === "agent_end") {
@@ -2056,6 +2254,18 @@ export class ObsidianAgentService {
 			// The snapshot field renders once in the panel; the log keeps the
 			// failure even after the user dismisses the notice.
 			this.log.error("Failed to persist agent output", () => ({ event: event.type, error: message }));
+		}
+		if (event.type === "agent_end") {
+			// Outside the persist guard on purpose: the resume has its own
+			// error path, and a dispatch failure must not surface disguised as
+			// a persist failure. A run that ended on its own may leave steers
+			// pi never injected — `shouldStopAfterTurn` returns the loop before
+			// its drain point, and the final drain point races a steer typed
+			// during the last reply. Dispatching them here is what the user
+			// asked for when they typed. Runs the user aborted are excluded
+			// inside the resume itself, and `abort()` also empties the mirror
+			// directly, so the two guards are belt and braces.
+			await this.resumeQueuedPrompts(event.messages);
 		}
 		await this.refreshSessionInfo();
 		this.notify();

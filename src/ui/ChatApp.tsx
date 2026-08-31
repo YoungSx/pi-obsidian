@@ -347,11 +347,21 @@ export function ChatApp({ service, inputController, component, draftStore, onOpe
 
 	const sendPrompt = async (): Promise<void> => {
 		const prompt = input.trim();
-		if (!prompt || snapshot.isStreaming || snapshot.isCompacting || snapshot.isRewinding || isInitializing) {
+		// A send while the agent answers is allowed: it queues (see the service).
+		// The states that still refuse are a compaction with no run behind it —
+		// nothing to steer, and a send racing the compactor — a rewind, which
+		// holds the turn exclusively, and a panel that has not finished coming up.
+		if (!prompt || isInitializing || (snapshot.isCompacting && !snapshot.isStreaming) || snapshot.isRewinding) {
 			return;
 		}
 		const images = toImageContents(pendingImages);
 		if (activeEdit) {
+			// An edit cannot apply mid-run — it rewinds the transcript another
+			// run is reading — and arming one is blocked while streaming, so a
+			// stray send from an edit armed just before the run started waits.
+			if (snapshot.isStreaming) {
+				return;
+			}
 			// An armed edit rewrites the conversation rather than appending. Same
 			// draft economy as the plain send: the composer empties before the
 			// rewind starts (a branch summary can hold the await for seconds, and a
@@ -597,6 +607,8 @@ export function ChatApp({ service, inputController, component, draftStore, onOpe
 					pendingImages={pendingImages}
 					onAddImages={(files) => void handleAddImages(files)}
 					onRemoveImage={handleRemoveImage}
+					queuedPrompts={snapshot.queuedPrompts}
+					onCancelQueuedPrompt={(id) => service.removeQueuedPrompt(id)}
 					contextGauge={
 						<ContextGauge
 							fill={snapshot.contextFill}

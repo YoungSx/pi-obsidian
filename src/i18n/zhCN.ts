@@ -90,8 +90,14 @@ export const zhCN: DeepPartial<EnCopy> = {
 		earlierSummarized: "较早的历史已被总结，以适应上下文窗口。",
 		imagePlaceholder: "[图片：{mimeType}]",
 		imagesNotSupported: "{model} 不支持图片。请更换模型或移除图片。",
-		/** 回复尚在流式输出时又收到一次发送；编辑器的控件让这只会是罕见的竞态。 */
+		/** 压缩或重写正占用回合时又收到一次发送；编辑器的控件让这只会是罕见的竞态。 */
 		agentBusy: "Piem 已经在回复中了。",
+		/** 排队区标题（aria）。回复进行中发出的消息先在这里等待。 */
+		queueLabel: "等待插话",
+		/** 排队 chip 上的图片数量后缀。 */
+		queueImages: "{count} 张图",
+		/** 排队 chip 的撤回按钮。 */
+		queueCancel: "撤回",
 		/** 回复已生成但没能写进 vault。读者反正已看到正文，所以这是通知而不是警报。 */
 		persistFailed: "这条回复没能保存进笔记库：{error}",
 		/** 溢出菜单项：把对话记录写成 vault 里的 Markdown 笔记。 */
