@@ -15,12 +15,28 @@ export class PiemChatView extends ItemView {
 	private readonly service: ObsidianAgentService;
 	private readonly draftStore: DraftStore | undefined;
 	private readonly inputController = new ChatInputController();
+	/**
+	 * Opens the subagent monitor, optionally already showing one run.
+	 *
+	 * Injected rather than reached for, because activating a leaf is the plugin's
+	 * job: this view knows nothing about workspace layout, and a view that opened
+	 * other views would be the second place that logic lives. Optional so a test
+	 * can mount the panel without a workspace — the entry icon simply does not
+	 * render, which is also the honest state when nothing can open it.
+	 */
+	private readonly openSubagents: ((subagentId?: string) => void) | undefined;
 	private root: Root | null = null;
 
-	constructor(leaf: WorkspaceLeaf, service: ObsidianAgentService, draftStore?: DraftStore) {
+	constructor(
+		leaf: WorkspaceLeaf,
+		service: ObsidianAgentService,
+		draftStore?: DraftStore,
+		openSubagents?: (subagentId?: string) => void,
+	) {
 		super(leaf);
 		this.service = service;
 		this.draftStore = draftStore;
+		this.openSubagents = openSubagents;
 		this.scope = new Scope(this.app.scope);
 		this.scope.register(["Mod"], "Enter", (event) => {
 			event.preventDefault();
@@ -114,7 +130,13 @@ export class PiemChatView extends ItemView {
 		this.contentEl.addClass("piem-chat-view");
 		this.root = createRoot(this.contentEl);
 		this.root.render(
-			<ChatApp service={this.service} inputController={this.inputController} component={this} draftStore={this.draftStore} />,
+			<ChatApp
+				service={this.service}
+				inputController={this.inputController}
+				component={this}
+				draftStore={this.draftStore}
+				onOpenSubagents={this.openSubagents}
+			/>,
 		);
 	}
 

@@ -6,6 +6,7 @@ import type { SuggestionScope } from "../agent/quickActionSuggestionRequest";
 import type { QuickAction } from "./quickActionSuggestions";
 import type { ActiveSessionInfo } from "../session/ObsidianSessionManager";
 import type { DraftStore } from "../session/DraftStore";
+import { snapshotSubagents, type SubagentSnapshot } from "../subagent/inspectorModel";
 import type { ChatInputController } from "./ChatInputController";
 import { getActiveNotePath } from "./activeNotePath";
 import { ChatBanner } from "./ChatBanner";
@@ -14,6 +15,7 @@ import { ChatHeader } from "./ChatHeader";
 import { ChatStatusBar } from "./ChatStatusBar";
 import { ContextGauge } from "./ContextGauge";
 import { ContextRow } from "./ContextRow";
+import { SubagentEntryIcon } from "./SubagentEntryIcon";
 import { MessageList } from "./MessageList";
 import { ModelSwitcher } from "./ModelSwitcher";
 import { ThinkingLevelSelector } from "./ThinkingLevelSelector";
@@ -33,9 +35,18 @@ interface ChatAppProps {
 	 * panel without touching the vault.
 	 */
 	draftStore?: DraftStore;
+	/**
+	 * Reveals the subagent monitor, optionally already showing one run.
+	 *
+	 * Only the plugin can do this — it owns the workspace leaf — so it arrives as
+	 * a callback rather than being reached for here. Absent means no entry icon:
+	 * a tree mounted without a workspace (a test) has nowhere to navigate to, and
+	 * an icon that led nowhere would be worse than none.
+	 */
+	onOpenSubagents?: (subagentId?: string) => void;
 }
 
-export function ChatApp({ service, inputController, component, draftStore }: ChatAppProps): React.JSX.Element {
+export function ChatApp({ service, inputController, component, draftStore, onOpenSubagents }: ChatAppProps): React.JSX.Element {
 	const [snapshot, setSnapshot] = useState<ChatSnapshot>(() => service.getSnapshot());
 	const { draft: input, setDraft: setInput, clearDraft } = useSessionDraft(draftStore, snapshot.session?.id);
 	const [sessions, setSessions] = useState<ActiveSessionInfo[]>([]);
@@ -48,6 +59,15 @@ export function ChatApp({ service, inputController, component, draftStore }: Cha
 	// never enter the DraftStore, which persists text per session, so they live
 	// only for the turn the user is composing and clear on a successful send.
 	const [pendingImages, setPendingImages] = useState<PendingImage[]>([]);
+	/**
+	 * Every subagent this session spawned, rebuilt on registry events.
+	 *
+	 * A second channel alongside the chat snapshot, because the two answer
+	 * different questions and change at different moments: the snapshot is this
+	 * conversation, and a spawn or a settlement happens inside a tool call the
+	 * snapshot has no reason to report.
+	 */
+	const [subagents, setSubagents] = useState<readonly SubagentSnapshot[]>([]);
 	/**
 	 * The model-generated quick actions for whichever placement asked last, tagged
 	 * with the session they belong to. An empty `actions` means "nothing yet" —
@@ -96,6 +116,24 @@ export function ChatApp({ service, inputController, component, draftStore }: Cha
 		// window.
 		void service.initialize().finally(() => setIsInitializing(false));
 		return unsubscribe;
+	}, [service]);
+
+	/*
+	 * The registry's own subscription, which the service snapshot cannot stand in
+	 * for: a spawn and a settlement both land inside a tool call, and neither
+	 * moves anything the chat snapshot reports.
+	 *
+	 * `Date.now()` at snapshot time is what a running child's elapsed time is
+	 * measured against, so a row's duration is its age at the last event. Nothing
+	 * repaints between events on purpose — a per-second re-render of the composer
+	 * to advance one number in a popover nobody has open is the wrong trade, and
+	 * the status word beside it already says the run is not over.
+	 */
+	useEffect(() => {
+		const registry = service.getSubagentRegistry();
+		const resnapshot = (): void => setSubagents(snapshotSubagents(registry, Date.now()));
+		resnapshot();
+		return registry.subscribe(resnapshot);
 	}, [service]);
 
 	useEffect(() => {
@@ -402,6 +440,17 @@ export function ChatApp({ service, inputController, component, draftStore }: Cha
 							onPin={(path) => service.pinContextRef(path)}
 							onUnpin={(path) => service.unpinContextRef(path)}
 							onSetFollowActive={(follow) => service.setFollowActiveNote(follow)}
+							/*
+							 * Null rather than an icon that renders null: the row reads this
+							 * prop's presence as "something is riding along, stay visible", so
+							 * handing it a component that draws nothing would produce an empty
+							 * row on every turn that never delegated.
+							 */
+							trailing={
+								onOpenSubagents && subagents.length > 0 ? (
+									<SubagentEntryIcon snapshots={subagents} onOpen={onOpenSubagents} />
+								) : null
+							}
 						/>
 					}
 				/>

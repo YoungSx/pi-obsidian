@@ -2663,3 +2663,598 @@ button.piem-chat__latest {
 .theme-light .piem-brand-icon {
 	filter: invert(1);
 }
+
+/* --- subagent inspector (src/ui/SubagentInspector.tsx) --- */
+
+/*
+ * The monitor panel, in an Obsidian sidebar's ~300px.
+ *
+ * One column, not two. A list beside a detail pane is the desktop shape for this
+ * kind of view and it does not survive the width: each half would land near
+ * 150px, where a task sentence wraps every three words and a report is
+ * unreadable. The detail replaces the list and a back control returns, which is
+ * also what the phone build needs — `isDesktopOnly: false` means this runs
+ * there.
+ */
+.piem-subagent-view {
+	padding: var(--size-4-3);
+}
+
+.piem-subagents {
+	display: flex;
+	flex-direction: column;
+	gap: var(--size-4-3);
+}
+
+/*
+ * Says outright that nothing here acts.
+ *
+ * Muted and small: it is a standing fact about the panel, read once, not a
+ * warning. `--text-muted` rather than `--text-faint` because at
+ * `--font-ui-smaller` the faint tone falls under the 4.5:1 WCAG 1.4.3 asks of
+ * body text.
+ */
+.piem-subagents__notice {
+	color: var(--text-muted);
+	font-size: var(--font-ui-smaller);
+	margin: 0;
+}
+
+.piem-subagents__list {
+	display: flex;
+	flex-direction: column;
+	gap: var(--size-4-1);
+	list-style: none;
+	margin: 0;
+	padding: 0;
+}
+
+/*
+ * One run as a row.
+ *
+ * A full-width button, not a card: the row's whole job is to be pressable and to
+ * carry two lines, and a card would spend a border and 16px of padding per run
+ * saying nothing extra. The left rule is deliberately absent — a coloured
+ * `border-left` is the tell of an accent looking for somewhere to go; the status
+ * lives in the dot, the word, and nothing else.
+ */
+.piem-subagents__row {
+	align-items: stretch;
+	background: transparent;
+	border: none;
+	border-radius: var(--radius-s);
+	box-shadow: none;
+	display: flex;
+	flex-direction: column;
+	gap: var(--size-4-1);
+	height: auto;
+	padding: var(--size-4-2);
+	text-align: start;
+	white-space: normal;
+	width: 100%;
+}
+
+@media (hover: hover) {
+
+	.piem-subagents__row:hover {
+		background: var(--background-modifier-hover);
+	}
+}
+
+.piem-subagents__row-head {
+	align-items: baseline;
+	display: flex;
+	gap: var(--size-4-2);
+}
+
+/*
+ * The task, clamped to two lines.
+ *
+ * A spawn's task is written for a model that cannot see the conversation, so it
+ * is often a paragraph; the row shows enough to recognize which run it is and
+ * the detail page shows all of it. Two lines rather than one because the first
+ * line of such a task is frequently only its framing ("Read every note under
+ * Projects/ and…").
+ */
+.piem-subagents__row-task {
+	-webkit-box-orient: vertical;
+	-webkit-line-clamp: 2;
+	color: var(--text-normal);
+	display: -webkit-box;
+	font-size: var(--font-ui-small);
+	line-height: var(--line-height-tight);
+	overflow: hidden;
+}
+
+.piem-subagents__row-meta {
+	color: var(--text-muted);
+	display: flex;
+	flex-wrap: wrap;
+	font-size: var(--font-ui-smaller);
+	gap: var(--size-4-1);
+	padding-inline-start: calc(var(--size-4-2) + 8px);
+}
+
+.piem-subagents__row-status {
+	color: var(--text-normal);
+}
+
+/*
+ * The status glyph: 8px, flush with the first line of the task.
+ *
+ * Colour and shape only — the word beside it carries the same state in text,
+ * because a colour-blind reader has to be able to tell a failure from a finish
+ * and this dot alone cannot do that.
+ */
+.piem-subagents__dot {
+	background: var(--text-muted);
+	border-radius: 50%;
+	display: inline-block;
+	flex: 0 0 auto;
+	height: 8px;
+	width: 8px;
+}
+
+.piem-subagents__dot--running {
+	background: var(--interactive-accent);
+}
+
+.piem-subagents__dot--done {
+	background: var(--text-success);
+}
+
+.piem-subagents__dot--incomplete {
+	background: var(--text-warning);
+}
+
+.piem-subagents__dot--failed {
+	background: var(--text-error);
+}
+
+/*
+ * A working child breathes.
+ *
+ * The only motion in the panel, and it is carrying information the list cannot
+ * otherwise give: "still going" versus "finished a while ago", without reading.
+ * Opacity, so it composites rather than reflows. Behind
+ * `prefers-reduced-motion: no-preference` — with motion off the accent colour
+ * and the status word say the same thing.
+ */
+@keyframes piem-subagent-breathe {
+
+	0%,
+	100% {
+		opacity: 1;
+	}
+
+	50% {
+		opacity: 0.35;
+	}
+}
+
+@media (prefers-reduced-motion: no-preference) {
+
+	.piem-subagents__dot--running {
+		animation: piem-subagent-breathe 1.8s ease-in-out infinite;
+	}
+}
+
+/* --- empty state --- */
+
+/*
+ * Nothing has been delegated yet.
+ *
+ * Two lines rather than one: the first states the fact, the second says what
+ * would put something here. A monitor for a feature the user may never have
+ * knowingly triggered has to explain itself, or an empty panel reads as broken.
+ */
+.piem-subagents__empty {
+	color: var(--text-muted);
+	display: flex;
+	flex-direction: column;
+	gap: var(--size-4-1);
+	padding: var(--size-4-4) var(--size-4-2);
+	text-align: center;
+}
+
+.piem-subagents__empty-title {
+	color: var(--text-normal);
+	margin: 0;
+}
+
+.piem-subagents__empty-hint {
+	font-size: var(--font-ui-smaller);
+	line-height: var(--line-height-normal);
+	margin: 0;
+	text-wrap: pretty;
+}
+
+/* --- detail --- */
+
+.piem-subagents__detail {
+	display: flex;
+	flex-direction: column;
+	gap: var(--size-4-3);
+}
+
+/*
+ * Back on the left, status on the right.
+ *
+ * The status repeats what the row already said, and it earns the repeat: the
+ * detail page is long enough to scroll, and the reader arriving at a report has
+ * to know whether it is the whole answer before they start believing it.
+ */
+.piem-subagents__detail-bar {
+	align-items: center;
+	display: flex;
+	gap: var(--size-4-2);
+	justify-content: space-between;
+}
+
+.piem-subagents__back-label {
+	font-size: var(--font-ui-small);
+}
+
+.piem-subagents__badge {
+	align-items: center;
+	color: var(--text-muted);
+	display: inline-flex;
+	font-size: var(--font-ui-smaller);
+	gap: var(--size-4-1);
+}
+
+.piem-subagents__section {
+	display: flex;
+	flex-direction: column;
+	gap: var(--size-4-1);
+}
+
+/*
+ * Section headings, sized as labels rather than as document structure.
+ *
+ * They are `<h3>` because the page has a real outline a screen reader should be
+ * able to jump through; visually a 300px panel cannot afford five heading-sized
+ * lines, so the type scale drops to the interface small size and the hierarchy
+ * is carried by weight and colour.
+ */
+.piem-subagents__section-title {
+	color: var(--text-muted);
+	font-size: var(--font-ui-smaller);
+	font-weight: var(--font-medium);
+	letter-spacing: 0;
+	margin: 0;
+	text-transform: none;
+}
+
+.piem-subagents__task {
+	color: var(--text-normal);
+	margin: 0;
+	text-wrap: pretty;
+	white-space: pre-wrap;
+}
+
+.piem-subagents__instructions,
+.piem-subagents__timing,
+.piem-subagents__usage,
+.piem-subagents__note {
+	color: var(--text-muted);
+	font-size: var(--font-ui-smaller);
+	margin: 0;
+}
+
+.piem-subagents__instructions {
+	white-space: pre-wrap;
+}
+
+/*
+ * The setup block as a definition list.
+ *
+ * Two columns, label then value, because these are four short pairs and reading
+ * them as a table is the point: "which model did this actually run on" is a
+ * lookup, not prose. `<dl>` rather than a grid of spans so the pairing survives
+ * a screen reader.
+ */
+.piem-subagents__config {
+	column-gap: var(--size-4-2);
+	display: grid;
+	font-size: var(--font-ui-smaller);
+	grid-template-columns: auto 1fr;
+	margin: 0;
+	row-gap: var(--size-4-1);
+}
+
+.piem-subagents__config dt {
+	color: var(--text-muted);
+}
+
+.piem-subagents__config dd {
+	color: var(--text-normal);
+	margin: 0;
+	overflow-wrap: anywhere;
+}
+
+/* A model id is an identifier, and identifiers are compared character by character. */
+.piem-subagents__config-id {
+	font-family: var(--font-monospace);
+}
+
+/*
+ * Why the report below is partial.
+ *
+ * `--text-warning` on transparency, not a filled callout: it is one sentence,
+ * and a coloured slab in a 300px column reads as an error state for the whole
+ * panel rather than a caveat about one field.
+ */
+.piem-subagents__caveat {
+	color: var(--text-warning);
+	font-size: var(--font-ui-smaller);
+	margin: 0;
+	text-wrap: pretty;
+}
+
+.piem-subagents__error {
+	color: var(--text-error);
+	font-size: var(--font-ui-smaller);
+	margin: 0;
+	overflow-wrap: anywhere;
+}
+
+/* --- process record --- */
+
+.piem-subagents__process {
+	border-top: 1px solid var(--background-modifier-border);
+	padding-top: var(--size-4-2);
+}
+
+.piem-subagents__process-summary {
+	align-items: baseline;
+	cursor: pointer;
+	display: flex;
+	gap: var(--size-4-2);
+	justify-content: space-between;
+	list-style: none;
+}
+
+.piem-subagents__process-count {
+	color: var(--text-faint);
+	font-size: var(--font-ui-smaller);
+}
+
+/*
+ * The transcript as an ordered list.
+ *
+ * `<ol>` because the order is the information — this is the sequence the child
+ * went through — and the numbers are suppressed because in a 300px column they
+ * would cost an indent per row while the reader is already reading top to
+ * bottom.
+ */
+.piem-subagents__steps {
+	display: flex;
+	flex-direction: column;
+	gap: var(--size-4-1);
+	list-style: none;
+	margin: var(--size-4-2) 0 0;
+	padding: 0;
+}
+
+.piem-subagents__step {
+	display: flex;
+	flex-direction: column;
+	font-size: var(--font-ui-smaller);
+	gap: 2px;
+}
+
+.piem-subagents__step-label {
+	color: var(--text-muted);
+}
+
+/*
+ * A step's text is machine output — a grep table, a note's contents, a JSON
+ * payload — so it is set in monospace for the same reason the transcript's tool
+ * results are: proportional type destroys the alignment that carries the
+ * meaning.
+ */
+.piem-subagents__step-text {
+	color: var(--text-normal);
+	font-family: var(--font-monospace);
+	font-size: var(--font-ui-smaller);
+	line-height: var(--line-height-tight);
+	overflow-wrap: anywhere;
+	white-space: pre-wrap;
+}
+
+.piem-subagents__step--error .piem-subagents__step-label {
+	color: var(--text-error);
+}
+
+.piem-subagents__step-clip {
+	color: var(--text-faint);
+	font-family: var(--font-interface);
+}
+
+/* --- entry icon in the chat panel's context row (src/ui/SubagentEntryIcon.tsx) --- */
+
+/*
+ * The wrapper the popover is positioned against, and the surface a hover-leave
+ * is measured on: it contains the button *and* the popover, so travelling from
+ * one to the other never leaves it.
+ */
+.piem-chat__subagents {
+	display: inline-flex;
+	margin-inline-start: auto;
+	position: relative;
+}
+
+/*
+ * The icon itself.
+ *
+ * `clickable-icon` is load-bearing, not cosmetic — Obsidian styles every
+ * `button:not(.clickable-icon)` as a filled form control at a specificity this
+ * stylesheet cannot outrank, so dropping the class hands the glyph to the
+ * theme's button chrome rather than freeing it from it. Same arithmetic as the
+ * context ring beside it.
+ */
+.piem-chat__subagents-button {
+	position: relative;
+}
+
+/* A working child tints the icon, so "something is running" survives at 16px. */
+.piem-chat__subagents-button--running {
+	--icon-color: var(--interactive-accent);
+	--icon-color-hover: var(--interactive-accent-hover);
+}
+
+/*
+ * The count, as a badge on the icon's corner.
+ *
+ * Absolutely positioned so it costs the row no width: the context row already
+ * wraps at a few chips and this sits at its end. The number is `aria-hidden` —
+ * the button's own accessible name says "2 subagents working", which is the
+ * sentence a screen reader should get rather than a bare digit.
+ */
+.piem-chat__subagents-badge {
+	align-items: center;
+	background: var(--interactive-accent);
+	border-radius: var(--radius-s);
+	color: var(--text-on-accent);
+	display: inline-flex;
+	/*
+	 * The smallest rung of the ramp, not a hardcoded 9px.
+	 *
+	 * A px here would be the one element in the panel that ignores Obsidian's
+	 * mobile UI scale, where `--font-ui-medium` is rebound to the reader's note
+	 * size and the rest of the ramp derives from it (WCAG 1.4.4). The box is
+	 * sized in `em` for the same reason: it has to grow with the digit it holds,
+	 * or a reader at 20px notes gets a clipped count.
+	 */
+	font-size: var(--font-ui-smaller);
+	font-weight: var(--font-bold);
+	justify-content: center;
+	line-height: 1;
+	min-height: 1.1em;
+	min-width: 1.1em;
+	padding: 1px 3px;
+	transform: scale(0.75);
+	transform-origin: top right;
+	pointer-events: none;
+	position: absolute;
+	inset-block-start: 0;
+	inset-inline-end: 0;
+}
+
+/*
+ * The settled badge is quiet.
+ *
+ * Once nothing is running the count is history, and history in the composer's
+ * chrome should not compete with the send button for attention. It keeps the
+ * shape so the icon does not jump when the last child settles.
+ */
+.piem-chat__subagents-badge--settled {
+	background: var(--background-modifier-border);
+	color: var(--text-muted);
+}
+
+/*
+ * The hover/press list.
+ *
+ * Same geometry and stacking as the context popover — both float above the
+ * composer from the same row, and two different z-index literals is how that
+ * quietly stops being true. See that rule for why the fallback is
+ * `--layer-menu`'s 65.
+ */
+.piem-chat__subagents-popover {
+	background: var(--background-primary);
+	border: 1px solid var(--background-modifier-border);
+	border-radius: var(--radius-m);
+	bottom: calc(100% + var(--size-4-2));
+	box-shadow: var(--shadow-s);
+	display: flex;
+	flex-direction: column;
+	gap: 2px;
+	max-height: 15rem;
+	max-width: 18rem;
+	min-width: 12rem;
+	overflow-y: auto;
+	padding: var(--size-4-1);
+	position: absolute;
+	inset-inline-end: 0;
+	text-align: start;
+	white-space: normal;
+	width: max-content;
+	z-index: var(--layer-menu, 65);
+}
+
+.piem-chat__subagents-item {
+	align-items: baseline;
+	background: transparent;
+	border: none;
+	border-radius: var(--radius-s);
+	box-shadow: none;
+	display: flex;
+	gap: var(--size-4-2);
+	height: auto;
+	/* WCAG 2.5.8: 24px of pointer target, which is what --size-4-6 is. */
+	min-height: var(--size-4-6);
+	padding: var(--size-4-1) var(--size-4-2);
+	text-align: start;
+	white-space: normal;
+	width: 100%;
+}
+
+@media (hover: hover) {
+
+	.piem-chat__subagents-item:hover {
+		background: var(--background-modifier-hover);
+	}
+}
+
+.piem-chat__subagents-item-task {
+	-webkit-box-orient: vertical;
+	-webkit-line-clamp: 1;
+	color: var(--text-normal);
+	display: -webkit-box;
+	font-size: var(--font-ui-smaller);
+	overflow: hidden;
+}
+
+.piem-chat__subagents-item-status {
+	color: var(--text-muted);
+	flex: 0 0 auto;
+	font-size: var(--font-ui-smaller);
+	margin-inline-start: auto;
+}
+
+/*
+ * The child's report, rendered as Markdown through Obsidian's own pipeline.
+ *
+ * Only the size is set. `MarkdownText` already carries the prose typeface and
+ * the renderer emits ordinary Obsidian markup, so restyling headings or lists
+ * here would fight the user's theme for no gain — a report is a note like any
+ * other, read in the same column a note would be.
+ */
+.piem-subagents__report {
+	font-size: var(--font-ui-small);
+}
+
+.piem-subagents__report > :first-child {
+	margin-block-start: 0;
+}
+
+.piem-subagents__report > :last-child {
+	margin-block-end: 0;
+}
+
+/*
+ * The icon breathes while a child is running, on the same curve as the panel's
+ * status dot.
+ *
+ * Two surfaces showing one fact have to agree, and the keyframes are shared so
+ * they cannot drift apart. Opacity on the glyph rather than on the button, so
+ * the badge stays at full strength: the count is the part worth reading.
+ */
+@media (prefers-reduced-motion: no-preference) {
+
+	.piem-chat__subagents-button--running .piem-chat__subagents-icon {
+		animation: piem-subagent-breathe 1.8s ease-in-out infinite;
+	}
+}

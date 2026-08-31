@@ -7,6 +7,7 @@ import type { SuggestionScope } from "../agent/quickActionSuggestionRequest";
 import type { QuickAction } from "./quickActionSuggestions";
 import type { DraftStore } from "../session/DraftStore";
 import type { ActiveSessionInfo } from "../session/ObsidianSessionManager";
+import { SubagentRegistry } from "../subagent/registry";
 
 installObsidianStub();
 const document = installDom();
@@ -136,6 +137,21 @@ class FakeAgentService {
 	pinContextRef(): void {}
 	unpinContextRef(): void {}
 	setFollowActiveNote(): void {}
+
+	/**
+	 * The subagent registry, as an empty one.
+	 *
+	 * `ChatApp` subscribes to it unconditionally — the entry icon has to appear
+	 * the moment something is delegated, and a snapshot-shaped guard would make
+	 * the panel's own wiring optional. An empty registry is the honest stand-in:
+	 * nothing was spawned in these tests, so the icon renders nothing, which is
+	 * exactly the state every assertion below was written against.
+	 */
+	getSubagentRegistry(): SubagentRegistry {
+		return this.subagentRegistry;
+	}
+
+	private readonly subagentRegistry = new SubagentRegistry();
 
 	/**
 	 * Suggestion wiring. Each request is logged with its scope, so a placement

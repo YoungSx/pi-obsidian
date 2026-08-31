@@ -1338,7 +1338,10 @@ describe("inspector data", () => {
 			// Unsubscribed, so no further events reach the listener even though
 			// the settle fired.
 			expect(events).toEqual(["change"]);
-			expect(entry?.settledAt).toBeGreaterThan(entry!.spawnedAt);
+			// Not strictly greater: a spawn aborted in the same millisecond settles at
+			// its own spawn time, and asserting a gap would fail on a fast machine
+			// while testing the clock rather than the bookkeeping.
+			expect(entry?.settledAt).toBeGreaterThanOrEqual(entry!.spawnedAt);
 		} finally {
 			extension.disposeAll();
 		}

@@ -16,6 +16,21 @@ interface ContextRowProps {
 	onUnpin: (path: string) => void;
 	/** Starts or stops naming whatever note the user is looking at. */
 	onSetFollowActive: (follow: boolean) => void;
+	/**
+	 * Row-end content that is not a note reference — today, the subagent monitor's
+	 * entry icon.
+	 *
+	 * It arrives as a node rather than as props for a specific control because the
+	 * row's subject is what the model is told about, and a subagent is not that; a
+	 * `subagentSnapshots` prop here would make this component the place two
+	 * unrelated features meet. `ChatApp` composes them instead, the same way it
+	 * composes the header's switchers.
+	 *
+	 * Its presence also keeps the row alive: the row hides itself when there is no
+	 * note to report, and a monitor icon that vanished whenever no note was open
+	 * would be a notification you could only see by luck.
+	 */
+	trailing?: React.ReactNode;
 }
 
 /**
@@ -56,6 +71,7 @@ export function ContextRow({
 	onPin,
 	onUnpin,
 	onSetFollowActive,
+	trailing,
 }: ContextRowProps): React.JSX.Element | null {
 	const t = useT();
 	const rowRef = useRef<HTMLDivElement | null>(null);
@@ -79,8 +95,9 @@ export function ContextRow({
 
 	// Nothing to say: no Markdown note open and nothing pinned, with following
 	// still on. Rendering an empty row would spend sidebar height on the absence
-	// of information.
-	if (refs.length === 0 && isFollowingActive) {
+	// of information — unless something else is riding along, in which case the
+	// row is the only thing holding it and hiding it would take that with it.
+	if (refs.length === 0 && isFollowingActive && !trailing) {
 		return null;
 	}
 
@@ -113,6 +130,12 @@ export function ContextRow({
 					buttonRef={resumeRef}
 				/>
 			)}
+			{/*
+			 * Pushed to the far end by its own margin rather than by
+			 * `justify-content`, which would move the chips too. Wrapped so the
+			 * margin has something to sit on whatever the caller passed.
+			 */}
+			{trailing ? <span className="piem-chat__context-trailing">{trailing}</span> : null}
 		</div>
 	);
 }

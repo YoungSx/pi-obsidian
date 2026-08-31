@@ -2,7 +2,7 @@ import { Notice, Plugin, type DataAdapter, type Editor, type WorkspaceLeaf } fro
 import { PiemSettingTab, normalizeSettings, type PiemSettings } from "./settings";
 import type { McpServerConfig } from "./mcp/mcpConfig";
 import { normalizeCustomEndpoint } from "./customEndpoint";
-import { VIEW_TYPE_PIEM_CHAT, VIEW_TYPE_PIEM_LOGS, PLUGIN_ID } from "./constants";
+import { VIEW_TYPE_PIEM_CHAT, VIEW_TYPE_PIEM_LOGS, VIEW_TYPE_PIEM_SUBAGENTS, PLUGIN_ID } from "./constants";
 import { createPluginLogger, type PluginLogger } from "./logging/pluginLogger";
 import { getLogFilePath } from "./logging/logFile";
 import { PiemLogView } from "./logging/logView";
@@ -29,6 +29,7 @@ import { ObsidianAgentService } from "./agent/ObsidianAgentService";
 import { McpManager } from "./mcp/mcpManager";
 import { emptySkillLoadReport, type SkillLoadReport } from "./agent/skillLoader";
 import { PiemChatView } from "./ui/PiemChatView";
+import { PiemSubagentView } from "./ui/PiemSubagentView";
 import { requestNoteReference, warnIfTruncated } from "./ui/noteReferenceCommand";
 import { BRAND_ICON_ID, registerBrandIcon } from "./brandIcon";
 import { getT, resolveLanguage, type LanguageHost, type Translator } from "./i18n";
@@ -152,8 +153,15 @@ export default class PiemPlugin extends Plugin {
 		});
 		this.draftStore = DraftStore.forPlugin(this.app, this, this.requirePluginLogger().logger);
 
-		this.registerView(VIEW_TYPE_PIEM_CHAT, (leaf) => new PiemChatView(leaf, this.requireAgentService(), this.draftStore ?? undefined));
+		this.registerView(
+			VIEW_TYPE_PIEM_CHAT,
+			(leaf) =>
+				new PiemChatView(leaf, this.requireAgentService(), this.draftStore ?? undefined, (subagentId) =>
+					void this.activateSubagentView(subagentId),
+				),
+		);
 		this.registerView(VIEW_TYPE_PIEM_LOGS, (leaf) => this.createLogView(leaf));
+		this.registerView(VIEW_TYPE_PIEM_SUBAGENTS, (leaf) => new PiemSubagentView(leaf, this.requireAgentService()));
 		this.addSettingTab(new PiemSettingTab(this.app, this, this.requireSecretEnvironment()));
 		this.addCommand({
 			id: "open-chat",
@@ -167,6 +175,13 @@ export default class PiemPlugin extends Plugin {
 			name: t.t("commands.openLogs"),
 			callback: () => {
 				void this.activateLogView();
+			},
+		});
+		this.addCommand({
+			id: "open-subagents",
+			name: t.t("commands.openSubagents"),
+			callback: () => {
+				void this.activateSubagentView();
 			},
 		});
 		this.addCommand({
@@ -506,6 +521,7 @@ export default class PiemPlugin extends Plugin {
 		// The panel re-renders from the snapshot on its own, but the tab title is
 		// drawn by Obsidian outside React, so a language change needs this nudge.
 		this.findChatView()?.refreshHeader();
+		this.findSubagentView()?.refreshHeader();
 	}
 
 	/**
@@ -663,6 +679,44 @@ export default class PiemPlugin extends Plugin {
 				adapter.revealInFinder?.(getLogFilePath(configDir, PLUGIN_ID));
 			},
 		});
+	}
+
+	/**
+	 * The subagent monitor's leaf, when one is open.
+	 *
+	 * Same optional-chained lookup as {@link findChatView}: persistence tests
+	 * drive `saveSettings` against a plugin stub with no workspace at all.
+	 */
+	private findSubagentView(): PiemSubagentView | null {
+		const view = this.app?.workspace?.getLeavesOfType(VIEW_TYPE_PIEM_SUBAGENTS)[0]?.view;
+		return view instanceof PiemSubagentView ? view : null;
+	}
+
+	/**
+	 * Opens the subagent monitor, optionally already showing one run.
+	 *
+	 * Returns the view so the caller can chain — the chat panel's entry icon
+	 * activates the leaf and names a run in one awaited sequence, and a latched
+	 * request means the naming survives a leaf that has not mounted React yet.
+	 */
+	async activateSubagentView(subagentId?: string): Promise<PiemSubagentView | null> {
+		const existingLeaf = this.app.workspace.getLeavesOfType(VIEW_TYPE_PIEM_SUBAGENTS)[0];
+		if (existingLeaf) {
+			await this.app.workspace.revealLeaf(existingLeaf);
+		} else {
+			const leaf = this.app.workspace.getRightLeaf(false);
+			if (!leaf) {
+				new Notice(this.t().t("commands.couldNotOpenSubagents"));
+				return null;
+			}
+			await leaf.setViewState({ type: VIEW_TYPE_PIEM_SUBAGENTS, active: true });
+			await this.app.workspace.revealLeaf(leaf);
+		}
+		const view = this.findSubagentView();
+		if (view && subagentId !== undefined) {
+			view.showSubagent(subagentId);
+		}
+		return view;
 	}
 
 	private async activateLogView(): Promise<void> {
