@@ -27,6 +27,16 @@ export default tseslint.config(
 	},
 	...obsidianmd.configs.recommended,
 	{
+		// Test infrastructure that emulates Obsidian's own prototype helpers.
+		// Obsidian's `hide()`/`show()` assign `display` directly — that is the
+		// behaviour being reproduced — so the rule that rightly steers plugin
+		// code toward `setCssProps` is scoped off here, and only here.
+		files: ["src/testing/obsidianDom.ts"],
+		rules: {
+			"obsidianmd/no-static-styles-assignment": "off",
+		},
+	},
+	{
 		// The load harness is build-time tooling, not plugin runtime code: it
 		// reads the built bundle off disk and evaluates it the way Obsidian's
 		// loader does. Node builtins and `eval` are the mechanism under test,

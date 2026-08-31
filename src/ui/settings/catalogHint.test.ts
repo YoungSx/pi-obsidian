@@ -1,11 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import { installObsidianStub } from "../../testing/obsidianStub";
-
-// `ModelModal` extends Obsidian's `Modal` at module scope, so the stub has to be
-// registered before the import below resolves.
-installObsidianStub();
-
-const { findCatalogCapabilityHint } = await import("./ModelModal");
+import { findCatalogCapabilityHint } from "./catalogCapabilityHint";
 import { getBuiltinModels, getBuiltinProviders } from "../../net/builtinCatalog";
 import type { ModelsDevIndex, ModelsDevModel } from "../../net/modelsDev";
 

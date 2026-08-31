@@ -11,6 +11,9 @@ import { getBuiltinModels, getBuiltinProviders } from "../../net/builtinCatalog"
 import type { ProviderListing } from "../../net/modelListingCache";
 import type { ModelsDevIndex } from "../../net/modelsDev";
 import { CatalogSuggest, type CatalogSuggestion } from "./CatalogSuggest";
+import { findCatalogCapabilityHint } from "./catalogCapabilityHint";
+import { adviseCapabilities, type CapabilityField } from "./capabilityAdvice";
+import { CAPABILITY_FIELDS, attachCapabilityAdvice, type CapabilityAdviceRow } from "./capabilityAdviceRow";
 import { createCollapsibleSection } from "./collapsibleSection";
 import type { Translator } from "../../i18n";
 import { attachTestButton, type TestRowHandle } from "./testResult";
@@ -114,104 +117,6 @@ export function buildModelSuggestions(listings: readonly ProviderListing[] = [])
 }
 
 /**
- * What the recommendation sources say about one model id's capabilities.
- *
- * Both answers come from the same data models.dev publishes, so one lookup
- * serves every capability control the form renders. The numeric fields are
- * present only when the answering entry published a limit. Which source
- * answered is deliberately absent: that is pipeline detail, not something the
- * form should narrate.
- */
-export interface CatalogCapabilityHint {
-	/** Whether the entry advertises reasoning parameters. */
-	reasoning: boolean;
-	/** Whether the entry accepts image content alongside text. */
-	images: boolean;
-	/** Tokens of context, when the answering entry published one. */
-	contextWindow?: number;
-	/** Cap on output tokens, when the answering entry published one. */
-	maxTokens?: number;
-}
-
-/**
- * Looks one model id up across the recommendation sources and reports its
- * capabilities.
- *
- * Two sources, one authority. The live models.dev index answers first because
- * it is the same dataset the builtin snapshot was cut from, merely fresher; the
- * snapshot fills in when the fetch has not landed or cannot — offline, or
- * models.dev reshaped. Within each source, matching is exact first: ids are
- * commonly namespaced by the gateway in front — an OpenRouter-style endpoint
- * serves `anthropic/claude-…` — so the final path segment matches too. Which of
- * the two answered is not reported; the form narrates the recommendation, not
- * the plumbing behind it.
- *
- * Neither source probes the user's endpoint. A listing response carries no
- * capability data, and the only live way to learn what a server accepts is to
- * send real requests and read its errors — provider-specific, costly, and wrong
- * more often than the authority is. Every control stays editable for the
- * gateways where even the fresh answer is stale.
- */
-export function findCatalogCapabilityHint(modelApiId: string, live?: ModelsDevIndex): CatalogCapabilityHint | undefined {
-	const id = modelApiId.trim().toLowerCase();
-	if (!id) {
-		return undefined;
-	}
-	const tail = id.slice(id.lastIndexOf("/") + 1);
-	if (live) {
-		const exact = live.exact.get(id);
-		if (exact) {
-			return { ...exact };
-		}
-	}
-	const exactSnapshot = findCatalogModel(id);
-	if (exactSnapshot) {
-		return hintFromSnapshot(exactSnapshot);
-	}
-	if (live && tail !== id) {
-		const namespaced = live.tail.get(tail);
-		if (namespaced) {
-			return { ...namespaced };
-		}
-	}
-	if (tail !== id) {
-		const namespacedSnapshot = findCatalogModel(tail);
-		if (namespacedSnapshot) {
-			return hintFromSnapshot(namespacedSnapshot);
-		}
-	}
-	return undefined;
-}
-
-/** One snapshot entry, carrying the catalog section that knew it. */
-type SnapshotEntry = CatalogCapabilityHint & { provider: string };
-
-/** Widens a snapshot entry into a hint, attributing it to the catalog section that knew it. */
-function hintFromSnapshot(entry: SnapshotEntry): CatalogCapabilityHint {
-	return {
-		reasoning: entry.reasoning,
-		images: entry.images,
-		contextWindow: entry.contextWindow,
-		maxTokens: entry.maxTokens,
-	};
-}
-function findCatalogModel(id: string): SnapshotEntry | undefined {
-	for (const provider of getBuiltinProviders()) {
-		const match = getBuiltinModels(provider).find((model) => model.id.toLowerCase() === id);
-		if (match) {
-			return {
-				reasoning: match.reasoning,
-				images: match.input.includes("image"),
-				contextWindow: match.contextWindow,
-				maxTokens: match.maxTokens,
-				provider,
-			};
-		}
-	}
-	return undefined;
-}
-
-/**
  * Validates a draft, returning a message or undefined.
  *
  * Exported and DOM-free so the rules are unit-testable: this is the panel's only
@@ -243,31 +148,17 @@ export class ModelModal extends Modal {
 	private probes = new AbortController();
 	/** Listings this form has collected, seeded from the session's existing ones. */
 	private listings: readonly ProviderListing[] = [];
-	/**
-	 * Whether the user has set a capability toggle by hand this session. Once
-	 * true for one, catalog recommendations stop being applied to it — see
-	 * {@link refreshCatalogRecommendation}.
-	 */
-	private reasoningTouched = false;
-	private imagesTouched = false;
 	private reasoningToggle: ToggleComponent | null = null;
 	private imagesToggle: ToggleComponent | null = null;
-	/** Rewritable note under a toggle's description; empty renders as nothing. */
-	private thinkingHint: HTMLElement | null = null;
-	private imageHint: HTMLElement | null = null;
-	/** Whether the user has typed or picked a model id this session. Gates whether the live index, when it lands, may apply its toggles — an edit form opened to a stored id must not have stored choices rewritten by a fetch that merely arrived late. */
-	private idTouched = false;
 	/** The live models.dev answers, once its fetch lands; absent until then. */
 	private modelsDevIndex: ModelsDevIndex | undefined;
-	/** Input fields for the numeric limits, so a recommendation can fill a blank one. */
+	/** Input fields for the numeric limits, so an adopted recommendation can fill one. */
 	private contextWindowInput: TextComponent | null = null;
 	private maxTokensInput: TextComponent | null = null;
-	/** The collapsible holding the capability fields, so a catalog answer landing in it can open it. */
-	private capabilityGroup: HTMLDetailsElement | null = null;
+	/** One advice line per capability control, attached where the control is built. */
+	private adviceRows: Partial<Record<CapabilityField, CapabilityAdviceRow>> = {};
 	/** The draft as it stood at open, serialized — the baseline the dirty check compares against. */
 	private originalDraft: string;
-	/** Set by the first hand edit; programmatic fills before it fold into the baseline. */
-	private handEdited = false;
 	private readonly guard: DiscardGuard;
 	private status: ModalStatus | null = null;
 
@@ -303,7 +194,7 @@ export class ModelModal extends Modal {
 		// Editing starts from a stored choice, so the catalog's answer is reported
 		// but never applied over it; a form opened to add starts with an empty id,
 		// which has no recommendation to show either way.
-		this.refreshCatalogRecommendation(false);
+		this.refreshCatalogAdvice();
 
 		new Setting(contentEl)
 			.setName(t.t("modelModal.provider"))
@@ -333,22 +224,22 @@ export class ModelModal extends Modal {
 				text.setValue(this.draft.modelApiId);
 				text.onChange((value) => {
 					this.draft.modelApiId = value;
-					this.idTouched = true;
 					this.onEdit();
 					this.testRow?.reset();
-					// The id decides what the catalog can recommend; a changed id is a
-					// changed question, so the stale answer must not survive it.
-					this.refreshCatalogRecommendation(true);
+					// The id decides what the catalog can say about anything else on
+					// the form; a changed id is a changed question, so every advice
+					// line is re-asked — and any answer left from the last id is
+					// overwritten, the exact failure issue #160 reported.
+					this.refreshCatalogAdvice();
 				});
-					// Read through a closure rather than passed as a snapshot, so a probe
+				// Read through a closure rather than passed as a snapshot, so a probe
 				// that lands after this field was built still shows up: the suggest
 				// re-reads on every keystroke, and never triggers a request itself.
 				new CatalogSuggest(this.app, text.inputEl, () => buildModelSuggestions(this.listings), (value) => {
 					this.draft.modelApiId = value;
-					this.idTouched = true;
 					this.onEdit();
 					this.testRow?.reset();
-					this.refreshCatalogRecommendation(true);
+					this.refreshCatalogAdvice();
 				});
 			});
 
@@ -381,7 +272,6 @@ export class ModelModal extends Modal {
 				this.draft.reasoning ||
 				this.draft.supportsImages,
 		});
-		this.capabilityGroup = capabilityBody.parentElement as HTMLDetailsElement;
 
 		const contextWindowSetting = new Setting(capabilityBody)
 			.setName(t.t("modelModal.contextWindow"))
@@ -390,6 +280,13 @@ export class ModelModal extends Modal {
 		// has to say so where the typing happened, not after a save that never
 		// picked the value up.
 		const contextWindowHint = createEffectLine(contextWindowSetting.descEl);
+		this.adviceRows.contextWindow = attachCapabilityAdvice<number>(contextWindowSetting, t, (value) => {
+			this.draft.contextWindow = value;
+			this.contextWindowInput?.setValue(String(value));
+			this.onEdit();
+			this.testRow?.reset();
+			this.refreshCatalogAdvice();
+		});
 		contextWindowSetting.addText((text) => {
 			text.inputEl.type = "number";
 			text.setPlaceholder(t.t("modelModal.contextWindowPlaceholder"));
@@ -409,6 +306,13 @@ export class ModelModal extends Modal {
 			.setName(t.t("modelModal.maxTokens"))
 			.setDesc(t.t("modelModal.maxTokensDesc"));
 		const maxTokensHint = createEffectLine(maxTokensSetting.descEl);
+		this.adviceRows.maxTokens = attachCapabilityAdvice<number>(maxTokensSetting, t, (value) => {
+			this.draft.maxTokens = value;
+			this.maxTokensInput?.setValue(String(value));
+			this.onEdit();
+			this.testRow?.reset();
+			this.refreshCatalogAdvice();
+		});
 		maxTokensSetting.addText((text) => {
 			text.inputEl.type = "number";
 			text.setPlaceholder(t.t("modelModal.maxTokensPlaceholder"));
@@ -427,35 +331,48 @@ export class ModelModal extends Modal {
 		const thinkingSetting = new Setting(capabilityBody)
 			.setName(t.t("modelModal.supportsThinking"))
 			.setDesc(t.t("modelModal.supportsThinkingDesc"));
-		// Appended after `setDesc`, which replaces the description's contents. Its
-		// own element so the line can be rewritten as the id changes without
-		// re-rendering the form, which would throw focus out of the field.
-		this.thinkingHint = createEffectLine(thinkingSetting.descEl);
+		// The advice line lives in the description area, appended after `setDesc`
+		// — which replaces the description's contents — and is rewritten in place
+		// as the id changes rather than re-rendering the form, which would throw
+		// focus out of the field.
+		this.adviceRows.reasoning = attachCapabilityAdvice<boolean>(thinkingSetting, t, (value) => {
+			this.draft.reasoning = value;
+			this.reasoningToggle?.setValue(value);
+			this.onEdit();
+			this.testRow?.reset();
+			this.refreshCatalogAdvice();
+		});
 		thinkingSetting.addToggle((toggle) => {
 			this.reasoningToggle = toggle;
 			toggle.setValue(this.draft.reasoning);
 			toggle.onChange((reasoning) => {
-				// An explicit choice outranks every later recommendation, so it is
-				// recorded rather than recomputed on the next id edit.
-				this.reasoningTouched = true;
+				// An explicit choice, adopted or clicked, outranks nothing the form
+				// would later overwrite: the catalog only ever advises now.
 				this.draft.reasoning = reasoning;
 				this.onEdit();
 				this.testRow?.reset();
+				this.refreshCatalogAdvice();
 			});
 		});
 
 		const imagesSetting = new Setting(capabilityBody)
 			.setName(t.t("modelModal.supportsImages"))
 			.setDesc(t.t("modelModal.supportsImagesDesc"));
-		this.imageHint = createEffectLine(imagesSetting.descEl);
+		this.adviceRows.images = attachCapabilityAdvice<boolean>(imagesSetting, t, (value) => {
+			this.draft.supportsImages = value;
+			this.imagesToggle?.setValue(value);
+			this.onEdit();
+			this.testRow?.reset();
+			this.refreshCatalogAdvice();
+		});
 		imagesSetting.addToggle((toggle) => {
 			this.imagesToggle = toggle;
 			toggle.setValue(this.draft.supportsImages);
 			toggle.onChange((supportsImages) => {
-				this.imagesTouched = true;
 				this.draft.supportsImages = supportsImages;
 				this.onEdit();
 				this.testRow?.reset();
+				this.refreshCatalogAdvice();
 			});
 		});
 
@@ -507,80 +424,48 @@ export class ModelModal extends Modal {
 	}
 
 	/**
-	 * Re-reads the recommendation sources for the current model id.
+	 * Re-reads the recommendation sources for the current model id and rewrites
+	 * the four advice lines.
 	 *
-	 * Effects are deliberately separable per control. Each hint line always
-	 * follows the id: it is a report, and reports do not wait for permission. Each
-	 * toggle value only follows it while the user has not set that toggle by hand —
-	 * a recommendation that overwrites an explicit choice is not a recommendation,
-	 * so once flipped manually the form keeps applying nothing and the line stays
-	 * as the record of what the source thought.
+	 * One doctrine, four controls: **advise, never write.** The catalog reports
+	 * what it knows; the value stays the user's until they adopt a recommendation
+	 * by clicking for it. Before issue #160 this method ran two contradictory
+	 * rules — toggles re-applied on every id edit, numbers filled once and then
+	 * went silent forever, gated on the field being blank. A changed id therefore
+	 * left the previous model's number sitting under the new one with nothing said
+	 * about it, and `contextWindow` is not decoration: it feeds the context gauge
+	 * and the compaction threshold.
 	 *
-	 * The numeric fields follow a different rule: they fill only when blank, and
-	 * say nothing about it. Blank means "use the default", so filling one can
-	 * never overwrite a stored or hand-typed value — which is why it happens
-	 * regardless of `apply`.
+	 * Every line is rewritten on every call, including to empty. A line left
+	 * standing from a previous id is exactly the stale claim this replaced, so
+	 * {@link adviseCapabilities} returning nothing for a field is an instruction to
+	 * clear it, not an absence of instruction.
 	 */
-	/** Opens the capability group when a catalog answer has just landed in it, so the filled field is seen rather than hidden. */
-	private revealCapabilityGroup(): void {
-		if (this.capabilityGroup && !this.capabilityGroup.open) {
-			this.capabilityGroup.open = true;
-		}
-	}
-
-	/**
-	 * A numeric fill the form performed on its own is not the user's unsaved
-	 * work. While nothing has been hand-edited it folds into the open baseline,
-	 * so Esc does not warn about a value nobody typed; once the user has edited
-	 * anything — including the id that earned this fill — real changes exist
-	 * and the guard stays armed.
-	 */
-	private absorbProgrammaticFill(): void {
-		if (!this.handEdited) {
-			this.originalDraft = JSON.stringify(this.trimmedDraft());
-		}
-	}
-
-	private refreshCatalogRecommendation(apply: boolean): void {
-		const { t } = this.options;
+	private refreshCatalogAdvice(): void {
 		const hint = findCatalogCapabilityHint(this.draft.modelApiId, this.modelsDevIndex);
-		this.thinkingHint?.setText(
-			hint ? t.t(hint.reasoning ? "modelModal.thinkingHintSupported" : "modelModal.thinkingHintUnsupported") : "",
+		const advice = adviseCapabilities(
+			{
+				contextWindow: this.draft.contextWindow,
+				maxTokens: this.draft.maxTokens,
+				reasoning: this.draft.reasoning,
+				images: this.draft.supportsImages,
+			},
+			hint,
+			this.draft.modelApiId.trim() !== "",
 		);
-		this.imageHint?.setText(
-			hint ? t.t(hint.images ? "modelModal.imagesHintSupported" : "modelModal.imagesHintUnsupported") : "",
-		);
-		if (hint?.contextWindow !== undefined && this.draft.contextWindow === undefined) {
-			this.draft.contextWindow = hint.contextWindow;
-			this.contextWindowInput?.setValue(String(hint.contextWindow));
-			// The group holds what was just filled; opening it is the report.
-			this.revealCapabilityGroup();
-			this.absorbProgrammaticFill();
-		}
-		if (hint?.maxTokens !== undefined && this.draft.maxTokens === undefined) {
-			this.draft.maxTokens = hint.maxTokens;
-			this.maxTokensInput?.setValue(String(hint.maxTokens));
-			this.revealCapabilityGroup();
-			this.absorbProgrammaticFill();
-		}
-		if (hint && apply) {
-			if (!this.reasoningTouched) {
-				this.draft.reasoning = hint.reasoning;
-				this.reasoningToggle?.setValue(hint.reasoning);
-			}
-			if (!this.imagesTouched) {
-				this.draft.supportsImages = hint.images;
-				this.imagesToggle?.setValue(hint.images);
-			}
+		for (const field of CAPABILITY_FIELDS) {
+			this.adviceRows[field]?.render(advice.find((entry) => entry.field === field));
 		}
 	}
 
 	/**
 	 * Starts the shared models.dev fetch, if this form was handed the option.
 	 *
-	 * When it lands, the recommendation re-runs against the live index: hints
-	 * re-report, untouched toggles follow only if the user has already typed an
-	 * id — showing intent — and blank numeric fields fill either way. Failure is
+	 * When it lands, the advice re-runs against the live index: every line
+	 * re-reports for the current id, which may turn a snapshot-backed claim into
+	 * a live-backed one, or into a warning once the live index stops backing the
+	 * stored value. Nothing is applied — the doctrine is advise, never write, so
+	 * a fetch that merely arrived late cannot move a stored number. Failure is
 	 * silent, exactly like a failed listing probe: the snapshot still speaks.
 	 */
 	private fetchCapabilityIndex(): void {
@@ -594,7 +479,7 @@ export class ModelModal extends Modal {
 					return;
 				}
 				this.modelsDevIndex = index;
-				this.refreshCatalogRecommendation(this.idTouched);
+				this.refreshCatalogAdvice();
 			},
 			() => {
 				// Offline, aborted, or models.dev moved on. The snapshot is the
@@ -668,7 +553,6 @@ export class ModelModal extends Modal {
 
 	/** One fresh edit clears the old verdict — it no longer describes this draft. */
 	private onEdit(): void {
-		this.handEdited = true;
 		this.guard.edited();
 		this.status?.clear();
 	}
