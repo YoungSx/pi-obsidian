@@ -131,10 +131,9 @@ path (`~/.paseo/...`), which `PREVIEW_DIR=` works around.
 
 ## Versioning & releases
 
-- Bump `version` in `manifest.json` (SemVer) and update `versions.json` to map plugin version → minimum app version.
-- Create a GitHub release whose tag exactly matches `manifest.json`'s `version`. Do not use a leading `v`.
-- Attach `manifest.json`, `main.js`, and `styles.css` (if present) to the release as individual assets.
-- After the initial release, follow the process to add/update your plugin in the community catalog as required.
+- The git tag is the single release input. Do not hand-edit `manifest.json` / `versions.json` / `package.json` before releasing — the Release workflow stamps all three from the tag (`scripts/stamp-version.mjs`) and then asserts they match.
+- Tag the exact SemVer string with **no leading `v`** (e.g. `git tag 0.1.0-alpha.38 && git push origin 0.1.0-alpha.38`). Obsidian matches the release tag against `manifest.json`'s `version` verbatim, so a `v`-prefixed tag yields a release the plugin store cannot find.
+- The CI accepts both spellings (`replace(/^v/, "")` strips it), but every `v`-prefixed release is invisible to Obsidian's scan — legacy `v*` tags stay on GitHub, don't add more.
 
 ## Agent capability
 
