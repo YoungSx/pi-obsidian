@@ -1286,7 +1286,9 @@ export class ObsidianAgentService {
 		}
 
 		const t = this.t();
-		const base = noteFileName(session.name ?? session.firstMessage ?? t.t("chat.exportUntitled"));
+		// ||, not ??: firstMessage is "" for an image-only opener, and noteFileName's
+		// English fallback would leak past an empty-string title.
+		const base = noteFileName(session.name || session.firstMessage || t.t("chat.exportUntitled"));
 		const dir = this.getSettings().sessionDir;
 		try {
 			let path = `${dir}/${base}.md`;

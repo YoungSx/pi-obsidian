@@ -97,7 +97,7 @@ class SessionNameModal extends Modal {
 			.setDesc(this.t.t("session.nameDesc"))
 			.addText((text) => {
 				text
-					.setPlaceholder(this.session.firstMessage.trim().split("\n")[0] ?? "")
+					.setPlaceholder(sessionTitle(this.session, this.t) || this.t.t("session.untitled"))
 					.setValue(this.name)
 					.onChange((value) => {
 						this.name = value;
