@@ -103,11 +103,20 @@ describe("ChatComposer send button", () => {
 		expect(sendButton(host)?.disabled).toBe(true);
 	});
 
-	it("swaps Send for a labelled Stop while a turn is in flight", async () => {
+	it("keeps Send beside a labelled Stop while a turn is in flight", async () => {
 		const host = await renderComposer({ isStreaming: true });
 
-		expect(sendButton(host)).toBeNull();
 		expect(host.querySelector(".piem-chat__stop-button")?.getAttribute("aria-label")).toBe("Stop response");
+		// A send mid-reply is no longer refused: it queues as a steer, so Send
+		// stays available for exactly the correction a reply in flight provokes.
+		expect(sendButton(host)?.disabled).toBe(false);
+	});
+
+	it("hides Send during compaction, which has no run to steer into", async () => {
+		const host = await renderComposer({ isCompacting: true });
+
+		expect(host.querySelector(".piem-chat__stop-button")?.getAttribute("aria-label")).toBe("Stop compaction");
+		expect(sendButton(host)).toBeNull();
 	});
 
 	it("names Stop after compaction when that is what it would cancel", async () => {

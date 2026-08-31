@@ -3,7 +3,8 @@ import { installObsidianStub, requestUrlMock } from "../testing/obsidianStub";
 import type { App, DataAdapter, ListedFiles, Stat, TFile, TFolder } from "obsidian";
 import type { Api, AssistantMessage, Context, Model, SimpleStreamOptions } from "@earendil-works/pi-ai";
 import { createAssistantMessageEventStream } from "@earendil-works/pi-ai";
-import type { StreamFn } from "@earendil-works/pi-agent-core";
+import type { AgentMessage, StreamFn } from "@earendil-works/pi-agent-core";
+import type { PromptQueue } from "./promptQueue";
 import { ObsidianSessionManager } from "../session/ObsidianSessionManager";
 import { DEFAULT_SESSION_RETENTION } from "../session/retention";
 import { DEFAULT_SESSION_DIR } from "../session/sessionDir";
@@ -1382,6 +1383,229 @@ describe("ObsidianAgentService", () => {
 			// been applied either way.
 			expect(service.getSnapshot().messages[0]?.role).not.toBe("compactionSummary");
 		});
+	});
+});
+
+describe("ObsidianAgentService queued prompts (mid-run sends)", () => {
+	/** Polls until the condition holds; the run's steps are async, not observable by await alone. */
+	function waitFor(condition: () => boolean): Promise<void> {
+		return new Promise((resolve) => {
+			const tick = () => (condition() ? resolve() : setTimeout(tick, 1));
+			tick();
+		});
+	}
+
+	/** The first text of a message, for asserting on what the transcript actually says. */
+	function firstText(message: { content: unknown }): string {
+		const block = (message.content as { type: string; text?: string }[])[0];
+		return block?.text ?? "";
+	}
+
+	function userTexts(service: ObsidianAgentServiceType): string[] {
+		return service
+			.getSnapshot()
+			.messages.filter((message) => message.role === "user")
+			.map((message) => firstText(message));
+	}
+
+	/** Plants a stranded entry directly in the mirror, for paths that need one without a live run. */
+	function addStranded(service: ObsidianAgentServiceType, text: string): void {
+		const queue = (service as unknown as { promptQueue: PromptQueue }).promptQueue;
+		queue.add({
+			kind: "steer",
+			text,
+			imageCount: 0,
+			message: { role: "user", content: [{ type: "text", text }], timestamp: Date.now() },
+		});
+	}
+
+	/**
+	 * A streamFn whose first request never answers until `release` is called —
+	 * the stand-in for a model the user interrupts mid-reply.
+	 */
+	function createGatedStreamFn() {
+		let requestCount = 0;
+		let gate: ReturnType<typeof createAssistantMessageEventStream> | undefined;
+		let gateModel: Model<Api> | undefined;
+		const streamFn: StreamFn = (model, _context, _options) => {
+			requestCount += 1;
+			if (requestCount === 1) {
+				gate = createAssistantMessageEventStream();
+				gateModel = model;
+				return gate;
+			}
+			return scriptedTextStream(model, "Second reply");
+		};
+		return {
+			streamFn,
+			waitForFirstRequest: () => waitFor(() => requestCount === 1),
+			// Same shape `scriptedTextStream` builds; the model is only known once
+			// the request arrives, so the reply is assembled at release time.
+			release: () => {
+				const model = gateModel;
+				const target = gate;
+				if (!model || !target) {
+					throw new Error("release before the first request");
+				}
+				const message: AssistantMessage = {
+					role: "assistant",
+					content: [{ type: "text", text: "First reply" }],
+					api: model.api,
+					provider: model.provider,
+					model: model.id,
+					usage: {
+						input: 1_000,
+						output: 10,
+						cacheRead: 0,
+						cacheWrite: 0,
+						totalTokens: 1_010,
+						cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+					},
+					timestamp: Date.now(),
+					stopReason: "stop",
+				};
+				target.push({ type: "done", reason: "stop", message });
+				target.end(message);
+			},
+		};
+	}
+
+	it("queues a mid-run send as a steer and injects every one at the next turn boundary", async () => {
+		// Two mid-run sends on purpose: pi's own default is one-at-a-time, so
+		// both landing proves the agent was built with steeringMode "all".
+		const gated = createGatedStreamFn();
+		const service = createService(new MemoryAdapter(), { streamFn: gated.streamFn });
+
+		const run = service.sendPrompt("First question");
+		await gated.waitForFirstRequest();
+
+		expect(await service.sendPrompt("Hold on, use the other file")).toBe(true);
+		expect(await service.sendPrompt("And also skip the summary")).toBe(true);
+		expect(service.getSnapshot().queuedPrompts.map((entry) => entry.text)).toEqual([
+			"Hold on, use the other file",
+			"And also skip the summary",
+		]);
+
+		gated.release();
+		await run;
+
+		expect(userTexts(service)).toEqual(["First question", "Hold on, use the other file", "And also skip the summary"]);
+		expect(service.getSnapshot().queuedPrompts).toEqual([]);
+	});
+
+	it("takes one queued chip back and re-pushes only the survivors into pi", async () => {
+		const gated = createGatedStreamFn();
+		const service = createService(new MemoryAdapter(), { streamFn: gated.streamFn });
+
+		const run = service.sendPrompt("First question");
+		await gated.waitForFirstRequest();
+		await service.sendPrompt("Take this back");
+		await service.sendPrompt("Keep this one");
+
+		const queued = service.getSnapshot().queuedPrompts;
+		expect(queued).toHaveLength(2);
+		service.removeQueuedPrompt(queued[0]?.id ?? "");
+
+		expect(service.getSnapshot().queuedPrompts.map((entry) => entry.text)).toEqual(["Keep this one"]);
+
+		gated.release();
+		await run;
+
+		// The survivor is the only mid-run message that reached the transcript.
+		expect(userTexts(service)).toEqual(["First question", "Keep this one"]);
+	});
+
+	it("clears queued chips when the run is aborted", async () => {
+		const gated = createGatedStreamFn();
+		const service = createService(new MemoryAdapter(), { streamFn: gated.streamFn });
+
+		const run = service.sendPrompt("First question");
+		await gated.waitForFirstRequest();
+		await service.sendPrompt("Hold on");
+		expect(service.getSnapshot().queuedPrompts).toHaveLength(1);
+
+		// Abort only signals; a gated stream that ignores its signal never
+		// settles, so the reply has to flow for the run to actually end.
+		gated.release();
+		service.abort();
+		await run;
+
+		expect(service.getSnapshot().queuedPrompts).toEqual([]);
+		// Stopping the run retracts the queued intent along with it: the
+		// transcript holds the original prompt and the aborted reply, no steer.
+		expect(userTexts(service)).toEqual(["First question"]);
+	});
+
+	it("carries stranded queue entries ahead of the next direct send", async () => {
+		// A run that ended before its drain point leaves the mirror full; the
+		// next ordinary send must dispatch those words first, not behind the new one.
+		const service = createService();
+		await service.initialize();
+		addStranded(service, "Stranded correction");
+
+		await service.sendPrompt("Fresh question");
+
+		expect(userTexts(service)).toEqual(["Stranded correction", "Fresh question"]);
+		expect((service as unknown as { promptQueue: PromptQueue }).promptQueue.size).toBe(0);
+	});
+
+	it("dispatches stranded steers itself when the run ended without injecting them", async () => {
+		const service = createService();
+		await service.initialize();
+		addStranded(service, "Stranded correction");
+
+		await (service as unknown as { resumeQueuedPrompts: (messages: readonly AgentMessage[]) => Promise<void> })
+			.resumeQueuedPrompts([]);
+
+		// The rescue is a fresh run on its own: the words land, then the
+		// scripted reply, and the mirror is empty afterwards.
+		expect(userTexts(service)).toEqual(["Stranded correction"]);
+		expect((service as unknown as { promptQueue: PromptQueue }).promptQueue.size).toBe(0);
+	});
+
+	it("leaves the queue alone when the run died on a provider error", async () => {
+		const service = createService();
+		await service.initialize();
+		addStranded(service, "Stranded correction");
+
+		// Shape mirrors pi's own run-failure message; only role and stopReason
+		// are read, but the full assistant shape keeps the cast honest.
+		const failed: AgentMessage = {
+			role: "assistant",
+			content: [{ type: "text", text: "" }],
+			api: "anthropic",
+			provider: "anthropic",
+			model: "test-model",
+			usage: {
+				input: 0,
+				output: 0,
+				cacheRead: 0,
+				cacheWrite: 0,
+				totalTokens: 0,
+				cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+			},
+			timestamp: Date.now(),
+			stopReason: "error",
+			errorMessage: "boom",
+		};
+
+		await (service as unknown as { resumeQueuedPrompts: (messages: readonly AgentMessage[]) => Promise<void> })
+			.resumeQueuedPrompts([failed]);
+
+		// Re-sending into the same failure would bill a second refusal; the
+		// words stay queued for the next direct send to carry.
+		expect(userTexts(service)).toEqual([]);
+		expect((service as unknown as { promptQueue: PromptQueue }).promptQueue.size).toBe(1);
+	});
+
+	it("clears queued chips when the session changes", async () => {
+		const service = createService();
+		addStranded(service, "Queued for the old session");
+
+		await service.newSession();
+
+		expect((service as unknown as { promptQueue: PromptQueue }).promptQueue.size).toBe(0);
+		expect(service.getSnapshot().queuedPrompts).toEqual([]);
 	});
 });
 

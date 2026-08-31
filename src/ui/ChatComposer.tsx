@@ -7,6 +7,7 @@ import { useT } from "./TranslatorContext";
 import { useAutosize } from "./useAutosize";
 import { CommandMenu, type CommandEntry } from "./CommandMenu";
 import type { PendingImage } from "./pendingImages";
+import type { QueuedPrompt } from "../agent/promptQueue";
 
 interface ChatComposerProps {
 	input: string;
@@ -107,6 +108,14 @@ interface ChatComposerProps {
 	onAddImages?: (files: File[]) => void;
 	/** Remove one staged image by id. */
 	onRemoveImage?: (id: string) => void;
+	/**
+	 * Mid-run sends waiting for pi to inject, oldest first. Shown where the
+	 * send happens — a queue invisible at the composer is a queue the user
+	 * cannot trust took their words.
+	 */
+	queuedPrompts?: QueuedPrompt[];
+	/** Takes one queued message back, by its chip's id. */
+	onCancelQueuedPrompt?: (id: string) => void;
 }
 
 /**
@@ -143,6 +152,8 @@ export function ChatComposer({
 	pendingImages,
 	onAddImages,
 	onRemoveImage,
+	queuedPrompts,
+	onCancelQueuedPrompt,
 }: ChatComposerProps): React.JSX.Element {
 	const t = useT();
 	const textareaRef = useRef<HTMLTextAreaElement | null>(null);
@@ -330,6 +341,32 @@ export function ChatComposer({
 						<IconButton icon="x" label={t.t("chat.editingCancel")} onClick={() => onCancelEdit?.()} className="piem-chat__editing-cancel" />
 					</div>
 				) : null}
+				{queuedPrompts && queuedPrompts.length > 0 ? (
+					/*
+					 * The waiting line, oldest first. Sits between the composer and the
+					 * running reply's output so the reader connects the two: these words
+					 * went in, the agent has not reached them yet. Cancel is per chip —
+					 * a queue of three is three decisions, not one.
+					 */
+					<ul className="piem-chat__queue" aria-label={t.t("chat.queueLabel")}>
+						{queuedPrompts.map((queued) => (
+							<li key={queued.id} className="piem-chat__queue-item" role="listitem">
+								<span className="piem-chat__queue-text">
+									{queued.text}
+									{queued.imageCount > 0 ? (
+										<span className="piem-chat__queue-images">{t.t("chat.queueImages", { count: queued.imageCount })}</span>
+									) : null}
+								</span>
+								<IconButton
+									icon="x"
+									label={t.t("chat.queueCancel")}
+									onClick={() => onCancelQueuedPrompt?.(queued.id)}
+									className="piem-chat__queue-cancel"
+								/>
+							</li>
+						))}
+					</ul>
+				) : null}
 				{pendingImages && pendingImages.length > 0 ? (
 					<ul className="piem-chat__pending-images">
 						{pendingImages.map((image, index) => (
@@ -414,12 +451,30 @@ export function ChatComposer({
 						{thinkingSelector}
 						{contextGauge}
 						{isBusy ? (
-						<IconButton
-							icon="square"
-							label={t.t(isCompacting ? "chat.stopCompaction" : "chat.stopResponse")}
-							onClick={onAbort}
-							className="piem-chat__stop-button"
-						/>
+						/*
+						 * Stop stays during a run, and Send stays beside it: while the
+						 * agent answers, this button queues the draft rather than
+						 * starting a run, which is now a real outcome rather than the
+						 * error banner it replaced. During compaction there is no run
+						 * to queue into and a send mid-compact races the compactor,
+						 * so the button is off for that window alone.
+						 */
+						<>
+							<IconButton
+								icon="square"
+								label={t.t(isCompacting ? "chat.stopCompaction" : "chat.stopResponse")}
+								onClick={onAbort}
+								className="piem-chat__stop-button"
+							/>
+							{!isCompacting ? (
+								<SendButton
+									shortcut={shortcut}
+									isConfigured={isConfigured}
+									disabled={isInitializing || !isConfigured || !input.trim()}
+									onSend={onSend}
+								/>
+							) : null}
+						</>
 					) : (
 						<SendButton
 							shortcut={shortcut}

@@ -943,6 +943,7 @@ function baseSnapshot(): ChatSnapshot {
 		contextRefs: [],
 		isFollowingActiveNote: true,
 		availableCommands: [],
+		queuedPrompts: [],
 	} as ChatSnapshot;
 }
 

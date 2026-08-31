@@ -313,6 +313,7 @@ function snapshot(overrides: Partial<ChatSnapshot> = {}): ChatSnapshot {
 		contextRefs: [],
 		isFollowingActiveNote: true,
 		availableCommands: [],
+		queuedPrompts: [],
 		...overrides,
 	};
 }
