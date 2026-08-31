@@ -1,6 +1,7 @@
 export const PLUGIN_ID = "piem";
 export const VIEW_TYPE_PIEM_CHAT = `${PLUGIN_ID}-chat-view`;
 export const VIEW_TYPE_PIEM_LOGS = `${PLUGIN_ID}-logs-view`;
+export const VIEW_TYPE_PIEM_SUBAGENTS = `${PLUGIN_ID}-subagents-view`;
 export const DEFAULT_PROVIDER = "deepseek";
 export const DEFAULT_MODEL_ID = "deepseek-v4-pro";
 /**

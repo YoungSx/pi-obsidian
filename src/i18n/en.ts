@@ -32,6 +32,8 @@ export const en = {
 		couldNotOpenChat: "Could not open the chat view.",
 		openLogs: "Open log view",
 		couldNotOpenLogs: "Could not open the log view.",
+		openSubagents: "Open subagent panel",
+		couldNotOpenSubagents: "Could not open the subagent panel.",
 	},
 
 	/** Chat panel — header, banner, composer, message list, and trace rows. */
@@ -1055,6 +1057,88 @@ export const en = {
 		openaiChat: "OpenAI Chat Completions",
 		openaiResponses: "OpenAI Responses",
 		anthropicMessages: "Anthropic Messages",
+	},
+
+	/**
+	 * The subagent inspector: the side panel, its entry point above the composer,
+	 * and the detail page.
+	 *
+	 * One-way glass by design (issue #153). Every leaf here names or describes
+	 * something; none of them is an action on a running child. There is no "stop"
+	 * label and no reply field, because the panel deliberately offers neither —
+	 * a subagent cannot see this conversation, so a reply would have nowhere to
+	 * land, and a kill switch beside a report the user is still reading is a
+	 * misfire waiting to happen.
+	 */
+	subagents: {
+		tabTitle: "Piem subagents",
+		panelAria: "Subagents in this chat",
+		/**
+		 * Two leaves, not one with the status substituted in: the running case
+		 * names a count that is changing and the settled case names a count that
+		 * is done, and a language that inflects could not carry both from one
+		 * template.
+		 */
+		entryRunning: "{count} subagent(s) working. Open the subagent panel.",
+		entrySettled: "{count} subagent(s) in this chat. Open the subagent panel.",
+		popoverAria: "Subagents in this chat",
+		/** One popover row: opens the panel already showing that run. */
+		openDetail: "Open {role}: {status}",
+		listAria: "Subagents, oldest first",
+		empty: "No subagents yet.",
+		emptyHint: "When Piem hands a task to a subagent, the run shows up here: what it was asked, what it reported, and every step in between.",
+		emptyDetail: "Pick a run to see what it was asked and what it wrote.",
+		back: "Back to the list",
+		/**
+		 * Says outright what the panel does not do, because the absence of a stop
+		 * button is otherwise indistinguishable from a stop button that has not
+		 * loaded yet.
+		 */
+		readOnly: "This panel only watches. A subagent cannot be answered or stopped from here.",
+		status: {
+			running: "working",
+			done: "done",
+			incomplete: "cut short",
+			failed: "failed",
+		},
+		ranFor: "ran for {duration}",
+		startedAt: "started {time}",
+		incompleteReaped: "Cut short at the 30-minute limit, so the report below is partial.",
+		incompleteAborted: "Stopped before it finished, so the report below is partial.",
+		killedByParent: "It stopped because the chat turn stopped.",
+		killedByTeardown: "It stopped because the chat closed.",
+		killedByTool: "Piem stopped it: the answer was no longer needed.",
+		sectionTask: "Task",
+		sectionInstructions: "Standing instructions",
+		sectionConfig: "Setup",
+		sectionReport: "Report",
+		sectionProcess: "Process record",
+		configRole: "Role",
+		configModel: "Model",
+		configThinking: "Thinking",
+		configDepth: "Level",
+		/** Level 1 is a direct child of this chat; 2 was spawned by another subagent. */
+		depthValue: "{depth}",
+		usageTurns: "{count} turn(s)",
+		usageTokens: "{tokens} tokens",
+		usageCost: "{cost}",
+		reportPending: "Still working. Its report lands here when it finishes.",
+		reportNone: "It failed before writing a report.",
+		failureLabel: "What went wrong",
+		processCount: "{count} step(s)",
+		processPending: "The transcript is kept when the run ends.",
+		processNone: "Nothing recorded: the run failed before its transcript could be kept.",
+		/** What each transcript step was. */
+		line: {
+			user: "Brief",
+			assistant: "Reply",
+			thinking: "Thinking",
+			toolCall: "Ran {tool}",
+			toolResult: "{tool} returned",
+			toolError: "{tool} failed",
+		},
+		/** Marks a step whose text was clipped for display. */
+		clipped: "… clipped for display",
 	},
 
 	/** The log viewer panel. */
