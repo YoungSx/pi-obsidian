@@ -20,20 +20,6 @@ import { throwIfAborted } from "../tools/toolResult";
 import { composeSubagentPrompt, type SubagentRole } from "./roles";
 
 /**
- * The orphan reaper, not a task time limit.
- *
- * Waiting on a subagent is the parent's job — Codex-style spawn/wait puts the
- * pacing in a `wait` tool call, and a child that is still working is nobody's
- * emergency. The one hazard is a child nobody waits for: a parent run that
- * ends normally does not abort its signal, so without a cap a forgotten child
- * could keep calling tools — and writing to the vault — until the plugin
- * unloads. This window is the last-resort kill for exactly that case; it sits
- * far above any legitimate wait loop. Tests pass a small one to keep runs
- * from spinning.
- */
-export const SUBAGENT_MAX_LIFETIME_MS = 30 * 60_000;
-
-/**
  * Mid-run compactions one child may spend, mirroring the parent's budget.
  *
  * The reason is the parent's verbatim (see `MAX_MID_RUN_COMPACTIONS` in
@@ -42,8 +28,8 @@ export const SUBAGENT_MAX_LIFETIME_MS = 30 * 60_000;
  * until the next reply lands — so a run whose retained tail alone exceeds the
  * budget asks for a summary at every turn boundary while shrinking nothing. A
  * child needs this more than the parent does, not less: nobody is watching it,
- * and its only other bound is the 30-minute reaper, which is a lot of futile
- * billed requests.
+ * and a run has no deadline, so a futile compaction loop would bill until
+ * someone noticed rather than until a clock ran out.
  */
 export const SUBAGENT_MAX_COMPACTIONS = 4;
 
@@ -81,11 +67,6 @@ export interface SubagentRunOptions {
 	compactionSettings?: CompactionSettings;
 	/** The parent run's signal; aborting it aborts the subagent immediately. */
 	signal?: AbortSignal;
-	/**
-	 * Reaper window (see {@link SUBAGENT_MAX_LIFETIME_MS}). Optional so tests
-	 * can pass a short one; production callers take the default.
-	 */
-	timeoutMs?: number;
 	/** Escape hatch for tests and logging; the runner itself stays event-blind. */
 	onEvent?: (event: AgentEvent) => void;
 }
@@ -101,11 +82,15 @@ export interface SubagentRunResult {
 	 *
 	 * A run cut short still holds whatever the child had already written, and
 	 * throwing that away is the one thing none of the peer implementations do —
-	 * a 29-minute sweep reaped at 30 minutes has findings worth reading. Absent
-	 * on a run that finished on its own, so the common case carries no field
-	 * the parent has to interpret.
+	 * a long sweep stopped one step from the end has findings worth reading.
+	 * Absent on a run that finished on its own, so the common case carries no
+	 * field the parent has to interpret.
+	 *
+	 * A flag, not a reason: every stop is now somebody's decision, and the
+	 * registry records whose in `killedBy`. Naming a cause here too would give
+	 * two fields one job and let them disagree.
 	 */
-	incomplete?: "reaped" | "aborted";
+	incomplete?: true;
 	/**
 	 * The child's full transcript, as it stood when the run ended.
 	 *
@@ -122,23 +107,20 @@ export interface LinkedSignals {
 	signal: AbortSignal;
 	/** Fires the controller; how external callers kill the linked run. */
 	abort: () => void;
-	/** Must be called in a finally; stops the reaper timer and the parent listener. */
+	/** Must be called in a finally; drops the parent listener. */
 	dispose: () => void;
-	/** True only when the reaper fired, so a caller can word the error correctly. */
-	timedOut: () => boolean;
 }
 
 /**
- * Merges the parent's signal with an optional reaper into one controller.
+ * Re-exposes the parent's signal as a controller this side can also fire.
  *
- * A run ends only when this controller fires or the model stops on its own, so
- * the caller must call `dispose` in a finally even on success — the reaper
- * timer, when armed, otherwise stays armed for the full window, keeping the
- * Node loop alive.
+ * A run ends only when this controller fires or the model stops on its own. The
+ * caller must still call `dispose` in a finally even on success: the listener on
+ * the parent otherwise outlives the run, and a long-lived parent signal would
+ * accumulate one per child it ever started.
  */
-export function linkSignals(parent: AbortSignal | undefined, timeoutMs: number | undefined): LinkedSignals {
+export function linkSignals(parent: AbortSignal | undefined): LinkedSignals {
 	const controller = new AbortController();
-	let timedOut = false;
 
 	// `AbortSignal.any` would say this in one line but postdates the WebView
 	// versions `minAppVersion` admits — the same reason the agent service
@@ -150,19 +132,10 @@ export function linkSignals(parent: AbortSignal | undefined, timeoutMs: number |
 		parent?.addEventListener("abort", forwardAbort, { once: true });
 	}
 
-	const timeoutHandle = timeoutMs === undefined ? undefined : setTimeout(() => {
-		timedOut = true;
-		controller.abort();
-	}, timeoutMs);
-
 	return {
 		signal: controller.signal,
 		abort: () => controller.abort(),
-		timedOut: () => timedOut,
 		dispose: () => {
-			if (timeoutHandle !== undefined) {
-				clearTimeout(timeoutHandle);
-			}
 			parent?.removeEventListener("abort", forwardAbort);
 		},
 	};
@@ -229,20 +202,19 @@ function textOfBlocks(content: ReadonlyArray<{ type: string; text?: string }>): 
  *
  * The child shares the parent's model, transport, and API-key resolution but
  * nothing else: its transcript starts empty, is never persisted, and dies with
- * this call. There is no compaction on purpose — the lifetime reaper bounds a
- * forgotten run, and compaction would need the models bundle plus session
- * bookkeeping the child does not own.
+ * this call.
+ *
+ * The run has no deadline. A child that is still working is nobody's emergency,
+ * and from out here a thorough sweep and a wedged one are the same silence — so
+ * a wall-clock cap can only ever cut off honest work. What bounds a forgotten
+ * child is ownership, not time: the parent's signal kills it, `kill_subagent`
+ * kills it, and `disposeAll` kills every live child when the service or plugin
+ * tears down.
  */
 export async function runSubagent(options: SubagentRunOptions): Promise<SubagentRunResult> {
 	const { task, role, tools, model, streamFn, thinkingLevel } = options;
-	const timeoutMs = options.timeoutMs ?? SUBAGENT_MAX_LIFETIME_MS;
-	const linked = linkSignals(options.signal, timeoutMs);
-	const abortError = (): Error =>
-		new Error(
-			linked.timedOut()
-				? `Subagent reaped after ${Math.round(timeoutMs / 1000)}s`
-				: "Subagent aborted",
-		);
+	const linked = linkSignals(options.signal);
+	const abortError = (): Error => new Error("Subagent aborted");
 	// Compaction bookkeeping, run-local because the run is one function call: the
 	// parent needs fields on a service for the same state because its run outlives
 	// any single method.
@@ -333,15 +305,15 @@ export async function runSubagent(options: SubagentRunOptions): Promise<Subagent
 		// error to protect the panel — the child feeds the error back and only
 		// stops when the run itself is dead. The predicate is still load-bearing:
 		// pi's loop never re-checks its signal between turns, so a completed
-		// request followed by tool results would run on forever and the reaper
-		// below would never land. `linked.signal` is the run's only abort source
-		// (parent abort and the reaper both fire it, and its listener is what
-		// calls `agent.abort()`), so reading it here is the between-turns abort
-		// check the loop lacks.
+		// request followed by tool results would run on forever and a kill would
+		// never land. `linked.signal` is the run's only abort source (parent
+		// abort, `kill_subagent`, and teardown all fire it, and its listener is
+		// what calls `agent.abort()`), so reading it here is the between-turns
+		// abort check the loop lacks.
 		shouldStopAfterTurn: () => linked.signal.aborted,
 		// pi fires this before `shouldStopAfterTurn` and hands the result of it to
 		// that check, so compaction runs first and the abort check gets the last
-		// word — a summary that finishes after the reaper landed cannot revive the
+		// word — a summary that finishes after a kill landed cannot revive the
 		// run. Absent when the host offers no `models`, which is also how tests and
 		// the pre-compaction behavior are preserved.
 		...(options.models ? { prepareNextTurnWithContext: compactBetweenTurns } : {}),
@@ -354,8 +326,9 @@ export async function runSubagent(options: SubagentRunOptions): Promise<Subagent
 	}
 
 	// The linked controller above is the subagent's real kill switch: pi's
-	// `Agent` takes no signal of its own, so parent abort and reaper both reach
-	// the run through `agent.abort()` — the same path the chat panel uses.
+	// `Agent` takes no signal of its own, so every kill — parent abort,
+	// `kill_subagent`, teardown — reaches the run through `agent.abort()`, the
+	// same path the chat panel uses.
 	const stopAgent = (): void => agent.abort();
 	linked.signal.addEventListener("abort", stopAgent, { once: true });
 
@@ -391,7 +364,7 @@ export async function runSubagent(options: SubagentRunOptions): Promise<Subagent
 	// the killed-run case is settled here rather than in the catch above.
 	if (linked.signal.aborted) {
 		// Whatever the child had already written is the point of salvaging: a
-		// long sweep reaped one minute from the end holds most of its findings.
+		// long sweep stopped one step from the end holds most of its findings.
 		// The strict "a tool-call message is not a report" rule is relaxed for
 		// exactly this case — there is no final report to prefer over prefatory
 		// text, so the alternative to imperfect text is no text at all. The
@@ -400,7 +373,7 @@ export async function runSubagent(options: SubagentRunOptions): Promise<Subagent
 		if (!salvaged) {
 			throw abortError();
 		}
-		return { text: salvaged, ...accounting, messages, incomplete: linked.timedOut() ? "reaped" : "aborted" };
+		return { text: salvaged, ...accounting, messages, incomplete: true };
 	}
 
 	// A message that requested tools has no report in it — even when it also

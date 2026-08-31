@@ -9,11 +9,11 @@ import type { SubagentToolsContext } from "./spawnTool";
  * start and collect it.
  *
  * Both are thin readers over the registry, and both exist because the
- * alternative is worse than it looks: without a kill, a fan-out whose first
- * report makes the rest pointless leaves its siblings running — holding write
- * tools — until they finish or the lifetime reaper lands; without a listing,
- * the only way to learn what is still running is to commit to a wait, whose
- * floor is ten seconds. Claude Code (`TaskStop`, `ListAgents`), Codex
+ * alternative is worse than it looks: a run has no deadline, so without a kill
+ * a fan-out whose first report makes the rest pointless leaves its siblings
+ * running — holding write tools — until they finish on their own or the session
+ * closes; without a listing, the only way to learn what is still running is to
+ * commit to a wait, whose floor is ten seconds. Claude Code (`TaskStop`, `ListAgents`), Codex
  * (`interrupt_agent`, `list_agents`) and the pi community extension all ship
  * both.
  */

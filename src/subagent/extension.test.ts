@@ -9,8 +9,8 @@ import {
 	type StreamFn,
 } from "@earendil-works/pi-agent-core";
 import { Type } from "typebox";
-import { clampWait, clampWaitTimeoutMs, WAIT_DEFAULT_MS, WAIT_MAX_MS, WAIT_MIN_MS, type WaitPacing } from "./waitTool";
-import { runSubagent, SUBAGENT_MAX_COMPACTIONS, SUBAGENT_MAX_LIFETIME_MS } from "./runner";
+import { clampWait, clampWaitTimeoutMs, WAIT_DEFAULT_MS, WAIT_MIN_MS, type WaitPacing } from "./waitTool";
+import { runSubagent, SUBAGENT_MAX_COMPACTIONS } from "./runner";
 import { SUBAGENT_CONCURRENCY_LIMIT } from "./spawnTool";
 import { createSubagentExtension, type SubagentHost } from "./extension";
 import { anyRunning, snapshotSubagents } from "./inspectorModel";
@@ -37,7 +37,7 @@ const SKILL: Skill = {
 };
 
 /** Millisecond-scale wait pacing so tests never idle on Codex's 10s floor. */
-const TEST_PACING: WaitPacing = { defaultMs: 200, minMs: 10, maxMs: 500 };
+const TEST_PACING: WaitPacing = { defaultMs: 200, minMs: 10 };
 
 /**
  * Builds a streamFn whose nth request replays the nth script entry.
@@ -240,8 +240,8 @@ function failingTool(): AgentTool {
 		execute: async () => {
 			// One real tick per call. The scripted stream resolves synchronously,
 			// so a sync-throwing tool turns the whole loop into uninterrupted
-			// microtasks — the run's reaper timer never gets a slot to fire and
-			// the test spins forever instead of finishing.
+			// microtasks — an abort scheduled by the test never gets a slot to
+			// land and the test spins forever instead of finishing.
 			await new Promise((resolve) => setTimeout(resolve, 0));
 			throw new Error("vault exploded");
 		},
@@ -341,7 +341,12 @@ describe("runSubagent", () => {
 		expect(run).rejects.toThrow("Subagent aborted");
 	});
 
-	it("reaps the run past the lifetime window", async () => {
+	it("keeps waiting on a silent child rather than inventing a deadline", async () => {
+		// The guard against a wall-clock cap creeping back in: a hung child is
+		// still running after a window any reaper would have fired inside, and
+		// only the explicit abort ends it. A thorough sweep and a wedged one look
+		// identical from out here, so a timer could only ever cut off honest work.
+		const controller = new AbortController();
 		const run = runSubagent({
 			task: "t",
 			role,
@@ -349,9 +354,22 @@ describe("runSubagent", () => {
 			model: MODEL,
 			streamFn: hangingStreamFn(),
 			thinkingLevel: "off" as never,
-			timeoutMs: 20,
+			signal: controller.signal,
 		});
-		expect(run).rejects.toThrow("reaped");
+		let settled = false;
+		void run.then(
+			() => {
+				settled = true;
+			},
+			() => {
+				settled = true;
+			},
+		);
+		await new Promise((resolve) => setTimeout(resolve, 60));
+		expect(settled).toBe(false);
+
+		controller.abort();
+		expect(run).rejects.toThrow("Subagent aborted");
 	});
 
 	it("refuses to start when the parent signal is already aborted", async () => {
@@ -422,21 +440,24 @@ describe("runSubagent", () => {
 		).rejects.toThrow("Subagent failed: grep: vault exploded");
 	});
 
-	it("reaps instead of spinning when the model never recovers from a tool error", async () => {
+	it("stops a model that never recovers from a tool error the moment it is aborted", async () => {
 		const failing = failingTool();
 		// The script clamps to its last entry, so the model retries the failing
-		// call forever; the reaper must end the run, not bill eternally.
-		expect(
-			runSubagent({
-				task: "t",
-				role,
-				tools: [failing],
-				model: MODEL,
-				streamFn: scriptedStreamFn([{ toolCall: { id: "call_1", name: "grep" } }]),
-				thinkingLevel: "off" as never,
-				timeoutMs: 30,
-			}),
-		).rejects.toThrow("reaped");
+		// call forever. Nothing ends that on a clock — the abort has to reach it
+		// between turns, which is what `shouldStopAfterTurn` is there for.
+		const controller = new AbortController();
+		const run = runSubagent({
+			task: "t",
+			role,
+			tools: [failing],
+			model: MODEL,
+			streamFn: scriptedStreamFn([{ toolCall: { id: "call_1", name: "grep" } }]),
+			thinkingLevel: "off" as never,
+			signal: controller.signal,
+		});
+		await new Promise((resolve) => setTimeout(resolve, 20));
+		controller.abort();
+		expect(run).rejects.toThrow("Subagent aborted");
 	});
 
 	it("lists the given skills in the child system prompt", async () => {
@@ -596,50 +617,30 @@ describe("runSubagent", () => {
 		expect(run).rejects.toThrow("Narrow it, or split it");
 	});
 
-	it("arms the default reaper, which is finite", () => {
-		expect(SUBAGENT_MAX_LIFETIME_MS).toBeGreaterThan(0);
-	});
-
-	it("hands back a partial report when the reaper lands mid-run", async () => {
+	it("hands back a partial report when a kill lands mid-run", async () => {
 		const failing = failingTool();
+		const controller = new AbortController();
 		// The script clamps to its last entry, so after the written turn the model
-		// retries the failing call forever and the reaper ends the run. The text
-		// from the turn before is the salvage.
-		const result = await runSubagent({
+		// retries the failing call forever until the abort lands. The text from
+		// the turn before is the salvage.
+		const run = runSubagent({
 			task: "t",
 			role,
 			tools: [failing],
 			model: MODEL,
 			// Prefatory text on the tool-call message is the only text a run that
 			// never finishes ever produces — a plain text turn would end the run
-			// before the reaper could land. Salvage relaxes the "a tool-call
+			// before the kill could land. Salvage relaxes the "a tool-call
 			// message is not a report" rule for exactly this case.
 			streamFn: scriptedStreamFn([{ toolCall: { id: "call_1", name: "grep" }, text: "Partial findings: two matches." }]),
 			thinkingLevel: "off" as never,
-			timeoutMs: 60,
-		});
-		expect(result.text).toContain("Partial findings");
-		expect(result.incomplete).toBe("reaped");
-	});
-
-	it("marks a parent-aborted run's salvaged text as aborted, not reaped", async () => {
-		const controller = new AbortController();
-		const failing = failingTool();
-		const run = runSubagent({
-			task: "t",
-			role,
-			tools: [failing],
-			model: MODEL,
-			streamFn: scriptedStreamFn([{ toolCall: { id: "call_1", name: "grep" }, text: "Wrote this much." }]),
-			thinkingLevel: "off" as never,
 			signal: controller.signal,
 		});
-		// Let the first turn land before stopping, so there is something to salvage.
 		await new Promise((resolve) => setTimeout(resolve, 20));
 		controller.abort();
 		const result = await run;
-		expect(result.text).toContain("Wrote this much.");
-		expect(result.incomplete).toBe("aborted");
+		expect(result.text).toContain("Partial findings");
+		expect(result.incomplete).toBe(true);
 	});
 
 	it("still throws when an aborted run wrote nothing at all", async () => {
@@ -728,7 +729,7 @@ describe("spawn/wait extension", () => {
 			expect(result.details).toMatchObject({ subagentId: "subagent-1", role: "general", status: "running" });
 			expect(controller.signal.aborted).toBe(false);
 		} finally {
-			// A hung child keeps a reaper timer armed; dispose is the teardown.
+			// A hung child runs until something kills it; dispose is that teardown.
 			extension.disposeAll();
 		}
 	});
@@ -793,7 +794,9 @@ describe("spawn/wait extension", () => {
 	it("clamps the wait into the Codex window", () => {
 		expect(clampWaitTimeoutMs(undefined)).toBe(WAIT_DEFAULT_MS);
 		expect(clampWaitTimeoutMs(WAIT_MIN_MS - 1)).toBe(WAIT_MIN_MS);
-		expect(clampWaitTimeoutMs(WAIT_MAX_MS + 1)).toBe(WAIT_MAX_MS);
+		// No ceiling: how long to wait is the model's own call, and an hour-long
+		// request survives intact rather than being quietly cut to a house number.
+		expect(clampWaitTimeoutMs(6 * 3_600_000)).toBe(6 * 3_600_000);
 		expect(clampWaitTimeoutMs(45_000)).toBe(45_000);
 	});
 
@@ -1061,7 +1064,7 @@ describe("spawn/wait extension", () => {
 			expect(textBlock(collected)).toContain("INCOMPLETE");
 			expect(collected.details).toMatchObject({
 				status: "settled",
-				subagents: [{ subagentId: "subagent-1", status: "incomplete", incomplete: "aborted" }],
+				subagents: [{ subagentId: "subagent-1", status: "incomplete", incomplete: true }],
 			});
 		} finally {
 			extension.disposeAll();
@@ -1220,7 +1223,9 @@ describe("spawn/wait extension", () => {
 		expect(clampWait(undefined)).toEqual({ value: WAIT_DEFAULT_MS, clamped: false });
 		expect(clampWait(45_000)).toEqual({ value: 45_000, clamped: false });
 		expect(clampWait(WAIT_MIN_MS - 1)).toEqual({ value: WAIT_MIN_MS, clamped: true });
-		expect(clampWait(WAIT_MAX_MS + 1)).toEqual({ value: WAIT_MAX_MS, clamped: true });
+		expect(clampWait(6 * 3_600_000)).toEqual({ value: 6 * 3_600_000, clamped: false });
+		// NaN would slip past a bare comparison and arm a timer that fires at once.
+		expect(clampWait(Number.NaN)).toEqual({ value: WAIT_DEFAULT_MS, clamped: true });
 	});
 
 	it("an id-less wait in a later turn names the earlier children instead of denying them", async () => {

@@ -36,8 +36,8 @@ export interface SubagentSnapshot {
 	durationMs: number;
 	/** The final report text; present whenever a result was produced. */
 	report?: string;
-	/** Why the report is partial, when it is. */
-	incomplete?: "reaped" | "aborted";
+	/** Set when the report is partial; `killedBy` says whose decision that was. */
+	incomplete?: true;
 	/** The named failure, when the run threw. */
 	errorMessage?: string;
 	/** Assistant turns and billed tokens, present whenever a result was produced. */
