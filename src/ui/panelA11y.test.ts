@@ -249,7 +249,7 @@ describe("touch targets (WCAG 2.5.5 / 2.5.8)", () => {
 	 * while the screen stayed the main way to reach the panel.
 	 *
 	 * Layout blocks are the deliberate exception, not a loophole. The one-row
-	 * header and the focus-revealed send row ask which input is driving *now*,
+	 * header asks which input is driving *now*,
 	 * and keying those on `any-pointer` would drag a mouse-driven touchscreen
 	 * laptop into the phone arrangement. So the ban lands on what a `pointer`
 	 * block may *declare* — never a touch-target size — rather than on the query
@@ -487,31 +487,3 @@ describe("z-index falls back to Obsidian's own layer value", () => {
 	});
 });
 
-describe("the send row survives a tap on its own controls", () => {
-	/*
-	 * On a phone the row is hidden until the composer is in use, and the switch
-	 * has to be a latched class rather than `:focus-within`. iOS Safari drops the
-	 * textarea's focus as part of tap handling — not as a default action, so
-	 * `preventDefault` on the press cannot stop it — which made a `:focus-within`
-	 * row collapse between `pointerdown` and `touchend`. The pressed control left
-	 * the layout before the tap resolved, so the `click` went to whatever moved
-	 * into that spot and the button never fired at all.
-	 *
-	 * Asserted on the stylesheet because the failure is a CSS/JS pairing: the
-	 * class is meaningless if a later edit re-keys the row on focus, and no
-	 * rendering test in this runner can see a real tap resolve.
-	 */
-	const gate = mediaBlocks("pointer: coarse").find((block) => block.includes(".piem-chat__composer-bar"));
-
-	it("keys the row on the latched class, never on focus", () => {
-		expect(gate).toBeDefined();
-		expect(gate).toContain(".piem-chat__composer-shell.is-composing .piem-chat__composer-bar");
-		expect(gate).not.toContain(":focus-within .piem-chat__composer-bar");
-	});
-
-	it("keeps the busy escape hatch, so Stop outlives a dismissed keyboard", () => {
-		// A tap that closes the soft keyboard also releases the latch, and a Stop
-		// button that went with it would strand a running request.
-		expect(gate).toContain('.piem-chat[aria-busy="true"] .piem-chat__composer-bar');
-	});
-});

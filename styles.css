@@ -2247,46 +2247,6 @@ button.piem-chat__latest {
 			justify-content: flex-end;
 		}
 	}
-
-	/*
-	 * The send row — model switcher, occupancy ring, Send/Stop — shows up only
-	 * when the composer is in use: on shell focus, or while a turn is running.
-	 *
-	 * A row of controls that sit idle between turns is the same vertical spend
-	 * as the header's wrapped row, and the keyboard that opens when the reader
-	 * taps the textarea makes every saved pixel twice as valuable — the
-	 * transcript above is what is left to read. The switches:
-	 *
-	 * `.is-composing` on the shell covers composing. `aria-busy` covers the turn
-	 * itself, so Stop stays reachable from a blurred composer — a tap that
-	 * dismisses the keyboard also blurs the textarea, and a Stop button that
-	 * vanished with focus would strand a running request. The attribute is
-	 * already maintained by `ChatApp` for exactly the busy states.
-	 *
-	 * `display` rather than `visibility`/`opacity`: the row must actually give
-	 * its height back, or nothing above moves.
-	 *
-	 * Why a latched class and not `:focus-within`, which needs no JS at all:
-	 * `:focus-within` ties the row's existence to focus surviving a tap on the
-	 * row itself, and on iOS Safari it does not — Safari drops the field's focus
-	 * as part of tap handling, which is not a default action, so the composer's
-	 * `preventDefault` on the press cannot stop it (verified in Chromium with
-	 * that blur simulated: `pointerdown` arrives already cancelled and the
-	 * `focusout` lands anyway). The row then collapsed between `pointerdown` and
-	 * `touchend`, which took the pressed control out of the layout before the tap
-	 * resolved: the `click` went to whatever moved into that spot and the button
-	 * never fired. `ChatComposer` latches the class on focus entering the shell
-	 * and releases it only when focus lands outside, so a tap on the composer's
-	 * own controls reads as part of composing rather than the end of it.
-	 */
-	.piem-chat__composer-bar {
-		display: none;
-	}
-
-	.piem-chat__composer-shell.is-composing .piem-chat__composer-bar,
-	.piem-chat[aria-busy="true"] .piem-chat__composer-bar {
-		display: flex;
-	}
 }
 
 /* --- settings panel --- */
