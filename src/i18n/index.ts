@@ -65,7 +65,7 @@ function walk(node: unknown, path: readonly string[]): string | undefined {
 }
 
 /** A dotted path that names a string leaf of {@link EnCopy}, type-checked. */
-type CopyPath<T> = {
+export type CopyPath<T> = {
 	[K in keyof T & string]: T[K] extends string
 		? K
 		: T[K] extends Record<string, unknown>

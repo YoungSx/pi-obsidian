@@ -2605,6 +2605,16 @@ button.piem-chat__latest {
 }
 
 /*
+ * A capability claim the catalog cannot back (issue #160). A warning, not an
+ * error: the number is the user's to keep or correct, so it reads as caution —
+ * distinct from --error, which reports a rejected value — without reading as
+ * more help text.
+ */
+.piem-settings-effect--warn {
+	color: var(--text-warning);
+}
+
+/*
  * A row description past the fold budget (descFold.ts).
  *
  * The body span carries the clamp, not the description element, because the

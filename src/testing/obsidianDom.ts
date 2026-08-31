@@ -65,6 +65,12 @@ export function installObsidianDomHelpers(): void {
 	prototype.toggleClass = function toggleClass(this: HTMLElement, cls: string, value: boolean): void {
 		this.classList.toggle(cls, value);
 	};
+	prototype.hide = function hide(this: HTMLElement): void {
+		this.style.display = "none";
+	};
+	prototype.show = function show(this: HTMLElement): void {
+		this.style.display = "";
+	};
 
 	installed = true;
 }

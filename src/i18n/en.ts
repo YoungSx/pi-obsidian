@@ -1077,10 +1077,26 @@ export const en = {
 		supportsThinkingDesc: "Enable only if this model accepts reasoning parameters. Strict servers reject them outright.",
 		thinkingHintSupported: "This model supports thinking. Recommended on.",
 		thinkingHintUnsupported: "This model does not support thinking. Recommended off.",
+		thinkingUnbacked: "The model catalog does not list this ID, so the thinking switch has no source behind it. Keep it on only if you know the server accepts it.",
 		supportsImages: "Accepts images",
 		supportsImagesDesc: "Enable to let this model receive attached images alongside text.",
 		imagesHintSupported: "This model accepts images. Recommended on.",
 		imagesHintUnsupported: "This model does not accept images. Recommended off.",
+		imagesUnbacked: "The model catalog does not list this ID, so the image switch has no source behind it. Keep it on only if you know the server accepts images.",
+		// Issue #160: the numeric limits used to be filled once and then go silent,
+		// so a value left over from the previous model id sat under the new one
+		// unremarked. The four lines below are that failure's replacements: the
+		// catalog advises, the user's value is the user's, and an unbacked value
+		// is said out loud rather than passed over.
+		contextWindowAdvice: "The catalog suggests {value} for this model.",
+		contextWindowAdviceMatches: "Matches the catalog for this model.",
+		contextWindowUnbacked: "The model catalog does not list this ID, so this number has no source behind it. Check it against the provider's docs.",
+		maxTokensAdvice: "The catalog suggests {value} for this model.",
+		maxTokensAdviceMatches: "Matches the catalog for this model.",
+		maxTokensUnbacked: "The model catalog does not list this ID, so this number has no source behind it. Check it against the provider's docs.",
+		adoptNumber: "Adopt the suggested value",
+		adoptToggleOn: "Turn on",
+		adoptToggleOff: "Turn off",
 		connection: "Connection",
 		connectionDesc: "Sends one minimal request to confirm the provider, key, and model ID work together.",
 		cancel: "Cancel",

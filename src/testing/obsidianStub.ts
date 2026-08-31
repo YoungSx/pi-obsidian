@@ -88,6 +88,67 @@ export class SettingButtonStub {
 }
 
 /**
+ * The per-row icon button handed to `Setting.addExtraButton`, rendered as a real
+ * element so assertions read the DOM. `setTooltip` is recorded rather than
+ * rendered — Obsidian's tooltip is its own popover that does not exist under
+ * `bun test` — but the `aria-label` production code also sets lands as a real
+ * attribute, which is the accessible name a screen reader actually reads.
+ *
+ * The element's `hide()`/`show()` come from `installObsidianDomHelpers`, the
+ * same place every other caller of Obsidian's element extensions gets them.
+ */
+export class ExtraButtonStub {
+	icon: string | undefined;
+	tooltip: string | undefined;
+	onClickHandler: (() => unknown) | undefined;
+	private elRef: HTMLElement | undefined;
+
+	constructor(private readonly parent: HTMLElement) {}
+
+	// Lazily created, like `SettingButtonStub`'s button: a builder that never
+	// configures anything produces no dead element in the DOM.
+	get extraSettingsEl(): HTMLElement {
+		return this.render();
+	}
+
+	setIcon(icon: string): this {
+		this.icon = icon;
+		this.render().textContent = icon;
+		return this;
+	}
+
+	setTooltip(tooltip: string): this {
+		this.tooltip = tooltip;
+		return this;
+	}
+
+	onClick(handler: () => unknown): this {
+		this.onClickHandler = handler;
+		this.render().addEventListener("click", () => {
+			void handler();
+		});
+		return this;
+	}
+
+	// A button element is created on first use, like `SettingButtonStub`'s: an
+	// `addExtraButton` whose builder never configures anything produces no dead
+	// element in the DOM.
+	private render(): HTMLElement {
+		if (!this.elRef) {
+			this.elRef = this.parent.ownerDocument.createElement("div");
+			this.elRef.className = "extra-setting-button";
+			this.parent.appendChild(this.elRef);
+		}
+		return this.elRef;
+	}
+
+	/** Programmatic click for tests; goes through the same listener a real click would. */
+	click(): void {
+		this.render().click();
+	}
+}
+
+/**
  * Mutable handle for the stubbed `Platform` flags.
  *
  * Tests that exercise desktop/mobile branching reconfigure these instead of
@@ -593,6 +654,19 @@ const obsidianStub = {
 			build(new SettingButtonStub(this.controlsEl));
 			return this;
 		}
+
+		addExtraButton(build: (extra: ExtraButtonStub) => unknown): this {
+			const stub = new ExtraButtonStub(this.controlsEl);
+			// Recorded like `Menu`'s items: the builder hands the stub away and
+			// production keeps only its closure, so this array is a test's only
+			// handle back onto what the row actually built.
+			this.extraButtons.push(stub);
+			build(stub);
+			return this;
+		}
+
+		/** Every extra button this row built, oldest first. */
+		readonly extraButtons: ExtraButtonStub[] = [];
 	},
 	Notice: class Notice {
 		constructor(message: string | DocumentFragment, timeout?: number) {
