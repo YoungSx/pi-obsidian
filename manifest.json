@@ -1,7 +1,7 @@
 {
 	"id": "piem",
 	"name": "Piem",
-	"version": "0.1.0-alpha.9",
+	"version": "1.0.0",
 	"minAppVersion": "1.5.7",
 	"description": "Run the Piem agent inside Obsidian with vault-scoped tools and a chat side panel.",
 	"author": "Shangxin",
