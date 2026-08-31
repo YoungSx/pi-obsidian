@@ -122,12 +122,11 @@ describe("meter and trigger agreement", () => {
 		}
 	});
 
-	it("stops pi compacting when the user turns it off, at any occupancy", () => {
-		const config: CompactionConfig = { enabled: false };
-
-		expect(piWouldCompact(999_999, 1_000_000, config)).toBe(false);
-		// The meter still reports a full bar — the context genuinely is full — but
-		// says so without promising anything will step in.
-		expect(measureContextFill([], 1_000_000, resolveCompactionSettings(config, 1_000_000)).compactionEnabled).toBe(false);
+	it("compacts at any occupancy, because the hard rule has no off state", () => {
+		// Automatic compaction is a hard rule now: there is no user-facing switch,
+		// so the meter's threshold always names a line pi really acts on. Pinned
+		// here so a future "let the user disable it" cannot re-open the gap this
+		// file exists to close.
+		expect(piWouldCompact(999_999, 1_000_000, undefined)).toBe(true);
 	});
 });

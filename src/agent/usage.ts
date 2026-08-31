@@ -71,12 +71,6 @@ export interface ContextFill {
 	 */
 	compactionRatio: number;
 	/**
-	 * False when the user turned automatic compaction off, so the meter can stop
-	 * promising a threshold that will never fire. The bar still fills — the
-	 * context still runs out — but nothing steps in at the line.
-	 */
-	compactionEnabled: boolean;
-	/**
 	 * True while no assistant turn has reported usage, meaning {@link tokens}
 	 * is a per-character heuristic rather than a provider-measured figure and
 	 * must not be presented as precise.
@@ -106,7 +100,6 @@ export function measureContextFill(messages: AgentMessage[], contextWindow: numb
 		contextWindow,
 		ratio: estimate.tokens / contextWindow,
 		compactionRatio: usable / contextWindow,
-		compactionEnabled: settings.enabled,
 		heuristicOnly: estimate.lastUsageIndex === null,
 	};
 }

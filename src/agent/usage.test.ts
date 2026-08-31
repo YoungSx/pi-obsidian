@@ -84,11 +84,6 @@ describe("measureContextFill", () => {
 		expect(fill.compactionRatio).toBeCloseTo(0.8, 6);
 	});
 
-	it("reports compaction being off, so the meter stops promising a threshold", () => {
-		expect(measureContextFill([], 100_000, compactionSettings({ enabled: false })).compactionEnabled).toBe(false);
-		expect(measureContextFill([], 100_000, compactionSettings()).compactionEnabled).toBe(true);
-	});
-
 	it("orders occupancy by reported usage so the meter can colour itself", () => {
 		const ratioAt = (tokens: number): number =>
 			measureContextFill(

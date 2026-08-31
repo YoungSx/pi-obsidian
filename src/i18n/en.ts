@@ -302,16 +302,6 @@ export const en = {
 		 */
 		meterMeasured: "Compaction starts near {percent}%.",
 		/**
-		 * Note when automatic compaction is switched off.
-		 *
-		 * Separate from {@link meterMeasured} because that string names a threshold,
-		 * and naming a threshold nothing acts on is the one claim this note must not
-		 * make. Names the manual path instead, which is what is left — and names it
-		 * as an action rather than as "the Tidy up earlier messages command", since
-		 * the tidy button sits a line below in the same popover.
-		 */
-		meterNoCompaction: "Automatic tidying is off — tidy up earlier messages manually before the window fills.",
-		/**
 		 * Names for the tidy control while it cannot act.
 		 *
 		 * The button stays rendered in both states so it never moves, and a disabled
@@ -802,9 +792,6 @@ export const en = {
 		groupLabel: "Context tidying",
 		/** Names the default behaviour, so a reader who never opens the group knows it is handled. */
 		groupHint: "Advanced. Piem already summarizes older messages before the context fills.",
-		enabledName: "Summarize automatically",
-		enabledDesc:
-			"Replace older messages with a summary when the context is nearly full. Turn this off to keep every message and tidy up manually instead.",
 		reserveName: "Headroom before tidying",
 		reserveDesc:
 			"Tokens kept free for writing the summary. Raise it to tidy up earlier, lower it to use more of the window first. Default {default}.",

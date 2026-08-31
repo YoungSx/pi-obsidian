@@ -38,10 +38,9 @@ export type ContextLevel = "ok" | "warn" | "near";
  * Bands the occupancy against the same threshold compaction acts on, so the
  * colour never disagrees with what actually triggers summarization.
  *
- * With automatic compaction off the bands still apply: the context still fills
- * and running out still costs the user their turn, so a full bar has to look
- * urgent. What changes is only the promise in {@link meterTitle} — nothing steps
- * in at the line, so nothing is claimed.
+ * Automatic compaction is a hard rule (see `resolveCompactionSettings`), so the
+ * threshold is always a live one: something really does step in at the line,
+ * and the meter can colour and promise against it without hedging.
  */
 export function contextLevel(fill: ContextFill): ContextLevel {
 	if (fill.ratio >= fill.compactionRatio) {
@@ -53,11 +52,6 @@ export function contextLevel(fill: ContextFill): ContextLevel {
 export function meterTitle(fill: ContextFill, t: Translator): string {
 	if (fill.heuristicOnly) {
 		return t.t("context.meterHeuristic");
-	}
-	// Naming a threshold that will never fire is the one thing this tooltip must
-	// not do: it is the only place the panel states what happens at the line.
-	if (!fill.compactionEnabled) {
-		return t.t("context.meterNoCompaction");
 	}
 	return t.t("context.meterMeasured", { percent: Math.round(fill.compactionRatio * 100) });
 }

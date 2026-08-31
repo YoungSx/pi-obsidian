@@ -25,11 +25,10 @@ describe("resolveCompactionSettings", () => {
 
 		expect(resolved.reserveTokens).toBe(32_768);
 		expect(resolved.keepRecentTokens).toBe(DEFAULT_COMPACTION_SETTINGS.keepRecentTokens);
-		expect(resolved.enabled).toBe(DEFAULT_COMPACTION_SETTINGS.enabled);
 	});
 
-	it("passes the enabled flag through, including off", () => {
-		expect(resolveCompactionSettings({ enabled: false }, 100_000).enabled).toBe(false);
+	it("pins compaction on, because it is a hard rule with no user-facing off switch", () => {
+		expect(resolveCompactionSettings(undefined, 100_000).enabled).toBe(true);
 	});
 
 	it("caps the reserve below the window, so compaction cannot fire on an empty context", () => {
@@ -130,9 +129,14 @@ describe("normalizeCompactionConfig", () => {
 
 	it("keeps the fields it can read and omits the rest", () => {
 		expect(normalizeCompactionConfig({ enabled: false, reserveTokens: 32_768, keepRecentTokens: null })).toEqual({
-			enabled: false,
 			reserveTokens: 32_768,
 		});
+	});
+
+	it("drops the retired enabled flag entirely, so an old off switch cannot outlive its removal", () => {
+		// A vault that turned compaction off under the old setting returns to the
+		// hard rule on next load, and the next save scrubs the key from data.json.
+		expect(normalizeCompactionConfig({ enabled: false })).toBeUndefined();
 	});
 
 	it("reads a number written as a string, as an older build or a hand edit may have left it", () => {

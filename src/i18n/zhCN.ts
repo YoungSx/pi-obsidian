@@ -182,7 +182,6 @@ export const zhCN: DeepPartial<EnCopy> = {
 		ok: "正常",
 		meterHeuristic: "按消息大小估算，首次回复后更新。",
 		meterMeasured: "接近 {percent}% 时自动整理较早的消息。",
-		meterNoCompaction: "自动整理已关闭，占满前请手动整理较早的消息。",
 		tidyWhileCompacting: "正在整理较早的消息…",
 		tidyWhileStreaming: "回复结束后可整理较早的消息",
 	},
@@ -505,8 +504,6 @@ export const zhCN: DeepPartial<EnCopy> = {
 	compaction: {
 		groupLabel: "上下文整理",
 		groupHint: "高级选项。在上下文占满之前，Piem 已经会自动总结较早的消息。",
-		enabledName: "自动总结",
-		enabledDesc: "上下文接近占满时，用一段总结替换较早的消息。关闭后将保留每一条消息，改为手动整理。",
 		reserveName: "整理前预留的余量",
 		reserveDesc: "为撰写总结而预留的 token。调高会更早整理，调低则先用掉更多窗口。默认 {default}。",
 		keepName: "保留的近期消息",
