@@ -43,7 +43,6 @@ async function renderHeader(snapshot: ChatSnapshot): Promise<HTMLElement> {
 			onNewSession={() => undefined}
 			onRenameSession={() => undefined}
 			onDeleteSession={() => undefined}
-			onInsertCommand={() => undefined}
 		/>,
 	);
 	await flushRender();
