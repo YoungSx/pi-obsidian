@@ -672,12 +672,13 @@ button.piem-settings-tab {
 /* --- messages --- */
 
 /*
- * Card chrome belongs to the two conversational roles only. Tool calls, tool
- * results and harness output render as flat trace rows (below), so a bordered
- * card never contains a second bordered box.
+ * A transcript row is `article.piem-chat__message`: the bubble (`.piem-chat__bubble`)
+ * plus, for the conversational roles, the actions row underneath. Card chrome
+ * belongs to the two conversational roles only — tool calls, tool results and
+ * harness output render as flat trace rows (below), so a bordered card never
+ * contains a second bordered box.
  */
 .piem-chat__message {
-	border-radius: var(--radius-m);
 	padding: var(--size-4-2);
 }
 
@@ -686,12 +687,29 @@ button.piem-settings-tab {
  * `--background-secondary`, so filling the assistant instead would push the
  * model forward and sink the user's own words into the panel — the inverse of
  * every chat convention.
+ *
+ * The fill lands on the bubble, not the row: the row also owns the edit action
+ * beneath the card, and a control painted into the card it opens reads as part
+ * of the message rather than as a control for it. So the row sheds its chrome
+ * and hands it to the inner wrapper.
  */
 .piem-chat__message--user {
 	align-self: flex-end;
+	max-width: 90%;
+	padding: 0;
+}
+
+/*
+ * The bubble wrapper exists so a role's actions can sit under its card without
+ * being inside it. Only the user's turn paints it; for the assistant it is a
+ * transparent pass-through — the assistant reads as the page — and it must add
+ * no spacing of its own, or the reply's own padding would double up.
+ */
+.piem-chat__message--user .piem-chat__bubble {
 	background: var(--background-primary);
 	border: 1px solid var(--background-modifier-border);
-	max-width: 90%;
+	border-radius: var(--radius-m);
+	padding: var(--size-4-2);
 }
 
 /* The assistant reads as the page: no fill, no border, just text. */

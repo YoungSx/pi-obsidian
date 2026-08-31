@@ -454,6 +454,23 @@ describe("MessageList edit action", () => {
 		expect(questions[1]?.querySelector('[aria-label="Edit and resend"]')).not.toBeNull();
 	});
 
+	it("places the edit under the bubble, not inside it, like the reply's own actions row", async () => {
+		// The bubble is the card; the actions row is the row's second child. Painted
+		// inside the card, the control reads as part of the message rather than as
+		// a control for it — which is what Issue #169 asked to have moved.
+		const host = renderMessages([userMessage("q1"), assistantMessage("a1"), userMessage("q2"), assistantMessage("a2")], {
+			onEditMessage: () => undefined,
+		});
+		await flushRender();
+
+		const question = host.querySelectorAll(".piem-chat__message--user")[1];
+		const bubble = question?.querySelector(":scope > .piem-chat__bubble");
+		expect(bubble).not.toBeNull();
+		const actions = question?.querySelector(":scope > .piem-chat__message-actions");
+		expect(actions).not.toBeNull();
+		expect(actions?.querySelector('[aria-label="Edit and resend"]')).not.toBeNull();
+	});
+
 	it("withdraws the edit once a newer question is unanswered, which a resend would take down with it", async () => {
 		const host = renderMessages([userMessage("q1"), assistantMessage("a1"), userMessage("q2")], {
 			onEditMessage: () => undefined,

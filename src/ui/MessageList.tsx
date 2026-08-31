@@ -613,34 +613,43 @@ function MessageRow({ message, isStreaming, renderContext, onRetry, onEdit }: Me
 		 * phone that is a visible fraction of the transcript. The accessible name
 		 * carries the role instead, so nothing is lost to a screen reader.
 		 */
-		<article
-			className={`piem-chat__message piem-chat__message--${message.role}`}
-			aria-busy={isStreaming}
-			aria-label={renderContext.t.t(message.role === "user" ? "chat.you" : "chat.agent")}
-		>
-			<div className="piem-chat__message-content">{renderMessageContent(message, { isStreaming, renderContext })}</div>
-			{cutoff ? (
-				<p className="piem-chat__interrupted">
-					<ObsidianIcon name={cutoff.icon} />
-					{cutoff.notice}
-				</p>
-			) : null}
-			{message.role === "assistant" && !isStreaming ? (
-				<ReplyActions app={renderContext.app} text={assistantText(message)} onRetry={onRetry} />
-			) : null}
-			{message.role === "user" && onEdit ? (
-				/*
-				 * A single always-visible control, mirroring the reply's actions row:
-				 * on a touch panel there is no hover to surface anything, and an edit
-				 * offered only via long-press or a hidden menu is one a reader never
-				 * finds. It sits under the bubble like the reply's actions do, so the
-				 * two roles read the same way.
-				 */
-				<div className="piem-chat__message-actions">
-					<IconButton icon="pen-line" label={renderContext.t.t("chat.editMessage")} onClick={onEdit} />
+			/*
+			 * The bubble is an inner wrapper, not the article itself. The article is
+			 * the transcript row — bubble plus the actions row beneath it — so a
+			 * role's controls can sit *under* its card instead of inside it, the way
+			 * the reply's copy/insert row does. For the assistant the wrapper paints
+			 * nothing (see the stylesheet); only the user's turn fills it.
+			 */
+			<article
+				className={`piem-chat__message piem-chat__message--${message.role}`}
+				aria-busy={isStreaming}
+				aria-label={renderContext.t.t(message.role === "user" ? "chat.you" : "chat.agent")}
+			>
+				<div className="piem-chat__bubble">
+					<div className="piem-chat__message-content">{renderMessageContent(message, { isStreaming, renderContext })}</div>
+					{cutoff ? (
+						<p className="piem-chat__interrupted">
+							<ObsidianIcon name={cutoff.icon} />
+							{cutoff.notice}
+						</p>
+					) : null}
 				</div>
-			) : null}
-		</article>
+				{message.role === "assistant" && !isStreaming ? (
+					<ReplyActions app={renderContext.app} text={assistantText(message)} onRetry={onRetry} />
+				) : null}
+				{message.role === "user" && onEdit ? (
+					/*
+					 * A single always-visible control, mirroring the reply's actions row:
+					 * on a touch panel there is no hover to surface anything, and an edit
+					 * offered only via long-press or a hidden menu is one a reader never
+					 * finds. It sits under the bubble — outside the card, in the row the
+					 * article owns — so the two roles read the same way.
+					 */
+					<div className="piem-chat__message-actions">
+						<IconButton icon="pen-line" label={renderContext.t.t("chat.editMessage")} onClick={onEdit} />
+					</div>
+				) : null}
+			</article>
 	);
 }
 
