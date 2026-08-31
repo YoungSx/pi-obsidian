@@ -203,8 +203,9 @@ describe("ChatComposer keyboard contract", () => {
  * which presses are cancelled and which are left to the browser.
  *
  * Cancelling is the comfort, not the guarantee — iOS Safari blurs the field
- * during its own tap handling, which no `preventDefault` reaches. What keeps the
- * send row up is the latch pinned in the block below.
+ * during its own tap handling, which no `preventDefault` reaches. Nothing
+ * breaks when it does: the send row is always rendered, so the pressed control
+ * is never out of the layout by the time the tap resolves.
  */
 describe("ChatComposer touch focus contract", () => {
 	beforeEach(() => {
@@ -238,137 +239,14 @@ describe("ChatComposer touch focus contract", () => {
 		expect(press(host, textarea, "touch")).toBe(false);
 	});
 
-	it("leaves a mouse press alone, where the row never hides anyway", async () => {
+	it("leaves a mouse press alone, where native focus movement is what tab order expects", async () => {
 		const host = await renderComposer();
 
-		// The stylesheet keys the row's hiding on `pointer: coarse`, so a fine
-		// pointer has no collapse to defend against — and native focus movement
-		// is what a desktop keyboard user's tab order expects.
+		// A desktop keyboard user tabs into a control by pressing it; cancelling
+		// that would strand focus on the draft and break the tab order.
 		expect(press(host, sendButton(host)!, "mouse")).toBe(false);
 	});
 });
-
-/**
- * The send row's latch — the phone-only rule that the row exists while the
- * reader is composing.
- *
- * This is the contract that replaced `:focus-within`, and the reason is a real
- * failure rather than a preference. On iOS Safari a tap on a control inside the
- * row blurs the textarea as part of tap handling, which is not a default action
- * and so survives the composer's `preventDefault`. Keyed on `:focus-within` the
- * row then collapsed between `pointerdown` and `touchend` — the pressed control
- * left the layout before the tap resolved, the `click` went to whatever moved
- * into that spot, and the button never fired. Verified in Chromium with that
- * blur simulated.
- *
- * So these assert on the class the stylesheet keys the row on. The release is
- * driven by a press outside the shell rather than by a blur, because on iOS
- * every blur reports `relatedTarget` null — holding the latch on null would pin
- * the row open forever, and releasing on it restores the original bug. Where the
- * finger went next is the unambiguous signal.
- */
-describe("ChatComposer send row latch", () => {
-	beforeEach(() => {
-		document.body.replaceChildren();
-	});
-
-	afterEach(() => {
-		document.body.replaceChildren();
-	});
-
-	it("does not mark the shell as composing before it is touched", async () => {
-		const host = await renderComposer();
-
-		expect(shell(host).classList.contains("is-composing")).toBe(false);
-	});
-
-	it("marks the shell as composing once focus reaches the draft", async () => {
-		const host = await renderComposer();
-
-		await focusIn(host.querySelector("textarea")!);
-
-		expect(shell(host).classList.contains("is-composing")).toBe(true);
-	});
-
-	it("keeps the row up when the draft's focus is dropped to nowhere, as iOS does mid-tap", async () => {
-		const host = await renderComposer();
-		await focusIn(host.querySelector("textarea")!);
-
-		// `relatedTarget` null is what iOS reports while resolving a tap on the
-		// row. Releasing here is precisely the bug: the row would collapse under
-		// the finger before the press it is carrying could land.
-		await focusOut(host.querySelector("textarea")!, null);
-
-		expect(shell(host).classList.contains("is-composing")).toBe(true);
-	});
-
-	it("keeps the row up through a press on a control inside it", async () => {
-		const host = await renderComposer();
-		await focusIn(host.querySelector("textarea")!);
-
-		await pressAt(sendButton(host)!);
-
-		expect(shell(host).classList.contains("is-composing")).toBe(true);
-	});
-
-	it("releases the row on a press outside the composer", async () => {
-		const host = await renderComposer();
-		await focusIn(host.querySelector("textarea")!);
-
-		const outside = document.createElement("button");
-		document.body.appendChild(outside);
-		await pressAt(outside);
-
-		expect(shell(host).classList.contains("is-composing")).toBe(false);
-	});
-
-	it("releases the row for a keyboard user tabbing out, who presses nothing", async () => {
-		const host = await renderComposer();
-		await focusIn(host.querySelector("textarea")!);
-
-		// A tablet with a hardware keyboard is a coarse-pointer device, so the row
-		// is hidden there too — and Tab fires no press, so the press route above
-		// cannot see this. Focus naming its destination is what makes it safe.
-		const outside = document.createElement("button");
-		document.body.appendChild(outside);
-		await focusOut(host.querySelector("textarea")!, outside);
-
-		expect(shell(host).classList.contains("is-composing")).toBe(false);
-	});
-});
-
-/** Presses `target`, as the document-level release listener sees it. */
-async function pressAt(target: HTMLElement): Promise<void> {
-	target.dispatchEvent(new window.PointerEvent("pointerdown", { bubbles: true, cancelable: true, pointerType: "touch" }));
-	await flushRender();
-}
-
-function shell(host: HTMLElement): HTMLElement {
-	const element = host.querySelector<HTMLElement>(".piem-chat__composer-shell");
-	if (!element) {
-		throw new Error("composer rendered without a shell");
-	}
-	return element;
-}
-
-/**
- * Sends focus into `target`, the way React's `onFocus` on the shell sees it.
- *
- * A dispatched `focusin` rather than `target.focus()`: React attaches its
- * delegated listener to the root container, and the synthetic `onFocus` it
- * builds comes from the bubbling `focusin` — which a programmatic `focus()` in
- * this DOM does not reliably emit.
- */
-async function focusIn(target: HTMLElement): Promise<void> {
-	target.dispatchEvent(new window.FocusEvent("focusin", { bubbles: true }));
-	await flushRender();
-}
-
-/** Takes focus off `target`, reporting `next` as where it went. */
-async function focusOut(target: HTMLElement, next: HTMLElement | null): Promise<void> {
-	target.dispatchEvent(new window.FocusEvent("focusout", { bubbles: true, relatedTarget: next }));
-	await flushRender();
-}
 
 /**
  * Presses `target` with a pointer of the given type, returning whether the
