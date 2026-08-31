@@ -1,6 +1,6 @@
 import React, { useEffect, useId, useMemo, useRef, useState } from "react";
 import { Platform } from "obsidian";
-import { IconButton } from "./ObsidianIcon";
+import { IconButton, ObsidianIcon } from "./ObsidianIcon";
 import { isSendShortcut, resolveSendShortcut, sendShortcutAria, type SendShortcut } from "./keyboard";
 import { sendButtonTitle, sendShortcutLabel } from "./chatStatus";
 import { useT } from "./TranslatorContext";
@@ -22,6 +22,14 @@ interface ChatComposerProps {
 	 * no other channel to explain itself.
 	 */
 	isConfigured: boolean;
+	/**
+	 * Whether the draft is an armed edit of an earlier question — sending then
+	 * rewrites the conversation from that turn instead of appending. Drives the
+	 * editing notice, the one place the state is visible where the send happens.
+	 */
+	isEditing?: boolean;
+	/** Cancels the armed edit; the panel restores the draft it displaced. */
+	onCancelEdit?: () => void;
 	/** The chord the user chose in settings; overridden on mobile, see {@link resolveSendShortcut}. */
 	sendShortcut: SendShortcut;
 	onInputChange: (value: string) => void;
@@ -106,6 +114,8 @@ interface ChatComposerProps {
  */
 export function ChatComposer({
 	input,
+	isEditing = false,
+	onCancelEdit,
 	isStreaming,
 	isCompacting,
 	isInitializing,
@@ -295,6 +305,22 @@ export function ChatComposer({
 		<footer className="piem-chat__composer">
 			<div className="piem-chat__composer-shell" onPointerDown={keepFocusOnPress}>
 				{contextRow}
+				{isEditing ? (
+					/*
+					 * The armed edit must be visible where the send happens. Its Send
+					 * looks identical to the everyday one but rewrites the conversation
+					 * instead of appending — a state carried silently by a textarea
+					 * that merely shows old words would read as an ordinary draft, and
+					 * the first send after opening the panel would surprise. The cancel
+					 * beside it is the way back out, including to the draft this state
+					 * displaced.
+					 */
+					<div className="piem-chat__editing" role="status">
+						<ObsidianIcon name="pen-line" className="piem-chat__editing-icon" />
+						<span className="piem-chat__editing-text">{t.t("chat.editingNotice")}</span>
+						<IconButton icon="x" label={t.t("chat.editingCancel")} onClick={() => onCancelEdit?.()} className="piem-chat__editing-cancel" />
+					</div>
+				) : null}
 				{pendingImages && pendingImages.length > 0 ? (
 					<ul className="piem-chat__pending-images">
 						{pendingImages.map((image, index) => (

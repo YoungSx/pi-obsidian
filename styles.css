@@ -853,6 +853,16 @@ button.piem-settings-tab {
 }
 
 /*
+ * The edit action on the user's own turn. It reuses the reply actions' row and
+ * its variables wholesale; only the justification differs, because the user
+ * bubble is the right-aligned one and an action under it reads as belonging to
+ * the words above only from the same edge.
+ */
+.piem-chat__message--user .piem-chat__message-actions {
+	justify-content: flex-end;
+}
+
+/*
  * Keyboard focus restores strength on every device; the pointer half is gated on
  * `hover: hover` below. A touch tap leaves `:hover` latched on the tapped element
  * until the next tap lands elsewhere, so an ungated hover rule renders as a
@@ -1908,6 +1918,39 @@ button.piem-chat__latest {
 
 .piem-chat__thinking-switcher-name {
 	white-space: nowrap;
+}
+
+/*
+ * The armed-edit notice, at the top of the composer shell. Send looks the same
+ * while an edit is armed but rewrites the conversation instead of appending, so
+ * the state is stated where the send happens — the same reason a reply-forward
+ * email client prints its subject line above the body. The left accent bars it
+ * apart from the rows that merely carry content (context chips, thumbnails):
+ * this one changes what the send does.
+ */
+.piem-chat__editing {
+	align-items: center;
+	border-inline-start: 2px solid var(--interactive-accent);
+	display: flex;
+	gap: var(--size-4-1);
+	padding-block: var(--size-4-1);
+}
+
+.piem-chat__editing-icon {
+	color: var(--interactive-accent);
+	flex-shrink: 0;
+}
+
+.piem-chat__editing-text {
+	color: var(--text-muted);
+	flex: 1;
+	font-size: var(--font-ui-smaller);
+}
+
+.piem-chat__editing-cancel {
+	--icon-color: var(--text-muted);
+	--icon-color-hover: var(--text-normal);
+	flex-shrink: 0;
 }
 
 /*
