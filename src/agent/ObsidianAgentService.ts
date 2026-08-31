@@ -1063,6 +1063,14 @@ export class ObsidianAgentService {
 			}
 			this.recordOverheadUsage(result.usage);
 			return result.actions;
+		} catch (error) {
+			// The contract with the UI is "null means nothing to show, never a
+			// throw": the caller renders its fallback row and moves on. `fetch…`
+			// holds that line, but `getSelectedModel` above it can reject for a
+			// legacy endpoint no catalog entry covers — letting that escape would
+			// turn a decorative miss into an unhandled rejection in the panel.
+			this.log.debug("quick action suggestions failed", () => ({ error: String(error) }));
+			return null;
 		} finally {
 			if (this.suggestionController === controller) {
 				this.suggestionController = null;

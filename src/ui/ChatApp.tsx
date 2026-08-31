@@ -125,7 +125,12 @@ export function ChatApp({ service, inputController, component, draftStore, onOpe
 	// What the model is told about is `snapshot.contextRefs`, not this.
 	const sourcePath = getActiveNotePath(app);
 	const canOpenSettings = canOpenPluginSettings(app);
-	const hasActiveNote = snapshot.contextRefs.some((ref) => ref.kind === "active");
+	// The active note's path from the same refs the context row renders. The
+	// boolean variant is derivable, but the path itself is what the empty
+	// screen's suggestion effect must key on: a switch from note A to note B
+	// never flips presence, yet changes what the chips should be about.
+	const activeNotePath = snapshot.contextRefs.find((ref) => ref.kind === "active")?.path ?? null;
+	const hasActiveNote = activeNotePath !== null;
 
 	useEffect(() => {
 		const unsubscribe = service.subscribe(setSnapshot);
@@ -186,9 +191,10 @@ export function ChatApp({ service, inputController, component, draftStore, onOpe
 			}
 			setSuggestions({ revision: snapshot.sessionRevision, scope: "empty", actions: actions ?? [] });
 		});
-		// Re-runs per session and per active-note flip, both of which change what
-		// the suggestions should be about; the guard above keeps it off a live turn.
-	}, [service, snapshot.isConfigured, snapshot.isStreaming, snapshot.messages.length, snapshot.sessionRevision, hasActiveNote, isInitializing]);
+		// Re-runs per session and per active-note change — the *path*, not just a
+		// presence flip, so A→B recomputes what the chips are about (issue #168
+		// follow-up). The guard above keeps it off a live turn.
+	}, [service, snapshot.isConfigured, snapshot.isStreaming, snapshot.messages.length, snapshot.sessionRevision, activeNotePath, isInitializing]);
 
 	/*
 	 * Settled reply: clear whatever the previous reply suggested and fetch the

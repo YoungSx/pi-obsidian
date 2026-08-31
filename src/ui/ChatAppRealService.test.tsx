@@ -22,15 +22,15 @@ const { DEFAULT_SESSION_DIR } = await import("../session/sessionDir");
 const { DEFAULT_SETTINGS } = await import("../settings");
 const { createRoot } = await import("react-dom/client");
 
-const SESSION_DIR = ".obsidian/plugins/piem/sessions";
+const SESSION_DIR = ".obsidian/plugins/piem/sessions"; // eslint-disable-line obsidianmd/hardcoded-config-path -- test fixture, no real vault
 const CHIPS_JSON = '[{"label":"Chip from the model","prompt":"The model prompt."}]';
 
 /** One completed provider response carrying only `text`. */
 function textReply(model: Model<Api>, text: string): ReturnType<typeof createAssistantMessageEventStream> {
 	const stream = createAssistantMessageEventStream();
 	const message = {
-		role: "assistant",
-		content: [{ type: "text", text }],
+		role: "assistant" as const,
+		content: [{ type: "text" as const, text }],
 		api: model.api,
 		provider: model.provider,
 		model: model.id,
@@ -72,7 +72,7 @@ function scriptedStreamFn(replies: string[]): { streamFn: StreamFn; prompts: str
 	let call = 0;
 	const streamFn: StreamFn = (model: Model<Api>, context: Context) => {
 		prompts.push(contextText(context));
-		const reply = replies[Math.min(call, replies.length - 1)];
+		const reply = replies[Math.min(call, replies.length - 1)] ?? "";
 		call += 1;
 		return textReply(model, reply);
 	};
@@ -156,7 +156,7 @@ describe("ChatApp × real service (issue #168)", () => {
 			sessionDir: DEFAULT_SESSION_DIR,
 			userSkillsDir: "",
 		};
-		const vaultFiles: Record<string, string> = { "Notes/todo.md": "- buy milk" };
+		const vaultFiles: Record<string, string> = { "Notes/todo.md": "- buy milk", "Notes/other.md": "- buy eggs" };
 		const files = new Map<string, { path: string; extension: string }>();
 		for (const path of Object.keys(vaultFiles)) {
 			files.set(path, { path, extension: path.slice(path.lastIndexOf(".") + 1) });
@@ -231,5 +231,29 @@ describe("ChatApp × real service (issue #168)", () => {
 		// And the request was actually for the empty screen.
 		expect(prompts.some((prompt) => prompt.length > 0)).toBe(true);
 		expect(service.getSnapshot().messages).toHaveLength(0);
+	});
+
+	it("switching from note A to note B re-asks the model for empty-screen chips (issue #168)", async () => {
+		const { service, setActiveFile, prompts } = await mountPanel(scriptedStreamFn([CHIPS_JSON]));
+
+		// Open note A and let its suggestion request land before touching B, so
+		// nothing is in flight when the interesting switch happens.
+		setActiveFile("Notes/todo.md");
+		service.setActiveNotePath("Notes/todo.md");
+		for (let i = 0; i < 10 && prompts.length < 2; i += 1) {
+			await flushRender();
+		}
+		expect(prompts).toHaveLength(2);
+		expect(prompts[1]).toContain("Notes/todo.md");
+
+		// A→B never flips note *presence* — this is the switch the boolean
+		// dependency silently ignored. The new request must name the new note.
+		setActiveFile("Notes/other.md");
+		service.setActiveNotePath("Notes/other.md");
+		for (let i = 0; i < 10 && prompts.length < 3; i += 1) {
+			await flushRender();
+		}
+		expect(prompts).toHaveLength(3);
+		expect(prompts[2]).toContain("Notes/other.md");
 	});
 });
