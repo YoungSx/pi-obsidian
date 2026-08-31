@@ -12,7 +12,7 @@ import { emptyScreenQuickActions, type QuickAction } from "./quickActionSuggesti
 import { describeReplyCutoff, type ReplyCutoff } from "./replyCutoff";
 import { useT } from "./TranslatorContext";
 import type { Translator } from "../i18n";
-import { ObsidianIcon } from "./ObsidianIcon";
+import { IconButton, ObsidianIcon } from "./ObsidianIcon";
 import { countDiffLines, describePendingTool, describeTool, isToolIdentifier, summarizeToolPayload, summarizeToolResult } from "./traceSummary";
 
 export interface MessageListProps {
@@ -48,6 +48,16 @@ export interface MessageListProps {
 	 * action rather than letting it queue a second run.
 	 */
 	onRetry?: (index: number) => void;
+	/**
+	 * Opens the question behind the newest reply for editing in the composer.
+	 *
+	 * Only ever called with the last answered question's index — see
+	 * {@link editableQuestionIndex}. Sending from the composer then replaces the
+	 * conversation from that turn, so the same in-flight gate {@link onRetry}
+	 * keeps applies here: absent while a turn is running, rather than queueing
+	 * an edit behind it.
+	 */
+	onEditMessage?: (index: number) => void;
 	/** Render context for `MarkdownRenderer.render`; supplied by the view. */
 	app: App;
 	component: Component;
@@ -147,6 +157,32 @@ function regenerableIndex(messages: AgentMessage[]): number | null {
 }
 
 /**
+ * The one question that may be edited and resent — the newest answered turn.
+ *
+ * Editing a question rewinds the conversation to just before it, so the same
+ * constraint that keeps {@link regenerableIndex} to one reply keeps this to the
+ * question directly behind it: an edit offered any earlier would discard every
+ * turn between it and the tail. The walk back from the reply is what names the
+ * turn — tool results and harness output can sit between a question and its
+ * answer, and the question is whichever user turn that walk reaches first.
+ *
+ * No reply at the tail means the newest question is unanswered, and an edit
+ * there would discard the question itself; `null` keeps the action hidden.
+ */
+function editableQuestionIndex(messages: AgentMessage[]): number | null {
+	const replyIndex = regenerableIndex(messages);
+	if (replyIndex === null) {
+		return null;
+	}
+	for (let cursor = replyIndex - 1; cursor >= 0; cursor -= 1) {
+		if (messages[cursor]?.role === "user") {
+			return cursor;
+		}
+	}
+	return null;
+}
+
+/**
  * Whether the turn has been accepted but produced nothing to look at yet.
  *
  * The gap this covers is the one a reader reports as "it ignored me": the prompt
@@ -213,6 +249,7 @@ export function MessageList({
 	showAgentDetails = false,
 	onOpenSettings,
 	onRetry,
+	onEditMessage,
 	app,
 	component,
 	sourcePath,
@@ -226,6 +263,7 @@ export function MessageList({
 	const context: MessageContext = { app, component, sourcePath, showAgentDetails, t };
 	const activeIndex = streamingIndex(isStreaming, messages);
 	const regenerateIndex = regenerableIndex(messages);
+	const editIndex = editableQuestionIndex(messages);
 	/*
 	 * Empty-screen suggestions exist for the configured, ready state only — the
 	 * connect-model branch has its one call to action, and the skeleton has
@@ -334,6 +372,19 @@ export function MessageList({
 							isStreaming={index === activeIndex}
 							renderContext={context}
 							onRetry={onRetry && index === regenerateIndex ? () => onRetry(index) : undefined}
+							/*
+							 * The edit hides itself on an unsettled turn too — the resend
+							 * truncates the transcript, and a turn still streaming (or
+							 * being compacted) is not a tail worth standing on. `onRetry`
+							 * leans on its caller for this; the edit owns it, because the
+							 * control sits on an *earlier* message than the streaming one
+							 * and would otherwise stay live through it.
+							 */
+							onEdit={
+								onEditMessage && index === editIndex && !isStreaming && !isCompacting
+									? () => onEditMessage(index)
+									: undefined
+							}
 						/>
 					))
 				)}
@@ -506,6 +557,8 @@ interface MessageRowProps {
 	renderContext: MessageContext;
 	/** Regenerates this reply; supplied only for the newest one. */
 	onRetry?: () => void;
+	/** Opens this question in the composer; supplied only for the newest answered one. */
+	onEdit?: () => void;
 }
 
 /**
@@ -515,7 +568,7 @@ interface MessageRowProps {
  * calls, tool results, harness output, compaction summaries — renders flat, so
  * a card never contains another bordered box.
  */
-function MessageRow({ message, isStreaming, renderContext, onRetry }: MessageRowProps): React.JSX.Element | null {
+function MessageRow({ message, isStreaming, renderContext, onRetry, onEdit }: MessageRowProps): React.JSX.Element | null {
 	// The summary fronts a compacted transcript; it reads as a divider ("history
 	// above this was summarized"), not as one more message bubble.
 	if (message.role === "compactionSummary") {
@@ -550,6 +603,18 @@ function MessageRow({ message, isStreaming, renderContext, onRetry }: MessageRow
 			) : null}
 			{message.role === "assistant" && !isStreaming ? (
 				<ReplyActions app={renderContext.app} text={assistantText(message)} onRetry={onRetry} />
+			) : null}
+			{message.role === "user" && onEdit ? (
+				/*
+				 * A single always-visible control, mirroring the reply's actions row:
+				 * on a touch panel there is no hover to surface anything, and an edit
+				 * offered only via long-press or a hidden menu is one a reader never
+				 * finds. It sits under the bubble like the reply's actions do, so the
+				 * two roles read the same way.
+				 */
+				<div className="piem-chat__message-actions">
+					<IconButton icon="pen-line" label={renderContext.t.t("chat.editMessage")} onClick={onEdit} />
+				</div>
 			) : null}
 		</article>
 	);

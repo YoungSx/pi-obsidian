@@ -427,6 +427,67 @@ describe("MessageList reply actions", () => {
 	});
 });
 
+describe("MessageList edit action", () => {
+	it("offers edit on the question the newest reply answers, and reports its index", async () => {
+		const edited: number[] = [];
+		const host = renderMessages([userMessage("q1"), assistantMessage("a1"), userMessage("q2"), assistantMessage("a2")], {
+			onEditMessage: (index) => edited.push(index),
+		});
+		await flushRender();
+
+		const buttons = Array.from(host.querySelectorAll<HTMLButtonElement>('[aria-label="Edit and resend"]'));
+		expect(buttons).toHaveLength(1);
+		buttons[0]?.click();
+		await flushRender();
+		expect(edited).toEqual([2]);
+	});
+
+	it("keeps the edit off the older questions, which a resend would discard the turns after", async () => {
+		const host = renderMessages([userMessage("q1"), assistantMessage("a1"), userMessage("q2"), assistantMessage("a2")], {
+			onEditMessage: () => undefined,
+		});
+		await flushRender();
+
+		const questions = Array.from(host.querySelectorAll(".piem-chat__message--user"));
+		expect(questions).toHaveLength(2);
+		expect(questions[0]?.querySelector('[aria-label="Edit and resend"]')).toBeNull();
+		expect(questions[1]?.querySelector('[aria-label="Edit and resend"]')).not.toBeNull();
+	});
+
+	it("withdraws the edit once a newer question is unanswered, which a resend would take down with it", async () => {
+		const host = renderMessages([userMessage("q1"), assistantMessage("a1"), userMessage("q2")], {
+			onEditMessage: () => undefined,
+		});
+		await flushRender();
+
+		expect(host.querySelectorAll('[aria-label="Edit and resend"]')).toHaveLength(0);
+	});
+
+	it("renders no edit on a question that has no reply behind it to replace", async () => {
+		const host = renderMessages([userMessage("a question")], { onEditMessage: () => undefined });
+		await flushRender();
+
+		expect(host.querySelector(".piem-chat__message-actions")).toBeNull();
+	});
+
+	it("gives the user turn no edit without the handler, same as the reply keeps none without onRetry", async () => {
+		const host = renderMessages([userMessage("q"), assistantMessage("a")]);
+		await flushRender();
+
+		expect(host.querySelectorAll('[aria-label="Edit and resend"]')).toHaveLength(0);
+	});
+
+	it("keeps the edit out of a streaming turn, whose transcript the send would tear mid-run", async () => {
+		const host = renderMessages([userMessage("q"), assistantMessage("half a th")], {
+			isStreaming: true,
+			onEditMessage: () => undefined,
+		});
+		await flushRender();
+
+		expect(host.querySelectorAll('[aria-label="Edit and resend"]')).toHaveLength(0);
+	});
+});
+
 describe("MessageList trace collapsing", () => {
 	it("renders a tool call as a plain row in the default tier, since the payload is hidden", async () => {
 		const host = renderMessages([assistantToolCall("read", { path: "Daily/2026-08-27.md", offset: 0 })]);

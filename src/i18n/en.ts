@@ -99,6 +99,18 @@ export const en = {
 		/** Appended to spoken text, so it continues the sentence in lower case. */
 		youStoppedSpoken: "you stopped this reply.",
 		/**
+		 * The edit-and-resend control on the last answered question. Names both
+		 * halves of what it does — the composer opens with the words, and sending
+		 * rewrites the conversation from that turn — because "edit" alone reads
+		 * like a transcript annotation, and the destructive half is the one the
+		 * reader has to expect before pressing Send.
+		 */
+		editMessage: "Edit and resend",
+		/** The composer notice while an edit is armed; see {@link editMessage}. */
+		editingNotice: "Editing your last question — sending replaces this reply.",
+		/** Cancels the armed edit and restores the draft it displaced. */
+		editingCancel: "Cancel edit",
+		/**
 		 * Shown when the provider cut the reply at its output-token ceiling
 		 * (`stopReason: "length"`).
 		 *

@@ -20,6 +20,7 @@ import { MessageList } from "./MessageList";
 import { ModelSwitcher } from "./ModelSwitcher";
 import { ThinkingLevelSelector } from "./ThinkingLevelSelector";
 import { appendToDraft } from "./noteReference";
+import { userText } from "./messageActions";
 import { canOpenPluginSettings, openPluginSettings } from "./pluginSettings";
 import { TranslatorProvider } from "./TranslatorContext";
 import { useSessionDraft } from "./useSessionDraft";
@@ -68,6 +69,22 @@ export function ChatApp({ service, inputController, component, draftStore, onOpe
 	 * snapshot has no reason to report.
 	 */
 	const [subagents, setSubagents] = useState<readonly SubagentSnapshot[]>([]);
+	/**
+	 * The question being edited, when the user has armed one: the session it
+	 * belongs to, the transcript index it was offered at, the prose it said, and
+	 * the draft it displaced. Sending while armed rewrites the conversation from
+	 * that turn instead of appending, so the armed state is what the send path
+	 * branches on — and what the composer's editing notice is driven by.
+	 *
+	 * `draftBefore` is restored on cancel, so arming an edit never costs the user
+	 * the half-typed thought they set aside to make it.
+	 */
+	const [editArmed, setEditArmed] = useState<{
+		sessionId: string | undefined;
+		index: number;
+		original: string;
+		draftBefore: string;
+	} | null>(null);
 	/**
 	 * The model-generated quick actions for whichever placement asked last, tagged
 	 * with the session they belong to. An empty `actions` means "nothing yet" —
@@ -208,6 +225,48 @@ export function ChatApp({ service, inputController, component, draftStore, onOpe
 		return emptyPlacement || replyPlacement ? suggestions.actions : [];
 	}, [suggestions, snapshot.messages.length, snapshot.sessionRevision]);
 
+	/*
+	 * Whether an armed edit still names its turn. A session switch leaves the
+	 * state behind but points it at a foreign transcript; a rewind, a compaction,
+	 * or a turn absorbed into a summary moves or replaces the message the index
+	 * stood for. Rather than chasing each of those with effects, the armed state
+	 * is validated against the transcript on every render: the message must still
+	 * be a user turn saying exactly what it said when it was armed. Anything else
+	 * silently disarms — the editing notice disappears and Send appends again.
+	 */
+	const activeEdit = useMemo(() => {
+		if (!editArmed || editArmed.sessionId !== snapshot.session?.id) {
+			return null;
+		}
+		const message = snapshot.messages[editArmed.index];
+		if (message?.role !== "user" || userText(message) !== editArmed.original) {
+			return null;
+		}
+		return editArmed;
+	}, [editArmed, snapshot.session?.id, snapshot.messages]);
+
+	/**
+	 * Arms the edit on the last answered question: its words go back into the
+	 * composer, and the draft they displaced is set aside for the cancel to
+	 * restore. Sending then goes through {@link service.editAndResend}.
+	 */
+	const handleEditMessage = useCallback(
+		(index: number): void => {
+			const original = userText(snapshot.messages[index]);
+			if (!original) {
+				return;
+			}
+			setEditArmed({ sessionId: snapshot.session?.id, index, original, draftBefore: inputRef.current });
+			setInput(original);
+		},
+		[snapshot.messages, snapshot.session?.id, setInput],
+	);
+
+	const handleCancelEdit = useCallback((): void => {
+		setEditArmed(null);
+		setInput(editArmed?.draftBefore ?? "");
+	}, [editArmed, setInput]);
+
 	const visibleMessages = useMemo(() => {
 		if (!snapshot.streamingMessage) {
 			return snapshot.messages;
@@ -221,6 +280,22 @@ export function ChatApp({ service, inputController, component, draftStore, onOpe
 			return;
 		}
 		const images = toImageContents(pendingImages);
+		if (activeEdit) {
+			// An armed edit rewrites the conversation rather than appending. Same
+			// draft economy as the plain send: the composer empties before the
+			// rewind starts (a branch summary can hold the await for seconds, and a
+			// draft lingering through it reads as "nothing happened"), and a refusal
+			// hands the text back with the edit still armed.
+			clearDraft();
+			const sent = await service.editAndResend(activeEdit.index, prompt, images);
+			if (sent) {
+				setEditArmed(null);
+				setPendingImages([]);
+			} else {
+				setInput(prompt);
+			}
+			return;
+		}
 		if (!snapshot.isConfigured) {
 			// Send is disabled without a key, but the ⌘↵ submit command routes through
 			// `sendPromptRef` and never sees the button's disabled state. Let it reach
@@ -280,6 +355,11 @@ export function ChatApp({ service, inputController, component, draftStore, onOpe
 			if (snapshot.isStreaming || snapshot.isCompacting || isInitializing) {
 				return;
 			}
+			// A suggestion the user taps while an edit is armed is a different intent
+			// — it appends a new turn, it does not rewrite one. The armed state lets
+			// go here so the next composer send appends too; the armed text stays in
+			// the draft as ordinary words the user can still send or clear.
+			setEditArmed(null);
 			void service.sendPrompt(prompt).then((sent) => {
 				if (!sent) {
 					setInput(prompt);
@@ -354,6 +434,7 @@ export function ChatApp({ service, inputController, component, draftStore, onOpe
 					showAgentDetails={snapshot.showAgentDetails}
 					onOpenSettings={canOpenSettings ? () => openPluginSettings(app) : undefined}
 					onRetry={snapshot.isStreaming || snapshot.isCompacting ? undefined : (index) => void service.retryFrom(index)}
+					onEditMessage={snapshot.isStreaming || snapshot.isCompacting ? undefined : handleEditMessage}
 					app={app}
 					component={component}
 					sourcePath={sourcePath}
@@ -378,6 +459,8 @@ export function ChatApp({ service, inputController, component, draftStore, onOpe
 
 				<ChatComposer
 					input={input}
+					isEditing={activeEdit !== null}
+					onCancelEdit={handleCancelEdit}
 					isStreaming={snapshot.isStreaming}
 					isCompacting={snapshot.isCompacting}
 					isInitializing={isInitializing}

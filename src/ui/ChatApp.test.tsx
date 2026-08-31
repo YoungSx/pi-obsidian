@@ -130,6 +130,20 @@ class FakeAgentService {
 	async retryFrom(): Promise<boolean> {
 		return false;
 	}
+
+	/**
+	 * Logged like `sentPrompts`, so a test can prove an armed send took the edit
+	 * path and *only* it — the two routes append different turns, and a leak from
+	 * one into the other is the bug the assertions exist to catch. `failSends`
+	 * declines it the same way it declines `sendPrompt`, reusing the constructor
+	 * switch rather than a second knob for one behaviour.
+	 */
+	readonly editResends: Array<{ index: number; prompt: string }> = [];
+
+	async editAndResend(index: number, prompt: string): Promise<boolean> {
+		this.editResends.push({ index, prompt });
+		return !this.failSends;
+	}
 	async openSession(): Promise<void> {}
 	async newSession(): Promise<void> {}
 	async renameSession(): Promise<void> {}
@@ -633,6 +647,152 @@ describe("ChatApp model-suggested quick actions", () => {
 		// The reply-scope chips are stale, so the empty screen is back on its built-ins.
 		expect(quickActionChips(host).some((chip) => chip.textContent === "Agent chip")).toBe(false);
 		expect(quickActionChips(host).some((chip) => chip.textContent === "Summarize this note")).toBe(true);
+	});
+});
+
+describe("ChatApp edit and resend", () => {
+	/** A settled question-and-answer pair, the only shape the edit is offered on. */
+	const answered: Partial<ChatSnapshot> = {
+		isConfigured: true,
+		messages: [userQuestion("What is in my vault?"), assistantReply("Notes about pi.")] as ChatSnapshot["messages"],
+	};
+
+		function userQuestion(text: string) {
+		return {
+			role: "user",
+			content: [{ type: "text", text }],
+			timestamp: Date.now(),
+		};
+	}
+
+	function assistantReply(text: string) {
+		return {
+			role: "assistant",
+			content: [{ type: "text", text }],
+			api: "anthropic-messages",
+			provider: "deepseek",
+			model: "deepseek-v4-pro",
+			usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } },
+			stopReason: "stop",
+			timestamp: Date.now(),
+		};
+	}
+
+	function editButton(host: HTMLElement): HTMLButtonElement {
+		const button = host.querySelector<HTMLButtonElement>('[aria-label="Edit and resend"]');
+		if (!button) {
+			throw new Error("edit button did not mount");
+		}
+		return button;
+	}
+
+	it("arms the edit: the question returns to the composer and the notice states the rewrite", async () => {
+		const { host } = await mountChat({ snapshot: answered });
+
+		editButton(host).click();
+		await flushRender();
+
+		expect(composer(host).value).toBe("What is in my vault?");
+		expect(host.querySelector(".piem-chat__editing")?.textContent).toContain("sending replaces this reply");
+	});
+
+	it("sends an armed edit through editAndResend, not sendPrompt", async () => {
+		const { host, service } = await mountChat({ snapshot: answered });
+
+		editButton(host).click();
+		await flushRender();
+		await typeDraft(composer(host), "Which notes mention pi?");
+		sendButton(host).click();
+		await flushRender();
+
+		expect(service.editResends).toEqual([{ index: 0, prompt: "Which notes mention pi?" }]);
+		expect(service.sentPrompts).toEqual([]);
+	});
+
+	it("clears the composer on an accepted edit, and the notice with it", async () => {
+		const { host } = await mountChat({ snapshot: answered });
+
+		editButton(host).click();
+		await flushRender();
+		await typeDraft(composer(host), "Rewritten question.");
+		sendButton(host).click();
+		await flushRender();
+
+		expect(composer(host).value).toBe("");
+		expect(host.querySelector(".piem-chat__editing")).toBeNull();
+	});
+
+	it("keeps the armed state and the text on a declined edit, so the words survive the failure", async () => {
+		const { host } = await mountChat({ snapshot: answered, failSends: true });
+
+		editButton(host).click();
+		await flushRender();
+		await typeDraft(composer(host), "Rewritten question.");
+		sendButton(host).click();
+		await flushRender();
+
+		expect(composer(host).value).toBe("Rewritten question.");
+		expect(host.querySelector(".piem-chat__editing")).not.toBeNull();
+	});
+
+	it("cancels back to the draft the edit displaced, rather than an empty composer", async () => {
+		const { host } = await mountChat({ snapshot: answered });
+
+		await typeDraft(composer(host), "Half a thought set aside.");
+		editButton(host).click();
+		await flushRender();
+
+		const cancel = host.querySelector<HTMLButtonElement>('[aria-label="Cancel edit"]');
+		expect(cancel).not.toBeNull();
+		cancel?.click();
+		await flushRender();
+
+		expect(composer(host).value).toBe("Half a thought set aside.");
+		expect(host.querySelector(".piem-chat__editing")).toBeNull();
+	});
+
+	it("disarms silently when the transcript moves under the armed index, instead of rewriting a stranger's turn", async () => {
+		// The armed state is validated per render, so a rewind below it — here,
+		// the turn replaced by the service's own emit — can no longer be named by
+		// the index. The send must append, never rewrite.
+		const { host, service } = await mountChat({ snapshot: answered });
+
+		editButton(host).click();
+		await flushRender();
+		service.emit({ messages: [userQuestion("The newer question."), assistantReply("Its answer.")] as ChatSnapshot["messages"] });
+		await flushRender();
+
+		expect(host.querySelector(".piem-chat__editing")).toBeNull();
+		await typeDraft(composer(host), "A fresh question.");
+		sendButton(host).click();
+		await flushRender();
+
+		expect(service.sentPrompts).toEqual(["A fresh question."]);
+		expect(service.editResends).toEqual([]);
+	});
+
+	it("sends a tapped quick action as its own turn while an edit is armed, leaving the armed words as a plain draft", async () => {
+		// The post-reply chips only render after the streaming→settled transition,
+		// so the turn is armed first, the reply then settles with suggestions, and
+		// the tap is what must append.
+		const { host, service } = await mountChat({
+			snapshot: { ...answered, isStreaming: true },
+			suggestionResults: [[{ id: "chip-0", label: "Summarize this note", prompt: "Summarize this note" }]],
+		});
+
+		service.emit({
+			isStreaming: false,
+			messages: [userQuestion("What is in my vault?"), assistantReply("Notes about pi.")] as ChatSnapshot["messages"],
+		});
+		await flushRender(() => host.querySelector(".piem-chat__quick-action") !== null);
+
+		editButton(host).click();
+		await flushRender();
+		host.querySelector<HTMLButtonElement>(".piem-chat__quick-action")?.click();
+		await flushRender();
+
+		expect(service.sentPrompts).toEqual(["Summarize this note"]);
+		expect(service.editResends).toEqual([]);
 	});
 });
 

@@ -593,6 +593,49 @@ describe("ObsidianAgentService", () => {
 		expect(await service.retryFrom(detached.length - 1)).toBe(false);
 	});
 
+	it("rewrites the question on edit-and-resend instead of re-asking the old one", async () => {
+		const service = createService();
+		await service.sendPrompt("What is in my vault?");
+		const before = service.getSnapshot().messages;
+		// The edit targets the user turn itself, which sits one below the reply.
+		const questionIndex = before.length - 2;
+		expect(before[questionIndex]?.role).toBe("user");
+
+		expect(await service.editAndResend(questionIndex, "Which notes mention pi?")).toBe(true);
+
+		const after = service.getSnapshot().messages;
+		// One question, the new one: the rewrite replaced the turn rather than
+		// stacking a second question below the first.
+		expect(after.filter((message) => message.role === "user")).toHaveLength(1);
+		expect(JSON.stringify(after)).toContain("Which notes mention pi?");
+		expect(JSON.stringify(after)).not.toContain("What is in my vault?");
+	});
+
+	it("declines an edit at an index that does not name a question", async () => {
+		// The index names the turn itself, so a reply or a tool row there is a
+		// caller bug, not a rewind target: `findPromptIndex` would silently walk
+		// back to the *previous* question and rewrite that one instead.
+		const service = createService();
+		await service.sendPrompt("What is in my vault?");
+		const before = service.getSnapshot().messages;
+
+		expect(await service.editAndResend(before.length - 1, "Which notes mention pi?")).toBe(false);
+		// The transcript is untouched by the refusal.
+		expect(service.getSnapshot().messages).toEqual(before);
+	});
+
+	it("declines an empty edit before touching the transcript", async () => {
+		// An empty prompt is refused by the send path, but by then the rewind and
+		// the branch summary have already happened — a no-op send would still fork
+		// the log and bill a summary request. The empty check has to run first.
+		const service = createService();
+		await service.sendPrompt("What is in my vault?");
+		const before = service.getSnapshot().messages;
+
+		expect(await service.editAndResend(before.length - 2, "   ")).toBe(false);
+		expect(service.getSnapshot().messages).toEqual(before);
+	});
+
 	it("reports pending tool calls by name, never the provider's call ids", async () => {
 		let snapshotDuringTool: { name: string; progress?: string }[] | undefined;
 		const service = createService(new MemoryAdapter(), {

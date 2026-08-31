@@ -21,6 +21,28 @@ export function assistantText(message: AssistantMessage): string {
 }
 
 /**
+ * The prose a user turn asked, excluding its images.
+ *
+ * Images ride beside the text and cannot be restated as it, so they are simply
+ * absent — a caller comparing this against a composer draft is comparing words,
+ * and that is the only comparison either side can make.
+ */
+export function userText(message: AgentMessage | undefined): string {
+	if (!message || message.role !== "user") {
+		return "";
+	}
+	const { content } = message;
+	if (typeof content === "string") {
+		return content.trim();
+	}
+	return content
+		.filter((part): part is Extract<typeof part, { type: "text" }> => part.type === "text")
+		.map((part) => part.text)
+		.join("\n")
+		.trim();
+}
+
+/**
  * The user turn that produced `index`, so a reply can be re-asked.
  *
  * Walks backwards because tool results and harness messages sit between the
@@ -32,15 +54,7 @@ export function precedingUserText(messages: AgentMessage[], index: number): stri
 		if (message?.role !== "user") {
 			continue;
 		}
-		const { content } = message;
-		if (typeof content === "string") {
-			return content.trim();
-		}
-		return content
-			.filter((part): part is Extract<typeof part, { type: "text" }> => part.type === "text")
-			.map((part) => part.text)
-			.join("\n")
-			.trim();
+		return userText(message);
 	}
 	return "";
 }

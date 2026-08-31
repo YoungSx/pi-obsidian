@@ -804,9 +804,63 @@ export class ObsidianAgentService {
 	/**
 	 * Re-asks the question that produced the reply at `index`.
 	 *
-	 * Truncates the transcript to just before that user turn and prompts again, so
-	 * the retry replaces the reply rather than appending a second answer to a
-	 * conversation the model would then see twice.
+	 * The same rewind {@link editAndResend} performs, minus the edit: the question
+	 * is re-sent exactly as it was asked, and the reply at `index` is replaced
+	 * rather than appended to.
+	 */
+	async retryFrom(index: number): Promise<boolean> {
+		await this.initialize();
+		const agent = this.requireAgent();
+		const promptIndex = findPromptIndex(agent.state.messages, index);
+		if (promptIndex === null) {
+			return false;
+		}
+		const prompt = extractUserText(agent.state.messages[promptIndex]);
+		if (!prompt) {
+			return false;
+		}
+		return await this.rewindAndResend(agent, promptIndex, prompt);
+	}
+
+	/**
+	 * Rewrites the question at `index` and re-asks it.
+	 *
+	 * The one correction a chat offers that "ask again" cannot: a typo, a missed
+	 * condition, a different phrasing — the only alternative is re-typing the
+	 * whole turn and letting the original stand. Semantically this is the retry
+	 * rewind with the text swapped before it goes back out.
+	 *
+	 * `index` names the user turn itself, not a reply above it, so the message
+	 * there must already be the question; there is nothing to walk back and find.
+	 * The same "newest turn only" restraint the retry control observes lives on
+	 * the caller (the panel offers the edit on the last answered question alone),
+	 * but the role check here is not policy — it is what makes the index mean
+	 * what this method assumes it means.
+	 *
+	 * `images` carries whatever the composer had staged when the edited turn was
+	 * sent. The rewind discards the original turn — its images with it — and the
+	 * staged ones are the only pictures the replacement turn shows, so dropping
+	 * them here would send less than the composer promised.
+	 */
+	async editAndResend(index: number, prompt: string, images: ImageContent[] = []): Promise<boolean> {
+		const trimmed = prompt.trim();
+		if (!trimmed) {
+			return false;
+		}
+		await this.initialize();
+		const agent = this.requireAgent();
+		if (agent.state.messages[index]?.role !== "user") {
+			return false;
+		}
+		return await this.rewindAndResend(agent, index, trimmed, images);
+	}
+
+	/**
+	 * The rewind both {@link retryFrom} and {@link editAndResend} perform.
+	 *
+	 * Truncates the transcript to just before the question at `promptIndex` and
+	 * sends `prompt` again, so the new turn replaces what followed rather than
+	 * appending a second answer to a conversation the model would then see twice.
 	 *
 	 * The log is append-only and tree-shaped, so the discarded turns stay on disk
 	 * and the replacement becomes a sibling rather than their child. Rewinding
@@ -817,31 +871,34 @@ export class ObsidianAgentService {
 	 * Before the rewind, {@link summarizeAbandonedBranch} generates a summary of
 	 * the fork being abandoned and persists it on the new main line, so the model
 	 * — and a reload — remember what was explored down it. A summary failure never
-	 * blocks the rewind: the user asked to retry, not to summarize, so the worst
-	 * case is a fork forgotten, not a retry that never happens.
+	 * blocks the rewind: the user asked to retry or edit, not to summarize, so the
+	 * worst case is a fork forgotten, not a request that never happens.
 	 *
-	 * A turn the log cannot name is refused rather than retried in memory alone.
+	 * A turn the log cannot name is refused rather than rewound in memory alone.
 	 * That covers messages a compaction absorbed, whose text survives only inside
 	 * the summary — rewinding to before the compaction would discard the summary
 	 * along with the turn.
+	 *
+	 * The conversation can move on while the summary is in flight: "New chat",
+	 * opening another session, and deleting the active one each build a fresh
+	 * agent through `replaceAgent`. Acting on the result then would truncate the
+	 * dead transcript and send `prompt` into the *new* session's log below its
+	 * untouched history. Compacting between turns widens that window from
+	 * milliseconds to seconds, so the result is discarded when the agent it was
+	 * asked on is no longer current — the same guard `performCompaction` keeps.
 	 */
-	async retryFrom(index: number): Promise<boolean> {
-		await this.initialize();
-		const agent = this.requireAgent();
+	private async rewindAndResend(
+		agent: Agent,
+		promptIndex: number,
+		prompt: string,
+		images: ImageContent[] = [],
+	): Promise<boolean> {
 		if (agent.state.isStreaming || this.isCompacting || this.branchSummaryController || this.retryInFlight) {
 			return false;
 		}
 		this.retryInFlight = true;
 		try {
-			const promptIndex = findPromptIndex(agent.state.messages, index);
-			if (promptIndex === null) {
-				return false;
-			}
 			const promptMessage = agent.state.messages[promptIndex];
-			const prompt = extractUserText(promptMessage);
-			if (!prompt) {
-				return false;
-			}
 			const entryId = promptMessage ? this.messageEntryIds.get(promptMessage) : undefined;
 			if (!entryId) {
 				return false;
@@ -857,12 +914,15 @@ export class ObsidianAgentService {
 				this.setError(error instanceof Error ? error.message : String(error));
 				return false;
 			}
+			if (this.agent !== agent) {
+				return false;
+			}
 			agent.state.messages = agent.state.messages.slice(0, promptIndex);
 			if (summaryMessage) {
 				agent.state.messages = [...agent.state.messages.slice(0, promptIndex), summaryMessage];
 			}
 			this.notify();
-			return await this.sendPrompt(prompt);
+			return await this.sendPrompt(prompt, images);
 		} finally {
 			this.retryInFlight = false;
 		}
