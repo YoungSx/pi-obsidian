@@ -262,6 +262,9 @@ export const en = {
 	chatStatus: {
 		opening: "Opening chat…",
 		tidyingUp: "Tidying up earlier messages…",
+		// The retry/edit window: a branch summary request runs before the
+		// replacement send, and the transcript narrates none of it.
+		resending: "Resending your message…",
 		// Ordinal, not a total: the run is mid-flight, so no total exists to name.
 		turnSteps: "step {count}",
 	},

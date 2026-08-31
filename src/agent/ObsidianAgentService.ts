@@ -190,6 +190,18 @@ export interface ChatSnapshot {
 	contextFill: ContextFill | null;
 	/** True while a compaction request is in flight (a real LLM call), before a prompt or between the turns of a run. */
 	isCompacting: boolean;
+	/**
+	 * True while a retry or edit-resend is between its guards and the replacement
+	 * send: the branch-summary request (a real LLM call that can run for seconds),
+	 * the rewind itself, and the gap before the new turn's first event.
+	 *
+	 * This window is the panel's own doing — the agent is not streaming yet and
+	 * no compaction is running, so without this flag the panel reports fully idle
+	 * while the user's edit is quietly being processed. Everything the streaming
+	 * state gates reads this too: the send controls, the status line, the
+	 * per-message actions that would race the rewind.
+	 */
+	isRewinding: boolean;
 	/** Whether the active model target has a credential ready for requests. */
 	isConfigured?: boolean;
 	/**
@@ -675,10 +687,74 @@ export class ObsidianAgentService {
 		if (!agent) {
 			return false;
 		}
-		if (agent.state.isStreaming) {
+		if (agent.state.isStreaming || this.isCompacting || this.retryInFlight) {
 			this.setError(this.t().t("chat.agentBusy"));
 			return false;
 		}
+		return await this.deliverPrompt(trimmedPrompt, images);
+	}
+
+	/**
+	 * The credential gate a turn must pass before anything goes out, raising the
+	 * banner itself. The missing credential is the one failure the settings tab
+	 * fixes, so this is the error that earns the banner's settings shortcut.
+	 *
+	 * Shared between {@link deliverPrompt} and the rewind preflight
+	 * ({@link rewindAndResend}) so the same refusal — same banner, same
+	 * wording — fires whether the turn is a fresh send or a replacement, and so
+	 * a wording change lands in one place.
+	 */
+	private ensureCredentialReady(): boolean {
+		if (this.hasApiKey()) {
+			return true;
+		}
+		const t = this.t();
+		this.setError(t.t("target.needsKeyToSend", { target: describeModelTarget(this.getSettings(), t) }), true);
+		return false;
+	}
+
+	/**
+	 * The multimodal gate: `images` on a text-only model is refused with a
+	 * banner before the run, leaving both text and images with the user to
+	 * reconsider. Empty arrays always pass — a text turn has nothing to gate.
+	 *
+	 * Shared for the same reason as {@link ensureCredentialReady}: the rewind
+	 * must refuse an impossible replacement *before* it throws the original
+	 * turn away, with the exact refusal a normal send would have raised.
+	 */
+	private ensureImagesSupported(images: ImageContent[]): boolean {
+		if (images.length === 0 || modelSupportsImages(getSelectedModel(this.getSettings()))) {
+			return true;
+		}
+		const t = this.t();
+		this.setError(t.t("chat.imagesNotSupported", { model: describeModelTarget(this.getSettings(), t) }));
+		return false;
+	}
+
+	/**
+	 * The send itself, once the caller holds the turn.
+	 *
+	 * Split from {@link sendPrompt} so the retry/edit rewind can hand its
+	 * replacement question to the exact send path a normal message takes — command
+	 * expansion, embed resolution, the capability gates — without tripping the
+	 * busy guards on the way in. The rewind already holds the exclusivity those
+	 * guards enforce ({@link retryInFlight} is set for its whole body, and it
+	 * refuses to start while anything else does): refusing here would not be
+	 * protection, it would be the rewind blocking itself.
+	 *
+	 * The credential and image gates are deliberately *not* skipped. They are
+	 * re-checked on this path so a key removed or a model switched while the
+	 * branch summary ran still fails the send — loudly, with the same banner a
+	 * normal send would raise — rather than half-completing a rewind that
+	 * already threw the original turn away.
+	 */
+	private async deliverPrompt(prompt: string, images: ImageContent[] = []): Promise<boolean> {
+		const trimmedPrompt = prompt;
+		const agent = this.agent;
+		if (!agent) {
+			return false;
+		}
+
 		// A real send ends the turn the suggestion was asked for — drop any
 		// in-flight request instead of letting it bill tokens whose chips are
 		// already superseded.
@@ -728,11 +804,7 @@ export class ObsidianAgentService {
 			}
 		}
 
-		if (!this.hasApiKey()) {
-			const t = this.t();
-			// The missing credential is the one failure the settings tab fixes,
-			// so this is the error that earns the banner's settings shortcut.
-			this.setError(t.t("target.needsKeyToSend", { target: describeModelTarget(this.getSettings(), t) }), true);
+		if (!this.ensureCredentialReady()) {
 			return false;
 		}
 
@@ -748,9 +820,7 @@ export class ObsidianAgentService {
 		// Phase 3: gate multimodal send on the active model's declared capability.
 		// A text-only model cannot consume an image content array; block before
 		// the run and leave both text and images with the user to reconsider.
-		if (allImages.length > 0 && !modelSupportsImages(getSelectedModel(this.getSettings()))) {
-			const t = this.t();
-			this.setError(t.t("chat.imagesNotSupported", { model: describeModelTarget(this.getSettings(), t) }));
+		if (!this.ensureImagesSupported(allImages)) {
 			return false;
 		}
 
@@ -897,7 +967,23 @@ export class ObsidianAgentService {
 		if (agent.state.isStreaming || this.isCompacting || this.branchSummaryController || this.retryInFlight) {
 			return false;
 		}
+		// Preflight before anything destructive: the rewind throws the original
+		// turn away, so a replacement that cannot legally go out (no credential,
+		// pictures on a text-only model) must be refused while the transcript is
+		// still intact. The checks mirror the send path exactly — same helpers,
+		// same banners — so refusing here is never stricter than sending fresh.
+		// The send-side checks stay; they are not redundant but the backstop for
+		// the seconds the branch summary runs, during which a key can be removed
+		// or the model switched.
+		if (!this.ensureCredentialReady() || !this.ensureImagesSupported(images)) {
+			return false;
+		}
 		this.retryInFlight = true;
+		// The window this flag opens is one the agent does not narrate: no stream
+		// events, no compaction. Without a notify here the panel stays visually
+		// idle for the whole branch-summary request — a real LLM call that can
+		// run for seconds — which reads as the edit having done nothing at all.
+		this.notify();
 		try {
 			const promptMessage = agent.state.messages[promptIndex];
 			const entryId = promptMessage ? this.messageEntryIds.get(promptMessage) : undefined;
@@ -923,9 +1009,14 @@ export class ObsidianAgentService {
 				agent.state.messages = [...agent.state.messages.slice(0, promptIndex), summaryMessage];
 			}
 			this.notify();
-			return await this.sendPrompt(prompt, images);
+			return await this.deliverPrompt(prompt, images);
 		} finally {
 			this.retryInFlight = false;
+			// The flag's release is its own render: the notification inside the try
+			// fired while the send was still pretending to be busy, so without this
+			// one the panel could stay in the rewinding treatment through the first
+			// events of the replacement run — or, on a refused send, indefinitely.
+			this.notify();
 		}
 	}
 
@@ -1028,7 +1119,7 @@ export class ObsidianAgentService {
 	 */
 	async suggestQuickActions(scope: SuggestionScope): Promise<QuickAction[] | null> {
 		const settings = this.getSettings();
-		if (!this.hasApiKey() || !this.agent || this.agent.state.isStreaming || this.isCompacting) {
+		if (!this.hasApiKey() || !this.agent || this.agent.state.isStreaming || this.isCompacting || this.retryInFlight) {
 			return null;
 		}
 		const subject =
@@ -1490,6 +1581,7 @@ export class ObsidianAgentService {
 			usage: sumUsage(messages, this.overheadUsage),
 			contextFill: measureContextFill(messages, contextWindow, this.resolveCompaction(contextWindow)),
 			isCompacting: this.isCompacting,
+			isRewinding: this.retryInFlight,
 			isConfigured: this.hasApiKey(),
 			showAgentDetails: settings.showAgentDetails,
 			// `getLanguage` is newer than this plugin's minAppVersion, so the shipped

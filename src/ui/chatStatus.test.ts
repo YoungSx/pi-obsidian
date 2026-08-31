@@ -5,7 +5,7 @@ import { getT } from "../i18n";
 const en = getT("en");
 const zh = getT("zh-cn");
 
-const idle = { isInitializing: false, isCompacting: false, showAgentDetails: false };
+const idle = { isInitializing: false, isCompacting: false, isRewinding: false, showAgentDetails: false };
 
 describe("chatStatusText", () => {
 	it("reports nothing while idle, so no empty row is reserved", () => {

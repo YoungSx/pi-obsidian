@@ -12,6 +12,14 @@ interface ChatComposerProps {
 	input: string;
 	isStreaming: boolean;
 	isCompacting: boolean;
+	/**
+	 * Whether a retry/edit-resend is between its guards and the replacement
+	 * send — the silent window where the transcript moves on its own. Read as
+	 * busy, exactly as streaming is: the send must be held, the editing notice
+	 * must not claim the composer is still armed for the same edit, and Stop
+	 * must stay reachable to cancel the branch summary mid-request.
+	 */
+	isRewinding: boolean;
 	isInitializing: boolean;
 	/**
 	 * Whether the active model target has a key ready.
@@ -118,6 +126,7 @@ export function ChatComposer({
 	onCancelEdit,
 	isStreaming,
 	isCompacting,
+	isRewinding,
 	isInitializing,
 	isConfigured,
 	sendShortcut,
@@ -138,7 +147,7 @@ export function ChatComposer({
 	const t = useT();
 	const textareaRef = useRef<HTMLTextAreaElement | null>(null);
 	const onSendRef = useRef<() => void>(onSend);
-	const isBusy = isStreaming || isCompacting;
+	const isBusy = isStreaming || isCompacting || isRewinding;
 	const [menuOpen, setMenuOpen] = useState(false);
 	// Per-instance rather than a constant: Obsidian allows several leaves of one
 	// view type, so two open chat panels would otherwise share one id and the

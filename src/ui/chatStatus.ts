@@ -98,6 +98,13 @@ export interface ChatStatusInput {
 	isInitializing: boolean;
 	isCompacting: boolean;
 	/**
+	 * Whether a retry or edit-resend is between its guards and the replacement
+	 * send. Like compaction, this is a real LLM request (the abandoned branch's
+	 * summary) that the transcript does not narrate — nothing streams, so
+	 * without a line here the wait reads as the panel having done nothing.
+	 */
+	isRewinding: boolean;
+	/**
 	 * Whether the reader has asked for agent-internal vocabulary.
 	 *
 	 * Only compaction is worded two ways. "Compacting context" names the mechanism
@@ -119,7 +126,9 @@ export interface ChatStatusInput {
  * Opening and compaction stay because neither has a place in the transcript:
  * opening is the panel starting up before there is a conversation, and
  * compaction is a request of its own that the reader did not initiate and the
- * message stream does not narrate. A reply in flight does have a place — the
+ * message stream does not narrate. The rewind window belongs here for the same
+ * reason — the branch summary it runs is silent, and nothing in the transcript
+ * says the edit is being processed. A reply in flight does have a place — the
  * typing indicator at the assistant's position — so its state is not
  * duplicated here; its elapsed-and-steps readout ({@link runProgressText}) is,
  * because that is a measurement of the wait, not a narration of it.
@@ -134,6 +143,9 @@ export function chatStatusText(input: ChatStatusInput, t: Translator): string | 
 	}
 	if (input.isCompacting) {
 		return t.t(input.showAgentDetails ? "chat.compacting" : "chatStatus.tidyingUp");
+	}
+	if (input.isRewinding) {
+		return t.t("chatStatus.resending");
 	}
 	return null;
 }
