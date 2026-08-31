@@ -21,8 +21,8 @@ import { slugifyServerName, type McpServerConfig } from "./mcpConfig";
  *
  * 1. **GET stream disabled.** Streamable HTTP servers may hold a GET SSE stream
  *    open for server→client notifications. Obsidian's `requestUrl` transport —
- *    the CORS-free path most MCP servers need — buffers whole responses and
- *    would time that stream out after 300s. The SDK treats a 405 on the GET as
+ *    the CORS-free path most MCP servers need — buffers whole responses, so a
+ *    stream meant to stay open would never resolve at all. The SDK treats a 405 on the GET as
  *    "no server stream, carry on", so the fetch handed to the transport
  *    short-circuits GET with exactly that. Tool calls (POST) are unaffected.
  *    Cost: no server push and no `tools/list_changed` — the list refreshes when
@@ -34,11 +34,40 @@ import { slugifyServerName, type McpServerConfig } from "./mcpConfig";
  *    mobile-first plugin cannot offer.
  */
 
-/** Connect + initial tools/list must finish inside this, or the server is marked unreachable. */
+/**
+ * Connect + initial tools/list must finish inside this, or the server is marked
+ * unreachable.
+ *
+ * Ours to choose, unlike a tool call: connecting happens on plugin load and on
+ * every settings save, with no model in the loop to ask and a user waiting on the
+ * settings panel to repaint. A server that cannot say hello in fifteen seconds
+ * is reported as down and retried on the next save.
+ */
 const CONNECT_TIMEOUT_MS = 15_000;
 
-/** Upper bound on one tool call — MCP tools are remote; an unbounded call hangs the agent turn. */
-const CALL_TIMEOUT_MS = 120_000;
+/**
+ * Default wait on one tool call, when the model does not say what it wants.
+ *
+ * Not a policy ceiling: the model may raise it per call via `timeoutMs`, the same
+ * dial `wait_subagent` exposes. But unlike pi's `timeoutMs?`, the MCP SDK has no
+ * "no limit" — omitting `timeout` silently takes its own 60s default (`Protocol`
+ * arms a `setTimeout` unconditionally), and `setTimeout` fires immediately past
+ * the 32-bit range, so "forever" is not expressible even by asking for a huge
+ * number. Some number is therefore unavoidable here; this one is a starting
+ * point the model can move, not a limit it cannot.
+ */
+const CALL_TIMEOUT_DEFAULT_MS = 120_000;
+
+/**
+ * The dial the model turns to buy a slow tool more time.
+ *
+ * Merged into every MCP tool's own schema rather than wrapped around it: the
+ * schema belongs to the server, and a parameter named for what it does is how
+ * the model learns the knob exists at all. `mcp` prefixes the name so it cannot
+ * collide with a server's own field, and it is stripped before the arguments go
+ * out on the wire.
+ */
+const TIMEOUT_PARAM = "mcpTimeoutMs";
 
 /** Cap on text returned to the model, matching every other tool's byte budget. */
 const mcpClientInfo = { name: "piem", version: "1.0.0" } as const;
@@ -75,6 +104,51 @@ function asTypeBoxSchema(inputSchema: unknown): TSchema {
 	// `{"type": "object", …}` documents, and pi serializes `parameters` back out
 	// as JSON Schema for the model. The cast is structural, not a lie.
 	return inputSchema as TSchema;
+}
+
+/**
+ * The server's schema with the timeout dial added as one more property.
+ *
+ * Shallow-copied rather than mutated: `entry.tools` is the cached listing, and
+ * writing into it would leave the injected property behind on a reconnect that
+ * reuses the same objects.
+ *
+ * A server that already publishes this name keeps its own, and `injected` is how
+ * the call site learns that: the field is then the server's real argument, so
+ * stripping it before the call would silently drop it — the corruption the name
+ * collision was supposed to avoid.
+ */
+function withTimeoutParam(inputSchema: unknown): { schema: TSchema; injected: boolean } {
+	const schema = asTypeBoxSchema(inputSchema) as TSchema & { properties?: Record<string, unknown> };
+	if (schema?.properties?.[TIMEOUT_PARAM] !== undefined) {
+		return { schema, injected: false };
+	}
+	return {
+		injected: true,
+		schema: {
+			...schema,
+			properties: {
+				...schema.properties,
+				[TIMEOUT_PARAM]: {
+					type: "number",
+					description: `How long to wait for this call, in milliseconds. Default ${Math.round(CALL_TIMEOUT_DEFAULT_MS / 1000)}s; raise it for a call you expect to be slow.`,
+				},
+			},
+		} as TSchema,
+	};
+}
+
+/** Splits the injected dial back out, so the server only sees its own arguments. */
+function takeTimeout(params: Record<string, unknown>, injected: boolean): { timeoutMs: number; args: Record<string, unknown> } {
+	if (!injected) {
+		return { timeoutMs: CALL_TIMEOUT_DEFAULT_MS, args: params };
+	}
+	const { [TIMEOUT_PARAM]: requested, ...args } = params;
+	// A model may pass a string, a negative, or NaN. Anything that is not a
+	// usable positive number falls back rather than arming a timer that fires at
+	// once — an instant timeout would read to the model as a broken server.
+	const timeoutMs = typeof requested === "number" && Number.isFinite(requested) && requested > 0 ? requested : CALL_TIMEOUT_DEFAULT_MS;
+	return { timeoutMs, args };
 }
 
 /** Sanitizes an MCP tool name for embedding in a pi tool name. */
@@ -313,6 +387,7 @@ export class McpManager {
 	}
 
 	private buildTool(server: McpServerConfig, client: Client, mcpTool: McpTool, name: string): AgentTool {
+		const dial = withTimeoutParam(mcpTool.inputSchema);
 		const origin = `${serverLabel(server)} MCP server`;
 		const disclosure =
 			`[MCP tool from ${origin}: ${server.url}] ` +
@@ -321,14 +396,15 @@ export class McpManager {
 			name,
 			label: mcpTool.name,
 			description: `${mcpTool.description ?? ""}\n\n${disclosure}`.trim(),
-			parameters: asTypeBoxSchema(mcpTool.inputSchema),
+			parameters: dial.schema,
 			execute: async (_toolCallId, params, signal): Promise<AgentToolResult<Record<string, unknown>>> => {
 				throwIfAborted(signal);
+				const { timeoutMs, args } = takeTimeout(params as Record<string, unknown>, dial.injected);
 				const result = await withTimeout(
 					// The SDK's own timeout (60s default) would fire first and misleadingly;
-					// raise it to our budget and let withTimeout be the single clock.
-					client.callTool({ name: mcpTool.name, arguments: params as Record<string, unknown> }, { signal, timeout: CALL_TIMEOUT_MS }),
-					CALL_TIMEOUT_MS,
+					// hand it the same budget and let withTimeout be the single clock.
+					client.callTool({ name: mcpTool.name, arguments: args }, { signal, timeout: timeoutMs }),
+					timeoutMs,
 					`Calling ${mcpTool.name}`,
 				);
 				throwIfAborted(signal);

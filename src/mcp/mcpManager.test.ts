@@ -212,6 +212,109 @@ describe("McpManager", () => {
 		await manager.dispose();
 	});
 
+	it("offers the model a timeout dial on every tool, and keeps it off the wire", async () => {
+		// The MCP SDK has no "no limit" — omitting `timeout` takes its own 60s
+		// default — so the honest move is to hand the number to the model rather
+		// than pick one for it. The dial rides the server's own schema, which is
+		// how the model learns it exists; the server must never see it.
+		const bodies: string[] = [];
+		const server = serverFixture({ name: "slow", url: "https://slow.example.com" });
+		const manager = makeManager([server], () => async (url, init) => {
+			if ((init?.method ?? "GET").toUpperCase() === "GET") {
+				return new Response(null, { status: 405 });
+			}
+			const body = typeof init?.body === "string" ? init.body : "";
+			bodies.push(body);
+			if (body.includes('"method":"initialize"')) {
+				return handshakeResponses("session-1")[0]!;
+			}
+			if (body.includes("notifications/initialized")) {
+				return new Response(null, { status: 202 });
+			}
+			if (body.includes('"method":"tools/list"')) {
+				return new Response(
+					JSON.stringify({
+						jsonrpc: "2.0",
+						id: 1,
+						result: {
+							tools: [{ name: "crawl", inputSchema: { type: "object", properties: { path: { type: "string" } } } }],
+						},
+					}),
+					{ status: 200, headers: { "content-type": "application/json" } },
+				);
+			}
+			return new Response(
+				JSON.stringify({ jsonrpc: "2.0", id: 2, result: { content: [{ type: "text", text: "swept" }] } }),
+				{ status: 200, headers: { "content-type": "application/json" } },
+			);
+		});
+
+		await manager.connect();
+		const [tool] = manager.buildAgentTools();
+		const properties = (tool!.parameters as { properties: Record<string, unknown> }).properties;
+		expect(Object.keys(properties)).toEqual(["path", "mcpTimeoutMs"]);
+
+		const result = await tool!.execute("call_1", { path: "/", mcpTimeoutMs: 600_000 }, undefined);
+		expect((result.content[0] as { text: string }).text).toContain("swept");
+		const callBody = bodies.find((body) => body.includes('"method":"tools/call"'))!;
+		expect(callBody).toContain('"path":"/"');
+		expect(callBody).not.toContain("mcpTimeoutMs");
+		await manager.dispose();
+	});
+
+	it("leaves a server's own field of that name alone", async () => {
+		// Shadowing a real parameter would corrupt the call, and the server's
+		// schema is the authority on its own arguments.
+		const bodies: string[] = [];
+		const server = serverFixture({ name: "own", url: "https://own.example.com" });
+		const manager = makeManager([server], () => async (url, init) => {
+			if ((init?.method ?? "GET").toUpperCase() === "GET") {
+				return new Response(null, { status: 405 });
+			}
+			const body = typeof init?.body === "string" ? init.body : "";
+			bodies.push(body);
+			if (body.includes('"method":"initialize"')) {
+				return handshakeResponses("session-1")[0]!;
+			}
+			if (body.includes("notifications/initialized")) {
+				return new Response(null, { status: 202 });
+			}
+			if (body.includes('"method":"tools/list"')) {
+				return new Response(
+					JSON.stringify({
+						jsonrpc: "2.0",
+						id: 1,
+						result: {
+							tools: [
+								{
+									name: "poll",
+									inputSchema: { type: "object", properties: { mcpTimeoutMs: { type: "string", description: "theirs" } } },
+								},
+							],
+						},
+					}),
+					{ status: 200, headers: { "content-type": "application/json" } },
+				);
+			}
+			return new Response(
+				JSON.stringify({ jsonrpc: "2.0", id: 2, result: { content: [{ type: "text", text: "polled" }] } }),
+				{ status: 200, headers: { "content-type": "application/json" } },
+			);
+		});
+
+		await manager.connect();
+		const [tool] = manager.buildAgentTools();
+		const own = (tool!.parameters as { properties: Record<string, { description?: string }> }).properties.mcpTimeoutMs;
+		expect(own?.description).toBe("theirs");
+
+		// And it reaches the wire: a field the server declared is a real argument,
+		// so stripping it would drop data rather than protect anything.
+		await tool!.execute("call_1", { mcpTimeoutMs: "5m" }, undefined);
+		const callBody = bodies.find((body) => body.includes('"method":"tools/call"'))!;
+		expect(callBody).toContain('"mcpTimeoutMs":"5m"');
+		await manager.dispose();
+	});
+
 	it("dispose closes every client so a reconnect starts fresh", async () => {
 		const server = serverFixture({ name: "x", url: "https://x.example.com" });
 		let postCount = 0;
