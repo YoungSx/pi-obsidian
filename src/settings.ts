@@ -510,8 +510,22 @@ export class PiemSettingTab extends PluginSettingTab {
 	 * renders anything at all on most supported versions. Switching would also
 	 * mean re-expressing the whole tab strip as `SettingDefinition[]`, which is
 	 * a separate piece of work from anything the panel needs today.
+	 *
+	 * The work lives in {@link renderPanel} rather than here so the language-change
+	 * redraw has something to call that is not a deprecated member. Obsidian calls
+	 * this override; nothing inside the panel does.
 	 */
 	display(): void {
+		this.renderPanel();
+	}
+
+	/**
+	 * The render itself, reachable without touching the deprecated override.
+	 *
+	 * Every redraw goes through here — see {@link display} for why the split
+	 * exists rather than the panel re-entering `display()`.
+	 */
+	private renderPanel(): void {
 		const language = resolveLanguage(this.app.vault as LanguageHost, this.plugin.settings.language);
 		renderSettingsPanel(this.containerEl, {
 			app: this.app,
@@ -523,8 +537,7 @@ export class PiemSettingTab extends PluginSettingTab {
 			save: async () => {
 				await this.plugin.saveSettings();
 				if (resolveLanguage(this.app.vault as LanguageHost, this.plugin.settings.language) !== language) {
-					// eslint-disable-next-line @typescript-eslint/no-deprecated -- imperative render is deliberate; see the docstring above
-					this.display();
+					this.renderPanel();
 				}
 			},
 			secretStorage: this.secretStorageTier,

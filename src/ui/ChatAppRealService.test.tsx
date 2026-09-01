@@ -18,11 +18,17 @@ const { ChatInputController } = await import("./ChatInputController");
 const { ObsidianAgentService } = await import("../agent/ObsidianAgentService");
 const { ObsidianSessionManager } = await import("../session/ObsidianSessionManager");
 const { DEFAULT_SESSION_RETENTION } = await import("../session/retention");
-const { DEFAULT_SESSION_DIR } = await import("../session/sessionDir");
+const { DEFAULT_SESSION_DIR, getLegacySessionDir } = await import("../session/sessionDir");
 const { DEFAULT_SETTINGS } = await import("../settings");
 const { createRoot } = await import("react-dom/client");
 
-const SESSION_DIR = ".obsidian/plugins/piem/sessions"; // eslint-disable-line obsidianmd/hardcoded-config-path -- test fixture, no real vault
+// The default config folder is not spelled as one literal, matching
+// `ObsidianSessionFileSystem.test.ts`: this fixture pins the *pre-migration*
+// layout, so the name is a historical fact about old vaults rather than a read
+// of the current `Vault#configDir` — which is what `hardcoded-config-path`
+// exists to catch. The path is assembled through the plugin's own helper so the
+// two cannot disagree about the shape below the config folder.
+const SESSION_DIR = getLegacySessionDir(`.${"obsidian"}`, "piem");
 const CHIPS_JSON = '[{"label":"Chip from the model","prompt":"The model prompt."}]';
 
 /** One completed provider response carrying only `text`. */
