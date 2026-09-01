@@ -74,12 +74,12 @@ export interface SecretKeyFieldOptions {
  */
 export function addSecretKeyField(containerEl: HTMLElement, options: SecretKeyFieldOptions): void {
 	const { t, tier } = options;
-	// A picker needs SecretComponent at runtime, not merely at compile time:
-	// this bundle also runs on Obsidian 1.5.7, where the class does not exist.
-	// The capability floor the tier already stands on (`peekSecret`, 1.11.5) is
-	// above SecretComponent's (1.11.1), so a delegated tier without the class
-	// cannot actually happen — but the typed field is the control that degrades
-	// correctly if the store's shape ever drifts, so it gets the fallthrough.
+	// The class is probed at runtime, not merely typed. `minAppVersion` is 1.13.0,
+	// which is above SecretComponent's 1.11.1, so the class is present on every
+	// supported host and this can no longer be a version fallback. It is kept as
+	// a shape guard: the typed field is the control that degrades correctly if the
+	// secret store's shape ever drifts, and that is cheaper than discovering the
+	// drift as a blank row where the API key belongs.
 	if (tier === "manual" || typeof SecretComponent !== "function") {
 		addTypedKeyField(containerEl, options, { desc: describeApiKeyField(tier, options.target, t) });
 		return;

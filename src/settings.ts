@@ -503,13 +503,13 @@ export class PiemSettingTab extends PluginSettingTab {
 	 * Renders the panel imperatively.
 	 *
 	 * Obsidian marks `display` deprecated since 1.13.0 in favour of the
-	 * declarative `getSettingDefinitions`, but its own docstring names the
-	 * exception this plugin falls under: "Only implement display() as a fallback
-	 * for plugins that need to support Obsidian versions older than 1.13.0."
-	 * `minAppVersion` is 1.5.7, so the imperative path is the only one that
-	 * renders anything at all on most supported versions. Switching would also
-	 * mean re-expressing the whole tab strip as `SettingDefinition[]`, which is
-	 * a separate piece of work from anything the panel needs today.
+	 * declarative `getSettingDefinitions`. With `minAppVersion` now at 1.13.0 the
+	 * old justification — "a fallback for plugins that need to support versions
+	 * older than 1.13.0" — no longer applies, so this is a deliberate deferral
+	 * rather than a necessity: adopting the declarative API means re-expressing
+	 * the whole tab strip as `SettingDefinition[]`, which is its own piece of
+	 * work. The cost of deferring is that these settings stay out of Obsidian's
+	 * settings search (`prefer-setting-definitions` reports exactly that).
 	 *
 	 * The work lives in {@link renderPanel} rather than here so the language-change
 	 * redraw has something to call that is not a deprecated member. Obsidian calls
