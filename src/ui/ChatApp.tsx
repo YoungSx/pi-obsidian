@@ -187,17 +187,31 @@ export function ChatApp({ service, inputController, component, draftStore, onOpe
 	 * panel appears. The built-in chips are already on screen — MessageList falls
 	 * back to them — so a failure here changes nothing visible, exactly the
 	 * contract that placement was given.
+	 *
+	 * The fetch is stale-while-revalidate (issue #200): a previous visit's answer
+	 * for this note fills the row immediately, the fresh request still goes out,
+	 * and its answer replaces the cached one — or, when the request cannot,
+	 * whatever is on screen stays. A cached row must not be mistaken for a fresh
+	 * answer, which is why the request runs even on a hit rather than short-
+	 * circuiting: the chips shown are always at most one request old.
 	 */
 	useEffect(() => {
 		if (!(snapshot.isConfigured ?? false) || isInitializing || snapshot.isStreaming || snapshot.messages.length > 0) {
 			return;
 		}
 		const request = ++suggestionRequestRef.current;
+		const cached = service.peekQuickActionSuggestions("empty");
+		if (cached) {
+			setSuggestions({ revision: snapshot.sessionRevision, scope: "empty", actions: cached });
+		}
 		void service.suggestQuickActions("empty").then((actions) => {
 			if (request !== suggestionRequestRef.current) {
 				return;
 			}
-			setSuggestions({ revision: snapshot.sessionRevision, scope: "empty", actions: actions ?? [] });
+			// Null is the request's failure shape, not an answer of none: the
+			// cached row stays put when there is one, and only a truly unanswered
+			// key clears to let the built-in chips back in.
+			setSuggestions({ revision: snapshot.sessionRevision, scope: "empty", actions: actions ?? cached ?? [] });
 		});
 		// Re-runs per session and per active-note change — the *path*, not just a
 		// presence flip, so A→B recomputes what the chips are about (issue #168
