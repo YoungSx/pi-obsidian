@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "bun:test";
-import { installObsidianStub } from "../testing/obsidianStub";
+import { installObsidianStub } from "../testUtils/obsidianStub";
 import type { McpServerConfig } from "./mcpConfig";
 
 // The manager transitively imports obsidianFetch, which imports Obsidian's

@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
-import { installObsidianStub } from "../testing/obsidianStub";
+import { installObsidianStub } from "../testUtils/obsidianStub";
 import type { App, DataAdapter, Component } from "obsidian";
 import type { Api, Context, Model } from "@earendil-works/pi-ai";
 import { createAssistantMessageEventStream } from "@earendil-works/pi-ai";
@@ -7,7 +7,7 @@ import type { StreamFn } from "@earendil-works/pi-agent-core";
 import type { ObsidianAgentService as ObsidianAgentServiceType } from "../agent/ObsidianAgentService";
 import type { PiemSettings } from "../settings";
 import type { UserSkillsLoad } from "../skills/userSkills";
-import { flushRender, installDom } from "../testing/dom";
+import { flushRender, installDom } from "../testUtils/dom";
 
 installObsidianStub();
 const document = installDom();

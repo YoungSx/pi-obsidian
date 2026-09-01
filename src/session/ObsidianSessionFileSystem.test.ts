@@ -2,7 +2,7 @@ import { describe, expect, it } from "bun:test";
 import type { DataAdapter } from "obsidian";
 import { JsonlSessionRepo } from "@earendil-works/pi-agent-core";
 import { ObsidianSessionFileSystem } from "./ObsidianSessionFileSystem";
-import { MemoryAdapter } from "../testing/memoryAdapter";
+import { MemoryAdapter } from "../testUtils/memoryAdapter";
 
 const SESSIONS_ROOT = "Piem/chats";
 const LEGACY_ROOT = `.${"obsidian"}/plugins/piem/sessions`;

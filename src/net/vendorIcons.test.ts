@@ -1,6 +1,6 @@
 import { describe, expect, it } from "bun:test";
 
-import { installObsidianStub, addIconMock } from "../testing/obsidianStub";
+import { installObsidianStub, addIconMock } from "../testUtils/obsidianStub";
 import type { VendorId } from "./vendorMatch";
 
 // The registry reaches `obsidian` for `addIcon`; the module ships types only,

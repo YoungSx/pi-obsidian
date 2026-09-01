@@ -1,8 +1,8 @@
 import { describe, expect, it } from "bun:test";
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { installDom } from "../../testing/dom";
-import { installObsidianDomHelpers } from "../../testing/obsidianDom";
+import { installDom } from "../../testUtils/dom";
+import { installObsidianDomHelpers } from "../../testUtils/obsidianDom";
 
 const document = installDom();
 installObsidianDomHelpers();

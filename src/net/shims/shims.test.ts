@@ -11,6 +11,12 @@ import type { AddressInfo } from "node:net";
 import OpenAI from "./openaiSdk.js";
 import Anthropic from "./anthropicSdk.js";
 import { buildRequestUrl, mergeHeaders, sseData } from "./apiHttp.js";
+import { stubWindowTimers } from "../../testUtils/windowStub";
+
+// The shims run inside Obsidian, so they arm `window.setTimeout` (popout-window
+// compatibility). These tests drive a real HTTP server rather than a DOM, so the
+// timers are put on `window` directly instead of installing happy-dom.
+const restoreWindowTimers = stubWindowTimers();
 
 const servers: Server[] = [];
 let requests: Array<{ url: string; headers: Record<string, string>; body: string }>;
@@ -59,6 +65,7 @@ afterAll(() => {
 		server.closeAllConnections();
 		server.close();
 	}
+	restoreWindowTimers();
 });
 
 describe("apiHttp primitives", () => {

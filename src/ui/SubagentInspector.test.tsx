@@ -4,8 +4,8 @@ import type { App, Component } from "obsidian";
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import type { Language } from "../i18n";
 import type { SubagentSnapshot } from "../subagent/inspectorModel";
-import { flushRender, installDom } from "../testing/dom";
-import { installObsidianStub } from "../testing/obsidianStub";
+import { flushRender, installDom } from "../testUtils/dom";
+import { installObsidianStub } from "../testUtils/obsidianStub";
 
 installObsidianStub();
 const document = installDom();

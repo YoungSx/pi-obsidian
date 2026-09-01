@@ -1,6 +1,6 @@
 import { describe, expect, it } from "bun:test";
 import type { DataAdapter } from "obsidian";
-import { installObsidianStub } from "../testing/obsidianStub";
+import { installObsidianStub } from "../testUtils/obsidianStub";
 
 // DraftStore imports Obsidian's `debounce` at runtime (#99), so the shared stub
 // must be registered before the module loads. The import below stays dynamic on
@@ -58,7 +58,7 @@ class MemoryAdapter {
  * Collects the records a store emits, so the tests can pin which failures get
  * logged rather than trusting that "somewhere a logger was touched".
  */
-const { spyLogger } = await import("../testing/logSpy");
+const { spyLogger } = await import("../testUtils/logSpy");
 
 function createStore(adapter = new MemoryAdapter(), logger?: ReturnType<typeof spyLogger>["logger"]): { store: DraftStoreInstance; adapter: MemoryAdapter } {
 	return { store: new DraftStore(adapter as unknown as DataAdapter, DRAFT_PATH, logger), adapter };

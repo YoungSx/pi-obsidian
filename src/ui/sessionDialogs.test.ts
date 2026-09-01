@@ -1,7 +1,7 @@
 import { describe, expect, it } from "bun:test";
 import type { App } from "obsidian";
-import { installDom } from "../testing/dom";
-import { installObsidianStub, lastSuggestModal, resetSuggestModals, type SuggestModalHandle } from "../testing/obsidianStub";
+import { installDom } from "../testUtils/dom";
+import { installObsidianStub, lastSuggestModal, resetSuggestModals, type SuggestModalHandle } from "../testUtils/obsidianStub";
 import { getT } from "../i18n";
 import type { ActiveSessionInfo } from "../session/ObsidianSessionManager";
 import type { SessionSearchResult } from "../session/sessionSearch";

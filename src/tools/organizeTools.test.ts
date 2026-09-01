@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import { installObsidianStub } from "../testing/obsidianStub";
+import { installObsidianStub } from "../testUtils/obsidianStub";
 import { PLUGIN_ID } from "../constants";
 import type { App, TAbstractFile, TFile, TFolder } from "obsidian";
 

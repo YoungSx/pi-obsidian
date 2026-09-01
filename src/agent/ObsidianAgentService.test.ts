@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import { installObsidianStub, requestUrlMock } from "../testing/obsidianStub";
+import { installObsidianStub, requestUrlMock } from "../testUtils/obsidianStub";
 import type { App, DataAdapter, ListedFiles, Stat, TFile, TFolder } from "obsidian";
 import type { Api, AssistantMessage, Context, Model, SimpleStreamOptions } from "@earendil-works/pi-ai";
 import { createAssistantMessageEventStream } from "@earendil-works/pi-ai";
@@ -12,7 +12,7 @@ import { DEFAULT_LOG_LEVEL } from "../logging/logLevel";
 import type { PiemSettings } from "../settings";
 import type { ObsidianAgentService as ObsidianAgentServiceType } from "./ObsidianAgentService";
 import type { UserSkillsLoad } from "../skills/userSkills";
-import { spyLogger } from "../testing/logSpy";
+import { spyLogger } from "../testUtils/logSpy";
 import { getT } from "../i18n";
 import type { LoggerLike } from "../logging/Logger";
 

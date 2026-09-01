@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import type { App, Component } from "obsidian";
-import { flushRender, installDom } from "../testing/dom";
-import { installObsidianStub } from "../testing/obsidianStub";
+import { flushRender, installDom } from "../testUtils/dom";
+import { installObsidianStub } from "../testUtils/obsidianStub";
 import type { ChatSnapshot } from "../agent/ObsidianAgentService";
 import type { ContextFill, UsageTotals } from "../agent/usage";
 import type { UserMessage } from "@earendil-works/pi-ai";

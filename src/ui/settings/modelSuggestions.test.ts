@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import { installObsidianStub } from "../../testing/obsidianStub";
+import { installObsidianStub } from "../../testUtils/obsidianStub";
 
 // `ModelModal` extends Obsidian's `Modal` at module scope, so the stub has to be
 // registered before the import below resolves.

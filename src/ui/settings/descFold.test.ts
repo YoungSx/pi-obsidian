@@ -1,7 +1,7 @@
 import { describe, expect, it } from "bun:test";
-import { installDom } from "../../testing/dom";
-import { installObsidianDomHelpers } from "../../testing/obsidianDom";
-import { installObsidianStub } from "../../testing/obsidianStub";
+import { installDom } from "../../testUtils/dom";
+import { installObsidianDomHelpers } from "../../testUtils/obsidianDom";
+import { installObsidianStub } from "../../testUtils/obsidianStub";
 import type { Translator } from "../../i18n";
 
 const document = installDom();

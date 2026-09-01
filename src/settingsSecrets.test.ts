@@ -11,7 +11,7 @@
  */
 
 import { describe, expect, it } from "bun:test";
-import { installObsidianStub } from "./testing/obsidianStub";
+import { installObsidianStub } from "./testUtils/obsidianStub";
 import type { Keychain } from "./keychain";
 import type { PiemSettings } from "./settings";
 

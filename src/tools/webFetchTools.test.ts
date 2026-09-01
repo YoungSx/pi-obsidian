@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, mock } from "bun:test";
-import { installObsidianStub, requestUrlMock } from "../testing/obsidianStub";
-import { stubWindowFetch } from "../testing/windowFetch";
+import { installObsidianStub, requestUrlMock } from "../testUtils/obsidianStub";
+import { stubWindowFetch } from "../testUtils/windowStub";
 
 installObsidianStub();
 

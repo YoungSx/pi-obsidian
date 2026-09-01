@@ -9,11 +9,11 @@
  */
 
 import { describe, expect, it } from "bun:test";
-import { installObsidianStub } from "./testing/obsidianStub";
+import { installObsidianStub } from "./testUtils/obsidianStub";
 // `main.ts` reaches the React tree (PiemChatView), and react-dom must be
 // evaluated after the test DOM exists — every `src/ui` test holds this same
 // ordering, and breaking it silently kills `useEffect` listeners there.
-import { installDom } from "./testing/dom";
+import { installDom } from "./testUtils/dom";
 import type { LoggerLike } from "./logging/Logger";
 import type PiemPluginType from "./main";
 import type { Keychain } from "./keychain";

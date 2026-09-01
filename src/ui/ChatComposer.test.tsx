@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
-import { flushRender, installDom } from "../testing/dom";
-import { installObsidianStub, platformMock, setTooltipMock } from "../testing/obsidianStub";
+import { flushRender, installDom } from "../testUtils/dom";
+import { installObsidianStub, platformMock, setTooltipMock } from "../testUtils/obsidianStub";
 
 installObsidianStub();
 const document = installDom();
