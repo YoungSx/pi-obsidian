@@ -1,5 +1,6 @@
 import { describe, expect, it, mock, beforeEach } from "bun:test";
 import { installObsidianStub, requestUrlMock } from "../testing/obsidianStub";
+import { stubWindowFetch } from "../testing/windowFetch";
 
 /** The subset of Obsidian's `RequestUrlResponse` that these tests rely on. */
 interface MockRequestUrlResponse {
@@ -349,8 +350,8 @@ describe("createFetchForTransport", () => {
 		requestUrlMock.mockReset();
 		const nativeFetch = mock<() => Promise<Response>>();
 		nativeFetch.mockResolvedValue(new Response("{}", { status: 200 }));
-		const original = globalThis.fetch;
-		globalThis.fetch = nativeFetch as unknown as typeof globalThis.fetch;
+		// Stubbed on `window`, which is the path the wrapper takes.
+		const restore = stubWindowFetch(nativeFetch);
 
 		try {
 			const fetchImpl = createFetchForTransport("fetch");
@@ -358,7 +359,7 @@ describe("createFetchForTransport", () => {
 			expect(nativeFetch).toHaveBeenCalledTimes(1);
 			expect(requestUrlMock).not.toHaveBeenCalled();
 		} finally {
-			globalThis.fetch = original;
+			restore();
 		}
 	});
 });

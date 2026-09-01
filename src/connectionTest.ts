@@ -2,6 +2,7 @@ import type { Models } from "@earendil-works/pi-ai";
 import type { Translator } from "./i18n";
 import { buildConfiguredModel, type ModelConfig, type ProviderConfig } from "./modelConfig";
 import { probeModelListing, type ModelListingResult } from "./net/modelListing";
+import { createObsidianStreamingFetch } from "./net/obsidianFetch";
 
 /**
  * Verifying a configured endpoint by actually calling it.
@@ -208,7 +209,11 @@ export async function testProviderConnection(
 	}
 
 	try {
-		const listing = await probeModelListing(provider, { fetch: options.fetch ?? window.fetch, signal: options.signal });
+		// The shared factory rather than a bare `window.fetch`: detached from
+		// `window` the method loses its receiver, and the factory already owns the
+		// wrapping every other caller goes through.
+		const fetchImpl = options.fetch ?? createObsidianStreamingFetch();
+		const listing = await probeModelListing(provider, { fetch: fetchImpl, signal: options.signal });
 		return describeListingResult(provider, listing, t);
 	} catch (error) {
 		return { ok: false, detail: describeError(error, t) };
