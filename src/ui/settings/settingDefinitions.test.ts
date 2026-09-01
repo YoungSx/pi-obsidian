@@ -121,10 +121,11 @@ describe("buildSettingDefinitions", () => {
 	it("keeps a page factory only while a tab still needs the imperative bridge", () => {
 		const definitions = buildSettingDefinitions(stubHost());
 
-		// Models has not moved its dynamic provider/model lists yet, so it still
-		// needs the bridge; Chat has moved and is now a real inline page.
-		expect(typeof (definitions[0] as { page?: unknown }).page).toBe("function");
+		// Models and Chat have moved to inline definitions; Extensions still owns
+		// asynchronous skill/MCP lifecycle work through the bridge.
+		expect((definitions[0] as { items?: unknown[] }).items).toBeArray();
 		expect((definitions[1] as { items?: unknown[] }).items).toBeArray();
+		expect(typeof (definitions[2] as { page?: unknown }).page).toBe("function");
 	});
 
 	it("puts the Chat tab's ordinary toggle in a real control definition", () => {
