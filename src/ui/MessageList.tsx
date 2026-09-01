@@ -58,6 +58,15 @@ export interface MessageListProps {
 	 * an edit behind it.
 	 */
 	onEditMessage?: (index: number) => void;
+	/**
+	 * Starts an A/B comparison from the question behind `index`.
+	 *
+	 * Offered on the same question the edit is offered on, for the same reason
+	 * both are bounded that way: the comparison forks at that turn, so any
+	 * earlier one would strand the turns between it and the tail on a branch the
+	 * reader did not ask to leave. Absent while anything is in flight.
+	 */
+	onCompare?: (index: number) => void;
 	/** Render context for `MarkdownRenderer.render`; supplied by the view. */
 	app: App;
 	component: Component;
@@ -250,6 +259,7 @@ export function MessageList({
 	onOpenSettings,
 	onRetry,
 	onEditMessage,
+	onCompare,
 	app,
 	component,
 	sourcePath,
@@ -384,6 +394,9 @@ export function MessageList({
 								onEditMessage && index === editIndex && !isStreaming && !isCompacting
 									? () => onEditMessage(index)
 									: undefined
+							}
+							onCompare={
+								onCompare && index === editIndex && !isStreaming && !isCompacting ? () => onCompare(index) : undefined
 							}
 						/>
 					))
@@ -583,6 +596,8 @@ interface MessageRowProps {
 	onRetry?: () => void;
 	/** Opens this question in the composer; supplied only for the newest answered one. */
 	onEdit?: () => void;
+	/** Forks this question into two comparison branches; same bound as {@link onEdit}. */
+	onCompare?: () => void;
 }
 
 /**
@@ -592,7 +607,7 @@ interface MessageRowProps {
  * calls, tool results, harness output, compaction summaries — renders flat, so
  * a card never contains another bordered box.
  */
-function MessageRow({ message, isStreaming, renderContext, onRetry, onEdit }: MessageRowProps): React.JSX.Element | null {
+function MessageRow({ message, isStreaming, renderContext, onRetry, onEdit, onCompare }: MessageRowProps): React.JSX.Element | null {
 	// The summary fronts a compacted transcript; it reads as a divider ("history
 	// above this was summarized"), not as one more message bubble.
 	if (message.role === "compactionSummary") {
@@ -637,16 +652,19 @@ function MessageRow({ message, isStreaming, renderContext, onRetry, onEdit }: Me
 				{message.role === "assistant" && !isStreaming ? (
 					<ReplyActions app={renderContext.app} text={assistantText(message)} onRetry={onRetry} />
 				) : null}
-				{message.role === "user" && onEdit ? (
+				{message.role === "user" && (onEdit || onCompare) ? (
 					/*
-					 * A single always-visible control, mirroring the reply's actions row:
-					 * on a touch panel there is no hover to surface anything, and an edit
+					 * Always-visible controls, mirroring the reply's actions row: on a
+					 * touch panel there is no hover to surface anything, and an action
 					 * offered only via long-press or a hidden menu is one a reader never
-					 * finds. It sits under the bubble — outside the card, in the row the
+					 * finds. They sit under the bubble — outside the card, in the row the
 					 * article owns — so the two roles read the same way.
 					 */
 					<div className="piem-chat__message-actions">
-						<IconButton icon="pen-line" label={renderContext.t.t("chat.editMessage")} onClick={onEdit} />
+						{onEdit ? <IconButton icon="pen-line" label={renderContext.t.t("chat.editMessage")} onClick={onEdit} /> : null}
+						{onCompare ? (
+							<IconButton icon="git-branch" label={renderContext.t.t("chat.compareFromHere")} onClick={onCompare} />
+						) : null}
 					</div>
 				) : null}
 			</article>

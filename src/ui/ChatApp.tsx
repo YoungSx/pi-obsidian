@@ -5,7 +5,7 @@ import type { ChatSnapshot, ObsidianAgentService } from "../agent/ObsidianAgentS
 import type { SuggestionScope } from "../agent/quickActionSuggestionRequest";
 import type { QuickAction } from "./quickActionSuggestions";
 import type { ActiveSessionInfo } from "../session/ObsidianSessionManager";
-import type { DraftStore } from "../session/DraftStore";
+import { draftKey, type DraftStore } from "../session/DraftStore";
 import { snapshotSubagents, type SubagentSnapshot } from "../subagent/inspectorModel";
 import type { ChatInputController } from "./ChatInputController";
 import { getActiveNotePath } from "./activeNotePath";
@@ -17,6 +17,8 @@ import { countRunSteps } from "./chatStatus";
 import { ContextGauge } from "./ContextGauge";
 import { contextLevel } from "./headerCopy";
 import { ContextRow } from "./ContextRow";
+import { LaneSwitcher } from "./LaneSwitcher";
+import { openChooseLane } from "./chooseLaneModal";
 import { SubagentEntryIcon } from "./SubagentEntryIcon";
 import { MessageList } from "./MessageList";
 import { ModelSwitcher } from "./ModelSwitcher";
@@ -24,6 +26,7 @@ import { ThinkingLevelSelector } from "./ThinkingLevelSelector";
 import { appendToDraft } from "./noteReference";
 import { userText } from "./messageActions";
 import { canOpenPluginSettings, openPluginSettings } from "./pluginSettings";
+import { getT } from "../i18n";
 import { TranslatorProvider } from "./TranslatorContext";
 import { useSessionDraft } from "./useSessionDraft";
 import { fileToPendingImage, toImageContents, type PendingImage } from "./pendingImages";
@@ -51,7 +54,12 @@ interface ChatAppProps {
 
 export function ChatApp({ service, inputController, component, draftStore, onOpenSubagents }: ChatAppProps): React.JSX.Element {
 	const [snapshot, setSnapshot] = useState<ChatSnapshot>(() => service.getSnapshot());
-	const { draft: input, setDraft: setInput, clearDraft } = useSessionDraft(draftStore, snapshot.session?.id);
+	// Keyed by session *and* lane: an A/B comparison has two writable branches at
+	// once, and a half-written question for one side must not surface in the
+	// other's composer. `draftKey` keeps the main lane on the bare session id, so
+	// drafts written before lanes existed are still found.
+	const draftScope = snapshot.session ? draftKey(snapshot.session.id, snapshot.activeLane) : undefined;
+	const { draft: input, setDraft: setInput, clearDraft } = useSessionDraft(draftStore, draftScope);
 	const [sessions, setSessions] = useState<ActiveSessionInfo[]>([]);
 	const [isInitializing, setIsInitializing] = useState(true);
 	// Reported upward by the composer, then handed to the transcript so its skip
@@ -307,11 +315,44 @@ export function ChatApp({ service, inputController, component, draftStore, onOpe
 	 * reason the wall hides — the service declines the work itself when busy.
 	 */
 	const recoveryOffer = useMemo(() => {
-		if (!snapshot.canResumeInterrupted || snapshot.isStreaming || snapshot.isCompacting) {
+		// `isRewinding` joins the two busy states for the same reason they are
+		// here: the service declines `continue()` during a retry's rewind as well,
+		// so an offer standing through it invites a press that cannot land.
+		if (!snapshot.canResumeInterrupted || snapshot.isStreaming || snapshot.isCompacting || snapshot.isRewinding) {
 			return undefined;
 		}
 		return { onResume: () => void service.resumeInterruptedRun(), onDismiss: () => service.dismissInterruptedRun() };
-	}, [snapshot.canResumeInterrupted, snapshot.isStreaming, snapshot.isCompacting, service]);
+	}, [snapshot.canResumeInterrupted, snapshot.isStreaming, snapshot.isCompacting, snapshot.isRewinding, service]);
+
+	/*
+	 * Starting a comparison empties the composer's staged images: the fork lands
+	 * on a branch where the turn they were staged for no longer exists, so
+	 * carrying them would attach them to whatever the reader types next.
+	 */
+	const handleCompare = useCallback(
+		(index: number): void => {
+			setEditArmed(null);
+			setPendingImages([]);
+			void service.startComparison(index);
+		},
+		[service],
+	);
+
+	/*
+	 * Choosing a winner asks about the losing branch first — see
+	 * `openChooseLane`, whose two buttons *are* the two outcomes. Armed edits let
+	 * go: the index they stood for belongs to the branch being left behind.
+	 */
+	const handleChooseLane = useCallback((): void => {
+		const lane = snapshot.activeLane;
+		openChooseLane(app, {
+			t: getT(snapshot.language),
+			onChoose: (losers) => {
+				setEditArmed(null);
+				return service.chooseLane(lane, losers).then(() => undefined);
+			},
+		});
+	}, [app, service, snapshot.activeLane, snapshot.language]);
 
 	/*
 	 * Whether an armed edit still names its turn. A session switch leaves the
@@ -562,6 +603,9 @@ export function ChatApp({ service, inputController, component, draftStore, onOpe
 					onEditMessage={
 						snapshot.isStreaming || snapshot.isCompacting || snapshot.isRewinding ? undefined : handleEditMessage
 					}
+					onCompare={
+						snapshot.isStreaming || snapshot.isCompacting || snapshot.isRewinding ? undefined : handleCompare
+					}
 					app={app}
 					component={component}
 					sourcePath={sourcePath}
@@ -620,6 +664,15 @@ export function ChatApp({ service, inputController, component, draftStore, onOpe
 							// parameter, so nothing else has to gate on support.
 							target={snapshot}
 							onSelect={(level) => void service.setThinkingLevel(level)}
+							isBusy={snapshot.isStreaming || snapshot.isCompacting || snapshot.isRewinding}
+						/>
+					}
+					laneSwitcher={
+						<LaneSwitcher
+							lanes={snapshot.lanes}
+							activeLane={snapshot.activeLane}
+							onSwitch={(lane) => void service.switchLane(lane)}
+							onChoose={handleChooseLane}
 							isBusy={snapshot.isStreaming || snapshot.isCompacting || snapshot.isRewinding}
 						/>
 					}

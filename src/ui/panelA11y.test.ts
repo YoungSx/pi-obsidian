@@ -159,6 +159,27 @@ describe("icon contrast in the resting state (WCAG 1.4.11)", () => {
 	});
 
 	/*
+	 * The comparison-branch switcher joins the send bar's leading cluster and is
+	 * styled like the switchers beside it, so it inherits their obligation: muted
+	 * by colour token rather than opacity, lifted on focus everywhere and on hover
+	 * only where a pointer can rest. Asserted rather than assumed, because it is a
+	 * fourth copy of a treatment the loop above cannot reach.
+	 */
+	it("mutes the lane switcher with colour, and lifts it on focus and hover", () => {
+		const body = ruleBody(".piem-chat__lane-switcher-button");
+
+		expect(body).not.toMatch(/(^|[^-])opacity\s*:/);
+		expect(body).toContain("--icon-color: var(--text-muted)");
+		expect(body).toContain("--icon-color-hover: var(--text-normal)");
+		// The branch name beside the glyph is text, so the icon tokens do not reach
+		// it; its own colour moves on the same two states.
+		expect(body).toContain("color: var(--text-muted)");
+		expect(ruleBody(".piem-chat__lane-switcher-button:focus-visible")).toContain("color: var(--text-normal)");
+		expect(ruleBody(".piem-chat__lane-switcher-button:hover")).toContain("color: var(--text-normal)");
+		expect(gatingBlockFor(".piem-chat__lane-switcher-button:hover")).not.toBeNull();
+	});
+
+	/*
 	 * Focus and hover are separate rules, not one selector list: the hover half is
 	 * gated on `@media (hover: hover)` (see the touch-hover block below) while the
 	 * focus half has to apply everywhere. Merging them would have swept keyboard

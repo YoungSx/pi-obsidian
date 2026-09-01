@@ -128,6 +128,34 @@ export const en = {
 		editMessage: "Edit and resend",
 		/** The composer notice while an edit is armed; see {@link editMessage}. */
 		editingNotice: "Editing your last question — sending replaces this reply.",
+		/**
+		 * Starts an A/B comparison from a question: two branches of the same
+		 * conversation, each continued separately, one of them eventually kept.
+		 *
+		 * "Compare" rather than "fork" or "branch": the reader's goal is to see two
+		 * answers side by side, and the tree that makes it possible is an
+		 * implementation detail they never have to hold.
+		 */
+		compareFromHere: "Compare two ways",
+		/** The lane switcher's accessible name. */
+		lanesLabel: "Comparison branches",
+		/** The original conversation, always the first option in the switcher. */
+		laneMain: "Original",
+		/** Comparison branches, numbered in creation order: "Option A", "Option B". */
+		laneOption: "Option {label}",
+		/** Settles the comparison in favour of the branch on screen. */
+		laneChoose: "Keep this one",
+		/** Title of the dialog that asks what happens to the branches not chosen. */
+		laneChooseTitle: "Keep this branch?",
+		/**
+		 * States both halves of the outcome before either is chosen: this branch
+		 * becomes the conversation, and the other one's fate is the actual question.
+		 */
+		laneChooseBody: "This branch becomes the conversation. What should happen to the other one?",
+		/** Leaves the losing branch switchable, as a reference. */
+		laneChooseKeep: "Keep it for reference",
+		/** Hides the losing branch; its turns stay in the chat log on disk. */
+		laneChooseRetire: "Clean it up",
 		/** Cancels the armed edit and restores the draft it displaced. */
 		editingCancel: "Cancel edit",
 		/**
