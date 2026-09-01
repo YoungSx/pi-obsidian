@@ -71,8 +71,8 @@ interface ChatBannerProps {
  * so a stale message stayed until the next turn overwrote it.
  *
  * At most one banner renders. Priority is urgency: a failure, then an outcome
- * the user just caused, then the standing context-wall offer — an offer can
- * wait; an error cannot.
+ * the user just caused, then the interrupted-reply offer, then the standing
+ * context-wall offer — an offer can wait; an error cannot.
  */
 export function ChatBanner({
 	errorMessage,

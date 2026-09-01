@@ -557,6 +557,7 @@ button.piem-settings-tab {
 	color: var(--text-muted);
 }
 
+
 .piem-chat__banner-icon {
 	flex-shrink: 0;
 	/* Optical alignment with one line of --font-ui-smaller text: the icon box is
@@ -2024,6 +2025,60 @@ button.piem-chat__latest {
 }
 
 .piem-chat__thinking-switcher-name {
+	white-space: nowrap;
+}
+
+/*
+ * The comparison-branch switcher, in the send bar's leading cluster beside the
+ * model and thinking controls — it answers the same class of question they do:
+ * where the message about to be sent will land. Rendered only while a
+ * comparison exists, so an ordinary chat spends no width on it.
+ */
+.piem-chat__lane-switcher {
+	align-items: center;
+	display: flex;
+	flex-shrink: 0;
+	gap: var(--size-4-1);
+	min-width: 0;
+}
+
+.piem-chat__lane-switcher-button {
+	--icon-color: var(--text-muted);
+	--icon-color-hover: var(--text-normal);
+	color: var(--text-muted);
+	flex-shrink: 0;
+	font-size: var(--font-ui-smaller);
+	gap: var(--size-4-1);
+	padding-inline: var(--size-4-1);
+	width: auto;
+}
+
+/* Same split as the switchers beside it: focus on every device, hover only
+ * where a pointer can rest. */
+.piem-chat__lane-switcher-button:focus-visible {
+	color: var(--text-normal);
+}
+
+@media (hover: hover) {
+
+	.piem-chat__lane-switcher-button:hover {
+		color: var(--text-normal);
+	}
+}
+
+.piem-chat__lane-switcher-name {
+	white-space: nowrap;
+}
+
+/*
+ * "Keep this one" reads as a control rather than an icon: it is the one
+ * irreversible action in the cluster, and the fill is what keeps it from being
+ * pressed while the reader thinks they are still browsing branches.
+ */
+.piem-chat__lane-choose {
+	flex-shrink: 0;
+	font-size: var(--font-ui-smaller);
+	min-height: var(--size-4-8);
 	white-space: nowrap;
 }
 

@@ -81,6 +81,16 @@ interface ChatComposerProps {
 	 */
 	thinkingSelector?: React.ReactNode;
 	/**
+	 * The comparison-branch switcher, rendered right of {@link thinkingSelector}.
+	 *
+	 * Passed in for the same reason as {@link thinkingSelector}: it reads the
+	 * session's lanes and writes back through the service. It joins the leading
+	 * cluster because it answers the same class of question those controls do —
+	 * where the message about to be sent will land — and it is absent, or renders
+	 * null, for every conversation that never forked, which is most of them.
+	 */
+	laneSwitcher?: React.ReactNode;
+	/**
 	 * The context-occupancy ring, rendered immediately to the left of Send.
 	 *
 	 * Passed in for the same reason as {@link contextRow}: this component knows
@@ -147,6 +157,7 @@ export function ChatComposer({
 	contextRow,
 	modelSwitcher,
 	thinkingSelector,
+	laneSwitcher,
 	contextGauge,
 	commands,
 	pendingImages,
@@ -449,6 +460,7 @@ export function ChatComposer({
 						 */}
 						{modelSwitcher}
 						{thinkingSelector}
+						{laneSwitcher}
 						{contextGauge}
 						{isBusy ? (
 						/*

@@ -150,6 +150,35 @@ class FakeAgentService {
 		this.editResends.push({ index, prompt });
 		return !this.failSends;
 	}
+	/** Recorded so a test can prove the compare action reached the service. */
+	readonly comparisons: number[] = [];
+	readonly laneSwitches: string[] = [];
+	readonly laneChoices: Array<{ lane: string; losers: "keep" | "retire" }> = [];
+	readonly resumeCalls: number[] = [];
+	readonly resumeDismissals: number[] = [];
+
+	async startComparison(index: number): Promise<boolean> {
+		this.comparisons.push(index);
+		return true;
+	}
+
+	async switchLane(lane: string): Promise<boolean> {
+		this.laneSwitches.push(lane);
+		return true;
+	}
+
+	async chooseLane(lane: string, losers: "keep" | "retire"): Promise<boolean> {
+		this.laneChoices.push({ lane, losers });
+		return true;
+	}
+
+	async resumeInterruptedRun(): Promise<void> {
+		this.resumeCalls.push(this.resumeCalls.length + 1);
+	}
+
+	dismissInterruptedRun(): void {
+		this.resumeDismissals.push(this.resumeDismissals.length + 1);
+	}
 	async openSession(): Promise<void> {}
 	async newSession(): Promise<void> {}
 	async renameSession(): Promise<void> {}
@@ -653,6 +682,155 @@ describe("ChatApp model-suggested quick actions", () => {
 		// The reply-scope chips are stale, so the empty screen is back on its built-ins.
 		expect(quickActionChips(host).some((chip) => chip.textContent === "Agent chip")).toBe(false);
 		expect(quickActionChips(host).some((chip) => chip.textContent === "Summarize this note")).toBe(true);
+	});
+});
+
+describe("ChatApp A/B comparison", () => {
+	let mounted: Mounted | undefined;
+
+	beforeEach(() => {
+		document.body.replaceChildren();
+	});
+
+	afterEach(async () => {
+		await mounted?.unmount();
+		mounted = undefined;
+		document.body.replaceChildren();
+	});
+
+	/** A settled question-and-answer pair, the only shape the compare action is offered on. */
+	const answered: Partial<ChatSnapshot> = {
+		isConfigured: true,
+		messages: [
+			{ role: "user", content: [{ type: "text", text: "Original question" }], timestamp: 1 },
+			{
+				role: "assistant",
+				content: [{ type: "text", text: "One possible answer." }],
+				api: "anthropic-messages",
+				provider: "deepseek",
+				model: "deepseek-v4-pro",
+				usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } },
+				stopReason: "stop",
+				timestamp: 2,
+			},
+		] as ChatSnapshot["messages"],
+	};
+
+	const forked: Partial<ChatSnapshot> = {
+		...answered,
+		activeLane: "ab-a-1",
+		lanes: [
+			{ lane: "main", leafId: "e1", retired: false },
+			{ lane: "ab-a-1", leafId: "e1", retired: false },
+			{ lane: "ab-b-1", leafId: "e1", retired: false },
+		],
+	};
+
+	function compareButton(host: HTMLElement): HTMLButtonElement {
+		const button = host.querySelector<HTMLButtonElement>('[aria-label="Compare two ways"]');
+		if (!button) {
+			throw new Error("compare button did not mount");
+		}
+		return button;
+	}
+
+	it("offers the compare action on the question the edit is offered on", async () => {
+		// Same bound, for the same reason: the fork lands at that turn, so an
+		// earlier one would strand every turn between it and the tail.
+		mounted = await mountChat({ snapshot: answered });
+
+		expect(compareButton(mounted.host)).toBeDefined();
+		expect(mounted.host.querySelector('[aria-label="Edit and resend"]')).toBeDefined();
+	});
+
+	it("starts the comparison at the question that was pressed", async () => {
+		mounted = await mountChat({ snapshot: answered });
+
+		compareButton(mounted.host).click();
+		await flushRender();
+
+		expect(mounted.service.comparisons).toEqual([0]);
+	});
+
+	it("hides the compare action while a turn is in flight", async () => {
+		// It rewrites which branch the next turn lands on; queueing that behind a
+		// running reply would file the reply against a branch the reader left.
+		mounted = await mountChat({ snapshot: { ...answered, isStreaming: true } });
+
+		expect(mounted.host.querySelector('[aria-label="Compare two ways"]')).toBeNull();
+	});
+
+	it("shows no switcher until a comparison exists", async () => {
+		mounted = await mountChat({ snapshot: answered });
+
+		expect(mounted.host.querySelector(".piem-chat__lane-switcher")).toBeNull();
+	});
+
+	it("shows the branch on screen once forked", async () => {
+		mounted = await mountChat({ snapshot: forked });
+
+		expect(mounted.host.querySelector(".piem-chat__lane-switcher-name")?.textContent).toBe("Option A");
+	});
+
+	it("carries the draft per branch, not per chat", async () => {
+		// The A/B case of issue #184: one session, two writable branches. A
+		// half-written question for one side must not surface in the other's
+		// composer — the same isolation keying on the session gave chats.
+		mounted = await mountChat({ withDraftStore: true, snapshot: forked });
+		await typeDraft(composer(mounted.host), "Cautious phrasing");
+
+		mounted.service.emit({ activeLane: "ab-b-1" });
+		await flushRender();
+
+		expect(composer(mounted.host).value).toBe("");
+		await typeDraft(composer(mounted.host), "Bold phrasing");
+		mounted.service.emit({ activeLane: "ab-a-1" });
+		await flushRender();
+		// Switching back finds the outgoing branch's words where they were left.
+		expect(composer(mounted.host).value).toBe("Cautious phrasing");
+	});
+});
+
+describe("ChatApp interrupted reply", () => {
+	let mounted: Mounted | undefined;
+
+	beforeEach(() => {
+		document.body.replaceChildren();
+	});
+
+	afterEach(async () => {
+		await mounted?.unmount();
+		mounted = undefined;
+		document.body.replaceChildren();
+	});
+
+	it("offers to continue, and reaches the service's own recovery", async () => {
+		mounted = await mountChat({ snapshot: { isConfigured: true, canResumeInterrupted: true } });
+
+		const banner = mounted.host.querySelector(".piem-chat__banner--recovery");
+		expect(banner?.querySelector(".piem-chat__banner-text")?.textContent).toContain("cut off before it finished");
+		banner?.querySelector<HTMLButtonElement>(".piem-chat__banner-action")?.click();
+		await flushRender();
+
+		expect(mounted.service.resumeCalls).toEqual([1]);
+	});
+
+	it("withdraws the offer through its own dismissal, not the shared one", async () => {
+		// Acknowledging a standing offer must not clear an outcome the service
+		// reported alongside it.
+		mounted = await mountChat({ snapshot: { isConfigured: true, canResumeInterrupted: true } });
+
+		mounted.host.querySelector<HTMLButtonElement>(".piem-chat__banner--recovery .piem-chat__banner-dismiss")?.click();
+		await flushRender();
+
+		expect(mounted.service.resumeDismissals).toEqual([1]);
+	});
+
+	it("stands down while a turn is in flight", async () => {
+		// `continue()` would be refused mid-run, so the offer must not invite it.
+		mounted = await mountChat({ snapshot: { isConfigured: true, canResumeInterrupted: true, isStreaming: true } });
+
+		expect(mounted.host.querySelector(".piem-chat__banner--recovery")).toBeNull();
 	});
 });
 
