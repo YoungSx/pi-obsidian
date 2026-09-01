@@ -501,10 +501,19 @@ export const en = {
 		title: "Piem asks",
 		/** Confirms an answer once every question has one. */
 		confirm: "Confirm",
-		/** Placeholder of the free-text input under the options. */
-		other: "Other…",
-		/** Hint under a multi-select question. */
-		multiHint: "Select one or more, then confirm.",
+		/** Placeholder of the free-text row at the end of the option list. */
+		other: "Something else…",
+		/**
+		 * Accessible name of that row's input. The placeholder is the visible
+		 * label, and a placeholder never reaches the accessibility tree — so the
+		 * name says which question the field belongs to, which matters once a
+		 * dialog carries four of them.
+		 */
+		otherLabel: "Your own answer for: {header}",
+		/** Hint above a multi-select question's options. */
+		multiHint: "Pick as many as apply.",
+		/** Sits beside a disabled Confirm, naming what it is still waiting for. */
+		remaining: "{count} still to answer",
 	},
 
 	/** Session dialogs: titles, search, and chat actions. */

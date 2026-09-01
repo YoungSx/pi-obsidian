@@ -303,8 +303,10 @@ export const zhCN: DeepPartial<EnCopy> = {
 	askUser: {
 		title: "Piem 提问",
 		confirm: "确认",
-		other: "其他…",
-		multiHint: "选择一项或多项后确认。",
+		other: "自己写一个…",
+		otherLabel: "自己写答案：{header}",
+		multiHint: "符合的都可以选。",
+		remaining: "还有 {count} 题没答",
 	},
 
 	session: {

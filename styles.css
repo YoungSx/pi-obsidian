@@ -2559,6 +2559,23 @@ button.piem-chat__latest {
 	.piem-chat__banner-action {
 		min-height: var(--size-4-12);
 	}
+
+	/*
+	 * The question dialog's answer rows. Height only: they are already full-width,
+	 * so a width floor would say nothing, and this is the one surface in the plugin
+	 * where a mis-tap is unrecallable — the answer goes straight to the model and
+	 * the turn proceeds on it. A row with a description clears 48px on its own; the
+	 * floor is for the bare-label row, which lands at 36px.
+	 *
+	 * `askUserModal.ts` reads the same query in script for the matching half of
+	 * this decision: on touch a lone single-select question stops submitting on
+	 * click and waits for Confirm, because at this size a mis-tap is the failure
+	 * mode a bigger target only reduces.
+	 */
+	.piem-ask-option,
+	.piem-ask-other-row {
+		min-height: var(--size-4-12);
+	}
 }
 
 /* --- narrow leaf / mobile --- */
@@ -3750,4 +3767,437 @@ button.piem-chat__latest {
 	.piem-chat__subagents-button--running .piem-chat__subagents-icon {
 		animation: piem-subagent-breathe 1.8s ease-in-out infinite;
 	}
+}
+
+/* --- ask_user question dialog (src/tools/askUserModal.ts) --- */
+
+/*
+ * The agent's structured question, as a dialog the whole turn waits on.
+ *
+ * This surface shipped with markup and no stylesheet at all: every option was a
+ * default Obsidian form-control button with its marker, label and description
+ * running together on one line, and every question trailed a bare text field. So
+ * this is not a restyle of a design — it is the design, and it borrows Obsidian's
+ * own dialog vocabulary rather than inventing one. The modal sits over the whole
+ * app, not inside the panel, so a Piem-specific look here would read as a
+ * stranger in the user's vault; every colour, radius and step below is a theme
+ * token, which is also what makes it correct under themes nobody here has seen.
+ *
+ * The layout is one column of rows. A row is the unit because the content is
+ * label-plus-consequence — the description is what makes "Archive" answerable —
+ * and a row is the only shape that can hold two lines of text at two weights and
+ * still be scanned in a column.
+ */
+.piem-ask {
+	/*
+	 * Four questions of four options each is 20 rows: past the frame's height on
+	 * a laptop and far past it on a phone. Bounded here rather than left to grow,
+	 * so the footer stays reachable — the same decision `.piem-settings-modal`
+	 * made, at the same ceiling, for the same reason.
+	 */
+	max-height: 70vh;
+	overflow-y: auto;
+}
+
+/*
+ * One question. Separated from the next by a rule, not only by space.
+ *
+ * Space alone was not enough once a question could be four rows of two lines:
+ * the gap between two questions has to beat the gap between a question's own
+ * rows, and at that scale "beat" means a step in kind rather than in size. The
+ * hairline is `.setting-item`'s own separator, which is how Obsidian divides a
+ * stack of unrelated controls.
+ */
+.piem-ask-question + .piem-ask-question {
+	border-top: 1px solid var(--background-modifier-border);
+	margin-block-start: var(--size-4-4);
+	padding-block-start: var(--size-4-4);
+}
+
+/*
+ * The question itself, and the only heading in the dialog.
+ *
+ * `--font-ui-medium` is the tier the panel reads its transcript and its own
+ * title in; this is a sentence to be read, not a label to be skimmed past, so it
+ * belongs there rather than in the smaller chrome tier the options use. That gap
+ * — medium against small — is what makes the hierarchy visible without a second
+ * weight or a second colour doing the work.
+ *
+ * More room below it than above: the heading belongs to the rows it introduces,
+ * and the gap between questions is already 16px. 8px below was not enough once
+ * there were three questions in a list: it left the heading closer to the bottom
+ * of the preceding question's rows (4px apart) than to the top of its own (8px),
+ * so it read as a trailing note on the wrong group. 12px is the step that makes
+ * it unambiguous, and it is still narrower than the between-question rule.
+ */
+.piem-ask-question-text {
+	color: var(--text-normal);
+	font-size: var(--font-ui-medium);
+	font-weight: var(--font-medium);
+	line-height: var(--line-height-tight);
+	margin-block-end: var(--size-4-3);
+}
+
+/*
+ * "Pick as many as apply", above the options rather than under them.
+ *
+ * A rule printed after the choices it governs arrives after it was needed. It is
+ * also deliberately quiet: the marker shape is the primary statement of the
+ * rule — a box accumulates, a ring replaces — and this line is the words for the
+ * reader who does not read shapes.
+ */
+.piem-ask-question-hint {
+	color: var(--text-muted);
+	font-size: var(--font-ui-smaller);
+	margin-block-end: var(--size-4-2);
+}
+
+.piem-ask-options {
+	display: flex;
+	flex-direction: column;
+	gap: var(--size-4-1);
+}
+
+/*
+ * One answer, as a full-width row.
+ *
+ * Full width, not a pill sized to its label: the options are a column to be read
+ * down, and content-sized buttons would give four answers four different widths,
+ * which reads as four different kinds of thing. It also means the target is the
+ * whole row rather than the text in it.
+ *
+ * `align-items: start` so the marker sits on the label's line and stays there
+ * when a description wraps to three lines — centring would float it into the
+ * middle of the block. `text-align: start` because `app.css` centres button text.
+ */
+.piem-ask-option,
+.piem-ask-other-row {
+	align-items: start;
+	border: 1px solid transparent;
+	border-radius: var(--radius-s);
+	/*
+	 * Stated, not inherited. `width: 100%` beside padding and a border is only
+	 * the row width under `border-box`, and the two rows do not agree on the
+	 * default: a <button> is `border-box` in the UA stylesheet and a <label> is
+	 * `content-box`. Measured in Chromium without this, the Other row came out
+	 * 492px against the options' 474 — 18px of padding and border added outside
+	 * the box — so the one row meant to look like the others was the one that
+	 * did not. Obsidian's own reset would have hidden it; a rule that depends on
+	 * the host's reset to be correct is a rule that breaks on a theme that
+	 * changes it.
+	 */
+	box-sizing: border-box;
+	display: flex;
+	gap: var(--size-4-2);
+	/* WCAG 2.5.8 asks for 24px; a one-line option is padded past it, and this is
+	 * the floor under the shortest possible row (a label with no description). */
+	min-height: var(--size-4-8);
+	padding: var(--size-4-2);
+	text-align: start;
+	width: 100%;
+}
+
+/*
+ * `text-align` again, at a specificity that beats the host.
+ *
+ * The shared rule above is (0,1,0) and `app.css` centres button text at
+ * `button:not(.clickable-icon)`, which is (0,1,1) — so on the button rows the
+ * host won and every label and description rendered centred inside a correctly
+ * placed box. The element-qualified selector ties that specificity and wins on
+ * source order, the same trick the background reset below uses.
+ *
+ * Not detectable from either `getBoundingClientRect()` or `getClientRects()`:
+ * the label and description are flex items, so both are blockified and their
+ * box and line-box left edges coincide. The centring happens to the text inside
+ * that box. `text-align` has to be asserted, not measured.
+ */
+button.piem-ask-option,
+button.piem-ask-option .piem-ask-option-label,
+button.piem-ask-option .piem-ask-option-description {
+	text-align: start;
+}
+
+/*
+ * `app.css` styles every `button:not(.clickable-icon)` as a form control at
+ * (0,1,1) — the fill and inset shadow that put these rows in raised boxes. The
+ * element-qualified selector ties that specificity and wins on source order,
+ * which is the trick the panel's other bare buttons use; see the reset near the
+ * top of this file. `height: auto` because that rule also pins a control height,
+ * which would crush a two-line row into one.
+ */
+button.piem-ask-option {
+	background: transparent;
+	/*
+	 * Padding and border reclaimed from the host, at a specificity that beats it.
+	 *
+	 * The shared rule states `padding: var(--size-4-2)` and `border: 1px solid
+	 * transparent` for both row kinds, but `app.css` sets `padding: 0 12px` and
+	 * `border: none` at `button:not(.clickable-icon)` — (0,1,1) against the shared
+	 * rule's (0,1,0) — so only the <button> rows took the host's values. Measured
+	 * in Chromium, that put the option markers 12px from the row's left edge and
+	 * the Other row's marker at 9px (8px padding + 1px border): a 3px stagger down
+	 * the one vertical line the eye follows in a list of choices.
+	 *
+	 * Restating both here ties the host's specificity and wins on source order,
+	 * the same move `text-align` above needs. Every row is now 8px of padding
+	 * inside a 1px transparent border, so the markers share one column and the
+	 * selected row's visible border grows into space the resting rows already
+	 * reserved instead of shifting the text.
+	 */
+	border: 1px solid transparent;
+	box-shadow: none;
+	height: auto;
+	padding: var(--size-4-2);
+	white-space: normal;
+}
+
+@media (hover: hover) {
+
+	.piem-ask-option:hover,
+	.piem-ask-other-row:hover {
+		background: var(--background-modifier-hover);
+	}
+}
+
+/*
+ * The chosen answer.
+ *
+ * Three signals at once, and the redundancy is the point: the marker fills, the
+ * surface tints, and the border takes the accent. Colour alone would fail WCAG
+ * 1.4.1 for a red-green reader, and a filled accent *background* — the obvious
+ * move — would drag every label onto an accent surface where the description's
+ * muted grey stops meeting 4.5:1. So the tint is the theme's own selection
+ * colour and the text keeps the colours it already had.
+ */
+/*
+ * `--background-modifier-hover`, not `-active-hover`. The stronger tint lifted
+ * the row to #404040 on the default dark theme, and the accent dot painted on it
+ * measured 2.65:1 — under the 3:1 floor for a control that carries state by fill
+ * alone. The lighter tint lands the same dot at 3.08:1. What is lost is a shade
+ * of row fill; what is kept is the accent border and the filled marker, which
+ * were always the two things actually announcing selection.
+ */
+.piem-ask-option[aria-pressed="true"],
+.piem-ask-other-row.is-filled {
+	background: var(--background-modifier-hover);
+	border-color: var(--interactive-accent);
+}
+
+.piem-ask-option:focus-visible,
+.piem-ask-other-row:focus-within {
+	outline: 2px solid var(--background-modifier-border-focus);
+	outline-offset: 1px;
+}
+
+/*
+ * The marker column: a ring for one-of, a box for several-of.
+ *
+ * Drawn from the theme's border and accent tokens rather than set as a glyph. The
+ * `✓` this replaces was a Unicode character standing in for an icon — the one
+ * place in the source that did — so it rendered in whatever the user's UI font
+ * happened to have, at whatever weight, next to Lucide icons everywhere else.
+ *
+ * `flex: 0 0 auto` and a fixed box, present from the first paint: the marker used
+ * to be `hidden` until selection, so every label jumped sideways at the moment of
+ * the click that selected it. An empty marker is the unselected state.
+ */
+.piem-ask-option-marker {
+	/*
+	 * `--background-modifier-border-focus`, not `-hover`. This ring is the only
+	 * thing that marks an unselected option, so WCAG 1.4.11 applies to it as a
+	 * control boundary: measured on the default dark theme, `-hover` (#555 on the
+	 * #262626 modal) is 2.03:1, under the 3:1 floor, while `-focus` (#7d7d7d)
+	 * reaches 3.68:1. The token is still a theme border colour, so a theme that
+	 * restyles its borders still reaches this one.
+	 */
+	border: 1.5px solid var(--background-modifier-border-focus);
+	border-radius: 50%;
+	/* As on the row: the 1.5px border has to sit inside the 16px box, or the
+	 * marker measures 19px and the label's column starts 3px further right than
+	 * the description's. Measured, not assumed — see the row's note. */
+	box-sizing: border-box;
+	flex: 0 0 auto;
+	height: var(--size-4-4);
+	position: relative;
+	width: var(--size-4-4);
+}
+
+/* Multi-select markers are boxes: a square accumulates, a circle replaces. The
+ * shape is the rule, stated before the first interaction. */
+.piem-ask-question-hint ~ .piem-ask-options .piem-ask-option-marker {
+	border-radius: var(--radius-s);
+}
+
+/*
+ * The filled marker: a dot inside the ring, a smaller square inside the box.
+ *
+ * A pseudo-element rather than a background on the marker itself, so the ring
+ * stays visible around the fill — a solid 16px accent disc loses its own edge
+ * against a tinted row, while a dot inside a ring reads at any size.
+ */
+.piem-ask-option[aria-pressed="true"] .piem-ask-option-marker,
+.piem-ask-other-row.is-filled .piem-ask-option-marker {
+	border-color: var(--interactive-accent);
+}
+
+.piem-ask-option[aria-pressed="true"] .piem-ask-option-marker::after,
+.piem-ask-other-row.is-filled .piem-ask-option-marker::after {
+	background: var(--interactive-accent);
+	border-radius: inherit;
+	content: "";
+	inset: 2.5px;
+	position: absolute;
+}
+
+/*
+ * The row's text: the answer, then what choosing it does.
+ *
+ * A column, so the description sits under the label instead of running on from
+ * it — which is what the unstyled version did, leaving "Archive File it away as
+ * read." as one sentence with no seam. `min-width: 0` is what lets a long
+ * description wrap inside the flex row rather than pushing the row wide.
+ */
+.piem-ask-option-body {
+	display: flex;
+	flex-direction: column;
+	gap: 2px;
+	min-width: 0;
+}
+
+.piem-ask-option-label {
+	color: var(--text-normal);
+	font-size: var(--font-ui-small);
+	font-weight: var(--font-medium);
+	line-height: var(--line-height-tight);
+}
+
+/*
+ * The consequence of choosing. Weaker on two axes — size and colour — which is
+ * what lets it sit directly under the label without competing with it.
+ *
+ * `--text-muted`, not the fainter tier: this is small text on the modal's own
+ * background, and `--text-faint` falls under the 4.5:1 body floor in most themes.
+ * It wraps rather than truncating — a truncated consequence is worse than none,
+ * because the reader cannot tell what was cut.
+ */
+.piem-ask-option-description {
+	color: var(--text-muted);
+	font-size: var(--font-ui-smaller);
+	line-height: var(--line-height-tight);
+}
+
+/*
+ * "Something else…" — the last row of the same list.
+ *
+ * A `<label>` wrapping the field, so a press anywhere on the row lands in the
+ * input; the row is the target, exactly as it is for the options above. It keeps
+ * the row shape and the marker column so the relationship is structural: this is
+ * one more answer in the same column of markers, not a form field that appeared
+ * underneath a list of buttons.
+ */
+.piem-ask-other-row {
+	cursor: text;
+}
+
+/*
+ * The field itself, with Obsidian's input chrome taken off.
+ *
+ * The row is the control now — it owns the border, the radius, the fill and the
+ * focus ring — so an input drawing its own would be a box inside a box. Same
+ * decision, and the same reasoning, as the composer's textarea sitting bare on
+ * its shell.
+ */
+input.piem-ask-other {
+	background: transparent;
+	border: none;
+	box-shadow: none;
+	color: var(--text-normal);
+	font-family: inherit;
+	font-size: var(--font-ui-small);
+	/*
+	 * The label's weight, because a typed answer is one of the choices.
+	 *
+	 * Obsidian's `input` rule leaves this at 400 while `.piem-ask-option-label`
+	 * sets `--font-medium`, so the Other row rendered one step lighter than the
+	 * four options above it — the one row in the list the eye reads as somehow
+	 * lesser, when it is the fifth equal choice. The placeholder stays at 400
+	 * below: an unfilled hint should sit under the real answers, and that is the
+	 * only part of this control that is a hint.
+	 */
+	font-weight: var(--font-medium);
+	/*
+	 * `height: auto` against Obsidian's `input` rule, which pins a control height
+	 * (30px in the default theme). Inherited, that height made this row 50px where
+	 * an option row was 34 — the one row meant to read as a sibling of the options
+	 * standing 16px taller than all of them. The row's own padding sets the height
+	 * now, as it does for every other row in the list.
+	 */
+	height: auto;
+	/* Matches the option label's line box, so the marker lands at the same height
+	 * on this row as on the ones above it. */
+	line-height: var(--line-height-tight);
+	min-width: 0;
+	padding: 0;
+	width: 100%;
+}
+
+input.piem-ask-other:focus,
+input.piem-ask-other:focus-visible {
+	/* The row's `:focus-within` ring is the focus indicator; a second ring on the
+	 * field inside it would draw two rectangles for one focus. */
+	box-shadow: none;
+	outline: none;
+}
+
+input.piem-ask-other::placeholder {
+	color: var(--text-muted);
+	/*
+	 * Pinned against the input's own `--font-medium`, which a placeholder would
+	 * otherwise inherit. An unfilled hint reads lighter than the real answers it
+	 * sits among; a typed answer takes the label's weight.
+	 */
+	font-weight: 400;
+}
+
+/*
+ * The footer: what Confirm is waiting for, then Confirm.
+ *
+ * Reading order matches the dependency — the blocker, then the blocked control —
+ * and the button keeps the trailing corner every submit in the app lives in. The
+ * top rule separates the decision from the act of submitting it.
+ */
+.piem-ask-footer {
+	align-items: center;
+	border-top: 1px solid var(--background-modifier-border);
+	display: flex;
+	gap: var(--size-4-2);
+	justify-content: flex-end;
+	margin-block-start: var(--size-4-4);
+	padding-block-start: var(--size-4-3);
+}
+
+/*
+ * "2 still to answer", beside a disabled Confirm.
+ *
+ * A disabled button says only that it will not work; with four questions in a
+ * scrolling box, the reader cannot tell whether the one they are looking at is
+ * the problem. Empty whenever Confirm is live, and collapsed rather than left
+ * holding a gap — the same `:empty` treatment the settings verdict lines use.
+ */
+.piem-ask-remaining {
+	color: var(--text-muted);
+	font-size: var(--font-ui-smaller);
+	margin-inline-end: auto;
+}
+
+.piem-ask-remaining:empty {
+	display: none;
+}
+
+.piem-ask-confirm:disabled {
+	/* Obsidian ships no disabled token, and `mod-cta` keeps its full accent when
+	 * disabled — so an unanswered dialog offered a button that looked ready and
+	 * did nothing. Matches the panel's own disabled treatment. */
+	cursor: not-allowed;
+	opacity: 0.4;
 }
