@@ -62,7 +62,7 @@ export class SkillManager {
 	private readonly importer: SkillImporter;
 
 	constructor(
-		private readonly fetchImpl: typeof globalThis.fetch,
+		private readonly fetchImpl: typeof window.fetch,
 		private readonly env: ExecutionEnv,
 		private readonly skillsDir: string = DEFAULT_SKILLS_DIR,
 	) {

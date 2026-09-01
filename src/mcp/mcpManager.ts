@@ -201,14 +201,14 @@ export function createNoGetStreamFetch(baseFetch: FetchLike): FetchLike {
 
 /** Rejects after `ms` if `promise` has not settled, so one dead server cannot hang plugin load. */
 function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
-	let timer: ReturnType<typeof setTimeout> | undefined;
+	let timer: number | undefined;
 	const timeout = new Promise<never>((_resolve, reject) => {
-		timer = setTimeout(() => reject(new Error(`${label} timed out after ${Math.round(ms / 1000)}s`)), ms);
+		timer = window.setTimeout(() => reject(new Error(`${label} timed out after ${Math.round(ms / 1000)}s`)), ms);
 	});
 	return Promise.race([
 		promise.finally(() => {
 			if (timer !== undefined) {
-				clearTimeout(timer);
+				window.clearTimeout(timer);
 			}
 		}),
 		timeout,

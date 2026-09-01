@@ -33,7 +33,7 @@ export interface ObsidianModelsBundle {
 	/** Providers registered and ready for dispatch. */
 	models: Models;
 	/** Transport-specific `fetch` that provider requests must go through. */
-	fetch: typeof globalThis.fetch;
+	fetch: typeof window.fetch;
 }
 
 export interface ObsidianModelsOptions {

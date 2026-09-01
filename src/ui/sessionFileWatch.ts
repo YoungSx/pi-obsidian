@@ -34,7 +34,7 @@ export function watchSessionFile(
 	onChange: (path: string) => void,
 	debounceMs = 500,
 ): EventRef[] {
-	let timer: ReturnType<typeof setTimeout> | null = null;
+	let timer: number | null = null;
 	let pendingPath: string | null = null;
 
 	const schedule = (path: string): void => {
@@ -42,7 +42,7 @@ export function watchSessionFile(
 		if (timer !== null) {
 			return;
 		}
-		timer = setTimeout(() => {
+		timer = window.setTimeout(() => {
 			timer = null;
 			const path = pendingPath;
 			pendingPath = null;

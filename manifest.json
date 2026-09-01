@@ -3,7 +3,7 @@
 	"name": "Piem",
 	"version": "1.0.3",
 	"minAppVersion": "1.5.7",
-	"description": "Run the Piem agent inside Obsidian with vault-scoped tools and a chat side panel.",
+	"description": "Run the Piem coding agent in a chat side panel, with tools scoped to your vault.",
 	"author": "Shangxin",
 	"isDesktopOnly": false
 }

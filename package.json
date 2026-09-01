@@ -1,7 +1,7 @@
 {
 	"name": "piem",
 	"version": "1.0.3",
-	"description": "Run the Piem agent inside Obsidian with vault-scoped tools and a chat side panel.",
+	"description": "Run the Piem coding agent in a chat side panel, with tools scoped to your vault.",
 	"main": "main.js",
 	"type": "module",
 	"scripts": {
@@ -16,7 +16,7 @@
 		"verify": "npm run build && npm run check:bundle && npm run check:copy && npm run check:version && bun test && npm run lint"
 	},
 	"keywords": [],
-	"license": "0-BSD",
+	"license": "MIT",
 	"devDependencies": {
 		"@eslint/js": "9.30.1",
 		"@types/bun": "^1.3.11",

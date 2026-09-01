@@ -157,7 +157,7 @@ function readErrorMessage(payload: unknown): string | undefined {
  */
 export async function probeModelListing(
 	provider: ProviderConfig,
-	options: { fetch: typeof globalThis.fetch; signal?: AbortSignal },
+	options: { fetch: typeof window.fetch; signal?: AbortSignal },
 ): Promise<ModelListingResult> {
 	const response = await options.fetch(modelListingUrl(provider), {
 		method: "GET",

@@ -42,14 +42,14 @@ export interface FileLogSinkOptions {
 	/** Rotation threshold, overridable for tests. */
 	maxBytes?: number;
 	/** Timer factory, injected so tests can flush deterministically. */
-	schedule?: (callback: () => void, ms: number) => ReturnType<typeof setTimeout>;
+	schedule?: (callback: () => void, ms: number) => number;
 }
 
 export class FileLogSink {
 	private readonly options: FileLogSinkOptions;
 	private readonly maxBytes: number;
 	private queue: LogRecord[] = [];
-	private timer: ReturnType<typeof setTimeout> | null = null;
+	private timer: number | null = null;
 	/**
 	 * Serializes flushes. `DataAdapter.append` offers no ordering guarantee across
 	 * concurrent calls, and two overlapping appends can interleave partial lines —
@@ -114,7 +114,7 @@ export class FileLogSink {
 		if (this.timer !== null) {
 			return;
 		}
-		const schedule = this.options.schedule ?? ((callback, ms) => setTimeout(callback, ms));
+		const schedule = this.options.schedule ?? ((callback, ms) => window.setTimeout(callback, ms));
 		this.timer = schedule(() => {
 			this.timer = null;
 			void this.flush();
@@ -123,7 +123,7 @@ export class FileLogSink {
 
 	private cancelTimer(): void {
 		if (this.timer !== null) {
-			clearTimeout(this.timer);
+			window.clearTimeout(this.timer);
 			this.timer = null;
 		}
 	}
