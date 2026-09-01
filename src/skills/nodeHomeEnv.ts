@@ -357,13 +357,13 @@ function expandHome(path: string, home: string): string {
 }
 
 function isMissing(cause: unknown): boolean {
-	return typeof cause === "object" && cause !== null && "code" in cause && (cause as { code: unknown }).code === "ENOENT";
+	return typeof cause === "object" && cause !== null && "code" in cause && cause.code === "ENOENT";
 }
 
 /** Maps node errno values onto the backend-independent codes pi understands. */
 function toFileError(cause: unknown, path: string): FileError {
 	const message = cause instanceof Error ? cause.message : String(cause);
-	const code = typeof cause === "object" && cause !== null && "code" in cause ? String((cause as { code: unknown }).code) : "";
+	const code = typeof cause === "object" && cause !== null && "code" in cause ? String(cause.code) : "";
 	const inner = cause instanceof Error ? cause : undefined;
 	if (code === "ENOENT") {
 		return new FileError("not_found", message, path, inner);

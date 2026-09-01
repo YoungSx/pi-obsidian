@@ -19,6 +19,7 @@ import {
 } from "@earendil-works/pi-agent-core";
 import { PromptQueue, type QueuedPrompt } from "./promptQueue";
 import { createObsidianModels, withRequestDefaults, type ObsidianModelsBundle } from "../net/streamFn";
+import { toFetchFunction } from "../net/obsidianFetch";
 import { matchVendorForModel } from "../net/vendorMatch";
 import { vendorIconName } from "../net/vendorIcons";
 import { compactIfNeeded, needsCompaction, DEFAULT_COMPACTION_RETRY, type CompactResult } from "./compaction";
@@ -3161,7 +3162,7 @@ export class ObsidianAgentService {
 		}
 		return (model, context, streamOptions) => {
 			const { models, fetch: fetchImpl } = this.requireModelsBundle();
-			return models.streamSimple(model, context, { ...streamOptions, fetch: fetchImpl });
+			return models.streamSimple(model, context, { ...streamOptions, fetch: toFetchFunction(fetchImpl) });
 		};
 	}
 

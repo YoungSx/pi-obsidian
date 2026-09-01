@@ -1,4 +1,4 @@
-import { createFetchForTransport } from "./obsidianFetch";
+import { createFetchForTransport, type FetchFn } from "./obsidianFetch";
 
 /**
  * Asking models.dev what it knows about a model id, at runtime.
@@ -143,7 +143,7 @@ let sessionIndex: Promise<ModelsDevIndex> | undefined;
  * the caller decides what silence looks like; the modal treats a rejection the
  * way it treats a failed listing probe, as a shorter list and no noise.
  */
-export function fetchModelsDevIndex(options: { fetch?: typeof window.fetch; signal?: AbortSignal } = {}): Promise<ModelsDevIndex> {
+export function fetchModelsDevIndex(options: { fetch?: FetchFn; signal?: AbortSignal } = {}): Promise<ModelsDevIndex> {
 	if (!sessionIndex) {
 		const fetchImpl = options.fetch ?? createFetchForTransport("requestUrl");
 		sessionIndex = fetchImpl(MODELS_DEV_API_URL, {

@@ -5,7 +5,7 @@ import { openAIResponsesApi } from "@earendil-works/pi-ai/api/openai-responses.l
 import { createModels, createProvider } from "@earendil-works/pi-ai";
 import type { Api, Model, Models, Provider, ProviderStreams } from "@earendil-works/pi-ai";
 import { builtinProviders } from "./builtinCatalog";
-import { createFetchForTransport, type NetworkTransport } from "./obsidianFetch";
+import { createFetchForTransport, toFetchFunction, type FetchFn, type NetworkTransport } from "./obsidianFetch";
 import { CUSTOM_ENDPOINT_PROVIDER } from "../constants";
 import { isCustomEndpointActive, type CustomEndpointConfig } from "../customEndpoint";
 import { describeProviderConfig, type ProviderConfig, type WireProtocol } from "../modelConfig";
@@ -33,7 +33,7 @@ export interface ObsidianModelsBundle {
 	/** Providers registered and ready for dispatch. */
 	models: Models;
 	/** Transport-specific `fetch` that provider requests must go through. */
-	fetch: typeof window.fetch;
+	fetch: FetchFn;
 }
 
 export interface ObsidianModelsOptions {
@@ -122,7 +122,8 @@ function createConfiguredProvider(id: string, name: string): Provider<WireProtoc
  */
 export function withRequestDefaults(bundle: ObsidianModelsBundle, getApiKey: (provider: string) => string | undefined): Models {
 	const { models, fetch: fetchImpl } = bundle;
-	const applyDefaults = (model: Model<Api>) => ({ apiKey: getApiKey(model.provider), fetch: fetchImpl });
+	// toFetchFunction: the one named FetchFn→pi-ai conversion at this seam.
+	const applyDefaults = (model: Model<Api>) => ({ apiKey: getApiKey(model.provider), fetch: toFetchFunction(fetchImpl) });
 	return {
 		...models,
 		streamSimple: (model, context, streamOptions) => models.streamSimple(model, context, { ...streamOptions, ...applyDefaults(model) }),
@@ -136,6 +137,6 @@ export function createObsidianStreamFn(options: ObsidianModelsOptions): StreamFn
 	return (model, context, streamOptions) =>
 		models.streamSimple(model, context, {
 			...streamOptions,
-			fetch: fetchImpl,
+			fetch: toFetchFunction(fetchImpl),
 		});
 }

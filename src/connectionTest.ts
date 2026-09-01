@@ -2,7 +2,7 @@ import type { Models } from "@earendil-works/pi-ai";
 import type { Translator } from "./i18n";
 import { buildConfiguredModel, type ModelConfig, type ProviderConfig } from "./modelConfig";
 import { probeModelListing, type ModelListingResult } from "./net/modelListing";
-import { createObsidianStreamingFetch } from "./net/obsidianFetch";
+import { createObsidianStreamingFetch, toFetchFunction, type FetchFn } from "./net/obsidianFetch";
 
 /**
  * Verifying a configured endpoint by actually calling it.
@@ -48,7 +48,7 @@ export interface ConnectionTestOptions {
 	 * turn does. Optional only so a unit test can drive a probe directly; the
 	 * plugin always supplies one from `createObsidianModels`.
 	 */
-	fetch?: typeof window.fetch;
+	fetch?: FetchFn;
 }
 
 /**
@@ -113,7 +113,7 @@ export async function testModelConnection(
 			// `options.maxTokens ?? model.maxTokens`, so passing one here would
 			// silently replace the value the user configured — the one thing this
 			// probe exists to verify. See the note above the function.
-			{ apiKey: provider.apiKey.trim(), signal: options.signal, fetch: options.fetch },
+			{ apiKey: provider.apiKey.trim(), signal: options.signal, fetch: options.fetch === undefined ? undefined : toFetchFunction(options.fetch) },
 		);
 		// A stream can terminate with an error message rather than throwing, so
 		// the reported stop reason decides the verdict, not the absence of a throw.

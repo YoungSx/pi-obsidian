@@ -127,7 +127,7 @@ export function buildAskUserForm(container: HTMLElement, questions: readonly Ask
 	container.classList.add("piem-ask");
 	// Question and its pending answer travel together everywhere below; indexing
 	// two parallel arrays would trip noUncheckedIndexedAccess at every use.
-	const items = questions.map((question) => ({ question, state: { checked: new Set<string>(), other: "" } as PendingAnswer }));
+	const items = questions.map((question) => ({ question, state: { checked: new Set<string>(), other: "" } satisfies PendingAnswer }));
 
 	const answerOf = (item: { question: AskUserQuestion; state: PendingAnswer }): string[] | null => {
 		const typed = item.state.other.trim();

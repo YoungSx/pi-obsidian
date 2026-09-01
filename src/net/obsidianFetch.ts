@@ -1,4 +1,5 @@
 import { requestUrl, type RequestUrlParam, type RequestUrlResponse } from "obsidian";
+import type { FetchFunction } from "@earendil-works/pi-ai";
 
 /**
  * Obsidian-backed `fetch` implementations for pi-ai provider requests.
@@ -16,12 +17,26 @@ import { requestUrl, type RequestUrlParam, type RequestUrlResponse } from "obsid
  * - {@link createObsidianStreamingFetch} — native `fetch`, real streaming,
  *   subject to CORS.
  *
- * Both return a `typeof window.fetch` so they satisfy pi-ai's
- * `FetchFunction` and can be passed as `options.fetch`.
+ * Both return a {@link FetchFn} — an honest function signature, unlike
+ * `typeof window.fetch`, whose type picks up bun-types' phantom `preconnect`
+ * member and can therefore never be satisfied structurally by a wrapper.
+ * pi-ai's `FetchFunction` accepts one via {@link toFetchFunction}.
  */
 
 /** Header names that Obsidian's `requestUrl` sets itself; forwarding ours breaks the request. */
 const STRIPPED_REQUEST_HEADERS = new Set(["host", "content-length", "connection"]);
+
+/**
+ * What our fetch factories actually produce: the call shape every consumer uses.
+ *
+ * Deliberately not `typeof window.fetch`. That type is polluted by bun-types
+ * (pulled in ambient through `@types/bun`), which declares a `fetch.preconnect`
+ * namespace on the global — so a wrapped closure, however faithful to the
+ * runtime call, can never structurally match it, and the scanner then flags the
+ * escaping assertion as unnecessary. Naming the shape ourselves keeps every
+ * signature honest and leaves exactly one place that converts to pi-ai's type.
+ */
+export type FetchFn = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
 
 function abortError(): DOMException {
 	return new DOMException("The operation was aborted.", "AbortError");
@@ -110,7 +125,13 @@ async function resolveBody(
 		return body;
 	}
 	if (ArrayBuffer.isView(body)) {
-		return body.buffer.slice(body.byteOffset, body.byteOffset + body.byteLength) as ArrayBuffer;
+		// `isView` does not exclude a SharedArrayBuffer backstop, so `body.buffer`
+		// types as either — but `requestUrl` needs a plain ArrayBuffer, and a real
+		// SAB body never reaches here (pi-ai sends strings and image buffers).
+		if (!(body.buffer instanceof ArrayBuffer)) {
+			throw new Error("Obsidian requestUrl transport does not support this request body type.");
+		}
+		return body.buffer.slice(body.byteOffset, body.byteOffset + body.byteLength);
 	}
 	if (typeof Blob !== "undefined" && body instanceof Blob) {
 		return await body.arrayBuffer();
@@ -221,7 +242,7 @@ function toResponse(response: RequestUrlResponse): Response {
  * a stall from down here. A wedged endpoint is ended by the user pressing stop,
  * which the race below turns into a real rejection.
  */
-export function createObsidianRequestUrlFetch(): typeof window.fetch {
+export function createObsidianRequestUrlFetch(): FetchFn {
 	const obsidianFetch = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
 		const url = resolveUrl(input);
 		const method = resolveMethod(input, init);
@@ -269,7 +290,7 @@ export function createObsidianRequestUrlFetch(): typeof window.fetch {
 		}
 	};
 
-	return obsidianFetch as typeof window.fetch;
+	return obsidianFetch;
 }
 
 /**
@@ -278,14 +299,28 @@ export function createObsidianRequestUrlFetch(): typeof window.fetch {
  * Subject to CORS: reliable on desktop for providers that allow browser
  * origins, but can fail on mobile or with stricter providers.
  */
-export function createObsidianStreamingFetch(): typeof window.fetch {
-	return ((input: RequestInfo | URL, init?: RequestInit) => window.fetch(input, init)) as typeof window.fetch;
+export function createObsidianStreamingFetch(): FetchFn {
+	return (input: RequestInfo | URL, init?: RequestInit) => window.fetch(input, init);
 }
 
 /** Transport strategy for provider HTTP requests. */
 export type NetworkTransport = "requestUrl" | "fetch";
 
 /** Resolves the configured transport to a concrete `fetch` implementation. */
-export function createFetchForTransport(transport: NetworkTransport): typeof window.fetch {
+export function createFetchForTransport(transport: NetworkTransport): FetchFn {
 	return transport === "fetch" ? createObsidianStreamingFetch() : createObsidianRequestUrlFetch();
+}
+
+/**
+ * Presents a {@link FetchFn} as pi-ai's `FetchFunction` (`typeof globalThis.fetch`).
+ *
+ * The one deliberate cast in the file. It is a real conversion, not a no-op:
+ * pi-ai's type inherits bun-types' phantom `fetch.preconnect` member (see
+ * {@link FetchFn}), which no callable can satisfy structurally. pi-ai itself
+ * only ever invokes it as `fetch(input, init)`, so the runtime contract is
+ * already met — this just names the boundary where the lie is absorbed, instead
+ * of scattering it across call sites.
+ */
+export function toFetchFunction(fetch: FetchFn): FetchFunction {
+	return fetch as FetchFunction;
 }

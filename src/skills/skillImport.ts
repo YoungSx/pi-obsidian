@@ -1,5 +1,6 @@
 import type { ExecutionEnv } from "@earendil-works/pi-agent-core";
 import { parse } from "yaml";
+import type { FetchFn } from "../net/obsidianFetch";
 import { DEFAULT_SKILLS_DIR } from "../agent/skillLoader";
 
 /**
@@ -333,7 +334,7 @@ export function parseProvenance(json: string | undefined): SkillProvenance | und
  */
 export class SkillImporter {
 	constructor(
-		private readonly fetchImpl: typeof window.fetch,
+		private readonly fetchImpl: FetchFn,
 		private readonly env: ExecutionEnv,
 		private readonly skillsDir: string = DEFAULT_SKILLS_DIR,
 	) {}
