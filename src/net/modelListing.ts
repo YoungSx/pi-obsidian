@@ -1,4 +1,5 @@
 import type { ProviderConfig, WireProtocol } from "../modelConfig";
+import type { FetchFn } from "./obsidianFetch";
 
 /**
  * Asking an endpoint which models it serves, without naming one.
@@ -157,7 +158,7 @@ function readErrorMessage(payload: unknown): string | undefined {
  */
 export async function probeModelListing(
 	provider: ProviderConfig,
-	options: { fetch: typeof window.fetch; signal?: AbortSignal },
+	options: { fetch: FetchFn; signal?: AbortSignal },
 ): Promise<ModelListingResult> {
 	const response = await options.fetch(modelListingUrl(provider), {
 		method: "GET",

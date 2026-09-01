@@ -6,7 +6,7 @@ installObsidianStub();
 
 // Dynamic imports so the mocked `obsidian` module wins over any cached real one.
 const { createObsidianModels, createObsidianStreamFn } = await import("./streamFn");
-const { createFetchForTransport } = await import("./obsidianFetch");
+const { createFetchForTransport, toFetchFunction } = await import("./obsidianFetch");
 const { buildCustomEndpointModel } = await import("../customEndpoint");
 const { CUSTOM_ENDPOINT_PROVIDER } = await import("../constants");
 
@@ -43,7 +43,7 @@ async function streamViaRequestUrl(
 		{ messages: [{ role: "user", content: [{ type: "text", text: "hi" }], timestamp: Date.now() }] },
 		// The plugin always injects its transport fetch (via `withRequestDefaults`
 		// or `createObsidianStreamFn`); without it pi's SDK would hit the network.
-		{ ...options, fetch: createFetchForTransport("requestUrl") },
+		{ ...options, fetch: toFetchFunction(createFetchForTransport("requestUrl")) },
 	);
 	const final = await stream.result();
 	if (!captured) {

@@ -168,8 +168,11 @@ export function sanitizeMessageForLog(message: AgentMessage): AgentMessage {
 	// structurally. The spread keeps every other field of the original message,
 	// so the returned object is the same shape with only the image blocks swapped.
 	const typed = message as unknown as { content: (TextContent | ImageContent)[] };
-	const content = typed.content.map((block) =>
-		block.type === "image" ? ({ type: "text", text: imageLogPlaceholder(block.mimeType) } as TextContent) : block,
+	// Annotated return type instead of a cast on the replacement block: the
+	// annotation contextually types the object literal, so `type` keeps its
+	// literal `"text"` and the block checks against TextContent directly.
+	const content = typed.content.map((block): TextContent | ImageContent =>
+		block.type === "image" ? { type: "text", text: imageLogPlaceholder(block.mimeType) } : block,
 	);
 	return { ...message, content } as AgentMessage;
 }

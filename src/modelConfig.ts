@@ -310,15 +310,18 @@ const OPENAI_COMPLETIONS_COMPAT = {
  * OpenAI), so the plugin only has to supply the key as `options.apiKey`.
  */
 export function buildConfiguredModel(model: ModelConfig, provider: ProviderConfig): Model<WireProtocol> {
+	// Image input is a capability the user declares (or the builtin catalog
+	// recommends), so the send path can gate attachments on it. Annotated so the
+	// array literals keep their literal element type — bare they widen to
+	// `string[]` and the protocol branches below stop typechecking.
+	const modelInput: ("text" | "image")[] = model.supportsImages ? ["text", "image"] : ["text"];
 	const base = {
 		id: model.modelApiId,
 		name: describeModelConfig(model),
 		provider: provider.id,
 		baseUrl: provider.baseUrl,
 		reasoning: model.reasoning,
-		// Image input is a capability the user declares (or the builtin catalog
-		// recommends), so the send path can gate attachments on it.
-		input: (model.supportsImages ? ["text", "image"] : ["text"]) as ("text" | "image")[],
+		input: modelInput,
 		cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
 		contextWindow: model.contextWindow ?? DEFAULT_CUSTOM_ENDPOINT_CONTEXT_WINDOW,
 		maxTokens: model.maxTokens ?? DEFAULT_CUSTOM_ENDPOINT_MAX_TOKENS,

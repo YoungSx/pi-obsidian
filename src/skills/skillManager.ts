@@ -1,5 +1,6 @@
 import type { ExecutionEnv, Skill } from "@earendil-works/pi-agent-core";
 import { DEFAULT_SKILLS_DIR, loadVaultSkills } from "../agent/skillLoader";
+import type { FetchFn } from "../net/obsidianFetch";
 import {
 	SkillImporter,
 	type FetchedSkill,
@@ -62,7 +63,7 @@ export class SkillManager {
 	private readonly importer: SkillImporter;
 
 	constructor(
-		private readonly fetchImpl: typeof window.fetch,
+		private readonly fetchImpl: FetchFn,
 		private readonly env: ExecutionEnv,
 		private readonly skillsDir: string = DEFAULT_SKILLS_DIR,
 	) {

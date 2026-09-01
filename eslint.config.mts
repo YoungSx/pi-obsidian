@@ -38,6 +38,17 @@ export default tseslint.config(
 	},
 	...obsidianmd.configs.recommended,
 	{
+		// The official Obsidian scanner runs typescript-eslint's
+		// `no-unnecessary-type-assertion`; keeping it on here means a stale cast
+		// fails locally instead of resurfacing in the marketplace Scorecard
+		// (issue #203). Scoped to TS files: the tseslint plugin this rule needs
+		// is only registered for those.
+		files: ["**/*.ts", "**/*.tsx"],
+		rules: {
+			"@typescript-eslint/no-unnecessary-type-assertion": "error",
+		},
+	},
+	{
 		// The user-level skill directories live on the user's machine, outside
 		// any vault, so reading them needs the node filesystem — desktop only.
 		// The require call sits behind a lazy try/catch (see nodeHomeEnv.ts's
