@@ -918,6 +918,8 @@ function baseSnapshot(): ChatSnapshot {
 		messages: [],
 		isStreaming: false,
 		pendingToolCalls: [],
+		activeLane: "main",
+		lanes: [{ lane: "main", leafId: null, retired: false }],
 		provider: DEFAULT_SETTINGS.provider,
 		modelId: DEFAULT_SETTINGS.modelId,
 		thinkingLevel: "off",

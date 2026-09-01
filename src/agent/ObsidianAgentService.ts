@@ -39,7 +39,13 @@ import {
 	type ModelChoice,
 	type PiemSettings,
 } from "../settings";
-import { ObsidianSessionManager, type ActiveSessionInfo, type SessionContext, type SessionDefaults } from "../session/ObsidianSessionManager";
+import {
+	ObsidianSessionManager,
+	type ActiveSessionInfo,
+	type SessionContext,
+	type SessionDefaults,
+	type SessionLane,
+} from "../session/ObsidianSessionManager";
 import { aggregateSessionSearchHits, type SessionSearchResult } from "../session/sessionSearch";
 import { arrayBufferToBase64, extractImageRefs, mimeTypeForPath, sanitizeMessageForLog, stripImageRefs } from "../vault/image";
 import { injectContext, type InjectedNote } from "./contextInjection";
@@ -146,12 +152,23 @@ export interface ChatSnapshot {
 	 */
 	noticeMessage?: string;
 	/**
-	 * Whether the last session load found a run the previous process never
+	 * Whether the active lane's last load found a run the previous process never
 	 * finished, with the user's words still the transcript's tail. The banner
 	 * turns this into the "continue" offer; absent from older snapshots means
 	 * "no", the same reading a fresh install has.
 	 */
 	canResumeInterrupted?: boolean;
+	/**
+	 * The lane this transcript belongs to, and the lanes the switcher may offer.
+	 *
+	 * A conversation that never forked reports `"main"` and a single lane, which
+	 * the switcher reads as "nothing to switch between" and stays unrendered —
+	 * so an ordinary chat is unchanged by the comparison feature existing.
+	 * Retired lanes are already filtered out: what is listed is what can be
+	 * opened.
+	 */
+	activeLane: string;
+	lanes: SessionLane[];
 	provider: string;
 	modelId: string;
 	/**
@@ -482,18 +499,31 @@ export class ObsidianAgentService {
 	private panelError: PanelError | undefined;
 	private noticeMessage: string | undefined;
 	/**
-	 * Whether the last session load found a run the previous process never
-	 * finished, with the user's words still the transcript's tail. Set by
-	 * {@link settleInterruptedRuns}; cleared by the recovery itself, a
-	 * dismissal, or a fresh send that supersedes the offer.
+	 * The lane every read and write in this panel is scoped to.
+	 *
+	 * `"main"` for a conversation that never forked, which is every session until
+	 * the user starts a comparison. Everything that projects a transcript, appends
+	 * to the log, or opens a ledger entry reads this rather than hardcoding
+	 * `"main"`, so the branch on screen and the branch being written are the same
+	 * one by construction.
 	 */
-	private resumableInterrupted = false;
+	private activeLane = "main";
+	/** Lanes the switcher may offer, refreshed whenever the set can have changed. */
+	private lanes: SessionLane[] = [];
 	/**
-	 * The run ledger entry opened for the run in flight, between
-	 * {@link beginRunOperation} and {@link endRunOperation}. One run at a
-	 * time — pi serializes runs — so one id is the whole state.
+	 * The run ledger entry opened for the run in flight, and the lane it was
+	 * opened on. pi serializes runs *per lane*, and a close filed against the
+	 * wrong lane leaves the real entry open forever — so the lane travels with
+	 * the id rather than being re-read at close time, by which point the user
+	 * may have switched.
 	 */
-	private activeRunLedgerId: string | undefined;
+	private activeRunLedger: { runId: string; lane: string } | undefined;
+	/**
+	 * Lanes whose last load found a run the previous process never finished, with
+	 * the user's words still that lane's transcript tail. The banner turns the
+	 * active lane's entry into the "continue" offer; the others wait for a switch.
+	 */
+	private resumableLanes = new Set<string>();
 	/** Agent-reported error the user already dismissed; see {@link dismissMessages}. */
 	private dismissedAgentError: string | undefined;
 	/** Why the last {@link initialize} failed, if it did; rides the error banner until dismissed. */
@@ -904,7 +934,9 @@ export class ObsidianAgentService {
 			const dispatch = stranded.length > 0 ? [...stranded.map((entry) => entry.message), message] : [message];
 			// The ledger entry opens before the run departs: a crash between
 			// this write and the run's own finish is the orphan signature
-			// recovery reads on the next load.
+			// recovery reads on the next load. Filed against the active lane, so
+			// an A/B side's crash recovers that side rather than whichever one is
+			// on screen later.
 			await this.beginRunOperation(dispatch);
 			if (stranded.length === 0) {
 				await agent.prompt([message]);
@@ -918,8 +950,9 @@ export class ObsidianAgentService {
 			}
 			sent = true;
 			// A fresh send supersedes the continue offer: the user has moved on
-			// and the crashed run's words are no longer the transcript's tail.
-			this.resumableInterrupted = false;
+			// and the crashed run's words are no longer this lane's transcript
+			// tail.
+			this.resumableLanes.delete(this.activeLane);
 		} catch (error) {
 			this.panelError = { message: error instanceof Error ? error.message : String(error), opensSettings: false };
 		} finally {
@@ -1010,7 +1043,7 @@ export class ObsidianAgentService {
 	}
 
 	/**
-	 * Continues the reply a crashed run never delivered.
+	 * Continues the reply a crashed run never delivered on the active lane.
 	 *
 	 * The transcript's tail is the user's words — that is what made the offer —
 	 * so `continue()` picks the reply up from exactly where the crash cut it,
@@ -1019,7 +1052,7 @@ export class ObsidianAgentService {
 	 * {@link abort}.
 	 */
 	async resumeInterruptedRun(): Promise<void> {
-		this.resumableInterrupted = false;
+		this.resumableLanes.delete(this.activeLane);
 		const agent = this.agent;
 		if (!agent || agent.state.isStreaming) {
 			return;
@@ -1043,30 +1076,31 @@ export class ObsidianAgentService {
 
 	/** Withdraws the continue offer without acting on it. */
 	dismissInterruptedRun(): void {
-		if (!this.resumableInterrupted) {
+		if (!this.resumableLanes.delete(this.activeLane)) {
 			return;
 		}
-		this.resumableInterrupted = false;
 		this.notify();
 	}
 
 	/**
-	 * Opens the session's run ledger for the run about to depart.
+	 * Opens the session's run ledger for the run about to depart, on the active
+	 * lane.
 	 *
-	 * The ledger is crash recovery's durable half: an `operation_started`
-	 * record that survives the process, so a crash mid-run leaves the orphan a
-	 * later load reads via {@link settleInterruptedRuns}. Best-effort by
-	 * design — the ledger is diagnostics, not the product, and a failed write
-	 * must never block the send the user asked for. The cost of a missing
-	 * entry is only that a crash during that run leaves nothing for recovery
-	 * to find.
+	 * The ledger is crash recovery's durable half: an `operation_started` record
+	 * that survives the process, so a crash mid-run leaves the orphan a later
+	 * load reads via {@link settleInterruptedRuns}. Best-effort by design — the
+	 * ledger is diagnostics, not the product, and a failed write must never
+	 * block the send the user asked for. The cost of a missing entry is only
+	 * that a crash during that run leaves nothing for recovery to find.
 	 */
 	private async beginRunOperation(originalPrompt: readonly AgentMessage[]): Promise<void> {
-		this.activeRunLedgerId = undefined;
+		const lane = this.activeLane;
+		this.activeRunLedger = undefined;
 		try {
-			this.activeRunLedgerId = await this.sessionManager.beginRunOperation([...originalPrompt]);
+			this.activeRunLedger = { runId: await this.sessionManager.beginRunOperation([...originalPrompt], lane), lane };
 		} catch (error) {
 			this.log.error("Failed to record run start", () => ({
+				lane,
 				error: error instanceof Error ? error.message : String(error),
 			}));
 		}
@@ -1075,23 +1109,25 @@ export class ObsidianAgentService {
 	/**
 	 * Closes the current run's ledger entry with `outcome`.
 	 *
-	 * A no-op without an open entry — a run whose open write failed has
-	 * nothing to close, and closing twice is impossible because the id clears
-	 * as it is read.
+	 * A no-op without an open entry — a run whose open write failed has nothing
+	 * to close, and closing twice is impossible because the entry clears as it is
+	 * read. The lane comes from the entry rather than from {@link activeLane}: a
+	 * user who switched lanes mid-run must not have the close filed against the
+	 * lane they are now looking at, which would leave the real entry open.
 	 */
 	private async endRunOperation(outcome: "completed" | "aborted" | "failed", error?: { code: string; message: string }): Promise<void> {
-		const runId = this.activeRunLedgerId;
-		this.activeRunLedgerId = undefined;
-		if (!runId) {
+		const ledger = this.activeRunLedger;
+		this.activeRunLedger = undefined;
+		if (!ledger) {
 			return;
 		}
 		try {
-			await this.sessionManager.endRunOperation(runId, outcome, error);
+			await this.sessionManager.endRunOperation(ledger.runId, outcome, error, ledger.lane);
 		} catch (failure) {
-			// The orphan this leaves is exactly what recovery looks for, so a
-			// failed close degrades to a spurious recovery offer — never to a
-			// lost reply.
+			// The orphan this leaves is exactly what recovery looks for, so a failed
+			// close degrades to a spurious recovery offer — never to a lost reply.
 			this.log.error("Failed to record run finish", () => ({
+				lane: ledger.lane,
 				error: failure instanceof Error ? failure.message : String(failure),
 			}));
 		}
@@ -1101,9 +1137,9 @@ export class ObsidianAgentService {
 	 * Closes the current run's ledger from the run's own last words.
 	 *
 	 * Runs on `agent_end`, which every run shape reaches: a completed reply
-	 * (`stop`), a user abort (`aborted`), a provider failure (`error`, with
-	 * the message the banner shows). `length` and any other stop reason mean
-	 * the model said its piece — the run did what was asked.
+	 * (`stop`), a user abort (`aborted`), a provider failure (`error`, with the
+	 * message the banner shows). `length` and any other stop reason mean the
+	 * model said its piece — the run did what was asked.
 	 */
 	private async settleRunLedger(messages: readonly AgentMessage[]): Promise<void> {
 		const lastAssistant = [...messages].reverse().find((message) => message.role === "assistant");
@@ -1118,44 +1154,78 @@ export class ObsidianAgentService {
 	}
 
 	/**
-	 * Reads the session's run ledger for runs the previous process never
-	 * finished, and settles them.
+	 * Reads every lane's run ledger for runs the previous process never finished,
+	 * and settles them.
 	 *
-	 * An open entry means a crash — or a killed Obsidian — cut a run
-	 * mid-flight. pi's storage refuses a second `operation_started` on the
-	 * lane while one is open, so these must close before anything new can
-	 * depart. The close records `aborted`: the run reached no outcome, and
-	 * neither `completed` nor `failed` would be honest.
+	 * An open entry means a crash — or a killed Obsidian — cut a run mid-flight.
+	 * pi's storage refuses a second `operation_started` on a lane while one is
+	 * open, so these must close before anything new can depart *on that lane*.
+	 * The sweep covers all of them rather than only the one on screen: an A/B
+	 * comparison leaves two writable branches, and a crash on the lane the user
+	 * was not watching would otherwise leave that side permanently unable to run.
+	 * The close records `aborted`: the run reached no outcome, and neither
+	 * `completed` nor `failed` would be honest.
 	 *
-	 * When the cut run's words are still the transcript's tail, the continue
-	 * offer stands. pi persists the prompt before streaming starts, so a run
-	 * killed mid-reply leaves the user message last, and `continue()` picks
-	 * the reply up from exactly there. An assistant tail means the reply did
-	 * arrive and only the close was lost; re-offering would invite a duplicate
-	 * turn, so those close silently.
+	 * When the cut run's words are still that lane's transcript tail, the
+	 * continue offer stands for it. pi persists the prompt before streaming
+	 * starts, so a run killed mid-reply leaves the user message last, and
+	 * `continue()` picks the reply up from exactly there. An assistant tail means
+	 * the reply did arrive and only the close was lost; re-offering would invite a
+	 * duplicate turn, so those close silently. The offer surfaces on the snapshot
+	 * only for the active lane — switching to another resumable lane reveals its
+	 * own offer without a second sweep.
 	 */
-	private async settleInterruptedRuns(context: SessionContext): Promise<void> {
-		this.resumableInterrupted = false;
-		let orphans: OperationStartedRecord[];
+	private async settleInterruptedRuns(activeContext: SessionContext): Promise<void> {
+		this.resumableLanes.clear();
+		let open: Map<string, OperationStartedRecord[]>;
 		try {
-			orphans = await this.sessionManager.findOpenRunOperations();
+			open = await this.sessionManager.findAllOpenRunOperations();
 		} catch (error) {
 			this.log.error("Failed to read the run ledger", () => ({
 				error: error instanceof Error ? error.message : String(error),
 			}));
 			return;
 		}
-		for (const orphan of orphans) {
-			try {
-				await this.sessionManager.endRunOperation(orphan.id, "aborted");
-			} catch (error) {
-				this.log.error("Failed to close an interrupted run's ledger entry", () => ({
-					error: error instanceof Error ? error.message : String(error),
-				}));
+		for (const [lane, orphans] of open) {
+			for (const orphan of orphans) {
+				try {
+					await this.sessionManager.endRunOperation(orphan.id, "aborted", undefined, lane);
+				} catch (error) {
+					this.log.error("Failed to close an interrupted run's ledger entry", () => ({
+						lane,
+						error: error instanceof Error ? error.message : String(error),
+					}));
+				}
+			}
+			if (await this.laneEndsResumable(lane, activeContext)) {
+				this.resumableLanes.add(lane);
 			}
 		}
-		const last = context.messages.at(-1);
-		this.resumableInterrupted = orphans.length > 0 && (last?.role === "user" || last?.role === "toolResult");
+	}
+
+	/**
+	 * Whether `lane`'s transcript ends where `continue()` can pick it up: on the
+	 * user's words or a tool result, rather than on a reply that already arrived.
+	 *
+	 * The active lane is read from the context already built for it rather than
+	 * re-projected, so the offer and the transcript on screen cannot disagree.
+	 */
+	private async laneEndsResumable(lane: string, activeContext: SessionContext): Promise<boolean> {
+		let last: AgentMessage | undefined;
+		if (lane === this.activeLane) {
+			last = activeContext.messages.at(-1);
+		} else {
+			try {
+				last = (await this.sessionManager.buildSessionContext(lane)).messages.at(-1);
+			} catch (error) {
+				this.log.error("Failed to read an interrupted lane's transcript", () => ({
+					lane,
+					error: error instanceof Error ? error.message : String(error),
+				}));
+				return false;
+			}
+		}
+		return last?.role === "user" || last?.role === "toolResult";
 	}
 
 	/**
@@ -1354,11 +1424,14 @@ export class ObsidianAgentService {
 	 */
 	private async summarizeAbandonedBranch(entryId: string): Promise<AgentMessage | null> {
 		const session = this.sessionManager.getSession();
-		const oldLeafId = await session.getLeafId();
+		// Lane-scoped: a retry inside a comparison rewinds *that* branch, and the
+		// leaf `collectEntriesForBranchSummary` walks back from has to be the one
+		// the lane is pointing at rather than main's.
+		const oldLeafId = await session.view(this.activeLane).getLeafId();
 		// No leaf means a fresh log with nothing to abandon; `oldLeafId === entryId`
 		// means the rewind targets the current tip, so there is no fork below it.
 		if (!oldLeafId || oldLeafId === entryId) {
-			await this.sessionManager.rewindTo(entryId);
+			await this.sessionManager.rewindTo(entryId, this.activeLane);
 			return null;
 		}
 		// A compaction in flight owns the log's summarization budget; a second
@@ -1367,7 +1440,7 @@ export class ObsidianAgentService {
 		// The rewind still happens — the user's intent is the retry, not the
 		// summary.
 		if (this.isCompacting) {
-			await this.sessionManager.rewindTo(entryId);
+			await this.sessionManager.rewindTo(entryId, this.activeLane);
 			return null;
 		}
 
@@ -1376,7 +1449,7 @@ export class ObsidianAgentService {
 		try {
 			const collected = await collectEntriesForBranchSummary(session, oldLeafId, entryId);
 			if (collected.entries.length === 0) {
-				await this.sessionManager.rewindTo(entryId);
+				await this.sessionManager.rewindTo(entryId, this.activeLane);
 				return null;
 			}
 
@@ -1392,7 +1465,7 @@ export class ObsidianAgentService {
 			// still-live branch; it is unconditional because the retry was the
 			// user's actual request. A failed or aborted summary simply means the
 			// fork is forgotten, not that the retry is blocked.
-			await this.sessionManager.rewindTo(entryId);
+			await this.sessionManager.rewindTo(entryId, this.activeLane);
 
 			if (!result.ok) {
 				if (!controller.signal.aborted) {
@@ -1408,7 +1481,7 @@ export class ObsidianAgentService {
 			// throw there cannot silently drop an amount the user was already
 			// charged.
 			this.recordOverheadUsage(result.value.usage);
-			await this.sessionManager.appendBranchSummary(result.value, oldLeafId);
+			await this.sessionManager.appendBranchSummary(result.value, oldLeafId, this.activeLane);
 			return createBranchSummaryMessage(result.value.summary, oldLeafId, Date.now());
 		} finally {
 			if (this.branchSummaryController === controller) {
@@ -1503,16 +1576,11 @@ export class ObsidianAgentService {
 		}
 		agent.clearAllQueues();
 		agent.abort();
-		if (!agent) {
-			return;
-		}
-		agent.abort();
 		void agent.waitForIdle().then(async () => {
-			// The run's own `agent_end` may not reach the settle: an abort that
-			// lands before the reply's last events still fires the end event, but
-			// a race against this handler leaves the mapping below as the only
-			// writer. Writing both is idempotent — the ledger id clears as it is
-			// read.
+			// The run's own `agent_end` may not reach the settle: an abort that lands
+			// before the reply's last events still fires the end event, but a race
+			// against this handler leaves the close below as the only writer. Writing
+			// both is idempotent — the ledger entry clears as it is read.
 			await this.endRunOperation("aborted");
 			await this.notifySettledState();
 		});
@@ -1532,9 +1600,12 @@ export class ObsidianAgentService {
 		const defaults = this.getSessionDefaults();
 		this.sessionInfo = await this.sessionManager.createSession({ ...defaults, thinkingLevel: seed });
 		this.messageEntryIds = new WeakMap<object, string>();
-		// A brand-new session has no ledger and no stranded reply; any offer the
-		// session just left was its own.
-		this.resumableInterrupted = false;
+		// A brand-new session has one lane, no ledger, and no stranded reply; any
+		// comparison or offer the session just left was its own.
+		this.activeLane = "main";
+		this.resumableLanes.clear();
+		this.activeRunLedger = undefined;
+		await this.refreshLanes();
 		this.lastCompaction = undefined;
 		this.overheadUsage = [];
 		// Pins and a dismissed follow belong to the conversation that collected them;
@@ -1545,6 +1616,161 @@ export class ObsidianAgentService {
 		this.panelError = undefined;
 		this.sessionRevision += 1;
 		this.notify();
+	}
+
+	/**
+	 * Forks the conversation at the turn behind `index` into two comparison lanes
+	 * and adopts the first one.
+	 *
+	 * The fork point is the *durable* entry the message at `index` came from —
+	 * looked up through the same `messageEntryIds` mapping the retry path uses, so
+	 * a turn the log cannot name (one a compaction absorbed) is refused rather
+	 * than forked in memory alone. Both lanes start at that entry's parent, which
+	 * makes them siblings of the turn being redone rather than continuations of it.
+	 *
+	 * `main` is deliberately untouched. Until the user promotes a winner the
+	 * original conversation is still there, and abandoning the comparison costs
+	 * nothing.
+	 *
+	 * Returns false when there is nothing to fork from, the panel is busy, or the
+	 * log cannot name the turn — the same refusals {@link retryFrom} makes, for
+	 * the same reasons.
+	 */
+	async startComparison(index: number): Promise<boolean> {
+		await this.initialize();
+		const agent = this.requireAgent();
+		if (agent.state.isStreaming || this.isCompacting || this.retryInFlight || this.branchSummaryController) {
+			return false;
+		}
+		const promptIndex = agent.state.messages[index]?.role === "user" ? index : findPromptIndex(agent.state.messages, index);
+		if (promptIndex === null) {
+			return false;
+		}
+		const promptMessage = agent.state.messages[promptIndex];
+		const entryId = promptMessage ? this.messageEntryIds.get(promptMessage) : undefined;
+		if (!entryId) {
+			return false;
+		}
+		let lanes: [string, string];
+		try {
+			lanes = await this.sessionManager.createComparisonLanes(entryId);
+		} catch (error) {
+			this.setError(error instanceof Error ? error.message : String(error));
+			return false;
+		}
+		await this.adoptLane(lanes[0]);
+		return true;
+	}
+
+	/**
+	 * Switches the panel to another lane.
+	 *
+	 * Refused while anything is in flight: the transcript, the tool mappings, and
+	 * the ledger entry all belong to the lane being left, and swapping them out
+	 * from under a live run would file its writes against the wrong branch.
+	 */
+	async switchLane(lane: string): Promise<boolean> {
+		await this.initialize();
+		if (lane === this.activeLane) {
+			return true;
+		}
+		const agent = this.agent;
+		if (agent?.state.isStreaming || this.isCompacting || this.retryInFlight || this.branchSummaryController) {
+			return false;
+		}
+		if (!(await this.sessionManager.getLanes()).some((candidate) => candidate.lane === lane)) {
+			return false;
+		}
+		await this.adoptLane(lane);
+		return true;
+	}
+
+	/**
+	 * Settles a comparison: `lane` becomes the conversation, and the lanes it beat
+	 * are either kept as reference or retired.
+	 *
+	 * Promotion moves `main` onto the winner's leaf, so a reader who never opens
+	 * the switcher again sees the transcript the user chose. Retirement moves the
+	 * loser's pointer to `null` — pi has no lane delete, so the turns stay in the
+	 * append-only log while the lane leaves the switcher and stops accepting
+	 * writes.
+	 *
+	 * The panel lands on `main` afterwards either way: the comparison is over, and
+	 * leaving it parked on a lane that is now a duplicate of `main` would invite
+	 * the next turn to be written somewhere the user no longer thinks of as the
+	 * conversation.
+	 */
+	async chooseLane(lane: string, losers: "keep" | "retire"): Promise<boolean> {
+		await this.initialize();
+		const agent = this.agent;
+		if (agent?.state.isStreaming || this.isCompacting || this.retryInFlight || this.branchSummaryController) {
+			return false;
+		}
+		const comparison = (await this.sessionManager.getLanes()).filter((candidate) => candidate.lane !== "main");
+		if (!comparison.some((candidate) => candidate.lane === lane)) {
+			return false;
+		}
+		try {
+			await this.sessionManager.promoteLane(lane);
+			// The winner is retired alongside the losers: its content now *is* main,
+			// so keeping it in the switcher would offer two names for one transcript.
+			await this.sessionManager.retireLane(lane);
+			if (losers === "retire") {
+				for (const candidate of comparison) {
+					if (candidate.lane !== lane) {
+						await this.sessionManager.retireLane(candidate.lane);
+					}
+				}
+			}
+		} catch (error) {
+			this.setError(error instanceof Error ? error.message : String(error));
+			return false;
+		}
+		await this.adoptLane("main");
+		return true;
+	}
+
+	/**
+	 * Points the panel at `lane` and rebuilds everything scoped to a branch.
+	 *
+	 * The transcript, the durable entry mapping, the compaction state, and the
+	 * continue offer are all per-lane, so they are re-derived from the lane's own
+	 * log rather than carried across. Usage restarts from history for the same
+	 * reason {@link openSession} restarts it: the overhead this panel accumulated
+	 * was spent on the branch being left.
+	 */
+	private async adoptLane(lane: string): Promise<void> {
+		this.agent?.abort();
+		this.compactionController?.abort();
+		this.branchSummaryController?.abort();
+		this.suggestionController?.abort();
+		this.activeLane = lane;
+		const context = await this.sessionManager.buildSessionContext(lane);
+		this.lastCompaction = await this.sessionManager.getLastCompaction(lane);
+		this.overheadUsage = [];
+		await this.adoptSessionContext(context);
+		await this.refreshLanes();
+		// Deliberately no ledger sweep here. The sweep both closes orphans and
+		// works out which lanes may be continued, so running it a second time
+		// finds nothing open — the first pass already closed them — and would
+		// erase every offer it had recorded. `resumableLanes` is per-session state
+		// established at load, and a new orphan can only appear via a crash, which
+		// means a reload; a lane switch just reveals the offer already known for
+		// the lane being adopted.
+		this.panelError = undefined;
+		this.notify();
+	}
+
+	/** Re-reads the lanes the switcher may offer. */
+	private async refreshLanes(): Promise<void> {
+		try {
+			this.lanes = await this.sessionManager.getLanes();
+		} catch (error) {
+			this.log.error("Failed to read the session's lanes", () => ({
+				error: error instanceof Error ? error.message : String(error),
+			}));
+			this.lanes = [];
+		}
 	}
 
 	/** Sessions for this vault, newest first. */
@@ -1595,8 +1821,11 @@ export class ObsidianAgentService {
 			return;
 		}
 
-		const context = await this.sessionManager.buildSessionContext();
-		this.lastCompaction = await this.sessionManager.getLastCompaction();
+		// The lane belongs to the session being left; the incoming one opens on its
+		// own main line.
+		this.activeLane = "main";
+		const context = await this.sessionManager.buildSessionContext(this.activeLane);
+		this.lastCompaction = await this.sessionManager.getLastCompaction(this.activeLane);
 		// Usage is per-transcript, and a reloaded session's compaction cost was
 		// already paid in an earlier run, so the running total starts from history.
 		this.overheadUsage = [];
@@ -1604,11 +1833,12 @@ export class ObsidianAgentService {
 		// follow state and no inherited pins.
 		this.contextRefs.reset();
 		await this.adoptSessionContext(context);
-		// Same placement as `initializeAgent`: the offer describes the
-		// transcript now on screen, so it is settled only after adoption.
+		await this.refreshLanes();
+		// Same placement as `initializeAgent`: the offer describes the transcript
+		// now on screen, so it is settled only after adoption.
 		await this.settleInterruptedRuns(context);
 		this.panelError = undefined;
-		await this.sessionManager.ensureConfiguration(this.getSessionDefaults());
+		await this.sessionManager.ensureConfiguration(this.getSessionDefaults(), this.activeLane);
 		this.sessionInfo = await this.sessionManager.getActiveSessionInfo();
 		this.notify();
 	}
@@ -1859,7 +2089,7 @@ export class ObsidianAgentService {
 		}
 		this.agent.state.thinkingLevel = level;
 		if (this.sessionManager.getActiveSessionPath()) {
-			await this.sessionManager.appendThinkingLevelChange(level);
+			await this.sessionManager.appendThinkingLevelChange(level, this.activeLane);
 		}
 		this.notify();
 	}
@@ -1884,7 +2114,7 @@ export class ObsidianAgentService {
 		const clamped = clampThinkingLevel(model, this.agent.state.thinkingLevel);
 		if (clamped !== this.agent.state.thinkingLevel) {
 			this.agent.state.thinkingLevel = clamped;
-			await this.sessionManager.appendThinkingLevelChange(clamped);
+			await this.sessionManager.appendThinkingLevelChange(clamped, this.activeLane);
 		}
 		this.agent.state.tools = [
 			...this.buildTools(),
@@ -1977,7 +2207,9 @@ export class ObsidianAgentService {
 			// would refuse, instead of the send gate explaining the refusal after.
 			supportsImages: modelSupportsImages(model),
 			noticeMessage: this.noticeMessage,
-			canResumeInterrupted: this.resumableInterrupted,
+			canResumeInterrupted: this.resumableLanes.has(this.activeLane),
+			activeLane: this.activeLane,
+			lanes: this.lanes,
 			provider: model.provider,
 			modelId: model.id,
 			vendorIcon: vendorIconName(matchVendorForModel(model.id, model.baseUrl)),
@@ -2073,9 +2305,13 @@ export class ObsidianAgentService {
 		await this.reloadCommandsSafely();
 		const defaults = this.getSessionDefaults();
 		this.sessionInfo = await this.sessionManager.continueRecentSession(defaults);
-		const context = await this.sessionManager.buildSessionContext();
-		this.lastCompaction = await this.sessionManager.getLastCompaction();
+		// A stored session may have been left on a comparison; the panel resumes on
+		// main, which is the branch the conversation's own history lives on.
+		this.activeLane = "main";
+		const context = await this.sessionManager.buildSessionContext(this.activeLane);
+		this.lastCompaction = await this.sessionManager.getLastCompaction(this.activeLane);
 		await this.adoptSessionContext(context);
+		await this.refreshLanes();
 		// After the context is adopted — the offer is about the transcript this
 		// panel now shows, so it must not stand before the messages are in.
 		await this.settleInterruptedRuns(context);
@@ -2784,7 +3020,7 @@ export class ObsidianAgentService {
 		agent.state.messages = outcome.messages;
 		this.lastCompaction = outcome.result;
 		this.recordOverheadUsage(outcome.result.usage);
-		await this.sessionManager.appendCompaction(outcome.result);
+		await this.sessionManager.appendCompaction(outcome.result, this.activeLane);
 		await this.refreshSessionInfo();
 		this.notify();
 		return true;
@@ -2880,7 +3116,7 @@ export class ObsidianAgentService {
 		// request reads. Sanitize to a deep copy with image blocks replaced by a
 		// text placeholder; dedup still keys on the original object identity.
 		const logged = sanitizeMessageForLog(message);
-		this.messageEntryIds.set(key, await this.sessionManager.appendMessage(logged));
+		this.messageEntryIds.set(key, await this.sessionManager.appendMessage(logged, this.activeLane));
 	}
 
 	/**
