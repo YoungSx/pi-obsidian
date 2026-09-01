@@ -86,8 +86,14 @@ for (const row of layouts) {
 	if (row.markerSize !== 16) {
 		failures.push(`${where}: marker ${row.markerSize}px, expected 16`);
 	}
-	/* Multi-select markers are squares, one-of markers are circles. */
-	const expectRadius = row.markerRadius === "50%" ? "circle" : row.markerRadius === "4px" ? "square" : "unknown";
+	/* Multi-select markers are boxes, one-of markers are rings. The shape is the
+	 * rule stated before the first interaction, so it is asserted from the multi
+	 * flag the report carries per row, not inferred from the radius itself —
+	 * deriving the expectation from the measurement would only ever agree. */
+	const expectRadius = row.multi ? "4px" : "50%";
+	if (row.markerRadius !== expectRadius) {
+		failures.push(`${where}: marker radius ${row.markerRadius}, expected ${expectRadius} for a ${row.multi ? "multi" : "one-of"} question`);
+	}
 	/* The offset is how far the marker's centre sits from the label's line centre.
 	 * Zero is dead-centred; anything over 1px reads as visibly off. */
 	if (row.markerOffset !== null && Math.abs(row.markerOffset) > 1) {

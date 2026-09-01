@@ -329,10 +329,18 @@ for (const frame of document.querySelectorAll(".frame")) {
 		const desc = row.querySelector(".piem-ask-option-description");
 		const style = getComputedStyle(row);
 		const markerBox = marker.getBoundingClientRect();
+		/*
+		 * Whether the parent question is multi-select. The shape rule reaches the
+		 * marker through the hint sibling selector, so the expected shape is
+		 * derivable from the DOM, not restated: a hint on the question means a box.
+		 */
+		const question = row.closest(".piem-ask-question");
+		const multi = question ? question.querySelector(".piem-ask-question-hint") !== null : false;
 		out.push({
 			frame: label,
 			coarse,
 			kind: row.classList.contains("piem-ask-other-row") ? "other" : "option",
+			multi,
 			text: label_ ? label_.textContent.trim().slice(0, 28) : "(other)",
 			height: Math.round(box.height),
 			width: Math.round(box.width),
