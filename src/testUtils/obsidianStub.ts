@@ -118,17 +118,24 @@ export class TextStub {
 
 /** Obsidian's toggle, a real `<input type="checkbox">` wrapper. */
 export class ToggleStub {
+	// Obsidian's toggle is a pill-shaped `div.checkbox-container` whose knob is
+	// a pseudo-element, with a real checkbox inside for keyboard and screen
+	// readers — not a bare styled `<input>`, which cannot host the knob.
 	private readonly el: HTMLInputElement;
+	private readonly container: HTMLElement;
 
 	constructor(parent: HTMLElement) {
+		this.container = parent.ownerDocument.createElement("div");
+		this.container.className = "checkbox-container";
 		this.el = parent.ownerDocument.createElement("input");
 		this.el.type = "checkbox";
-		this.el.className = "checkbox-container";
-		parent.appendChild(this.el);
+		this.container.appendChild(this.el);
+		parent.appendChild(this.container);
 	}
 
 	setValue(value: boolean): this {
 		this.el.checked = value;
+		this.container.classList.toggle("is-enabled", value);
 		return this;
 	}
 
@@ -209,6 +216,17 @@ export class SettingButtonStub {
  * The element's `hide()`/`show()` come from `installObsidianDomHelpers`, the
  * same place every other caller of Obsidian's element extensions gets them.
  */
+/**
+ * Renders icons into stub elements when a host has a real icon registry.
+ * `undefined` (the default, under `bun test`) leaves `setIcon` writing the icon
+ * name as text — assertable without shipping a registry.
+ */
+let stubIconPainter: ((element: HTMLElement, icon: string) => void) | undefined;
+
+export function setStubIconPainter(paint: ((element: HTMLElement, icon: string) => void) | undefined): void {
+	stubIconPainter = paint;
+}
+
 export class ExtraButtonStub {
 	icon: string | undefined;
 	tooltip: string | undefined;
@@ -225,7 +243,17 @@ export class ExtraButtonStub {
 
 	setIcon(icon: string): this {
 		this.icon = icon;
-		this.render().textContent = icon;
+		const el = this.render();
+		el.textContent = "";
+		// Real Obsidian renders the icon SVG into this element. Tests keep the
+		// name as text (cheap to assert, no icon registry needed); a host that
+		// has one — the visual preview harness — installs `setStubIconPainter`
+		// and gets the same glyphs `setIcon` would draw.
+		if (stubIconPainter) {
+			stubIconPainter(el, icon);
+		} else {
+			el.textContent = icon;
+		}
 		return this;
 	}
 
