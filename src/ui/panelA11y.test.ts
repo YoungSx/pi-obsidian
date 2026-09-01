@@ -589,3 +589,79 @@ describe("z-index falls back to Obsidian's own layer value", () => {
 	});
 });
 
+
+describe("scanner compatibility: hiding layers and the composer ring (issue #204)", () => {
+	/*
+	 * The official scanner flags `:has()` (broad invalidation) and, for Obsidian
+	 * 1.11.4, `clip-path` (partial support). The composer ring keys on
+	 * `:focus-within`; the skip link and the screen-reader-only clip hide through
+	 * the classic `clip: rect(0 0 0 0)` box — usable back before `clip-path`
+	 * existed — with `clip-path` kept as the modern rider, and focus releases
+	 * both. The negative `:has` check runs over the whole file including
+	 * comments: the scanner reads the raw text, so even a comment that names it
+	 * would count as a hit.
+	 */
+	it("the composer ring keys on :focus-within, and the stylesheet has no :has anywhere", () => {
+		expect(ruleBody(".piem-chat__composer-shell:focus-within")).toContain(
+			"box-shadow: 0 0 0 1px var(--background-modifier-border-focus)",
+		);
+		expect(styles).not.toMatch(/:has\(/);
+	});
+
+	it("the skip link hides through both clip layers and focus releases both", () => {
+		const hidden = ruleBody(".piem-chat__skip-link");
+		// `clip` only works on a positioned box — the guard that makes it real.
+		expect(hidden).toContain("position: absolute");
+		expect(hidden).toContain("clip: rect(0 0 0 0)");
+		expect(hidden).toContain("clip-path: inset(50%)");
+
+		const revealed = ruleBody(".piem-chat__skip-link:focus");
+		expect(revealed).toContain("clip: auto");
+		expect(revealed).toContain("clip-path: none");
+	});
+
+	it("the screen-reader-only clip stands without clip-path support", () => {
+		const body = ruleBody(".piem-chat__visually-hidden");
+		expect(body).toContain("position: absolute");
+		expect(body).toContain("clip: rect(0 0 0 0)");
+		expect(body).toContain("clip-path: inset(50%)");
+	});
+});
+
+describe("scanner compatibility: hiding layers and the composer ring (issue #204)", () => {
+	/*
+	 * The official scanner flags `:has()` (broad invalidation) and, for Obsidian
+	 * 1.11.4, `clip-path` (partial support). The composer ring keys on
+	 * `:focus-within`; the skip link and the screen-reader-only clip hide through
+	 * the classic `clip: rect(0 0 0 0)` box — usable back before `clip-path`
+	 * existed — with `clip-path` kept as the modern rider, and focus releases
+	 * both. The negative `:has` check runs over the whole file including
+	 * comments: the scanner reads the raw text, so even a comment that names it
+	 * would count as a hit.
+	 */
+	it("the composer ring keys on :focus-within, and the stylesheet has no :has anywhere", () => {
+		expect(ruleBody(".piem-chat__composer-shell:focus-within")).toContain(
+			"box-shadow: 0 0 0 1px var(--background-modifier-border-focus)",
+		);
+		expect(styles).not.toMatch(/:has\(/);
+	});
+
+	it("the skip link hides through both clip layers and focus releases both", () => {
+		const hidden = ruleBody(".piem-chat__skip-link");
+		// `clip` only works on a positioned box — the guard that makes it real.
+		expect(hidden).toContain("position: absolute");
+		expect(hidden).toContain("clip: rect(0 0 0 0)");
+		expect(hidden).toContain("clip-path: inset(50%)");
+
+		const revealed = ruleBody(".piem-chat__skip-link:focus");
+		expect(revealed).toContain("clip: auto");
+		expect(revealed).toContain("clip-path: none");
+	});
+
+	it("the screen-reader-only clip stands without clip-path support", () => {
+		const body = ruleBody(".piem-chat__visually-hidden");
+		expect(body).toContain("position: absolute");
+		expect(body).toContain("clip: rect(0 0 0 0)");
+		expect(body).toContain("clip-path: inset(50%)");
+	});
+});
