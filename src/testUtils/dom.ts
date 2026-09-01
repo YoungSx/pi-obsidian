@@ -34,6 +34,14 @@ export function installDom(): Document {
 	globals.Event = window.Event;
 	globals.CustomEvent = window.CustomEvent;
 	globals.requestAnimationFrame = (callback: FrameRequestCallback): number => window.setTimeout(() => callback(0), 0) as unknown as number;
+	// Pointer-query stub for touch-vs-mouse detection. Tests default to fine pointer.
+	globals.matchMedia = (query: string) => ({
+		matches: false,
+		media: query,
+		addEventListener: () => {},
+		removeEventListener: () => {},
+		dispatchEvent: () => true,
+	});
 	// Obsidian patches these helpers onto HTMLElement.prototype; production code
 	// calls them, so the test DOM has to provide them too.
 	(window.HTMLElement.prototype as unknown as { empty: () => void }).empty = function empty(this: HTMLElement) {
