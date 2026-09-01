@@ -3234,6 +3234,52 @@ describe("quick-action suggestions", () => {
 
 		expect(await service.suggestQuickActions("empty")).toBeNull();
 	});
+
+	/*
+	 * The cache behind issue #200: a successful empty-scope answer is the next
+	 * blank visit's stale row, so it lands in the cache; a failed or superseded
+	 * request must not poison it, and a reply's answer — tied to that one
+	 * conversation's text — never caches at all.
+	 */
+	it("caches an empty-scope answer and serves it back through peek", async () => {
+		const { service } = createServiceWithSettings(new MemoryAdapter(), { streamFn: suggestionReplyStreamFn(SUGGESTION_JSON) });
+		await service.initialize();
+		service.setActiveNotePath("Projects/weekly-0827.md");
+
+		expect(service.peekQuickActionSuggestions("empty")).toBeUndefined();
+		const actions = await service.suggestQuickActions("empty");
+
+		expect(actions).toEqual([{ id: "suggested-0", label: "Go deeper", prompt: "Expand on the reply." }]);
+		expect(service.peekQuickActionSuggestions("empty")).toEqual(actions ?? undefined);
+	});
+
+	it("keys the cache by note, so a different note reads as unanswered", async () => {
+		const { service } = createServiceWithSettings(new MemoryAdapter(), { streamFn: suggestionReplyStreamFn(SUGGESTION_JSON) });
+		await service.initialize();
+		service.setActiveNotePath("Projects/weekly-0827.md");
+		await service.suggestQuickActions("empty");
+		service.setActiveNotePath("Notes/other.md");
+
+		expect(service.peekQuickActionSuggestions("empty")).toBeUndefined();
+	});
+
+	it("does not cache a failed request, so the next peek still reads as unanswered", async () => {
+		const { service, settings } = createServiceWithSettings(new MemoryAdapter(), { streamFn: suggestionReplyStreamFn(SUGGESTION_JSON) });
+		await service.initialize();
+		service.setActiveNotePath("Projects/weekly-0827.md");
+		settings.providerApiKeys = {};
+
+		expect(await service.suggestQuickActions("empty")).toBeNull();
+		expect(service.peekQuickActionSuggestions("empty")).toBeUndefined();
+	});
+
+	it("does not cache reply-scope answers, whose subject no future request reproduces", async () => {
+		const { service } = createServiceWithSettings(new MemoryAdapter(), { streamFn: suggestionReplyStreamFn(SUGGESTION_JSON) });
+		await service.initialize();
+
+		await service.suggestQuickActions("empty");
+		expect(service.peekQuickActionSuggestions("reply")).toBeUndefined();
+	});
 });
 
 /**

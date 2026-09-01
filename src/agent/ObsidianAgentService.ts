@@ -26,6 +26,7 @@ import { measureContextFill, sumUsage, type ContextFill, type UsageTotals } from
 import { resolveCompactionSettings, type CompactionSettings } from "./compactionSettings";
 import { createObsidianTools } from "../tools/obsidianTools";
 import { fetchQuickActionSuggestions, lastAssistantText, type SuggestionScope } from "./quickActionSuggestionRequest";
+import { QuickActionSuggestionCache } from "./quickActionSuggestionCache";
 import type { QuickAction } from "../ui/quickActionSuggestions";
 import { DEFAULT_THINKING_LEVEL } from "../constants";
 import {
@@ -600,6 +601,16 @@ export class ObsidianAgentService {
 	 * session-switch — but not a controller.
 	 */
 	private suggestionController: AbortController | null = null;
+	/**
+	 * The empty screen's last answers, keyed by language and note path
+	 * ({@link QuickActionSuggestionCache}). Fed by every successful empty-scope
+	 * request and read by {@link peekQuickActionSuggestions}, so the panel can
+	 * show the previous chips while a fresh request revalidates them — and keep
+	 * them when the fresh request cannot. Plugin-lifetime, deliberately not
+	 * persisted: chips are decoration, and the built-in row already covers the
+	 * cold start a reload produces.
+	 */
+	private readonly suggestionCache = new QuickActionSuggestionCache();
 	/** Frozen for one user turn so a mid-loop note switch cannot retarget a write. */
 	private activeRunContext: ContextRef[] | null = null;
 	/**
@@ -1511,6 +1522,26 @@ export class ObsidianAgentService {
 	}
 
 	/**
+	 * The empty screen's previous answer, without sending anything.
+	 *
+	 * The stale half of the cache's stale-while-revalidate contract: the panel
+	 * reads this synchronously to fill the row while a fresh request revalidates
+	 * it. Undefined means no prior answer — the panel falls back to its built-in
+	 * chips exactly as before. Reply-scope results are not cached, so a reply
+	 * scope reads nothing here by construction.
+	 */
+	peekQuickActionSuggestions(scope: SuggestionScope): QuickAction[] | undefined {
+		if (scope !== "empty") {
+			return undefined;
+		}
+		const settings = this.getSettings();
+		return this.suggestionCache.get({
+			language: resolveLanguage(this.app.vault as LanguageHost, settings.language),
+			notePath: this.contextRefs.list().find((ref) => ref.kind === "active")?.path ?? null,
+		});
+	}
+
+	/**
 	 * Asks the active model for quick-action chips, as a best-effort side
 	 * channel.
 	 *
@@ -1562,6 +1593,16 @@ export class ObsidianAgentService {
 				return null;
 			}
 			this.recordOverheadUsage(result.usage);
+			// Only the empty screen caches: its subject is the (path, language) pair
+			// the next blank visit will reproduce, so the answer stays worth showing
+			// again. A reply's subject is that conversation's newest text — no future
+			// request will ask for it, so caching it would be dead weight.
+			if (scope === "empty" && result.actions) {
+				this.suggestionCache.set(
+					{ language: resolveLanguage(this.app.vault as LanguageHost, settings.language), notePath: subject },
+					result.actions,
+				);
+			}
 			return result.actions;
 		} catch (error) {
 			// The contract with the UI is "null means nothing to show, never a

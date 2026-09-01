@@ -206,14 +206,27 @@ class FakeAgentService {
 	 * Suggestion wiring. Each request is logged with its scope, so a placement
 	 * that should have stayed quiet shows up as an absence, and answered from
 	 * `suggestionResults` — `null` is the service's failure shape, which is how
-	 * a test exercises "no fallback" without a network.
+	 * a test exercises "no fallback" without a network. `peekedSuggestions`
+	 * stands in for the service's cache: keyed the way the real one is, so a
+	 * stale-while-revalidate test can stage a previous visit's answer.
 	 */
 	readonly suggestionRequests: SuggestionScope[] = [];
 	suggestionResults: (QuickAction[] | null)[] = [];
+	peekedSuggestions: Partial<Record<SuggestionScope, QuickAction[]>> = {};
+	/** When set, `suggestQuickActions` holds its answer until this resolves — the gate a test lifts to interleave renders. */
+	suggestionsGate: Promise<void> | null = null;
+
+	peekQuickActionSuggestions(scope: SuggestionScope): QuickAction[] | undefined {
+		return this.peekedSuggestions[scope];
+	}
 
 	async suggestQuickActions(scope: SuggestionScope): Promise<QuickAction[] | null> {
 		this.suggestionRequests.push(scope);
-		return this.suggestionResults.shift() ?? null;
+		const result = this.suggestionResults.shift() ?? null;
+		if (this.suggestionsGate) {
+			await this.suggestionsGate;
+		}
+		return result;
 	}
 
 	/** Pushes a partial snapshot the way the real service's events do. */
@@ -289,6 +302,14 @@ async function mountChat(
 		failSends?: boolean;
 		/** Queued answers for `suggestQuickActions`; must be set before mount, since the first request can fire during it. */
 		suggestionResults?: (QuickAction[] | null)[];
+		/** Chips `peekQuickActionSuggestions` serves, staged before mount for the same reason. */
+		peekedSuggestions?: Partial<Record<SuggestionScope, QuickAction[]>>;
+		/**
+		 * Held `suggestQuickActions` answers behind this gate, which must exist
+		 * before mount: the suggestion effect fires during it, and a gate added
+		 * after would miss the request entirely.
+		 */
+		suggestionsGate?: Promise<void>;
 	} = {},
 ): Promise<Mounted> {
 	const host = document.createElement("div");
@@ -296,6 +317,12 @@ async function mountChat(
 	const service = new FakeAgentService(fakeApp(), options.snapshot, options.failSends);
 	if (options.suggestionResults) {
 		service.suggestionResults = options.suggestionResults;
+	}
+	if (options.peekedSuggestions) {
+		service.peekedSuggestions = options.peekedSuggestions;
+	}
+	if (options.suggestionsGate) {
+		service.suggestionsGate = options.suggestionsGate;
 	}
 	const inputController = new ChatInputController();
 	const draftStore = new RecordingDraftStore();
@@ -642,6 +669,54 @@ describe("ChatApp model-suggested quick actions", () => {
 		expect(service.suggestionRequests).toEqual(["empty"]);
 		expect(quickActionChips(host).some((chip) => chip.textContent === "Summarize this note")).toBe(true);
 		expect(quickActionChips(host).some((chip) => chip.textContent === "Agent chip")).toBe(false);
+	});
+
+	/*
+	 * Stale-while-revalidate (issue #200): a previous visit's answer shows at
+	 * once, the request still goes out, and its answer replaces the row — or,
+	 * when it cannot, the cached row is what survives. The assertions below pin
+	 * each leg of that contract; the request-on-hit leg matters most, because a
+	 * cache that short-circuited would freeze the chips at their first wording.
+	 */
+	it("shows the cached chips immediately and still sends the freshening request", async () => {
+		const cachedChips: QuickAction[] = [{ id: "suggested-0", label: "Cached chip", prompt: "From the last visit." }];
+		let releaseRequest!: () => void;
+		// The gate is staged before mount so the moment between "request sent"
+		// and "answer back" is visible; an instant answer would overwrite the
+		// cached row before any assertion could see it, which is the very
+		// behavior the contract says happens first.
+		const gate = new Promise<void>((resolve) => {
+			releaseRequest = resolve;
+		});
+		const { host, service } = await mountChat({
+			snapshot: readySnapshot,
+			peekedSuggestions: { empty: cachedChips },
+			suggestionResults: [agentChips],
+			suggestionsGate: gate,
+		});
+
+		// Before the request resolves, the cached row is what fills the gap —
+		// the built-ins had their turn only when there was nothing cached.
+		expect(quickActionChips(host).some((chip) => chip.textContent === "Cached chip")).toBe(true);
+		expect(service.suggestionRequests).toEqual(["empty"]);
+
+		releaseRequest();
+		await flushRender(() => quickActionChips(host).some((chip) => chip.textContent === "Agent chip"));
+		expect(quickActionChips(host).some((chip) => chip.textContent === "Cached chip")).toBe(false);
+	});
+
+	it("keeps the cached chips on screen when the freshening request fails", async () => {
+		const cachedChips: QuickAction[] = [{ id: "suggested-0", label: "Cached chip", prompt: "From the last visit." }];
+		const { host } = await mountChat({
+			snapshot: readySnapshot,
+			peekedSuggestions: { empty: cachedChips },
+			suggestionResults: [null],
+		});
+
+		await flushRender();
+
+		// The request could not; the cache answers instead — the row never blanks.
+		expect(quickActionChips(host).some((chip) => chip.textContent === "Cached chip")).toBe(true);
 	});
 
 	it("shows the model's follow-ups after a reply settles", async () => {
