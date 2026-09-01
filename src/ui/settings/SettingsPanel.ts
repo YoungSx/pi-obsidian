@@ -280,11 +280,19 @@ function rowAction(button: ExtraButtonComponent, icon: string, label: string): v
 	button.extraSettingsEl.setAttribute("aria-label", label);
 }
 
-export function renderSettingsPanel(containerEl: HTMLElement, host: SettingsPanelHost): void {
-	containerEl.empty();
-
+/**
+ * The four tabs, as data.
+ *
+ * Split out from the render so the same list can drive two very different
+ * presentations: Obsidian's own settings navigation, which the declarative API
+ * builds from {@link SettingDefinitionPage} entries, and the in-panel tab strip
+ * this plugin drew for itself before that API existed. Each tab still owns one
+ * container and renders into it, which is what lets a single definition here
+ * serve both.
+ */
+export function settingsTabs(host: SettingsPanelHost): SettingsTabDefinition[] {
 	const { t } = host;
-	const tabs: SettingsTabDefinition[] = [
+	return [
 		{ id: "models", label: t.t("settings.tabModels"), render: (el) => renderModelsTab(el, host) },
 		// Behaviour on top, storage underneath, separated by a section heading:
 		// both halves answer questions about the same thing — the conversation —
@@ -297,9 +305,13 @@ export function renderSettingsPanel(containerEl: HTMLElement, host: SettingsPane
 		// rather than configuring it.
 		{ id: "general", label: t.t("settings.tabGeneral"), render: (el) => renderGeneralTab(el, host) },
 	];
+}
+
+export function renderSettingsPanel(containerEl: HTMLElement, host: SettingsPanelHost): void {
+	containerEl.empty();
 
 	renderSettingsTabs(containerEl, {
-		tabs,
+		tabs: settingsTabs(host),
 		activeTabId: RETIRED_TAB_IDS[lastActiveTabId] ?? lastActiveTabId,
 		onTabChange: (tabId) => {
 			lastActiveTabId = tabId;

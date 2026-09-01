@@ -149,6 +149,172 @@ export class ExtraButtonStub {
 }
 
 /**
+ * The toggle handed to `Setting.addToggle`, rendered as a real checkbox.
+ *
+ * `onChange` is wired to the element's own `change` event rather than kept as a
+ * private callback, so a test can drive the control the way a user does —
+ * `el.checked = x; el.dispatchEvent(new Event("change"))` — and exercise the
+ * production handler through the same path Obsidian uses. `setValue` deliberately
+ * does *not* fire it: Obsidian's own toggle sets the value silently, and a stub
+ * that notified on the seeding call would make every row appear to save on
+ * render.
+ */
+export class ToggleStub {
+	onChangeHandler: ((value: boolean) => unknown) | undefined;
+	readonly toggleEl: HTMLInputElement;
+
+	constructor(parent: HTMLElement) {
+		this.toggleEl = parent.ownerDocument.createElement("input");
+		this.toggleEl.type = "checkbox";
+		parent.appendChild(this.toggleEl);
+	}
+
+	setValue(value: boolean): this {
+		this.toggleEl.checked = value;
+		return this;
+	}
+
+	getValue(): boolean {
+		return this.toggleEl.checked;
+	}
+
+	setDisabled(disabled: boolean): this {
+		this.toggleEl.disabled = disabled;
+		return this;
+	}
+
+	setTooltip(_tooltip: string): this {
+		return this;
+	}
+
+	onChange(handler: (value: boolean) => unknown): this {
+		this.onChangeHandler = handler;
+		this.toggleEl.addEventListener("change", () => {
+			void handler(this.toggleEl.checked);
+		});
+		return this;
+	}
+
+	/** Flips the control as a user would, firing the production handler. */
+	toggle(value: boolean): void {
+		this.toggleEl.checked = value;
+		this.toggleEl.dispatchEvent(new Event("change"));
+	}
+}
+
+/**
+ * The dropdown handed to `Setting.addDropdown`, rendered as a real `<select>`
+ * with real `<option>` children — so a test can assert on the options a row
+ * offered, which is what a mis-built list actually looks like to a user.
+ */
+export class DropdownStub {
+	onChangeHandler: ((value: string) => unknown) | undefined;
+	readonly selectEl: HTMLSelectElement;
+
+	constructor(parent: HTMLElement) {
+		this.selectEl = parent.ownerDocument.createElement("select");
+		parent.appendChild(this.selectEl);
+	}
+
+	addOption(value: string, display: string): this {
+		const option = this.selectEl.ownerDocument.createElement("option");
+		option.value = value;
+		option.textContent = display;
+		this.selectEl.appendChild(option);
+		return this;
+	}
+
+	addOptions(options: Record<string, string>): this {
+		for (const [value, display] of Object.entries(options)) {
+			this.addOption(value, display);
+		}
+		return this;
+	}
+
+	setValue(value: string): this {
+		this.selectEl.value = value;
+		return this;
+	}
+
+	getValue(): string {
+		return this.selectEl.value;
+	}
+
+	setDisabled(disabled: boolean): this {
+		this.selectEl.disabled = disabled;
+		return this;
+	}
+
+	onChange(handler: (value: string) => unknown): this {
+		this.onChangeHandler = handler;
+		this.selectEl.addEventListener("change", () => {
+			void handler(this.selectEl.value);
+		});
+		return this;
+	}
+
+	/** Selects a value as a user would, firing the production handler. */
+	select(value: string): void {
+		this.selectEl.value = value;
+		this.selectEl.dispatchEvent(new Event("change"));
+	}
+}
+
+/**
+ * The text input handed to `Setting.addText`.
+ *
+ * `inputEl` is the load-bearing member: the settings panel commits several
+ * fields on `blur` rather than per keystroke, and reaches through to the element
+ * to say so. A stub that only recorded values could not exercise that path at
+ * all, so the element is real and the events are the real ones.
+ */
+export class TextStub {
+	onChangeHandler: ((value: string) => unknown) | undefined;
+	placeholder: string | undefined;
+	readonly inputEl: HTMLInputElement;
+
+	constructor(parent: HTMLElement) {
+		this.inputEl = parent.ownerDocument.createElement("input");
+		this.inputEl.type = "text";
+		parent.appendChild(this.inputEl);
+	}
+
+	setValue(value: string): this {
+		this.inputEl.value = value;
+		return this;
+	}
+
+	getValue(): string {
+		return this.inputEl.value;
+	}
+
+	setPlaceholder(placeholder: string): this {
+		this.placeholder = placeholder;
+		this.inputEl.placeholder = placeholder;
+		return this;
+	}
+
+	setDisabled(disabled: boolean): this {
+		this.inputEl.disabled = disabled;
+		return this;
+	}
+
+	onChange(handler: (value: string) => unknown): this {
+		this.onChangeHandler = handler;
+		this.inputEl.addEventListener("input", () => {
+			void handler(this.inputEl.value);
+		});
+		return this;
+	}
+
+	/** Types a value and commits it the way the panel's blur-committed rows expect. */
+	commit(value: string): void {
+		this.inputEl.value = value;
+		this.inputEl.dispatchEvent(new Event("blur"));
+	}
+}
+
+/**
  * Mutable handle for the stubbed `Platform` flags.
  *
  * Tests that exercise desktop/mobile branching reconfigure these instead of
@@ -741,28 +907,163 @@ const obsidianStub = {
 	AbstractInputSuggest: class AbstractInputSuggest {
 		constructor(_app: unknown, _inputEl: unknown) {}
 	},
-	PluginSettingTab: class PluginSettingTab {},
+	/**
+	 * `PluginSettingTab` with the two members a declarative tab actually drives:
+	 * the container it renders into and the `app`/`plugin` pair the base class
+	 * stores. The real class also carries `getSettingDefinitions`,
+	 * `getControlValue`, and `setControlValue`, but those are overridden by every
+	 * subclass we ship — inheriting a stub of them would let a missing override
+	 * pass silently, so they are left off and a subclass that forgets one fails
+	 * as `undefined is not a function`.
+	 *
+	 * `containerEl` is created eagerly rather than lazily: production reads it in
+	 * the constructor path, and a getter that built on first access would hand
+	 * out a different element to a test that looked before the render.
+	 */
+	PluginSettingTab: class PluginSettingTab {
+		containerEl: HTMLElement;
+		app: unknown;
+		plugin: unknown;
+		/** Recorded so a test can assert the tab asked for a re-render. */
+		updateCalls = 0;
+		/** Recorded separately: the cheap predicate re-evaluation, not a rebuild. */
+		refreshDomStateCalls = 0;
+
+		constructor(app: unknown, plugin: unknown) {
+			const doc = globalThis.document;
+			if (!doc) {
+				throw new Error("installDom() must run before a PluginSettingTab can be constructed in tests");
+			}
+			this.app = app;
+			this.plugin = plugin;
+			this.containerEl = doc.createElement("div");
+		}
+
+		update(): void {
+			this.updateCalls++;
+		}
+
+		refreshDomState(): void {
+			this.refreshDomStateCalls++;
+		}
+	},
+	/**
+	 * `SettingPage` with the element scaffold the real one builds, so a subclass
+	 * that renders into `containerEl` from `display()` produces markup a test can
+	 * read. `rootEl`/`titlebarEl` exist because the shipped class exposes them;
+	 * nothing we write touches them yet, but a page that starts styling its own
+	 * titlebar should find them here rather than inventing a second scaffold.
+	 *
+	 * `display()` stays abstract-by-omission: the real class declares it abstract,
+	 * and a stub implementation would make a subclass that forgot to override it
+	 * silently render nothing.
+	 */
+	SettingPage: class SettingPage {
+		rootEl: HTMLElement;
+		titlebarEl: HTMLElement;
+		containerEl: HTMLElement;
+		title = "";
+
+		constructor() {
+			const doc = globalThis.document;
+			if (!doc) {
+				throw new Error("installDom() must run before a SettingPage can be constructed in tests");
+			}
+			this.rootEl = doc.createElement("div");
+			this.titlebarEl = this.rootEl.createDiv();
+			this.containerEl = this.rootEl.createDiv();
+		}
+
+		hide(): void {}
+	},
 	// DOM-backed row builder, like the Modal above: the elements land in the
 	// document so a test can assert on the markup production code produced.
 	// Only the members exercised so far are implemented — a method that is
 	// called and missing fails loudly as `undefined is not a function`, which
 	// is the right signal to extend the stub rather than silently no-op it.
 	Setting: class Setting {
+		settingEl: HTMLElement;
+		infoEl: HTMLElement;
 		nameEl: HTMLElement;
 		descEl: HTMLElement;
 		controlsEl: HTMLElement;
+		/**
+		 * Alias for {@link controlsEl}, which is what the shipped API calls it.
+		 * Production reaches for `controlEl` (the About rows append a real `<a>`
+		 * there); the plural spelling predates it in this stub and other tests
+		 * already assert through it, so both name the same element rather than one
+		 * being migrated out from under those tests.
+		 */
+		controlEl: HTMLElement;
 
-		constructor(controlEl: HTMLElement) {
+		constructor(containerEl: HTMLElement) {
 			const doc = globalThis.document;
 			if (!doc) {
 				throw new Error("installDom() must run before a Setting can be constructed in tests");
 			}
-			const row = controlEl.createDiv({ cls: "setting-item" });
+			const row = containerEl.createDiv({ cls: "setting-item" });
+			this.settingEl = row;
 			const info = row.createDiv({ cls: "setting-item-info" });
+			this.infoEl = info;
 			this.nameEl = info.createDiv({ cls: "setting-item-name" });
 			this.descEl = info.createDiv({ cls: "setting-item-description" });
 			this.controlsEl = row.createDiv({ cls: "setting-item-control" });
+			this.controlEl = this.controlsEl;
 		}
+
+		/**
+		 * Obsidian's heading rows carry `setting-item-heading`, which is how the
+		 * heading styling reaches the screen — so that class is what a test should
+		 * pin rather than a recorded boolean.
+		 */
+		setHeading(): this {
+			this.settingEl.classList.add("setting-item-heading");
+			return this;
+		}
+
+		setClass(cls: string): this {
+			this.settingEl.classList.add(cls);
+			return this;
+		}
+
+		setDisabled(disabled: boolean): this {
+			this.settingEl.toggleClass("is-disabled", disabled);
+			return this;
+		}
+
+		setTooltip(_tooltip: string): this {
+			return this;
+		}
+
+		addToggle(build: (toggle: ToggleStub) => unknown): this {
+			const stub = new ToggleStub(this.controlsEl);
+			this.toggles.push(stub);
+			build(stub);
+			return this;
+		}
+
+		addDropdown(build: (dropdown: DropdownStub) => unknown): this {
+			const stub = new DropdownStub(this.controlsEl);
+			this.dropdowns.push(stub);
+			build(stub);
+			return this;
+		}
+
+		addText(build: (text: TextStub) => unknown): this {
+			const stub = new TextStub(this.controlsEl);
+			this.texts.push(stub);
+			build(stub);
+			return this;
+		}
+
+		/** Every toggle this row built, oldest first. */
+		readonly toggles: ToggleStub[] = [];
+		/** Every dropdown this row built, oldest first. */
+		readonly dropdowns: DropdownStub[] = [];
+		/** Every text field this row built, oldest first. */
+		readonly texts: TextStub[] = [];
+		/** Every plain button this row built, oldest first. */
+		readonly buttons: SettingButtonStub[] = [];
 
 		setName(name: string | DocumentFragment): this {
 			if (typeof name === "string") {
@@ -783,7 +1084,12 @@ const obsidianStub = {
 		}
 
 		addButton(build: (button: SettingButtonStub) => unknown): this {
-			build(new SettingButtonStub(this.controlsEl));
+			const stub = new SettingButtonStub(this.controlsEl);
+			// Recorded like the other controls: the builder hands the stub away and
+			// production keeps only its closure, so this array is a test's only
+			// handle back onto what the row actually built.
+			this.buttons.push(stub);
+			build(stub);
 			return this;
 		}
 
