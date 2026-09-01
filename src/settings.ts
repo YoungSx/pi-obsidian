@@ -1,4 +1,4 @@
-import { App, PluginSettingTab } from "obsidian";
+import { PluginSettingTab, type App, type SettingDefinitionItem } from "obsidian";
 import { getBuiltinModels } from "./net/builtinCatalog";
 import type { Model } from "@earendil-works/pi-ai";
 import type PiemPlugin from "./main";
@@ -25,7 +25,8 @@ import {
 	normalizeCustomEndpoint,
 	type CustomEndpointConfig,
 } from "./customEndpoint";
-import { renderSettingsPanel } from "./ui/settings/SettingsPanel";
+import type { SettingsPanelHost } from "./ui/settings/SettingsPanel";
+import { buildSettingDefinitions } from "./ui/settings/settingDefinitions";
 import { getT, isLanguageSetting, resolveLanguage, type LanguageHost, type LanguageSetting, type Translator } from "./i18n";
 import { DEFAULT_SEND_SHORTCUT, isSendShortcutSetting, type SendShortcut } from "./ui/keyboard";
 import { SkillManager } from "./skills/skillManager";
@@ -472,10 +473,11 @@ export function modelSupportsImages(model: Model<string>): boolean {
 /**
  * Obsidian's settings-tab entrypoint.
  *
- * Deliberately thin: it resolves the four things the panel needs from the plugin
- * and hands off. Everything about how the panel looks and behaves lives in
- * {@link renderSettingsPanel}, which keeps this module's schema and resolvers
- * testable without constructing a `PluginSettingTab`.
+ * Deliberately thin: it resolves what the panel needs from the plugin and hands
+ * off. Everything about how the panel looks and behaves lives in
+ * {@link buildSettingDefinitions} and the tab renderers behind it, which keeps
+ * this module's schema and resolvers testable without constructing a
+ * `PluginSettingTab`.
  */
 export class PiemSettingTab extends PluginSettingTab {
 	private readonly plugin: PiemPlugin;
@@ -502,42 +504,44 @@ export class PiemSettingTab extends PluginSettingTab {
 	/**
 	 * Renders the panel imperatively.
 	 *
-	 * Obsidian marks `display` deprecated since 1.13.0 in favour of the
-	 * declarative `getSettingDefinitions`. With `minAppVersion` now at 1.13.0 the
-	 * old justification — "a fallback for plugins that need to support versions
-	 * older than 1.13.0" — no longer applies, so this is a deliberate deferral
-	 * rather than a necessity: adopting the declarative API means re-expressing
-	 * the whole tab strip as `SettingDefinition[]`, which is its own piece of
-	 * work. The cost of deferring is that these settings stay out of Obsidian's
-	 * settings search (`prefer-setting-definitions` reports exactly that).
+	 * One page per tab, built in {@link buildSettingDefinitions}. Returning a
+	 * non-empty array is what takes the deprecated `display()` out of the
+	 * picture — Obsidian bypasses it entirely — and it is what puts these
+	 * settings into the app's settings search, which is the actual reason to
+	 * adopt the API rather than the deprecation notice.
 	 *
-	 * The work lives in {@link renderPanel} rather than here so the language-change
-	 * redraw has something to call that is not a deprecated member. Obsidian calls
-	 * this override; nothing inside the panel does.
+	 * Called on every `update()` and once at registration for indexing, so it
+	 * stays a pure assembly of definitions: the reads that cost something (the
+	 * vault's skill folders, the agent's load report, the stored chat count) all
+	 * sit behind the page factories, where they run on navigation instead of on
+	 * a search that never opens the page.
 	 */
-	display(): void {
-		this.renderPanel();
+	getSettingDefinitions(): SettingDefinitionItem[] {
+		return buildSettingDefinitions(this.buildHost());
 	}
 
 	/**
-	 * The render itself, reachable without touching the deprecated override.
+	 * The panel's view of the plugin.
 	 *
-	 * Every redraw goes through here — see {@link display} for why the split
-	 * exists rather than the panel re-entering `display()`.
+	 * Assembled per call rather than cached: the language is resolved once here
+	 * and closed over by every label-producing callback, so a language change has
+	 * to build a fresh host rather than mutate a stale one.
 	 */
-	private renderPanel(): void {
+	private buildHost(): SettingsPanelHost {
 		const language = resolveLanguage(this.app.vault as LanguageHost, this.plugin.settings.language);
-		renderSettingsPanel(this.containerEl, {
+		return {
 			app: this.app,
 			settings: this.plugin.settings,
-			// A language change rewrites every label on the page, including the tab
-			// strip's, so the panel is redrawn from scratch rather than patched.
-			// Comparing the resolved language (not the setting) keeps "auto" from
-			// redrawing when it resolves to what is already shown.
+			// A language change rewrites every label on the page, including the
+			// navigation's, so the definitions are rebuilt rather than patched:
+			// `update()` re-runs `getSettingDefinitions`, which re-resolves the
+			// language into a new host. Comparing the resolved language (not the
+			// setting) keeps "auto" from rebuilding when it resolves to what is
+			// already shown.
 			save: async () => {
 				await this.plugin.saveSettings();
 				if (resolveLanguage(this.app.vault as LanguageHost, this.plugin.settings.language) !== language) {
-					this.renderPanel();
+					this.update();
 				}
 			},
 			secretStorage: this.secretStorageTier,
@@ -585,6 +589,6 @@ export class PiemSettingTab extends PluginSettingTab {
 				states: () => this.plugin.mcpManager.getServerStates(),
 				test: (server) => this.plugin.mcpManager.testServer(server),
 			},
-		});
+		};
 	}
 }
