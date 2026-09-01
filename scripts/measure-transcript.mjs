@@ -1,0 +1,114 @@
+/*
+ * Asserts the transcript never scrolls sideways, in a real layout engine.
+ *
+ * Sibling of `measure-command-menu.mjs`. The stylesheet tests assert
+ * declarations; this asserts the consequence the issue was filed about — that a
+ * fenced block, a wide table or a pasted screenshot cannot drag the message
+ * column horizontally on a phone. No amount of reading CSS answers that: whether
+ * `max-width: 100%` bites depends on whether an ancestor's automatic minimum size
+ * already grew, which only a layout engine knows.
+ *
+ * The two assertions below are not the same check twice:
+ *
+ *   - The transcript must not scroll sideways. That is the symptom.
+ *   - Every element wider than the panel must sit inside something that scrolls.
+ *     That is what stops the fix from being a lie: clipping the transcript with
+ *     `overflow-x: hidden` and nothing else would satisfy the first check while
+ *     making a wide table permanently unreadable.
+ */
+import { execFileSync } from "node:child_process";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
+import process from "node:process";
+
+const CHROME = process.env.CHROME ?? "/usr/bin/chromium-browser";
+const PAGE = resolve(process.env.PREVIEW_DIR ?? ".preview", "transcript.html");
+
+readFileSync(PAGE, "utf8"); // Fail loudly if the preview was never generated.
+
+const dom = execFileSync(
+	CHROME,
+	["--headless", "--disable-gpu", "--no-sandbox", "--hide-scrollbars", "--virtual-time-budget=3000", "--dump-dom", `file://${PAGE}`],
+	{ encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], maxBuffer: 32 * 1024 * 1024 },
+);
+
+const payload = dom.match(/<pre[^>]*id="results"[^>]*>([\s\S]*?)<\/pre>/)?.[1];
+if (!payload) {
+	const denied = dom.includes("ERR_ACCESS_DENIED") || dom.includes("ERR_FILE_NOT_FOUND");
+	throw new Error(
+		denied
+			? `Chromium could not read ${PAGE}. A snap-packaged build is confined to non-hidden paths under $HOME, and this checkout is not one` +
+				` — regenerate somewhere it can reach:\n  PREVIEW_DIR=~/piem-preview node scripts/preview-transcript.mjs\n` +
+				`  PREVIEW_DIR=~/piem-preview node scripts/measure-transcript.mjs`
+			: "the page did not report measurements; its inline script never ran",
+	);
+}
+const panels = JSON.parse(payload.replace(/&quot;/g, '"').replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">"));
+
+/*
+ * Below this the fixtures are genuinely wider than the column, so a scroller has
+ * to exist. Above it the table fits and correctly scrolls nothing. 390px is the
+ * phone from the issue; the widest fixture table measures ~440px, so both narrow
+ * panels are covered and the 560px leaf is not asked for a scrollbar it should
+ * not have.
+ */
+const NARROW_ENOUGH_TO_OVERFLOW = 400;
+
+const failures = [];
+for (const panel of panels) {
+	if (panel.panelScrollsSideways) {
+		const blame = panel.pushers.map((p) => `${p.case} (${p.scrollWidth}px)`).join(", ") || "unknown";
+		failures.push(`${panel.panel}: the transcript scrolls sideways — ${panel.scrollWidth}px of content in a ${panel.client}px column, pushed by ${blame}`);
+	}
+	for (const leak of panel.leaks) {
+		failures.push(`${panel.panel}: ${leak.case} — <${leak.tag}${leak.cls ? ` class="${leak.cls}"` : ""}> overflows by ${leak.pushesBy}px with nothing scrolling to absorb it`);
+	}
+	/*
+	 * The positive half. A harness that only forbade overflow would also pass on a
+	 * stylesheet that wrapped every table into unreadable columns or clipped it
+	 * outright, so the constructs whose horizontal extent carries meaning are
+	 * required to stay reachable — the swipe has to exist, just not on the
+	 * transcript.
+	 *
+	 * Asserted only on the widths where the fixture genuinely does not fit. At
+	 * 560px the table fits the column outright and has nothing to scroll, which is
+	 * the correct outcome and not a missing scroller — the first cut of this check
+	 * demanded a scroller unconditionally and failed the one panel that was right.
+	 */
+	/*
+	 * A scroll box whose right edge lies past the column is a scrollbar no thumb
+	 * can reach, which on a phone is indistinguishable from the content simply
+	 * being gone. The transcript's `overflow-x: hidden` makes this the failure mode
+	 * to watch for: it would hide the symptom while leaving the block unusable.
+	 */
+	for (const box of panel.reachable) {
+		if (!box.rightInside) {
+			failures.push(`${panel.panel}: ${box.case} — its <${box.tag}> scroll box overhangs the column by ${box.overhang}px, so its scrollbar cannot be reached`);
+		}
+	}
+	if (panel.width <= NARROW_ENOUGH_TO_OVERFLOW) {
+		for (const required of ["fenced-code", "table-bare", "math-block"]) {
+			const found = panel.contained.some((c) => c.case.endsWith(`/${required}`));
+			if (!found) {
+				failures.push(`${panel.panel}: ${required} is not inside any horizontal scroller — its content is clipped rather than reachable`);
+			}
+		}
+	}
+}
+
+for (const panel of panels) {
+	console.log(
+		`${panel.panel.padEnd(16)} column=${String(panel.client).padStart(3)}px scrollWidth=${String(panel.scrollWidth).padStart(4)}px ` +
+			`overflow-x=${panel.overflowX.padEnd(7)} ${panel.panelScrollsSideways ? "SCROLLS SIDEWAYS" : "holds still"} ` +
+			`contained=${panel.contained.length} reachable=${panel.reachable.filter((b) => b.rightInside).length}/${panel.reachable.length}`,
+	);
+}
+
+if (failures.length > 0) {
+	console.error(`\n${failures.length} layout failure(s):`);
+	for (const failure of failures) {
+		console.error(`  - ${failure}`);
+	}
+	process.exit(1);
+}
+console.log(`\nall ${panels.length} panel widths hold their column still, and every wide construct stays reachable inside its own scroller`);

@@ -92,12 +92,18 @@ export default tseslint.config(
 		},
 	},
 	{
-		// Asserts on `styles.css` as a file, because the decisions it pins are
+		// Assert on `styles.css` as a file, because the decisions they pin are
 		// stylesheet structure rather than component behaviour: which media
-		// feature guards the touch-target rules, and whether "muted" is spelled
-		// as a colour token or as an opacity. Reading the stylesheet is the whole
-		// mechanism, and it never reaches the bundle.
-		files: ["src/ui/panelA11y.test.ts"],
+		// feature guards the touch-target rules, whether "muted" is spelled as a
+		// colour token or as an opacity, and which constructs own a horizontal
+		// scroll box. Reading the stylesheet is the whole mechanism, and neither
+		// file reaches the bundle.
+		//
+		// Listed by exact path, both of them, rather than as a `src/ui/*.test.ts`
+		// glob: every other block here is scoped the same way, and a glob would
+		// quietly hand node builtins to every future UI test in a plugin that has
+		// to run on a phone.
+		files: ["src/ui/panelA11y.test.ts", "src/ui/transcriptOverflow.test.ts"],
 		rules: {
 			"import/no-nodejs-modules": "off",
 		},
