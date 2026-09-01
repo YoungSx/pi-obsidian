@@ -58,6 +58,15 @@ function scriptedFetch(script: Response[]) {
 	return { calls, fetch: fetch as unknown as typeof globalThis.fetch };
 }
 
+/**
+ * Stands in for the manifest version the plugin injects.
+ *
+ * Deliberately not the real one: the point of taking it from the manifest is
+ * that no source file pins it, so a test that hardcoded today's version would
+ * re-create the drift the injection removed.
+ */
+const STUB_PLUGIN_VERSION = "9.9.9-test";
+
 /** The fetch shape the test doubles actually implement, before the SDK's `preconnect` typing noise. */
 type FetchLike = (url: string | URL, init?: RequestInit) => Promise<Response>;
 
@@ -65,6 +74,7 @@ function makeManager(servers: McpServerConfig[], fetchFactory: () => FetchLike):
 	return new McpManager(
 		() => servers,
 		() => "requestUrl",
+		STUB_PLUGIN_VERSION,
 		fetchFactory,
 	);
 }
@@ -164,6 +174,36 @@ describe("McpManager", () => {
 
 		// The saved config stays untested: a probe must not poison the cache.
 		expect(manager.getServerStates()[0]?.status).toBe("untested");
+		await manager.dispose();
+	});
+
+	it("reports the injected plugin version as clientInfo in the handshake", async () => {
+		// The version used to be a literal in mcpManager.ts and drifted: it said
+		// 1.0.0 while the plugin shipped past it, and no assertion noticed because
+		// nothing reads the handshake back. This reads it back.
+		const server = serverFixture({ name: "live", url: "https://live.example.com", token: "" });
+		let initializeBody = "";
+		const manager = makeManager([server], () => async (url, init) => {
+			if ((init?.method ?? "GET").toUpperCase() === "GET") {
+				return new Response(null, { status: 405 });
+			}
+			const body = typeof init?.body === "string" ? init.body : "";
+			if (body.includes('"method":"initialize"')) {
+				initializeBody = body;
+				return handshakeResponses("session-version")[0]!;
+			}
+			if (body.includes("notifications/initialized")) {
+				return new Response(null, { status: 202 });
+			}
+			return new Response(JSON.stringify({ jsonrpc: "2.0", id: 1, result: { tools: [] } }), {
+				status: 200,
+				headers: { "content-type": "application/json" },
+			});
+		});
+
+		await manager.testServer(server);
+		const initialize = JSON.parse(initializeBody) as { params: { clientInfo: unknown } };
+		expect(initialize.params.clientInfo).toEqual({ name: "piem", version: STUB_PLUGIN_VERSION });
 		await manager.dispose();
 	});
 

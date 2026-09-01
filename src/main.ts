@@ -68,7 +68,11 @@ export default class PiemPlugin extends Plugin {
 
 	/** The MCP bridge, constructing it on first use. */
 	get mcpManager(): McpManager {
-		this.mcpBridge ??= new McpManager(() => this.settings.mcpServers, () => this.settings.networkTransport);
+		this.mcpBridge ??= new McpManager(
+			() => this.settings.mcpServers,
+			() => this.settings.networkTransport,
+			this.manifest.version,
+		);
 		return this.mcpBridge;
 	}
 

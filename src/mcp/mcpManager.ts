@@ -69,8 +69,19 @@ const CALL_TIMEOUT_DEFAULT_MS = 120_000;
  */
 const TIMEOUT_PARAM = "mcpTimeoutMs";
 
-/** Cap on text returned to the model, matching every other tool's byte budget. */
-const mcpClientInfo = { name: "piem", version: "1.0.0" } as const;
+/**
+ * Who we say we are in the MCP handshake.
+ *
+ * The version is passed in from the plugin manifest rather than written here:
+ * a literal in this file is a second place the release version lives, and it
+ * silently stopped tracking the real one — it sat at "1.0.0" while the plugin
+ * shipped past it, because nothing reads this string back. `scripts/check-version.mjs`
+ * now fails on a hardcoded version anywhere under `src/`, so the only way to
+ * satisfy both it and the protocol is to take the value from the manifest.
+ */
+function mcpClientInfo(version: string): { name: string; version: string } {
+	return { name: "piem", version };
+}
 
 /** How a server's last connection attempt ended, for the settings panel. */
 export type McpServerStatus = "ok" | "error" | "disabled" | "untested";
@@ -226,6 +237,10 @@ export class McpManager {
 	private readonly entries = new Map<string, McpServerEntry>();
 
 	/**
+	 * `pluginVersion` is the manifest's version, reported to every server in the
+	 * handshake. Passed in rather than read here so this module keeps knowing
+	 * nothing about Obsidian, and so the release version has exactly one home.
+	 *
 	 * `fetchFactory` exists for tests: the transport selection is runtime state,
 	 * but a test has no network to ride, so it injects a fetch double here and
 	 * the manager cannot tell the difference.
@@ -233,6 +248,7 @@ export class McpManager {
 	constructor(
 		servers: () => McpServerConfig[],
 		transport: () => NetworkTransport,
+		private readonly pluginVersion: string,
 		private readonly fetchFactory: () => FetchLike = () => createFetchForTransport(transport()),
 	) {
 		this.servers = servers;
@@ -360,7 +376,7 @@ export class McpManager {
 			fetch: createNoGetStreamFetch(baseFetch),
 			requestInit: server.token === "" ? undefined : { headers: { Authorization: `Bearer ${server.token}` } },
 		});
-		const client = new Client(mcpClientInfo);
+		const client = new Client(mcpClientInfo(this.pluginVersion));
 		await withTimeout(client.connect(transport), CONNECT_TIMEOUT_MS, `Connecting to ${serverLabel(server)}`);
 		return client;
 	}

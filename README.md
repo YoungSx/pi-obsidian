@@ -12,8 +12,10 @@ agent runtime and defaults to DeepSeek's `deepseek-v4-pro` model.
 
 ## Status
 
-Piem is in early alpha (`0.1.0-alpha.x`). It runs in Obsidian desktop and
-mobile (`isDesktopOnly: false`).
+Piem runs in Obsidian desktop and mobile (`isDesktopOnly: false`). For the
+version you have, see `manifest.json` — or Settings → Piem → About, which reads
+it from there. Released versions and the minimum Obsidian version each one
+supports are listed in `versions.json`.
 
 ## Features
 

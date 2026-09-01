@@ -9,8 +9,9 @@ Piem 是一个在 Obsidian 里运行 AI 编码代理的 Obsidian 插件。代理
 
 ## 状态
 
-Piem 处于早期 alpha 阶段（`0.1.0-alpha.x`），同时支持 Obsidian 桌面端与移动端
-（`isDesktopOnly: false`）。
+Piem 同时支持 Obsidian 桌面端与移动端（`isDesktopOnly: false`）。当前版本号见
+`manifest.json`，或在「设置 → Piem → 关于」里查看（它就是从那里读的）。已发布的
+各版本及其所需的最低 Obsidian 版本，记录在 `versions.json`。
 
 ## 功能
 
