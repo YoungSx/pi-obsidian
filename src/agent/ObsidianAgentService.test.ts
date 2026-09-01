@@ -3105,3 +3105,275 @@ describe("quick-action suggestions", () => {
 		expect(await service.suggestQuickActions("empty")).toBeNull();
 	});
 });
+
+/**
+ * The two-lane comparison of issue #184, driven through the service the panel
+ * talks to. What is asserted here is the product's own contract — which branch
+ * the transcript reads, what a switch carries and what it must not, what
+ * choosing a winner does to the conversation — rather than pi's lane mechanics,
+ * which `ObsidianSessionManager.test.ts` covers.
+ */
+describe("A/B lanes", () => {
+	it("reports one lane until a comparison starts", async () => {
+		const service = createService();
+		await service.sendPrompt("First question");
+
+		const snapshot = service.getSnapshot();
+		// An ordinary chat is unchanged by the feature existing: one lane is the
+		// switcher's signal to stay unrendered.
+		expect(snapshot.activeLane).toBe("main");
+		expect(snapshot.lanes.map((lane) => lane.lane)).toEqual(["main"]);
+	});
+
+	it("forks two lanes from a turn and lands on the first", async () => {
+		const service = createService();
+		await service.sendPrompt("Which notes mention pi?");
+		const messages = service.getSnapshot().messages;
+
+		expect(await service.startComparison(messages.length - 1)).toBe(true);
+
+		const snapshot = service.getSnapshot();
+		expect(snapshot.lanes).toHaveLength(3);
+		expect(snapshot.activeLane).not.toBe("main");
+		// The forked turn is gone from the working transcript: both lanes are
+		// siblings of it, not continuations, so the question is open to be re-asked.
+		expect(snapshot.messages).toHaveLength(0);
+	});
+
+	it("refuses to fork a turn the log cannot name", async () => {
+		const service = createService();
+		await service.initialize();
+
+		expect(await service.startComparison(0)).toBe(false);
+		expect(service.getSnapshot().activeLane).toBe("main");
+	});
+
+	it("keeps each lane's transcript and continuation separate", async () => {
+		const service = createService();
+		await service.sendPrompt("Original question");
+		const messages = service.getSnapshot().messages;
+		await service.startComparison(messages.length - 1);
+		const [left, right] = service.getSnapshot().lanes.filter((lane) => lane.lane !== "main").map((lane) => lane.lane);
+
+		await service.sendPrompt("Take the cautious route");
+		expect(await service.switchLane(right ?? "")).toBe(true);
+		await service.sendPrompt("Take the bold route");
+
+		// The lane just written to holds only its own turn.
+		expect(JSON.stringify(service.getSnapshot().messages)).toContain("Take the bold route");
+		expect(JSON.stringify(service.getSnapshot().messages)).not.toContain("Take the cautious route");
+		// And switching back finds the other side exactly as it was left.
+		expect(await service.switchLane(left ?? "")).toBe(true);
+		expect(JSON.stringify(service.getSnapshot().messages)).toContain("Take the cautious route");
+		expect(JSON.stringify(service.getSnapshot().messages)).not.toContain("Take the bold route");
+		// Main is untouched throughout, which is what makes the comparison free to
+		// abandon.
+		expect(await service.switchLane("main")).toBe(true);
+		expect(JSON.stringify(service.getSnapshot().messages)).toContain("Original question");
+	});
+
+	it("refuses a switch to a lane that does not exist", async () => {
+		const service = createService();
+		await service.sendPrompt("Anything");
+
+		expect(await service.switchLane("ab-a-9")).toBe(false);
+		expect(service.getSnapshot().activeLane).toBe("main");
+	});
+
+	it("promotes the chosen lane into the conversation and returns to main", async () => {
+		const adapter = new MemoryAdapter();
+		const service = createService(adapter);
+		await service.sendPrompt("Original question");
+		const sessionPath = service.getSnapshot().session?.path ?? "";
+		await service.startComparison(service.getSnapshot().messages.length - 1);
+		const [left, right] = service.getSnapshot().lanes.filter((lane) => lane.lane !== "main").map((lane) => lane.lane);
+		await service.sendPrompt("The winning direction");
+		await service.switchLane(right ?? "");
+		await service.sendPrompt("The losing direction");
+
+		expect(await service.chooseLane(left ?? "", "keep")).toBe(true);
+
+		const snapshot = service.getSnapshot();
+		expect(snapshot.activeLane).toBe("main");
+		expect(JSON.stringify(snapshot.messages)).toContain("The winning direction");
+		// The winner leaves the switcher too: its content *is* main now, so two
+		// names for one transcript would be the confusing outcome.
+		expect(snapshot.lanes.map((lane) => lane.lane)).toEqual(["main", right ?? ""]);
+		// And the promotion is durable, not a view: reopening the session reads the
+		// chosen transcript as the conversation.
+		const reloaded = createService(adapter);
+		await reloaded.openSession(sessionPath);
+		expect(JSON.stringify(reloaded.getSnapshot().messages)).toContain("The winning direction");
+	});
+
+	it("retires the losing lane when asked to clean up", async () => {
+		const service = createService();
+		await service.sendPrompt("Original question");
+		await service.startComparison(service.getSnapshot().messages.length - 1);
+		const [left, right] = service.getSnapshot().lanes.filter((lane) => lane.lane !== "main").map((lane) => lane.lane);
+		await service.sendPrompt("Winner");
+		await service.switchLane(right ?? "");
+		await service.sendPrompt("Loser");
+
+		expect(await service.chooseLane(left ?? "", "retire")).toBe(true);
+
+		// Nothing but the conversation is left to switch to.
+		expect(service.getSnapshot().lanes.map((lane) => lane.lane)).toEqual(["main"]);
+	});
+
+	it("resets to main and one lane on a new chat", async () => {
+		const service = createService();
+		await service.sendPrompt("Original question");
+		await service.startComparison(service.getSnapshot().messages.length - 1);
+
+		await service.newSession();
+
+		const snapshot = service.getSnapshot();
+		expect(snapshot.activeLane).toBe("main");
+		expect(snapshot.lanes.map((lane) => lane.lane)).toEqual(["main"]);
+	});
+
+	it("writes a comparison lane's turns to its own branch on disk", async () => {
+		const adapter = new MemoryAdapter();
+		const service = createService(adapter);
+		await service.sendPrompt("Original question");
+		const sessionPath = service.getSnapshot().session?.path ?? "";
+		await service.startComparison(service.getSnapshot().messages.length - 1);
+		await service.sendPrompt("Only on this lane");
+
+		// A reload lands on main, which must not have inherited the lane's turn —
+		// the failure mode of a service that tracked the branch in memory only.
+		const reloaded = createService(adapter);
+		await reloaded.openSession(sessionPath);
+		expect(JSON.stringify(reloaded.getSnapshot().messages)).toContain("Original question");
+		expect(JSON.stringify(reloaded.getSnapshot().messages)).not.toContain("Only on this lane");
+		// The lane is still offered, and still holds its turn.
+		const lane = reloaded.getSnapshot().lanes.find((candidate) => candidate.lane !== "main")?.lane ?? "";
+		expect(await reloaded.switchLane(lane)).toBe(true);
+		expect(JSON.stringify(reloaded.getSnapshot().messages)).toContain("Only on this lane");
+	});
+});
+
+/**
+ * Crash recovery, per lane. pi refuses a second open operation on a lane that
+ * already has one, so an orphan left on the branch the user was *not* watching
+ * would silently make that side of a comparison unable to run — the completeness
+ * line issue #184 draws.
+ */
+describe("interrupted run recovery", () => {
+	it("offers to continue a run the previous process left open", async () => {
+		const adapter = new MemoryAdapter();
+		const service = createService(adapter);
+		await service.initialize();
+		const sessionPath = service.getSnapshot().session?.path ?? "";
+		const manager = new ObsidianSessionManager(asDataAdapter(adapter), SESSION_DIR, "obsidian-vault:Test");
+		await manager.loadSession(sessionPath);
+		await manager.appendMessage({ role: "user", content: [{ type: "text", text: "Cut off mid-reply" }], timestamp: 1 });
+		await manager.beginRunOperation([{ role: "user", content: [{ type: "text", text: "Cut off mid-reply" }], timestamp: 1 }]);
+
+		const reloaded = createService(adapter);
+		await reloaded.openSession(sessionPath);
+
+		expect(reloaded.getSnapshot().canResumeInterrupted).toBe(true);
+		// And the orphan is closed, so the lane can open a run again. Read through a
+		// fresh manager: pi hydrates its state at open and mutates it only through
+		// its own writes, so the one that planted the orphan cannot see the close.
+		expect(await openLedger(adapter, sessionPath).then((ledger) => ledger.findOpenRunOperations())).toEqual([]);
+	});
+
+	it("stays silent when the reply had already arrived", async () => {
+		const adapter = new MemoryAdapter();
+		const service = createService(adapter);
+		await service.sendPrompt("Answered before the crash");
+		const sessionPath = service.getSnapshot().session?.path ?? "";
+		const manager = new ObsidianSessionManager(asDataAdapter(adapter), SESSION_DIR, "obsidian-vault:Test");
+		await manager.loadSession(sessionPath);
+		await manager.beginRunOperation([]);
+
+		const reloaded = createService(adapter);
+		await reloaded.openSession(sessionPath);
+
+		// Only the close was lost. Re-offering would invite a duplicate turn.
+		expect(reloaded.getSnapshot().canResumeInterrupted ?? false).toBe(false);
+		expect(await openLedger(adapter, sessionPath).then((ledger) => ledger.findOpenRunOperations())).toEqual([]);
+	});
+
+	it("recovers an orphan on a comparison lane without disturbing main", async () => {
+		const adapter = new MemoryAdapter();
+		const service = createService(adapter);
+		await service.sendPrompt("Original question");
+		const sessionPath = service.getSnapshot().session?.path ?? "";
+		await service.startComparison(service.getSnapshot().messages.length - 1);
+		const lane = service.getSnapshot().activeLane;
+		const manager = new ObsidianSessionManager(asDataAdapter(adapter), SESSION_DIR, "obsidian-vault:Test");
+		await manager.loadSession(sessionPath);
+		await manager.appendMessage({ role: "user", content: [{ type: "text", text: "Cut off on the lane" }], timestamp: 2 }, lane);
+		await manager.beginRunOperation([], lane);
+
+		const reloaded = createService(adapter);
+		await reloaded.openSession(sessionPath);
+
+		// The panel opens on main, which had no interrupted run: no offer there.
+		expect(reloaded.getSnapshot().activeLane).toBe("main");
+		expect(reloaded.getSnapshot().canResumeInterrupted ?? false).toBe(false);
+		// The offer belongs to the lane it happened on, and appears on switching.
+		expect(await reloaded.switchLane(lane)).toBe(true);
+		expect(reloaded.getSnapshot().canResumeInterrupted).toBe(true);
+		// Closed on its own lane, so that side can run again.
+		expect(await openLedger(adapter, sessionPath).then((ledger) => ledger.findOpenRunOperations(lane))).toEqual([]);
+	});
+
+	it("withdraws the offer when the user sends instead", async () => {
+		const adapter = new MemoryAdapter();
+		const service = createService(adapter);
+		await service.initialize();
+		const sessionPath = service.getSnapshot().session?.path ?? "";
+		const manager = new ObsidianSessionManager(asDataAdapter(adapter), SESSION_DIR, "obsidian-vault:Test");
+		await manager.loadSession(sessionPath);
+		await manager.appendMessage({ role: "user", content: [{ type: "text", text: "Cut off" }], timestamp: 1 });
+		await manager.beginRunOperation([]);
+		const reloaded = createService(adapter);
+		await reloaded.openSession(sessionPath);
+
+		await reloaded.sendPrompt("Never mind, new question");
+
+		expect(reloaded.getSnapshot().canResumeInterrupted ?? false).toBe(false);
+	});
+
+	it("withdraws the offer on dismissal", async () => {
+		const adapter = new MemoryAdapter();
+		const service = createService(adapter);
+		await service.initialize();
+		const sessionPath = service.getSnapshot().session?.path ?? "";
+		const manager = new ObsidianSessionManager(asDataAdapter(adapter), SESSION_DIR, "obsidian-vault:Test");
+		await manager.loadSession(sessionPath);
+		await manager.appendMessage({ role: "user", content: [{ type: "text", text: "Cut off" }], timestamp: 1 });
+		await manager.beginRunOperation([]);
+		const reloaded = createService(adapter);
+		await reloaded.openSession(sessionPath);
+		expect(reloaded.getSnapshot().canResumeInterrupted).toBe(true);
+
+		reloaded.dismissInterruptedRun();
+
+		expect(reloaded.getSnapshot().canResumeInterrupted ?? false).toBe(false);
+	});
+
+	it("closes its own ledger entry when a run completes", async () => {
+		const adapter = new MemoryAdapter();
+		const service = createService(adapter);
+		await service.sendPrompt("A complete turn");
+		const sessionPath = service.getSnapshot().session?.path ?? "";
+
+		const ledger = await openLedger(adapter, sessionPath);
+		// Steady state: every run opened has been closed, so a reload has nothing
+		// to recover and offers nothing.
+		expect(await ledger.findAllOpenRunOperations()).toEqual(new Map());
+	});
+});
+
+/** A manager freshly opened on `path`, for reading a log another writer changed. */
+async function openLedger(adapter: MemoryAdapter, path: string): Promise<ObsidianSessionManager> {
+	const manager = new ObsidianSessionManager(asDataAdapter(adapter), SESSION_DIR, "obsidian-vault:Test");
+	await manager.loadSession(path);
+	return manager;
+}
