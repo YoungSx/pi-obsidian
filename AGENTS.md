@@ -131,9 +131,11 @@ path (`~/.paseo/...`), which `PREVIEW_DIR=` works around.
 
 ## Versioning & releases
 
-- The git tag is the single release input. Do not hand-edit `manifest.json` / `versions.json` / `package.json` before releasing — the Release workflow stamps all three from the tag (`scripts/stamp-version.mjs`) and then asserts they match.
-- Tag the exact SemVer string with **no leading `v`** (e.g. `git tag 0.1.0-alpha.38 && git push origin 0.1.0-alpha.38`). Obsidian matches the release tag against `manifest.json`'s `version` verbatim, so a `v`-prefixed tag yields a release the plugin store cannot find.
-- The CI accepts both spellings (`replace(/^v/, "")` strips it), but every `v`-prefixed release is invisible to Obsidian's scan — legacy `v*` tags stay on GitHub, don't add more.
+- **Release with `npm run release -- patch` (or `minor` / `major` / an explicit `1.2.3`).** It is the whole flow: bump, gates, commit, tag, push. Add `--dry-run` to stop before the commit and see what it would do.
+- The bump is committed to `master` **before** the tag is cut, and the tag points at that commit. This ordering is the point, not an implementation detail: Obsidian's plugin-store bot reads the version out of the *default branch's* `manifest.json` and looks for a release tagged exactly that. The retired tag-only flow stamped the version inside CI's throwaway checkout and never wrote it back, so `master` sat at `0.1.0-alpha.9` while thirty-odd releases shipped past it — every one of them invisible to the store.
+- Tags carry **no leading `v`**; Obsidian matches the manifest's version verbatim. The script writes the tag, so this cannot be got wrong by hand. Legacy `v*` tags stay on GitHub; don't add more.
+- **The version lives in `manifest.json` and nowhere else.** `package.json` and `versions.json` are stamped from it; everything else must read it at runtime — `this.manifest.version` in a `Plugin` subclass, or a constructor argument for a module that is not one (see `McpManager`'s `pluginVersion`). `npm run check:version` fails the build on a hardcoded version anywhere under `src/` or in either README, and runs in both CI workflows.
+- Why that gate exists: `src/mcp/mcpManager.ts` reported `{ name: "piem", version: "1.0.0" }` to every MCP server for two releases after 1.0.0, and both READMEs called a shipped 1.0.x plugin "early alpha (`0.1.0-alpha.x`)". Neither could fail any other gate, because nothing reads those strings back. The old `scripts/stamp-version.mjs` stamped a hardcoded list of three files, so a version in a fourth place was invisible to it by construction — which is why the gate enumerates where the version *may* live rather than where it must be written.
 
 ## Agent capability
 

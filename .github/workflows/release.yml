@@ -20,15 +20,17 @@ jobs:
                   bun-version: 1.4.0
             - run: bun install --frozen-lockfile
 
-            # The tag is the only release input; the version-bearing files are
-            # stamped from it here rather than hand-edited before tagging.
-            - name: Stamp release version from tag
-              run: node scripts/stamp-version.mjs "$GITHUB_REF_NAME"
-
-            # Stamp-then-assert: the step above should guarantee this, but it
-            # doubles as a guard against a broken stamping script shipping a
-            # manifest that contradicts the tag.
-            - name: Verify stamped versions match the tag
+            # No stamping here any more. `scripts/release.mjs` commits the bump to
+            # the default branch and then tags that commit, so the checkout this
+            # workflow gets already carries the right version. Stamping in CI is
+            # what left master's manifest at 0.1.0-alpha.9 for thirty-odd
+            # releases: the write happened in a throwaway checkout and the branch
+            # Obsidian's bot actually reads never saw it.
+            #
+            # What remains is the assertion, which is the valuable half — it
+            # fails a tag that does not match the tree it points at, including a
+            # tag pushed by hand.
+            - name: Verify committed versions match the tag
               run: |
                   TAG="${GITHUB_REF_NAME#v}"
                   for f in manifest.json package.json; do
@@ -58,6 +60,14 @@ jobs:
             # English by the component's own passing tests.
             - name: Check for hardcoded user-visible copy
               run: npm run check:copy
+
+            # The version belongs in manifest.json and nowhere else. Two places
+            # had quietly grown a second copy: mcpManager.ts reported 1.0.0 to
+            # every MCP server for two releases after 1.0.0, and both READMEs
+            # described a shipped 1.0.x plugin as early alpha. Neither could fail
+            # any other gate, because nothing reads those strings back.
+            - name: Check for version numbers written outside the manifest
+              run: npm run check:version
 
             # Includes the smoke test that evaluates main.js the way Obsidian
             # does and runs onload on both desktop and mobile platform shapes.

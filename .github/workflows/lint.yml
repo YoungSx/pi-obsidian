@@ -43,6 +43,13 @@ jobs:
             - name: Check for hardcoded user-visible copy
               run: npm run check:copy
 
+            # Runs here as well as at release time so a second copy of the
+            # version is caught in the PR that introduces it. Catching it only on
+            # release means the drift is already merged, which is how
+            # mcpManager.ts's stale 1.0.0 survived two releases.
+            - name: Check for version numbers written outside the manifest
+              run: npm run check:version
+
             - name: Test
               run: bun test
 
