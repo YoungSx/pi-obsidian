@@ -439,6 +439,223 @@ describe("ObsidianSessionManager chat folder", () => {
 	});
 });
 
+/**
+ * The A/B lanes issue #184 introduces, exercised through the manager rather
+ * than pi's `Session` directly: the lane rules that matter to the product —
+ * which lanes are offered, which branch a transcript reads, what promoting and
+ * retiring do to the log — are this class's own, and a test against pi would
+ * assert pi's behaviour instead.
+ */
+describe("ObsidianSessionManager lanes", () => {
+	it("offers only the main lane before a comparison starts", async () => {
+		const manager = await sessionWithTurns(["first", "second"]);
+
+		const lanes = await manager.getLanes();
+		expect(lanes).toHaveLength(1);
+		expect(lanes[0]?.lane).toBe("main");
+		expect(lanes[0]?.retired).toBe(false);
+		expect(typeof lanes[0]?.leafId).toBe("string");
+	});
+
+	it("forks two sibling lanes at the entry's parent, leaving main alone", async () => {
+		const manager = await sessionWithTurns(["first", "second"]);
+		const second = await entryIdOfMessage(manager, "second");
+		const mainLeafBefore = (await manager.getLanes())[0]?.leafId;
+
+		const [left, right] = await manager.createComparisonLanes(second);
+
+		const lanes = await manager.getLanes();
+		// Both lanes start where the forked turn's *parent* left off: the point the
+		// comparison diverges from, so neither side inherits the turn being redone.
+		const forkPoint = await entryIdOfMessage(manager, "first");
+		expect(lanes.find((lane) => lane.lane === left)?.leafId).toBe(forkPoint);
+		expect(lanes.find((lane) => lane.lane === right)?.leafId).toBe(forkPoint);
+		// Main is untouched until the user picks a winner — that is what makes the
+		// comparison non-destructive.
+		expect(lanes.find((lane) => lane.lane === "main")?.leafId).toBe(mainLeafBefore);
+	});
+
+	it("keeps each lane's transcript to its own branch", async () => {
+		const manager = await sessionWithTurns(["first", "second"]);
+		const [left, right] = await manager.createComparisonLanes(await entryIdOfMessage(manager, "second"));
+
+		await manager.appendMessage({ role: "user", content: [{ type: "text", text: "down left" }], timestamp: 3 }, left);
+		await manager.appendMessage({ role: "user", content: [{ type: "text", text: "down right" }], timestamp: 4 }, right);
+
+		expect(await textsOnLane(manager, left)).toEqual(["first", "down left"]);
+		expect(await textsOnLane(manager, right)).toEqual(["first", "down right"]);
+		// The original conversation still reads as it did, on its own branch.
+		expect(await textsOnLane(manager, "main")).toEqual(["first", "second"]);
+	});
+
+	it("names a fresh pair when one is already in flight", async () => {
+		const manager = await sessionWithTurns(["first", "second"]);
+		const [firstLeft, firstRight] = await manager.createComparisonLanes(await entryIdOfMessage(manager, "second"));
+
+		const [secondLeft, secondRight] = await manager.createComparisonLanes(await entryIdOfMessage(manager, "second"));
+
+		expect(new Set([firstLeft, firstRight, secondLeft, secondRight]).size).toBe(4);
+	});
+
+	it("refuses to fork from an entry the log does not have", async () => {
+		const manager = await sessionWithTurns(["first"]);
+
+		expect(await rejection(() => manager.createComparisonLanes("nope"))).toBe("Unknown session entry: nope");
+	});
+
+	it("promotes a lane by moving main onto its leaf", async () => {
+		const manager = await sessionWithTurns(["first", "second"]);
+		const [left, right] = await manager.createComparisonLanes(await entryIdOfMessage(manager, "second"));
+		await manager.appendMessage({ role: "user", content: [{ type: "text", text: "winner" }], timestamp: 3 }, left);
+		await manager.appendMessage({ role: "user", content: [{ type: "text", text: "loser" }], timestamp: 4 }, right);
+
+		await manager.promoteLane(left);
+
+		// Main now *is* the winning transcript, so a reader who never opens the
+		// switcher again sees the conversation the user chose.
+		expect(await textsOnLane(manager, "main")).toEqual(["first", "winner"]);
+	});
+
+	it("refuses to promote a retired lane", async () => {
+		const manager = await sessionWithTurns(["first", "second"]);
+		const [left] = await manager.createComparisonLanes(await entryIdOfMessage(manager, "second"));
+		await manager.retireLane(left);
+
+		expect(await rejection(() => manager.promoteLane(left))).toBe(`Lane is not active: ${left}`);
+	});
+
+	it("hides a retired lane from the switcher while its history stays on disk", async () => {
+		const manager = await sessionWithTurns(["first", "second"]);
+		const [left, right] = await manager.createComparisonLanes(await entryIdOfMessage(manager, "second"));
+		await manager.appendMessage({ role: "user", content: [{ type: "text", text: "kept" }], timestamp: 3 }, left);
+		await manager.appendMessage({ role: "user", content: [{ type: "text", text: "dropped" }], timestamp: 4 }, right);
+
+		await manager.retireLane(right);
+
+		// pi has no `deleteLane`, so retirement is a pointer move to null: the lane
+		// leaves the switcher and stops accepting writes, and the turns it held are
+		// still findable in the append-only log.
+		expect((await manager.getLanes()).map((lane) => lane.lane)).toEqual(["main", left]);
+		expect((await manager.getAllLanes()).find((lane) => lane.lane === right)).toEqual({ lane: right, leafId: null, retired: true });
+		const session = manager.getSession();
+		const dropped = (await session.findEntries()).some((entry) => entry.type === "message" && JSON.stringify(entry.message).includes("dropped"));
+		expect(dropped).toBe(true);
+	});
+
+	it("never retires main", async () => {
+		const manager = await sessionWithTurns(["first"]);
+
+		expect(await rejection(() => manager.retireLane("main"))).toBe("The main lane cannot be retired");
+	});
+});
+
+/**
+ * The run ledger, per lane. An A/B comparison leaves two writable branches, and
+ * pi refuses a second open operation on a lane that already has one — so a
+ * ledger keyed to `"main"` alone would let one side of the comparison block the
+ * other and would recover the wrong branch after a crash.
+ */
+describe("ObsidianSessionManager run ledger", () => {
+	it("keeps each lane's open operations to itself", async () => {
+		const manager = await sessionWithTurns(["first", "second"]);
+		const [left, right] = await manager.createComparisonLanes(await entryIdOfMessage(manager, "second"));
+
+		const leftRun = await manager.beginRunOperation([{ role: "user", content: [{ type: "text", text: "ask" }], timestamp: 1 }], left);
+
+		expect((await manager.findOpenRunOperations(left)).map((record) => record.id)).toEqual([leftRun]);
+		expect(await manager.findOpenRunOperations(right)).toEqual([]);
+		expect(await manager.findOpenRunOperations("main")).toEqual([]);
+	});
+
+	it("closes the entry it opened, on the lane it opened it on", async () => {
+		const manager = await sessionWithTurns(["first", "second"]);
+		const [left] = await manager.createComparisonLanes(await entryIdOfMessage(manager, "second"));
+		const runId = await manager.beginRunOperation([], left);
+
+		await manager.endRunOperation(runId, "completed", undefined, left);
+
+		expect(await manager.findOpenRunOperations(left)).toEqual([]);
+	});
+
+	it("sweeps every lane for the runs a crash left open", async () => {
+		const manager = await sessionWithTurns(["first", "second"]);
+		const [left, right] = await manager.createComparisonLanes(await entryIdOfMessage(manager, "second"));
+		const mainRun = await manager.beginRunOperation([], "main");
+		const rightRun = await manager.beginRunOperation([], right);
+
+		const open = await manager.findAllOpenRunOperations();
+
+		// Recovery has to see the lane the user was *not* looking at: otherwise a
+		// crash there leaves that branch permanently unable to open a run.
+		expect([...open.keys()].sort()).toEqual(["main", right].sort());
+		expect(open.get("main")?.map((record) => record.id)).toEqual([mainRun]);
+		expect(open.get(right)?.map((record) => record.id)).toEqual([rightRun]);
+		expect(open.has(left)).toBe(false);
+	});
+
+	it("keeps image bytes out of the ledger", async () => {
+		const manager = await sessionWithTurns(["first"]);
+
+		const runId = await manager.beginRunOperation([
+			{
+				role: "user",
+				content: [
+					{ type: "text", text: "look" },
+					{ type: "image", data: "AAAABBBBCCCC", mimeType: "image/png" },
+				],
+				timestamp: 1,
+			},
+		]);
+
+		const [record] = await manager.findOpenRunOperations();
+		expect(record?.id).toBe(runId);
+		const serialized = JSON.stringify(record);
+		expect(serialized).not.toContain("AAAABBBBCCCC");
+	});
+});
+
+/** The message a call rejected with, or `undefined` when it resolved. */
+async function rejection(call: () => Promise<unknown>): Promise<string | undefined> {
+	try {
+		await call();
+		return undefined;
+	} catch (error) {
+		return error instanceof Error ? error.message : String(error);
+	}
+}
+
+/** A session whose main lane holds one user message per entry of `texts`. */
+async function sessionWithTurns(texts: string[]): Promise<ObsidianSessionManager> {
+	const adapter = new MemoryAdapter() as unknown as DataAdapter;
+	const manager = new ObsidianSessionManager(adapter, SESSION_DIR, "obsidian-vault:Test");
+	await manager.createSession(DEFAULTS);
+	for (const [index, text] of texts.entries()) {
+		await manager.appendMessage({ role: "user", content: [{ type: "text", text }], timestamp: index + 1 });
+	}
+	return manager;
+}
+
+/** The durable entry id of the message saying `text`, which is what a fork targets. */
+async function entryIdOfMessage(manager: ObsidianSessionManager, text: string): Promise<string> {
+	const entries = await manager.getSession().findEntries({ order: "oldestFirst" });
+	const found = entries.find((entry) => entry.type === "message" && JSON.stringify(entry.message).includes(`"${text}"`));
+	if (!found) {
+		throw new Error(`No entry says: ${text}`);
+	}
+	return found.id;
+}
+
+async function textsOnLane(manager: ObsidianSessionManager, lane: string): Promise<string[]> {
+	const context = await manager.buildSessionContext(lane);
+	return context.messages.flatMap((message) => {
+		const { content } = message as { content?: unknown };
+		if (!Array.isArray(content)) {
+			return [];
+		}
+		return content.filter((part): part is { type: "text"; text: string } => (part as { type?: string }).type === "text").map((part) => part.text);
+	});
+}
+
 function getParent(path: string): string {
 	const index = path.lastIndexOf("/");
 	return index === -1 ? "" : path.slice(0, index);

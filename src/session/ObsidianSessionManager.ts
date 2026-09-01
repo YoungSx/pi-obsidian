@@ -46,6 +46,12 @@ export interface ActiveSessionInfo {
 	firstMessage: string;
 }
 
+export interface SessionLane {
+	lane: string;
+	leafId: string | null;
+	retired: boolean;
+}
+
 export interface SessionContext {
 	messages: AgentMessage[];
 	messageOrigins: (string | null)[];
@@ -171,19 +177,71 @@ export class ObsidianSessionManager {
 		return this.countJsonlFiles(normalized);
 	}
 
-	async appendMessage(message: AgentMessage): Promise<string> {
+	async getLanes(): Promise<SessionLane[]> {
+		return (await this.getSession().getLanes()).filter(({ lane, leafId }) => lane === "main" || leafId !== null).map(({ lane, leafId }) => ({
+			lane,
+			leafId,
+			retired: leafId === null,
+		}));
+	}
+
+	async getAllLanes(): Promise<SessionLane[]> {
+		return (await this.getSession().getLanes()).map(({ lane, leafId }) => ({ lane, leafId, retired: leafId === null && lane !== "main" }));
+	}
+
+	async createComparisonLanes(entryId: string): Promise<[string, string]> {
+		const session = this.getSession();
+		const entry = await session.getEntry(entryId);
+		if (!entry) {
+			throw new Error(`Unknown session entry: ${entryId}`);
+		}
+		const at = entry.parentId;
+		const existing = new Set((await session.getLanes()).map(({ lane }) => lane));
+		let index = 1;
+		let left = `ab-a-${index}`;
+		let right = `ab-b-${index}`;
+		while (existing.has(left) || existing.has(right)) {
+			index += 1;
+			left = `ab-a-${index}`;
+			right = `ab-b-${index}`;
+		}
+		await session.createLane(left, at);
+		await session.createLane(right, at);
+		return [left, right];
+	}
+
+	async moveLane(lane: string, to: string | null): Promise<void> {
+		await this.getSession().moveLane(lane, to);
+	}
+
+	async promoteLane(lane: string): Promise<void> {
+		const pointer = (await this.getSession().getLanes()).find((candidate) => candidate.lane === lane);
+		if (!pointer || pointer.leafId === null) {
+			throw new Error(`Lane is not active: ${lane}`);
+		}
+		await this.getSession().moveLane("main", pointer.leafId);
+	}
+
+	async retireLane(lane: string): Promise<void> {
+		if (lane === "main") {
+			throw new Error("The main lane cannot be retired");
+		}
+		await this.getSession().moveLane(lane, null);
+	}
+
+	async appendMessage(message: AgentMessage, lane = "main"): Promise<string> {
 		const persisted = JSON.parse(JSON.stringify(message)) as AgentMessage;
-		return this.getSession().appendMessage(persisted);
+		return this.getSession().view(lane).appendMessage(persisted);
 	}
 
-	async appendModelChange(provider: string, modelId: string): Promise<string> {
+	async appendModelChange(provider: string, modelId: string, lane = "main"): Promise<string> {
 		const session = this.getSession();
-		return (await session.appendEntry({ type: "model_change", id: session.idGenerator.next(), provider, modelId }, "main")).id;
+		return (await session.appendEntry({ type: "model_change", id: session.idGenerator.next(), provider, modelId }, lane)).id;
 	}
 
-	async appendThinkingLevelChange(thinkingLevel: ThinkingLevel): Promise<string> {
+	async appendThinkingLevelChange(thinkingLevel: ThinkingLevel, lane = "main"): Promise<string> {
 		const session = this.getSession();
-		return (await session.appendEntry({ type: "thinking_level_change", id: session.idGenerator.next(), thinkingLevel }, "main")).id;
+		return (await session.appendEntry({ type: "thinking_level_change", id: session.idGenerator.next(), thinkingLevel }, lane)).id;
 	}
 
 	/**
@@ -210,7 +268,7 @@ export class ObsidianSessionManager {
 		return buildPiSessionContext(entries).thinkingLevel as ThinkingLevel | undefined;
 	}
 
-	async appendCompaction(result: CompactResult): Promise<string> {
+	async appendCompaction(result: CompactResult, lane = "main"): Promise<string> {
 		const session = this.getSession();
 		// Agent messages may carry optional fields as explicit `undefined`; pi's
 		// durable payload contract rejects those even though JSON.stringify would
@@ -225,7 +283,7 @@ export class ObsidianSessionManager {
 			...(persisted.usage === undefined ? {} : { usage: persisted.usage }),
 			...(persisted.details === undefined ? {} : { details: persisted.details }),
 		};
-		return (await session.appendEntry(entry, "main")).id;
+		return (await session.appendEntry(entry, lane)).id;
 	}
 
 	/**
@@ -235,7 +293,7 @@ export class ObsidianSessionManager {
 	 * it into context as a memory of the fork rather than leaving it stranded
 	 * on the dead branch. `fromId` names the leaf the abandoned branch ended on.
 	 */
-	async appendBranchSummary(result: BranchSummaryResult, fromId: string): Promise<string> {
+	async appendBranchSummary(result: BranchSummaryResult, fromId: string, lane = "main"): Promise<string> {
 		const session = this.getSession();
 		const entry = {
 			type: "branch_summary" as const,
@@ -245,7 +303,7 @@ export class ObsidianSessionManager {
 			details: { readFiles: result.readFiles, modifiedFiles: result.modifiedFiles },
 			...(result.usage === undefined ? {} : { usage: result.usage }),
 		};
-		return (await session.appendEntry(entry, "main")).id;
+		return (await session.appendEntry(entry, lane)).id;
 	}
 
 	async appendSessionInfo(name: string | undefined): Promise<string> {
@@ -255,14 +313,20 @@ export class ObsidianSessionManager {
 	}
 
 	/**
-	 * Opens a run in pi's operation ledger: an `operation_started` record whose
-	 * id the matching `operation_finished` must carry back as its `runId`.
+	 * Opens a run in pi's operation ledger on `lane`: an `operation_started`
+	 * record whose id the matching `operation_finished` must carry back as its
+	 * `runId`.
 	 *
 	 * This is the durability half of crash recovery. A live run is in-memory
 	 * agent state; the ledger is the session file's own record that a run was
 	 * in flight. A crash between the two writes — the only way a started entry
-	 * survives without its finish — is exactly the signature a later load
-	 * looks for via {@link findOpenRunOperations}.
+	 * survives without its finish — is exactly the signature a later load looks
+	 * for via {@link findOpenRunOperations}.
+	 *
+	 * The lane is explicit because an A/B comparison runs each side
+	 * independently: pi refuses a second open operation on a lane that already
+	 * has one, so a ledger that always said `"main"` would let one lane's run
+	 * block the other's and would recover the wrong branch.
 	 *
 	 * `originalPrompt` is the caller's input as the caller shaped it, pi's
 	 * "normalized caller input" — deliberately not a claim about transcript
@@ -274,7 +338,7 @@ export class ObsidianSessionManager {
 	 * Throws when no session is active or the ledger write fails; the caller
 	 * decides whether a run may start with its ledger entry missing.
 	 */
-	async beginRunOperation(originalPrompt: AgentMessage[]): Promise<string> {
+	async beginRunOperation(originalPrompt: AgentMessage[], lane = "main"): Promise<string> {
 		const session = this.getSession();
 		// The ledger stores the prompt, and the prompt can carry image bytes.
 		// The same placeholder treatment {@link appendMessage} applies keeps
@@ -283,8 +347,8 @@ export class ObsidianSessionManager {
 		const started = await session.appendRecord({
 			type: "operation_started",
 			id: session.idGenerator.next(),
-			lane: "main",
-			sourceLeafId: await session.getLeafId(),
+			lane,
+			sourceLeafId: await session.view(lane).getLeafId(),
 			intent: {
 				kind: "run",
 				originalPrompt: JSON.parse(JSON.stringify(sanitized)) as AgentMessage[],
@@ -297,14 +361,21 @@ export class ObsidianSessionManager {
 	/**
 	 * Closes the ledger entry {@link beginRunOperation} opened. `runId` must be
 	 * the started record's id — pi's storage keys the close off it, and a
-	 * mismatched id leaves the original entry open forever.
+	 * mismatched id leaves the original entry open forever. `lane` must be the
+	 * lane the entry was opened on: pi tracks open operations per lane, so a
+	 * close filed against the wrong one leaves the real entry open.
 	 */
-	async endRunOperation(runId: string, outcome: OperationFinishedRecord["outcome"], error?: { code: string; message: string }): Promise<void> {
+	async endRunOperation(
+		runId: string,
+		outcome: OperationFinishedRecord["outcome"],
+		error?: { code: string; message: string },
+		lane = "main",
+	): Promise<void> {
 		const session = this.getSession();
 		await session.appendRecord({
 			type: "operation_finished",
 			id: session.idGenerator.next(),
-			lane: "main",
+			lane,
 			runId,
 			outcome,
 			...(error ? { error } : {}),
@@ -312,18 +383,38 @@ export class ObsidianSessionManager {
 	}
 
 	/**
-	 * Reads the lane's unfinished operations, newest first. An empty result is
-	 * the steady state — every run opened here has been closed. Entries
+	 * Reads one lane's unfinished operations, newest first. An empty result is
+	 * the steady state — every run opened there has been closed. Entries
 	 * surviving into a later load mean a run was cut off mid-flight, and pi's
 	 * storage refuses to open a second operation on a lane that already has
-	 * one, so recovery must close these before anything new can start.
+	 * one, so recovery must close these before anything new can start there.
 	 */
-	async findOpenRunOperations(): Promise<OperationStartedRecord[]> {
-		return this.getSession().findOpenOperations("main");
+	async findOpenRunOperations(lane = "main"): Promise<OperationStartedRecord[]> {
+		return this.getSession().findOpenOperations(lane);
 	}
 
-	async buildSessionContext(): Promise<SessionContext> {
-		const entries = await this.getSession().findEntriesOnBranch({ order: "oldestFirst" });
+	/**
+	 * Every lane's unfinished operations, keyed by lane.
+	 *
+	 * Recovery has to sweep the whole session rather than just the lane on
+	 * screen: an A/B comparison leaves two writable branches, and a crash
+	 * during the lane the user was *not* looking at would otherwise leave that
+	 * lane permanently unable to open a run.
+	 */
+	async findAllOpenRunOperations(): Promise<Map<string, OperationStartedRecord[]>> {
+		const lanes = await this.getAllLanes();
+		const open = new Map<string, OperationStartedRecord[]>();
+		for (const { lane } of lanes) {
+			const orphans = await this.findOpenRunOperations(lane);
+			if (orphans.length > 0) {
+				open.set(lane, orphans);
+			}
+		}
+		return open;
+	}
+
+	async buildSessionContext(lane = "main"): Promise<SessionContext> {
+		const entries = await this.getSession().view(lane).findEntriesOnBranch({ order: "oldestFirst" });
 		const piContext = buildPiSessionContext(entries);
 		const contextEntries = buildContextEntries(entries);
 		const messages: AgentMessage[] = [];
@@ -341,13 +432,13 @@ export class ObsidianSessionManager {
 		};
 	}
 
-	async rewindTo(entryId: string): Promise<void> {
+	async rewindTo(entryId: string, lane = "main"): Promise<void> {
 		const session = this.getSession();
 		const entry = await session.getEntry(entryId);
 		if (!entry) {
 			throw new Error(`Unknown session entry: ${entryId}`);
 		}
-		await session.moveLane("main", entry.parentId);
+		await session.moveLane(lane, entry.parentId);
 	}
 
 	/** The live pi session opened or created by the repository. */
@@ -358,8 +449,8 @@ export class ObsidianSessionManager {
 		return this.session;
 	}
 
-	async getLastCompaction(): Promise<CompactResult | undefined> {
-		const entry = await this.getSession().findEntryOnBranch({ type: "compaction" });
+	async getLastCompaction(lane = "main"): Promise<CompactResult | undefined> {
+		const entry = await this.getSession().view(lane).findEntryOnBranch({ type: "compaction" });
 		if (!entry || entry.type !== "compaction") {
 			return undefined;
 		}
@@ -414,14 +505,14 @@ export class ObsidianSessionManager {
 		return (await fresh.getName())?.trim() || undefined;
 	}
 
-	async ensureConfiguration(defaults: SessionDefaults): Promise<void> {
+	async ensureConfiguration(defaults: SessionDefaults, lane = "main"): Promise<void> {
 		// Model only. The thinking level used to be re-asserted here from global
 		// settings, which made the session's own recorded level decorative; the
 		// level now belongs to the conversation, so the session file wins and
 		// this sync must not overwrite it.
-		const context = await this.buildSessionContext();
+		const context = await this.buildSessionContext(lane);
 		if (context.model?.provider !== defaults.provider || context.model.modelId !== defaults.modelId) {
-			await this.appendModelChange(defaults.provider, defaults.modelId);
+			await this.appendModelChange(defaults.provider, defaults.modelId, lane);
 		}
 	}
 
