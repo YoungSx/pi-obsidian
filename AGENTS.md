@@ -50,14 +50,27 @@ two scripts answer that in a real engine:
 ```bash
 node scripts/preview-command-menu.mjs   # writes .preview/command-menu.html
 node scripts/measure-command-menu.mjs   # measures it, exits non-zero on regressions
+
+node scripts/preview-transcript.mjs     # writes .preview/transcript.html
+node scripts/measure-transcript.mjs     # asserts the message column never scrolls sideways
 ```
 
-The preview extracts its rules *from* `styles.css` rather than restating them,
+Each preview extracts its rules *from* `styles.css` rather than restating them,
 so it cannot drift from what ships. Not part of `npm run verify` — Chromium is
 not a project dependency — so the invariants worth keeping green in CI are
-mirrored as structural gates in `src/ui/panelA11y.test.ts`. Override the browser
-with `CHROME=`; a snap-packaged Chromium cannot read a checkout under a dotted
-path (`~/.paseo/...`), which `PREVIEW_DIR=` works around.
+mirrored as structural gates in `src/ui/panelA11y.test.ts` and
+`src/ui/transcriptOverflow.test.ts`. Override the browser with `CHROME=`; a
+snap-packaged Chromium cannot read a checkout under a dotted path
+(`~/.paseo/...`), which `PREVIEW_DIR=` works around.
+
+The transcript harness renders three panel widths (300px sidebar, 390px phone,
+560px wide leaf) and asserts two things that have to hold together: the message
+column never scrolls horizontally, *and* every construct wider than the column
+still has a reachable scrollbar of its own. Only the pair is meaningful —
+clipping the column alone would pass the first check while silently truncating
+tables. Its fixtures are deliberately pathological (96-character tokens, a
+1400px image), because a construct that merely might overflow proves nothing
+about the case `pre-wrap` fails on.
 
 ## Linting
 

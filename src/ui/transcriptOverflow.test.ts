@@ -1,0 +1,148 @@
+import { describe, expect, it } from "bun:test";
+import { readFileSync } from "node:fs";
+
+/**
+ * Structural gates over the transcript's horizontal-overflow contract.
+ *
+ * The behaviour these protect is measured, not asserted, by
+ * `scripts/measure-transcript.mjs`: it renders the real stylesheet against the
+ * real markup in Chromium at three panel widths and fails if the message column
+ * scrolls sideways or if a wide block ends up clipped instead of scrollable. That
+ * harness is the source of truth, and it is the only thing that *can* be —
+ * whether `max-width: 100%` bites depends on ancestor sizing that no substring
+ * check can see.
+ *
+ * These tests exist because that harness needs a browser and `bun test` does not
+ * have one. They pin the shape of the decision so a rule cannot quietly go
+ * missing between two runs of the measurement, and each one names the ablation
+ * that proved it load-bearing — dropping the rule and watching the measured
+ * column widen. Rules that ablation showed to change nothing are deliberately
+ * *not* pinned here; see the note on `min-width` in `styles.css`.
+ */
+
+const styles = readFileSync(new URL("../../styles.css", import.meta.url), "utf8");
+
+/** Declarations of the first rule whose selector list matches `selector` exactly. */
+function ruleBody(selector: string): string {
+	const escaped = selector.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+	const found = styles.match(new RegExp(`(?:^|\\n)\\s*${escaped}\\s*\\{([^}]*)\\}`));
+	const body = found?.[1];
+	if (body === undefined) throw new Error(`no rule for ${selector}`);
+	return body;
+}
+
+/**
+ * A rule body with its comments stripped. Required for every assertion, not just
+ * the negative ones: these rules record the declaration they replaced (`pre-wrap`)
+ * and the one they deliberately omit (`min-width`), so a raw substring check
+ * would read the prose as the declaration.
+ */
+function declarations(body: string): string {
+	return body.replace(/\/\*[\s\S]*?\*\//g, "");
+}
+
+/**
+ * Every construct whose horizontal extent carries meaning, and which therefore
+ * has to scroll rather than wrap. Ablating any one of these was measured to make
+ * the column scroll sideways again at one or more panel widths.
+ */
+const SCROLLS_IN_PLACE = [".piem-chat__markdown pre", ".piem-chat__markdown table", ".piem-chat__text", ".piem-chat__compaction pre"];
+
+describe("the transcript column never scrolls sideways", () => {
+	/*
+	 * The symptom the fix is for. `overflow-y: auto` alone does not leave the other
+	 * axis `visible` — CSS computes it to `auto` — so the transcript was a two-axis
+	 * scroller by omission, and one fenced code block took a 359px column to 1209px
+	 * of scroll width on a phone.
+	 */
+	it("states overflow-x on the scroll container instead of inheriting auto", () => {
+		expect(declarations(ruleBody(".piem-chat__messages"))).toContain("overflow-x: hidden");
+	});
+
+	it("clips rather than scroll-clips, so descendants stay scrollable by script", () => {
+		// `clip` would also forbid `scrollIntoView` on the newest message and focus
+		// moving into a long block; `hidden` clips the paint and keeps that working.
+		expect(declarations(ruleBody(".piem-chat__messages"))).not.toContain("overflow-x: clip");
+	});
+});
+
+describe("wide content scrolls inside its own box", () => {
+	/*
+	 * The half that keeps the fix honest. Clipping the column and stopping there
+	 * would make the symptom disappear while silently truncating every wide table —
+	 * so each construct that can exceed the column has to own a scroll box, and the
+	 * measurement asserts the resulting scrollbar is reachable inside the column.
+	 */
+	it.each(SCROLLS_IN_PLACE)("bounds %s to the column and lets it scroll", (selector) => {
+		const body = declarations(ruleBody(selector));
+
+		expect(body).toContain("max-width: 100%");
+		expect(body).toMatch(/overflow(-x)?: auto/);
+	});
+
+	it("makes the table a block so overflow applies, without collapsing its columns", () => {
+		/*
+		 * `overflow` does nothing on `display: table`, so the table has to become a
+		 * block box to scroll at all — and `width: max-content` is what stops that
+		 * from also discarding the column widths the table layout computed. Verified
+		 * in Chromium: 161/47/100 column widths either way.
+		 */
+		const body = declarations(ruleBody(".piem-chat__markdown table"));
+
+		expect(body).toContain("display: block");
+		expect(body).toContain("width: max-content");
+	});
+
+	it("also scrolls Obsidian's own table wrapper when the renderer emits one", () => {
+		// The reading view wraps Markdown tables in `.table-wrapper`; when it is
+		// there it, not the table, is the right scroll box.
+		expect(declarations(ruleBody(".piem-chat__markdown .table-wrapper"))).toMatch(/overflow(-x)?: auto/);
+	});
+});
+
+describe("prose wraps where machine output scrolls", () => {
+	/*
+	 * The split is the design. Prose has no columns to preserve, so an unbreakable
+	 * URL or vault path should break mid-token rather than push the column; code,
+	 * tables and equations carry meaning in their horizontal extent, so they scroll.
+	 */
+	it("lets prose break inside a token", () => {
+		expect(declarations(ruleBody(".piem-chat__markdown"))).toContain("overflow-wrap: break-word");
+	});
+
+	it("keeps a line of code on one line", () => {
+		/*
+		 * `pre`, not `pre-wrap`. Measured at 359px, `pre-wrap` did not remove the
+		 * scroll it was there to avoid — an unbreakable token still needed 557px —
+		 * it only decided which content got mangled first: a wrapped statement's
+		 * indentation stops describing its nesting. The trade is one line plus a
+		 * scroll, which is what every code editor picks.
+		 */
+		expect(declarations(ruleBody(".piem-chat__markdown pre"))).toContain("white-space: pre;");
+	});
+
+	it("leaves the inner code element to inherit, so a theme can still soft-wrap", () => {
+		/*
+		 * An explicit `white-space` on `pre code` was in an earlier cut and measured
+		 * redundant — `white-space` inherits. Removing it also hands the choice back
+		 * to the theme: a theme declaring `pre-wrap` on `code` gets it, and the
+		 * `<pre>`'s own scroll still keeps the content inside the column.
+		 */
+		expect(styles).not.toContain(".piem-chat__markdown pre code");
+	});
+});
+
+describe("intrinsically sized media comes down to the column", () => {
+	/*
+	 * A screenshot pasted from a desktop carries its own width — the fixture here is
+	 * 1400px against a 359px phone column. `height: auto` is what keeps the aspect
+	 * ratio while the width comes down; without it the picture squashes.
+	 */
+	it.each(["img", "svg", "video"])("holds %s to the column and preserves its ratio", (tag) => {
+		const body = declarations(ruleBody(`.piem-chat__markdown img,\n.piem-chat__markdown svg,\n.piem-chat__markdown video`));
+
+		expect(body).toContain("max-width: 100%");
+		expect(body).toContain("height: auto");
+		expect(styles).toContain(`.piem-chat__markdown ${tag}`);
+	});
+});

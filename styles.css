@@ -608,6 +608,31 @@ button.piem-settings-tab {
 	flex: 1 1 auto;
 	flex-direction: column;
 	gap: var(--size-4-2);
+	/*
+	 * The invariant, stated rather than left to the cascade: this column never
+	 * scrolls sideways. `overflow-y: auto` alone does not leave the other axis
+	 * `visible` — CSS computes it to `auto`, because a box cannot scroll one axis
+	 * and overflow the other unclipped — so the transcript was silently a two-axis
+	 * scroller and any wide construct dragged the whole column with it.
+	 *
+	 * Honest about its role: this line is a backstop, not the fix. The fix is that
+	 * every construct able to exceed the column now carries its own scroll box (see
+	 * the Markdown and `.piem-chat__text` rules below); with those in place
+	 * `scripts/measure-transcript.mjs` passes at all three widths whether this
+	 * declaration is present or not. It is kept because the invariant should be
+	 * declared where it holds rather than left as an emergent property of a dozen
+	 * content rules — the next construct Obsidian's renderer learns to emit will
+	 * meet a column that already refuses to widen.
+	 *
+	 * Which is also why it cannot stand alone. Clipping here without giving wide
+	 * blocks somewhere to scroll would trade a horizontal swipe for silently
+	 * truncated tables; the harness asserts the reachability half for that reason.
+	 *
+	 * `hidden` rather than `clip`: descendants may still be scrolled into view
+	 * programmatically (`scrollIntoView` on the newest message, focus entering a
+	 * long block), and `clip` forbids even that.
+	 */
+	overflow-x: hidden;
 	overflow-y: auto;
 	/* Focusable log: keyboard users can scroll the transcript without tabbing
 	 * through every message. The outline stays on the theme's focus colour. */
@@ -666,7 +691,14 @@ button.piem-settings-tab {
 .piem-chat__compaction pre {
 	font-size: var(--font-ui-smaller);
 	max-height: 12rem;
-	overflow-y: auto;
+	/*
+	 * `max-height` already made this a vertical scroller, which computes the
+	 * horizontal axis to `auto` as well — so the summary's own long tokens were
+	 * free to widen the box and the transcript behind it. Bounding the width is
+	 * what turns that into a scroll inside the block.
+	 */
+	max-width: 100%;
+	overflow: auto;
 	white-space: pre-wrap;
 }
 
@@ -936,6 +968,15 @@ button.piem-settings-tab {
 .piem-chat__text {
 	background: transparent;
 	margin: 0;
+	/*
+	 * `pre-wrap` wraps at break opportunities; a stack trace's path or a base64
+	 * line has none, so the block still needs somewhere for the excess to go.
+	 * `max-width: 100%` plus its own scroll keeps that swipe inside the block —
+	 * the same contract the Markdown rules below state, for the same reason: this
+	 * face is machine output, and its columns are the content.
+	 */
+	max-width: 100%;
+	overflow-x: auto;
 	white-space: pre-wrap;
 }
 
@@ -966,8 +1007,102 @@ button.piem-settings-tab {
 	margin-bottom: 0;
 }
 
+/*
+ * Overflow containment — the reason the transcript never scrolls sideways.
+ *
+ * `.piem-chat__messages` used to declare only `overflow-y: auto`, and CSS then
+ * computes the other axis from `visible` to `auto`: a box cannot scroll one axis
+ * and overflow the other unclipped. So the transcript was silently a two-axis
+ * scroller, and any construct wider than the panel dragged the whole message
+ * column with it — reading the next reply meant swiping the column back.
+ * Measured on a 390px phone before these rules, one fenced code block took the
+ * message list from 359px of column to 1209px of scroll width.
+ *
+ * The answer splits by what the content is, and the split is the whole design:
+ *
+ *   Prose *wraps*. A URL or a Windows path is one unbreakable token to the line
+ *   breaker, so `overflow-wrap: break-word` lets it break mid-token rather than
+ *   push the column. Nothing is lost — prose has no columns to preserve.
+ *
+ *   Machine output *scrolls in place*. A fenced block, a table, a math block and
+ *   the plain `<pre>` face are exactly the content whose horizontal extent
+ *   carries meaning: a diff's `+`/`-` gutter, a grep table's columns, an
+ *   equation's terms. Wrapping them destroys the alignment that is the point of
+ *   showing them, so each becomes its own scroll box — the swipe stays inside
+ *   the block that needs it, and the transcript around it holds still.
+ *
+ * `scripts/measure-transcript.mjs` asserts both halves in Chromium, because both
+ * are needed and neither is visible in the declarations: it fails if the column
+ * scrolls sideways *and* if a wide block ends up clipped rather than scrollable.
+ * The three rules it proves load-bearing are this file's `pre`, `table` and
+ * `.piem-chat__text` scroll boxes — ablating any one of them scrolls the column
+ * again. `min-width: 0` on the wrappers was in an earlier cut of this fix and is
+ * deliberately absent: measured, it changed nothing, because these wrappers are
+ * block boxes and the automatic-minimum-size rule that would have required it
+ * applies to flex items.
+ */
+.piem-chat__markdown {
+	overflow-wrap: break-word;
+}
+
+/*
+ * `white-space: pre-wrap` was the previous answer and only half of one: it softens
+ * wrapping *at existing break opportunities*, which a 78-character identifier or a
+ * base64 line does not have — measured at 359px, an unbreakable token still needed
+ * 557px of scroll under `pre-wrap`. So the wrap never removed the scroll; it only
+ * decided which content got mangled first.
+ *
+ * `pre` is a deliberate trade, not a free win, and the numbers are worth stating:
+ * on ordinary code the two are identical, and on a long *breakable* line
+ * (`export async function resolveActiveNoteContent(...)`) `pre-wrap` fits it in
+ * three lines while `pre` gives one line and 792px of scroll. What buys the scroll
+ * is that a line of code stays one line: soft-wrapping splits a statement across
+ * rows whose indentation no longer describes its nesting, which is the same reason
+ * GitHub and every code editor scroll rather than wrap by default.
+ */
 .piem-chat__markdown pre {
-	white-space: pre-wrap;
+	max-width: 100%;
+	overflow-x: auto;
+	white-space: pre;
+}
+
+/*
+ * Tables get the treatment twice, because which element scrolls depends on the
+ * renderer's output: Obsidian wraps a Markdown table in `.table-wrapper` in its
+ * reading view, and the wrapper is the right scroll box when it is there. When
+ * it is not, the `<table>` has to become its own — `display: block` is what lets
+ * an `overflow` apply to it at all, and `width: max-content` is what stops that
+ * from also collapsing the column widths `display: table` computes (verified in
+ * Chromium: identical 161/47/100 column widths either way).
+ */
+.piem-chat__markdown .table-wrapper {
+	max-width: 100%;
+	overflow-x: auto;
+}
+
+.piem-chat__markdown table {
+	display: block;
+	max-width: 100%;
+	overflow-x: auto;
+	width: max-content;
+}
+
+/* Math renders as one nowrap run, so it needs the same in-place scroll. */
+.piem-chat__markdown .math-block {
+	max-width: 100%;
+	overflow-x: auto;
+}
+
+/*
+ * An image carries its intrinsic width, which for a screenshot pasted from a
+ * desktop is several times the panel. `height: auto` keeps the aspect ratio
+ * while the width comes down; without it the picture would squash.
+ */
+.piem-chat__markdown img,
+.piem-chat__markdown svg,
+.piem-chat__markdown video {
+	height: auto;
+	max-width: 100%;
 }
 
 .piem-chat__markdown p,
@@ -1150,8 +1285,17 @@ button.piem-settings-tab {
 	padding: var(--size-4-1) 0 var(--size-4-1) var(--size-4-2);
 }
 
+/*
+ * Tool output and thinking text, same contract as the transcript's machine face:
+ * wrap where wrapping is possible, scroll where it is not. The `result` and
+ * `harness` variants below bound their own height, which already makes their
+ * horizontal axis `auto`; stating it on the block covers the `call` variant,
+ * which has no bounded body to inherit it from.
+ */
 .piem-chat__trace-body pre {
 	margin: 0;
+	max-width: 100%;
+	overflow-x: auto;
 	white-space: pre-wrap;
 }
 
