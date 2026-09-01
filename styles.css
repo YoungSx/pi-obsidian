@@ -2930,6 +2930,22 @@ button.piem-chat__latest {
 	font-size: var(--font-ui-smaller);
 }
 
+/*
+ * Matched transcript text under a history-picker row.
+ *
+ * Clamped to two lines: the excerpt is there to prove *why* the chat matched,
+ * and a message long enough to wrap further would push the next row off a phone
+ * screen — the list's job is to be scannable, not to reproduce the conversation.
+ */
+.piem-session-search__snippet {
+	color: var(--text-muted);
+	font-size: var(--font-ui-smaller);
+	display: -webkit-box;
+	-webkit-box-orient: vertical;
+	-webkit-line-clamp: 2;
+	overflow: hidden;
+}
+
 /* --- brand icon (src/brandIcon.ts) --- */
 
 /*

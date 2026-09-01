@@ -13,12 +13,16 @@ import {
 	type OperationStartedRecord,
 	type Session,
 	type ThinkingLevel,
+	createScanningSessionSearch,
+	type SessionSearch,
+	type SessionSearchOptions,
 } from "@earendil-works/pi-agent-core";
 import { normalizeFolderPath } from "../vault/path";
 import { sanitizeMessageForLog } from "../vault/image";
 import { DEFAULT_THINKING_LEVEL } from "../constants";
 import { ObsidianSessionFileSystem } from "./ObsidianSessionFileSystem";
 import { selectSessionsToEvict, UNLIMITED_SESSION_RETENTION } from "./retention";
+import { projectSessionEntryText, type StoredSessionSearchHit } from "./sessionSearch";
 
 export interface SessionDefaults {
 	provider: string;
@@ -133,6 +137,20 @@ export class ObsidianSessionManager {
 			.filter((session): session is SessionFileInfo => session !== null)
 			.sort((left, right) => right.modifiedTime - left.modifiedTime)
 			.map(({ modifiedTime: _modifiedTime, ...session }) => session);
+	}
+
+	createStoredSessionSearch(): SessionSearch<StoredSessionSearchHit> {
+		return createScanningSessionSearch((options?: SessionSearchOptions) => this.openStoredSessions(options), {
+			// Hands the caller's signal to the source so a superseded query stops
+			// before opening the next JSONL file; pi only checks it between sessions.
+			sourceOptions: (_text, options) => options,
+			pageSize: 64,
+			projectText: projectSessionEntryText,
+			createHit: (metadata, candidate) => ({
+				sessionId: metadata.id, path: metadata.path, entryId: candidate.entryId,
+				entryType: candidate.type, timestamp: candidate.timestamp, snippet: candidate.text,
+			}),
+		});
 	}
 
 	getSessionDir(): string {
@@ -404,6 +422,33 @@ export class ObsidianSessionManager {
 		const context = await this.buildSessionContext();
 		if (context.model?.provider !== defaults.provider || context.model.modelId !== defaults.modelId) {
 			await this.appendModelChange(defaults.provider, defaults.modelId);
+		}
+	}
+
+	/**
+	 * Opens each stored chat in turn, newest first, for the scanning search.
+	 *
+	 * A generator rather than a list of opened sessions: `repo.open` reads and
+	 * parses a whole JSONL file, so materializing them all would pay for every
+	 * chat in the vault before the first hit is yielded. pi stops pulling once its
+	 * limit is met, which is what keeps the common query cheap.
+	 *
+	 * The signal is re-checked here because pi only tests it between sessions and
+	 * candidates, and `repo.open` cannot be interrupted once it has begun — the
+	 * boundary before the next file is the last place a superseded keystroke can
+	 * still save the work.
+	 */
+	private async *openStoredSessions(options?: SessionSearchOptions): AsyncIterable<PiSession> {
+		const repo = this.repo(this.resolveSessionDir());
+		for (const metadata of await repo.list({ cwd: this.cwd })) {
+			if (options?.signal?.aborted) {
+				return;
+			}
+			try {
+				yield await repo.open(metadata);
+			} catch {
+				// A corrupt log must not make every healthy chat unsearchable.
+			}
 		}
 	}
 

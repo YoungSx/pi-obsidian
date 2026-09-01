@@ -32,6 +32,7 @@ export const en = {
 		couldNotOpenChat: "Could not open the chat view.",
 		openLogs: "Open log view",
 		couldNotOpenLogs: "Could not open the log view.",
+		searchChats: "Search chats",
 		openSubagents: "Open subagent panel",
 		couldNotOpenSubagents: "Could not open the subagent panel.",
 	},
@@ -483,7 +484,12 @@ export const en = {
 		newChat: "New chat",
 		untitled: "Untitled chat",
 		searchPlaceholder: "Search chats",
+		/** Placeholder once the picker can also read what was said in each chat. */
+		searchContentPlaceholder: "Search chats by title or what was said",
 		searchInstructions: "Type to filter the list of chats.",
+		searchNoResults: "No chat matches that yet.",
+		/** Sits under a row whose match came from the transcript rather than the title. */
+		searchMatchCount: "{count} matching messages",
 		renameChat: "Rename chat",
 		deleteChat: "Delete chat",
 		cancel: "Cancel",

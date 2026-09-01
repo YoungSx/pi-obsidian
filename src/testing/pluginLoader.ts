@@ -230,6 +230,7 @@ export function createObsidianHostModule(record: PluginHostRecord, platform: Rec
 		},
 		Setting: class Setting {},
 		Modal: class Modal {},
+		SuggestModal: class SuggestModal {},
 		FuzzySuggestModal: class FuzzySuggestModal {},
 		// Extended by the settings panel's suggest fields at module scope, so it
 		// has to be a real constructor: a plain object here fails the bundle's

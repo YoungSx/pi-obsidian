@@ -40,6 +40,7 @@ import {
 	type PiemSettings,
 } from "../settings";
 import { ObsidianSessionManager, type ActiveSessionInfo, type SessionContext, type SessionDefaults } from "../session/ObsidianSessionManager";
+import { aggregateSessionSearchHits, type SessionSearchResult } from "../session/sessionSearch";
 import { arrayBufferToBase64, extractImageRefs, mimeTypeForPath, sanitizeMessageForLog, stripImageRefs } from "../vault/image";
 import { injectContext, type InjectedNote } from "./contextInjection";
 import { noteFileName, renderTranscriptMarkdown, type ExportableMessage } from "./exportNote";
@@ -1550,6 +1551,30 @@ export class ObsidianAgentService {
 	async listSessions(): Promise<ActiveSessionInfo[]> {
 		await this.initialize();
 		return this.sessionManager.listSessions();
+	}
+
+	/**
+	 * Chats whose content matches `text`, newest session first, one row each.
+	 *
+	 * Scans stored logs lazily through pi's scanning search rather than reading
+	 * every session up front, so a superseded keystroke stops the scan at the next
+	 * session boundary — `repo.open` itself cannot be cancelled mid-read.
+	 */
+	async searchSessions(text: string, options: { limit?: number; signal?: AbortSignal } = {}): Promise<SessionSearchResult[]> {
+		await this.initialize();
+		const query = text.trim();
+		if (!query) {
+			return [];
+		}
+		const maxSessions = options.limit ?? 20;
+		const hits = [];
+		const search = this.sessionManager.createStoredSessionSearch();
+		// Entry budget, not a session budget: one chatty chat could otherwise fill
+		// the whole list once the hits are folded per session.
+		for await (const hit of search.search(query, { limit: maxSessions * 20, signal: options.signal })) {
+			hits.push(hit);
+		}
+		return aggregateSessionSearchHits(hits, query, maxSessions);
 	}
 
 	/** Switches to a stored session, replacing the transcript with its history. */

@@ -16,6 +16,7 @@ import { emptySkillLoadReport, type SkillLoadReport } from "./agent/skillLoader"
 import { PiemChatView } from "./ui/PiemChatView";
 import { PiemSubagentView } from "./ui/PiemSubagentView";
 import { requestNoteReference, warnIfTruncated } from "./ui/noteReferenceCommand";
+import { openSessionDeleteConfirm, openSessionPicker } from "./ui/sessionDialogs";
 import { BRAND_ICON_ID, registerBrandIcon } from "./brandIcon";
 import { registerVendorIcons } from "./net/vendorIcons";
 import { getT, resolveLanguage, type LanguageHost, type Translator } from "./i18n";
@@ -167,6 +168,13 @@ export default class PiemPlugin extends Plugin {
 			name: t.t("commands.newChat"),
 			callback: () => {
 				void this.startNewChat();
+			},
+		});
+		this.addCommand({
+			id: "search-chats",
+			name: t.t("commands.searchChats"),
+			callback: () => {
+				void this.openSessionSearch();
 			},
 		});
 		this.addCommand({
@@ -408,6 +416,29 @@ export default class PiemPlugin extends Plugin {
 	 * stub that has no workspace — so the lookup is optional rather than assuming
 	 * a fully constructed `App`.
 	 */
+	/**
+	 * Opens the history picker from the palette, with content search wired in.
+	 *
+	 * Activates the panel first so the picker's own actions — open, delete — land
+	 * on a mounted view rather than a service the user cannot see the result of.
+	 */
+	private async openSessionSearch(): Promise<void> {
+		const service = this.requireAgentService();
+		await this.activateChatView();
+		const t = this.t();
+		const sessions = await service.listSessions();
+		openSessionPicker(
+			this.app,
+			sessions,
+			{
+				onOpen: (path) => void service.openSession(path),
+				onDelete: (session) => openSessionDeleteConfirm(this.app, session, () => void service.deleteSession(session.path), t),
+				searchSessions: (text, options) => service.searchSessions(text, options),
+			},
+			t,
+		);
+	}
+
 	private findChatView(): PiemChatView | null {
 		const view = this.app?.workspace?.getLeavesOfType(VIEW_TYPE_PIEM_CHAT)[0]?.view;
 		return view instanceof PiemChatView ? view : null;
