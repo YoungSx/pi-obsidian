@@ -221,6 +221,11 @@ const TEXT_CHECKS = [
 		pattern: /\bimport\s*\.\s*meta\b/g,
 		why: "import.meta is a syntax error outside a module, which takes the whole plugin down at load time.",
 	},
+	{
+		name: "dynamic script element creation",
+		pattern: /createElement\(\s*["'`]script["'`]\s*\)/g,
+		why: "Obsidian's marketplace scanner fails a submission that builds <script> elements, under Code obfuscation: \"Dynamically injecting script elements can load and execute arbitrary external code.\" Nothing in src/ does this, so a hit here means a dependency brought it in. react-dom 19 is the known source — its createRoot implementation carries preinit/preinitModule and the hoistable <script async> path, all three unreachable for us and none of them tree-shakeable, because React reaches them through an internal dispatcher object. That is why react and react-dom are pinned to 18.3.1 (exact, no caret) in package.json: 18's client build contains no such call at all. Upgrading React is what trips this check.",
+	},
 ];
 
 function positionOf(source, index) {

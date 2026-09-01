@@ -31,8 +31,13 @@ interface IconButtonProps {
 	/**
 	 * Exposes the button element, for a caller that has to move focus onto it —
 	 * e.g. a control that only appears once the one the user just pressed is gone.
+	 *
+	 * Spelled out rather than `React.Ref` because React 18's `RefObject.current`
+	 * is `readonly` — the callback below assigns through it, which only
+	 * type-checks against the mutable half of the union. React 19 widened
+	 * `React.Ref` to permit the write; see the pin in `package.json`.
 	 */
-	buttonRef?: React.Ref<HTMLButtonElement>;
+	buttonRef?: React.RefCallback<HTMLButtonElement> | React.MutableRefObject<HTMLButtonElement | null>;
 	/**
 	 * What pressing the button opens, when it opens something.
 	 *
