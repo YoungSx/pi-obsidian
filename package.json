@@ -25,7 +25,7 @@
 		"@types/react-dom": "^19.2.3",
 		"electron": "^44.0.0",
 		"esbuild": "0.25.5",
-		"eslint-plugin-obsidianmd": "0.1.9",
+		"eslint-plugin-obsidianmd": "0.4.2",
 		"globals": "14.0.0",
 		"happy-dom": "^20.11.6",
 		"jiti": "2.6.1",
