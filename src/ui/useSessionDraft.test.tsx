@@ -8,7 +8,7 @@ installObsidianStub();
 const document = installDom();
 
 // Dynamic imports so the mocked `obsidian` module wins over any cached real one.
-const { DraftStore } = await import("../session/DraftStore");
+const { DraftStore, draftKey } = await import("../session/DraftStore");
 const { useSessionDraft } = await import("./useSessionDraft");
 const { createRoot } = await import("react-dom/client");
 
@@ -112,6 +112,39 @@ describe("useSessionDraft", () => {
 
 		expect(harness.current.draft).toBe("");
 		expect(await store.get("session-a")).toBe("");
+	});
+
+	it("keeps each comparison lane's unsent text to itself", async () => {
+		// The A/B case of issue #184: two writable branches of one chat, so the
+		// scope changes without the session changing. A half-written question for
+		// one side must not appear in the other's composer — the same isolation
+		// keying on the session gave chats, one level down.
+		const store = createStore();
+		const mounted = await mount(store, draftKey("chat-1", "ab-a-1"));
+
+		mounted.harness.current.setDraft("Cautious phrasing");
+		await mounted.render(draftKey("chat-1", "ab-b-1"));
+
+		expect(mounted.harness.current.draft).toBe("");
+		mounted.harness.current.setDraft("Bold phrasing");
+		await mounted.render(draftKey("chat-1", "ab-a-1"));
+
+		// Switching back finds the outgoing lane's text where it was left.
+		expect(mounted.harness.current.draft).toBe("Cautious phrasing");
+		await mounted.render(draftKey("chat-1", "ab-b-1"));
+		expect(mounted.harness.current.draft).toBe("Bold phrasing");
+	});
+
+	it("finds a draft written before lanes existed on the main lane", async () => {
+		// The stored file is the compatibility surface: `draftKey` leaves the main
+		// lane on the bare session id precisely so an upgrade does not silently
+		// discard every draft on disk.
+		const store = createStore();
+		await store.set("chat-1", "Typed before the upgrade");
+
+		const mounted = await mount(store, draftKey("chat-1"));
+
+		expect(mounted.harness.current.draft).toBe("Typed before the upgrade");
 	});
 
 	it("holds an empty draft while no chat is active", async () => {

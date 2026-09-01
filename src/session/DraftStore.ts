@@ -21,6 +21,22 @@ import { NOOP_LOGGER, type LoggerLike } from "../logging/Logger";
 const WRITE_DEBOUNCE_MS = 700;
 
 /**
+ * The key one composer's text is filed under.
+ *
+ * A session id alone stopped being enough with the A/B comparison of issue #184:
+ * a session can hold several writable branches at once, and a half-written
+ * question for one side must not appear in the other's composer — the same
+ * mistake, one level down, that keying on the session fixed for chats.
+ *
+ * The main lane keeps the bare session id so drafts written before lanes
+ * existed are still found: the stored file is the compatibility surface, and a
+ * suffix on every key would silently drop every draft on first upgrade.
+ */
+export function draftKey(sessionId: string, lane = "main"): string {
+	return lane === "main" ? sessionId : `${sessionId}#${lane}`;
+}
+
+/**
  * Longest draft persisted. A pasted note body can be enormous, and the draft
  * file is convenience state, not a document store; the composer keeps the full
  * text in memory either way.
