@@ -515,6 +515,7 @@ export function ChatApp({ service, inputController, component, draftStore, onOpe
 					onNewSession={() => void service.newSession()}
 					onRenameSession={(name) => void service.renameSession(name)}
 					onDeleteSession={(path) => void service.deleteSession(path)}
+					onSearchSessions={(text, options) => service.searchSessions(text, options)}
 					onExportSession={
 						() =>
 							void service.exportSessionAsNote().then((path) => {

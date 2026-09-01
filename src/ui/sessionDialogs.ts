@@ -1,10 +1,17 @@
-import { FuzzySuggestModal, Modal, Setting, type App } from "obsidian";
+import { Modal, Setting, SuggestModal, type App } from "obsidian";
 import type { ActiveSessionInfo } from "../session/ObsidianSessionManager";
+import type { SessionSearchResult } from "../session/sessionSearch";
 import type { Translator } from "../i18n";
+import { mergeSearchRows, titleMatches, type SessionRow } from "./sessionSearchRows";
 
 export interface SessionPickerActions {
 	onOpen: (path: string) => void;
 	onDelete: (session: ActiveSessionInfo) => void;
+	/**
+	 * Scans the stored logs for `text`. Omitted leaves the picker matching on
+	 * titles alone, which is what a caller without a live service can offer.
+	 */
+	searchSessions?: (text: string, options: { signal: AbortSignal }) => Promise<SessionSearchResult[]>;
 }
 
 export function sessionTitle(session: ActiveSessionInfo | undefined, t: Translator): string {
@@ -38,41 +45,110 @@ export function openSessionDeleteConfirm(app: App, session: ActiveSessionInfo, o
 }
 
 /**
- * Fuzzy matching and keyboard navigation come from Obsidian rather than a
- * hand-rolled dropdown, which also makes deleting a chat other than the active
- * one reachable — the header only ever knows about the active session.
+ * Keyboard navigation comes from Obsidian rather than a hand-rolled dropdown,
+ * which also makes deleting a chat other than the active one reachable — the
+ * header only ever knows about the active session.
+ *
+ * A `SuggestModal` rather than a `FuzzySuggestModal`: finding a chat by what was
+ * *said* in it means reading logs off disk, and `getItems()` is synchronous. So
+ * each keystroke paints the title matches at once and starts a scan; when the
+ * scan lands, the rows are re-requested by replaying an `input` event, with the
+ * hits cached per query so the replay cannot loop. A superseded query is aborted
+ * at the next session boundary — pi checks the signal there, and `repo.open`
+ * cannot be interrupted mid-read.
  */
-class SessionPickerModal extends FuzzySuggestModal<ActiveSessionInfo> {
+class SessionPickerModal extends SuggestModal<SessionRow> {
 	private readonly sessions: ActiveSessionInfo[];
 	private readonly actions: SessionPickerActions;
 	private readonly t: Translator;
+	/** Content hits per query, so a settled query never rescans the vault. */
+	private readonly cache = new Map<string, SessionSearchResult[]>();
+	private pending: AbortController | undefined;
+	/** The query the open scan belongs to; a later keystroke discards its result. */
+	private scanning: string | undefined;
 
 	constructor(app: App, sessions: ActiveSessionInfo[], actions: SessionPickerActions, t: Translator) {
 		super(app);
 		this.sessions = sessions;
 		this.actions = actions;
 		this.t = t;
-		this.setPlaceholder(t.t("session.searchPlaceholder"));
+		this.setPlaceholder(t.t(actions.searchSessions ? "session.searchContentPlaceholder" : "session.searchPlaceholder"));
+		this.emptyStateText = t.t("session.searchNoResults");
 		this.setInstructions([
-			{ command: "↵", purpose: t.t("session.pickerOpenHint") },
-			{ command: "shift ↵", purpose: t.t("session.pickerDeleteHint") },
+			{ command: "\u21b5", purpose: t.t("session.pickerOpenHint") },
+			{ command: "shift \u21b5", purpose: t.t("session.pickerDeleteHint") },
 		]);
 	}
 
-	getItems(): ActiveSessionInfo[] {
-		return this.sessions;
+	getSuggestions(query: string): SessionRow[] {
+		const trimmed = query.trim();
+		const rows = titleMatches(this.sessions, query, (session) => describeSession(session, this.t));
+		if (!trimmed || !this.actions.searchSessions) {
+			return rows;
+		}
+		const cached = this.cache.get(trimmed);
+		if (cached) {
+			return mergeSearchRows(rows, cached, this.sessions);
+		}
+		this.startScan(trimmed);
+		return rows;
 	}
 
-	getItemText(session: ActiveSessionInfo): string {
-		return describeSession(session, this.t);
+	renderSuggestion(row: SessionRow, el: HTMLElement): void {
+		el.createDiv({ cls: "piem-suggestion-value", text: sessionTitle(row.session, this.t) });
+		const meta = new Date(row.session.updatedAt).toLocaleString();
+		el.createDiv({
+			cls: "piem-suggestion-description",
+			text: row.matchCount === undefined ? meta : `${meta} · ${this.t.t("session.searchMatchCount", { count: row.matchCount })}`,
+		});
+		if (row.snippet) {
+			el.createDiv({ cls: "piem-session-search__snippet", text: row.snippet });
+		}
 	}
 
-	onChooseItem(session: ActiveSessionInfo, evt: MouseEvent | KeyboardEvent): void {
+	onChooseSuggestion(row: SessionRow, evt: MouseEvent | KeyboardEvent): void {
 		if (evt.shiftKey) {
-			this.actions.onDelete(session);
+			this.actions.onDelete(row.session);
 			return;
 		}
-		this.actions.onOpen(session.path);
+		this.actions.onOpen(row.session.path);
+	}
+
+	onClose(): void {
+		this.pending?.abort();
+		this.pending = undefined;
+	}
+
+	/** Scans in the background, then replays the input so the rows refresh. */
+	private startScan(query: string): void {
+		if (this.scanning === query) {
+			return;
+		}
+		this.pending?.abort();
+		const controller = new AbortController();
+		this.pending = controller;
+		this.scanning = query;
+		void this.actions
+			.searchSessions?.(query, { signal: controller.signal })
+			.then((hits) => {
+				if (controller.signal.aborted) {
+					return;
+				}
+				this.cache.set(query, hits);
+				// Only the query still in the box may repaint; an earlier one landing
+				// late would otherwise overwrite what the user is now reading.
+				if (this.inputEl.value.trim() === query) {
+					this.inputEl.dispatchEvent(new Event("input"));
+				}
+			})
+			.catch(() => {
+				// A cancelled or failed scan leaves the title matches on screen.
+			})
+			.finally(() => {
+				if (this.scanning === query) {
+					this.scanning = undefined;
+				}
+			});
 	}
 }
 

@@ -443,3 +443,109 @@ function getParent(path: string): string {
 	const index = path.lastIndexOf("/");
 	return index === -1 ? "" : path.slice(0, index);
 }
+
+describe("ObsidianSessionManager stored search", () => {
+	const CWD = "obsidian-vault:Test";
+
+	async function seed(adapter: DataAdapter, text: string): Promise<string> {
+		const manager = new ObsidianSessionManager(adapter, SESSION_DIR, CWD);
+		await manager.createSession(DEFAULTS);
+		await manager.appendMessage({ role: "user", content: [{ type: "text", text }], timestamp: 1 });
+		return manager.getActiveSessionPath()!;
+	}
+
+	async function collect(manager: ObsidianSessionManager, query: string, options?: { limit?: number; signal?: AbortSignal }) {
+		const hits = [];
+		for await (const hit of manager.createStoredSessionSearch().search(query, options)) {
+			hits.push(hit);
+		}
+		return hits;
+	}
+
+	it("finds a stored chat by its content and reports the path to open", async () => {
+		const adapter = new MemoryAdapter() as unknown as DataAdapter;
+		const path = await seed(adapter, "记得那次关于向量检索的讨论");
+
+		const hits = await collect(new ObsidianSessionManager(adapter, SESSION_DIR, CWD), "向量检索");
+
+		expect(hits).toHaveLength(1);
+		expect(hits[0]?.path).toBe(path);
+		expect(hits[0]?.entryType).toBe("message");
+		expect(hits[0]?.snippet).toContain("向量检索");
+	});
+
+	it("does not leak tool arguments or thinking into the searchable text", async () => {
+		const adapter = new MemoryAdapter() as unknown as DataAdapter;
+		const manager = new ObsidianSessionManager(adapter, SESSION_DIR, CWD);
+		await manager.createSession(DEFAULTS);
+		await manager.appendMessage({
+			role: "assistant",
+			content: [
+				{ type: "text", text: "answer" },
+				{ type: "thinking", thinking: "hidden-reasoning" },
+				{ type: "toolCall", id: "t1", name: "read", arguments: { path: "secret-note.md" } },
+			],
+			api: "anthropic-messages",
+			provider: "anthropic",
+			model: "claude",
+			usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } },
+			stopReason: "stop",
+			timestamp: 2,
+		} as never);
+
+		const searcher = new ObsidianSessionManager(adapter, SESSION_DIR, CWD);
+		expect(await collect(searcher, "answer")).toHaveLength(1);
+		expect(await collect(searcher, "hidden-reasoning")).toHaveLength(0);
+		expect(await collect(searcher, "secret-note.md")).toHaveLength(0);
+	});
+
+	it("yields nothing for an empty query", async () => {
+		const adapter = new MemoryAdapter() as unknown as DataAdapter;
+		await seed(adapter, "anything");
+
+		expect(await collect(new ObsidianSessionManager(adapter, SESSION_DIR, CWD), "   ")).toHaveLength(0);
+	});
+
+	it("stops opening further logs once the entry limit is reached", async () => {
+		const memory = new MemoryAdapter();
+		const adapter = memory as unknown as DataAdapter;
+		await seed(adapter, "shared marker one");
+		await seed(adapter, "shared marker two");
+		const reads: string[] = [];
+		const originalRead = memory.read.bind(memory);
+		(memory as unknown as { read: (path: string) => Promise<string> }).read = async (path: string) => {
+			reads.push(path);
+			return originalRead(path);
+		};
+
+		const hits = await collect(new ObsidianSessionManager(adapter, SESSION_DIR, CWD), "shared marker", { limit: 1 });
+
+		expect(hits).toHaveLength(1);
+		// Listing reads a header from both logs; only the matching one is then
+		// opened. Three reads rather than four is the proof the scan stopped.
+		expect(reads).toHaveLength(3);
+		expect(reads.filter((path) => path === hits[0]?.path)).toHaveLength(2);
+	});
+
+	it("stops at a session boundary when the caller aborts", async () => {
+		const adapter = new MemoryAdapter() as unknown as DataAdapter;
+		await seed(adapter, "marker one");
+		await seed(adapter, "marker two");
+		const controller = new AbortController();
+		controller.abort();
+
+		expect(await collect(new ObsidianSessionManager(adapter, SESSION_DIR, CWD), "marker", { signal: controller.signal })).toHaveLength(0);
+	});
+
+	it("keeps healthy chats searchable when one log is corrupt", async () => {
+		const memory = new MemoryAdapter();
+		const adapter = memory as unknown as DataAdapter;
+		const healthy = await seed(adapter, "still findable");
+		const broken = await seed(adapter, "irrelevant");
+		await memory.write(broken, '{"kind":"header","version":4,"id":"broken","createdAt":0,"cwd":"obsidian-vault:Test"}\n{oops\n');
+
+		const hits = await collect(new ObsidianSessionManager(adapter, SESSION_DIR, CWD), "still findable");
+
+		expect(hits.map((hit) => hit.path)).toEqual([healthy]);
+	});
+});

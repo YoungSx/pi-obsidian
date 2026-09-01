@@ -2,6 +2,7 @@ import React from "react";
 import { Menu, Platform, type App } from "obsidian";
 import type { ChatSnapshot } from "../agent/ObsidianAgentService";
 import type { ActiveSessionInfo } from "../session/ObsidianSessionManager";
+import type { SessionSearchResult } from "../session/sessionSearch";
 import { IconButton } from "./ObsidianIcon";
 import { useT } from "./TranslatorContext";
 import {
@@ -20,6 +21,11 @@ interface ChatHeaderProps {
 	onNewSession: () => void;
 	onRenameSession: (name: string) => void;
 	onDeleteSession: (path: string) => void;
+	/**
+	 * Reads the stored logs so the picker can match on what was said, not just on
+	 * the title. Absent leaves the picker matching titles alone.
+	 */
+	onSearchSessions?: (text: string, options: { signal: AbortSignal }) => Promise<SessionSearchResult[]>;
 	/**
 	 * Writes the transcript into the vault as a Markdown note and opens it.
 	 * Offered only while a settled session with at least one message exists —
@@ -58,6 +64,7 @@ export function ChatHeader({
 	onNewSession,
 	onRenameSession,
 	onDeleteSession,
+	onSearchSessions,
 	onExportSession,
 	onOpenSettings,
 }: ChatHeaderProps): React.JSX.Element {
@@ -71,7 +78,7 @@ export function ChatHeader({
 	// The dedicated history button's availability. On a phone it leaves the row
 	// entirely — see the actions row below — and this same check gates the menu
 	// item that replaces it, so the two doors share one answer.
-	const canPickSession = !isBusy && sessions.length >= 2;
+	const canPickSession = !isBusy && (sessions.length >= 2 || (sessions.length === 1 && onSearchSessions !== undefined));
 	const openPicker = (): void => {
 		openSessionPicker(
 			app,
@@ -79,6 +86,7 @@ export function ChatHeader({
 			{
 				onOpen: onOpenSession,
 				onDelete: (session) => openSessionDeleteConfirm(app, session, () => onDeleteSession(session.path), t),
+				searchSessions: onSearchSessions,
 			},
 			t,
 		);
@@ -175,7 +183,7 @@ export function ChatHeader({
 						icon="history"
 						label={t.t("chat.openChatHistory")}
 						onClick={openPicker}
-						disabled={isBusy || sessions.length < 2}
+						disabled={!canPickSession}
 					/>
 				)}
 				<IconButton icon="square-pen" label={t.t("chat.newChat")} onClick={onNewSession} disabled={isBusy} />

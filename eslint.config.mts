@@ -12,6 +12,11 @@ export default tseslint.config(
 				// so the desktop path references the Node global inside this
 				// browser-globals config.
 				Buffer: "readonly",
+				// A TS lib type, not a runtime global: the session search returns
+				// one from its lazy source. The browser-globals preset predates
+				// these landing in the list, so `no-undef` flags the annotation —
+				// the same gap `src/net/shims` works around for AsyncGenerator.
+				AsyncIterable: "readonly",
 			},
 			parserOptions: {
 				projectService: {

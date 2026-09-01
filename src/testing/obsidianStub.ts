@@ -318,6 +318,34 @@ function createMenuItem(entry: MenuItemRecording): MenuItemLike {
  */
 export const openedMenus: MenuRecording[] = [];
 
+/**
+ * Driving surface of a stubbed {@link SuggestModal}, for tests that need to type
+ * into a picker and read the rows it rendered.
+ */
+export interface SuggestModalHandle {
+	inputEl: HTMLInputElement;
+	resultContainerEl: HTMLElement;
+	emptyStateText: string;
+	type(query: string): Promise<void>;
+	rerender(): Promise<void>;
+	choose(index: number, event?: { shiftKey?: boolean }): Promise<void>;
+	close(): void;
+	getPlaceholder(): string;
+	getInstructions(): { command: string; purpose: string }[];
+}
+
+const openedSuggestModals: SuggestModalHandle[] = [];
+
+/** The most recently constructed suggest modal, or undefined if none. */
+export function lastSuggestModal(): SuggestModalHandle | undefined {
+	return openedSuggestModals.at(-1);
+}
+
+/** Forgets every recorded suggest modal, for a clean slate between tests. */
+export function resetSuggestModals(): void {
+	openedSuggestModals.length = 0;
+}
+
 /** Discards recorded menus. Call from `beforeEach` before building a menu. */
 export function resetMenus(): void {
 	openedMenus.length = 0;
@@ -600,6 +628,110 @@ const obsidianStub = {
 		showAtPosition(position: { x: number; y: number }): void {
 			this.recording.shown = true;
 			this.recording.position = position;
+		}
+	},
+	/**
+	 * `SuggestModal` with the parts a subclass actually drives: the input, the
+	 * result container, and the input-event listener Obsidian uses to re-query.
+	 *
+	 * That listener is the point of the stub. The session picker refreshes itself
+	 * by dispatching an `input` event once an async scan lands, which is only
+	 * observable if something re-runs `getSuggestions` and re-renders — so the
+	 * stub reproduces that loop rather than leaving it to be asserted indirectly.
+	 */
+	SuggestModal: class SuggestModal {
+		modalEl: HTMLElement;
+		/** Registered on construction so a test can drive the modal it opened. */
+		contentEl: HTMLElement;
+		inputEl: HTMLInputElement;
+		resultContainerEl: HTMLElement;
+		limit = 100;
+		emptyStateText = "";
+		private placeholder = "";
+		private instructions: { command: string; purpose: string }[] = [];
+
+		constructor() {
+			const doc = globalThis.document;
+			if (!doc) {
+				throw new Error("installDom() must run before a SuggestModal can be constructed in tests");
+			}
+			this.modalEl = doc.createElement("div");
+			this.contentEl = doc.createElement("div");
+			this.inputEl = doc.createElement("input");
+			this.resultContainerEl = doc.createElement("div");
+			this.modalEl.append(this.inputEl, this.resultContainerEl, this.contentEl);
+			doc.body.appendChild(this.modalEl);
+			this.inputEl.addEventListener("input", () => void this.rerender());
+			openedSuggestModals.push(this as unknown as SuggestModalHandle);
+		}
+
+		open(): void {
+			void this.rerender();
+		}
+
+		close(): void {
+			this.onClose();
+			this.modalEl.remove();
+		}
+
+		onClose(): void {}
+		onNoSuggestion(): void {}
+
+		setPlaceholder(placeholder: string): void {
+			this.placeholder = placeholder;
+			this.inputEl.placeholder = placeholder;
+		}
+
+		getPlaceholder(): string {
+			return this.placeholder;
+		}
+
+		setInstructions(instructions: { command: string; purpose: string }[]): void {
+			this.instructions = instructions;
+		}
+
+		getInstructions(): { command: string; purpose: string }[] {
+			return this.instructions;
+		}
+
+		/** Types into the modal exactly as a user would, listener included. */
+		async type(query: string): Promise<void> {
+			this.inputEl.value = query;
+			this.inputEl.dispatchEvent(new (globalThis as unknown as { Event: typeof Event }).Event("input"));
+			await Promise.resolve();
+		}
+
+		/** Re-queries and re-renders, the way Obsidian does on every input event. */
+		async rerender(): Promise<void> {
+			const self = this as unknown as {
+				getSuggestions: (query: string) => unknown[] | Promise<unknown[]>;
+				renderSuggestion: (value: unknown, el: HTMLElement) => void;
+			};
+			const values = await self.getSuggestions(this.inputEl.value);
+			this.resultContainerEl.replaceChildren();
+			for (const value of values) {
+				const el = globalThis.document.createElement("div");
+				el.classList.add("suggestion-item");
+				this.resultContainerEl.appendChild(el);
+				self.renderSuggestion(value, el);
+			}
+			if (values.length === 0) {
+				this.onNoSuggestion();
+			}
+		}
+
+		/** Chooses a rendered row by index, as clicking or pressing Enter would. */
+		async choose(index: number, event: { shiftKey?: boolean } = {}): Promise<void> {
+			const self = this as unknown as {
+				getSuggestions: (query: string) => unknown[] | Promise<unknown[]>;
+				onChooseSuggestion: (value: unknown, evt: unknown) => void;
+			};
+			const values = await self.getSuggestions(this.inputEl.value);
+			const value = values[index];
+			if (value === undefined) {
+				throw new Error(`No suggestion at index ${index}`);
+			}
+			self.onChooseSuggestion(value, { shiftKey: false, ...event });
 		}
 	},
 	FuzzySuggestModal: class FuzzySuggestModal {},

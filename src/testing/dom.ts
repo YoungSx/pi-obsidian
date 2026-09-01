@@ -29,6 +29,10 @@ export function installDom(): Document {
 	globals.Node = window.Node;
 	globals.navigator = window.navigator;
 	globals.customElements = window.customElements;
+	// happy-dom validates dispatched events against its own realm's Event, so the
+	// global has to be that class rather than bun's built-in one.
+	globals.Event = window.Event;
+	globals.CustomEvent = window.CustomEvent;
 	globals.requestAnimationFrame = (callback: FrameRequestCallback): number => window.setTimeout(() => callback(0), 0) as unknown as number;
 	// Obsidian patches these helpers onto HTMLElement.prototype; production code
 	// calls them, so the test DOM has to provide them too.
@@ -42,6 +46,34 @@ export function installDom(): Document {
 		for (const [name, value] of Object.entries(props)) {
 			this.style.setProperty(name, value);
 		}
+	};
+	// Obsidian's element-creation helpers, which production code uses instead of
+	// createElement + appendChild. Only the options these call sites pass are
+	// honoured; an unsupported one would be a silent no-op, so keep them narrow.
+	type CreateOptions = { cls?: string | string[]; text?: string; attr?: Record<string, string> };
+	function createChild(this: HTMLElement, tag: string, options: CreateOptions = {}): HTMLElement {
+		const child = window.document.createElement(tag) as unknown as HTMLElement;
+		if (options.cls) {
+			child.classList.add(...(Array.isArray(options.cls) ? options.cls : [options.cls]));
+		}
+		if (options.text !== undefined) {
+			child.textContent = options.text;
+		}
+		for (const [name, value] of Object.entries(options.attr ?? {})) {
+			child.setAttribute(name, value);
+		}
+		this.appendChild(child);
+		return child;
+	}
+	const proto = window.HTMLElement.prototype as unknown as Record<string, unknown>;
+	proto.createEl = function createEl(this: HTMLElement, tag: string, options?: CreateOptions) {
+		return createChild.call(this, tag, options);
+	};
+	proto.createDiv = function createDiv(this: HTMLElement, options?: CreateOptions) {
+		return createChild.call(this, "div", options);
+	};
+	proto.createSpan = function createSpan(this: HTMLElement, options?: CreateOptions) {
+		return createChild.call(this, "span", options);
 	};
 	installedDocument = window.document as unknown as Document;
 	return installedDocument;
