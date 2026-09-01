@@ -225,6 +225,40 @@ each key once per device. Prefer restricted / low-limit keys.
 notes immediately. Use it on vaults you are willing to have changed, and
 review the transcript after each turn.
 
+## Capabilities Obsidian flags
+
+Piem is an agent plugin: doing its job requires capabilities that Obsidian's
+community-plugin review reports explicitly, so they are listed here in that
+same vocabulary. None of these is a defect or a workaround — each is load-
+bearing for a feature, and none phones anything home beyond what is described
+above.
+
+- **Direct filesystem access.** On desktop the plugin reaches Node `fs` through
+  Electron's `require`, bypassing the vault API. This is how user-level skill
+  folders are read and written (`~/.pi/agent/skills`, `~/.agents/skills`):
+  the vault API cannot see outside the vault. There is no shell execution and
+  no probing of arbitrary paths — the paths accessed are the user's home
+  directory and the skill folders beneath it. On mobile, where the host
+  exposes no `require`, this path degrades to "unavailable" rather than
+  failing the plugin.
+- **Vault enumeration.** Search and task tools call `vault.getFiles` /
+  `vault.getMarkdownFiles`, which list every file in the vault with its full
+  path. The model sees these listings whenever a search or task query touches
+  them; that is inherent to "search my vault" and is why the vault you point
+  Piem at should be one you are willing to send to the model provider.
+- **Clipboard access.** Outgoing only: message replies, log lines, and a
+  copy-secret affordance in settings call `navigator.clipboard.writeText`.
+  Piem never reads the clipboard; pasted images arrive through the editor's
+  own paste event, not a clipboard read.
+- **Base64 encoding at runtime.** Image attachments are encoded with `btoa`
+  before being sent as model content. That is the entire use — no decoding of
+  obfuscated payloads anywhere.
+- **Network requests.** Roughly twenty call sites, all going through one
+  transport layer: model provider streams, the connection test, the models.dev
+  catalog suggestion, remote MCP servers, and the opt-in `webfetch` tool. The
+  transport honors the user's `requestUrl`-vs-`fetch` choice, so egress is
+  inspectable in one place rather than scattered.
+
 ## Development
 
 ```bash
