@@ -2,6 +2,7 @@ import { SettingPage, type SettingDefinitionItem } from "obsidian";
 import { settingsTabs, type SettingsPanelHost } from "./SettingsPanel";
 import { chatDefinitions } from "./chatDefinitions";
 import { generalDefinitions } from "./generalDefinitions";
+import { modelsDefinitions } from "./modelsDefinitions";
 
 /**
  * Bridges the panel's tabs onto Obsidian's declarative settings API.
@@ -70,6 +71,7 @@ export function buildSettingDefinitions(host: SettingsPanelHost): SettingDefinit
 	// the migration incremental: a section moves when its rows are expressed, and
 	// the ones that have not moved are untouched rather than half-converted.
 	const declarative: Record<string, (host: SettingsPanelHost) => SettingDefinitionItem[]> = {
+		models: modelsDefinitions,
 		chat: chatDefinitions,
 		general: generalDefinitions,
 	};

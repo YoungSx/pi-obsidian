@@ -289,7 +289,7 @@ const MODEL_FILTER_MIN_ROWS = 8;
  * screen readers: the tooltip is a visual title, so the accessible name has to
  * be set separately or the button reads as blank to assistive technology.
  */
-function rowAction(button: ExtraButtonComponent, icon: string, label: string): void {
+export function rowAction(button: ExtraButtonComponent, icon: string, label: string): void {
 	button.setIcon(icon);
 	button.setTooltip(label);
 	button.extraSettingsEl.setAttribute("aria-label", label);
@@ -1166,7 +1166,7 @@ export function renderSkillsTab(containerEl: HTMLElement, host: SettingsPanelHos
  * the section each belongs to, where the path sits beside the message, and a
  * count in a toast that vanishes would be the less useful copy of both.
  */
-async function runSkillReload(host: SettingsPanelHost, button: ButtonComponent, reload: () => Promise<void>): Promise<void> {
+export async function runSkillReload(host: SettingsPanelHost, button: ButtonComponent, reload: () => Promise<void>): Promise<void> {
 	const { t } = host;
 	button.setDisabled(true);
 	try {
@@ -1200,7 +1200,7 @@ async function runSkillReload(host: SettingsPanelHost, button: ButtonComponent, 
  * `code` stays off the screen. It is a jargon token with no consequence attached
  * (`file_info_failed`); it goes to the log, where a bug report gets assembled.
  */
-function renderSkillProblems(containerEl: HTMLElement, diagnostics: readonly SkillDiagnostic[], copy: SkillProblemsCopy): void {
+export function renderSkillProblems(containerEl: HTMLElement, diagnostics: readonly SkillDiagnostic[], copy: SkillProblemsCopy): void {
 	containerEl.empty();
 	if (diagnostics.length === 0) {
 		return;
@@ -1273,7 +1273,7 @@ export function renderMcpSection(containerEl: HTMLElement, host: SettingsPanelHo
 }
 
 /** Opens the add/edit form and hands the finished row to the section's mutation path. */
-function openMcpServerModal(
+export function openMcpServerModal(
 	host: SettingsPanelHost,
 	server: McpServerConfig | undefined,
 	afterMutation: () => Promise<void>,
@@ -1304,7 +1304,7 @@ function openMcpServerModal(
 	}).open();
 }
 
-function renderMcpRow(containerEl: HTMLElement, host: SettingsPanelHost, state: McpServerState, afterMutation: () => Promise<void>): void {
+export function renderMcpRow(containerEl: HTMLElement, host: SettingsPanelHost, state: McpServerState, afterMutation: () => Promise<void>): void {
 	const { t } = host;
 	// The URL is the address requests leave to, so it reads as the row's main
 	// description; the connection verdict hangs beneath it as an effect line,
@@ -1396,7 +1396,7 @@ function renderMcpRow(containerEl: HTMLElement, host: SettingsPanelHost, state: 
 }
 
 /** The connection verdict, as one sentence. */
-function describeMcpRow(state: McpServerState, t: Translator): string {
+export function describeMcpRow(state: McpServerState, t: Translator): string {
 	return state.enabled
 		? state.status === "ok"
 			? t.t("mcp.statusOk", { tools: state.toolCount })
@@ -1411,12 +1411,12 @@ function describeMcpRow(state: McpServerState, t: Translator): string {
  * together, so a failed connection reads as one through {@link describeMcpRow}'s
  * words and the same effect-line styling every other failure in this panel uses.
  */
-function setMcpVerdict(el: HTMLElement, state: McpServerState, t: Translator): void {
+export function setMcpVerdict(el: HTMLElement, state: McpServerState, t: Translator): void {
 	el.setText(describeMcpRow(state, t));
 	el.toggleClass("piem-settings-effect--error", state.enabled && state.status === "error");
 }
 
-function renderSkillRow(containerEl: HTMLElement, host: SettingsPanelHost, row: SkillRow, afterMutation: () => Promise<void>): void {
+export function renderSkillRow(containerEl: HTMLElement, host: SettingsPanelHost, row: SkillRow, afterMutation: () => Promise<void>): void {
 	const { t } = host;
 	const setting = new Setting(containerEl).setName(row.name).setDesc(describeSkillRow(row, t));
 
@@ -1452,7 +1452,7 @@ function renderSkillRow(containerEl: HTMLElement, host: SettingsPanelHost, row: 
 }
 
 /** Row description: where an imported skill came from, or what a local one is. */
-function describeSkillRow(row: SkillRow, t: Translator): string {
+export function describeSkillRow(row: SkillRow, t: Translator): string {
 	if (row.provenance) {
 		return t.t("skills.importedFrom", { url: row.provenance.url });
 	}
@@ -1467,7 +1467,7 @@ function describeSkillRow(row: SkillRow, t: Translator): string {
  * a verdict the user has just waited a network round trip for survives a
  * re-render better as a toast than as a line that the next click erases.
  */
-async function runSkillUpdate(host: SettingsPanelHost, row: SkillRow, button: ButtonComponent, afterMutation: () => Promise<void>): Promise<void> {
+export async function runSkillUpdate(host: SettingsPanelHost, row: SkillRow, button: ButtonComponent, afterMutation: () => Promise<void>): Promise<void> {
 	const { t } = host;
 	button.setDisabled(true);
 	try {
@@ -1496,7 +1496,7 @@ async function runSkillUpdate(host: SettingsPanelHost, row: SkillRow, button: Bu
 	}
 }
 
-async function runSkillRemove(host: SettingsPanelHost, row: SkillRow, afterMutation: () => Promise<void>): Promise<void> {
+export async function runSkillRemove(host: SettingsPanelHost, row: SkillRow, afterMutation: () => Promise<void>): Promise<void> {
 	const { t } = host;
 	try {
 		await host.skills.remove(row.dirName);
@@ -1517,7 +1517,7 @@ async function runSkillRemove(host: SettingsPanelHost, row: SkillRow, afterMutat
  * directory as "no skills here" and says nothing, so an unread folder is
  * indistinguishable from an empty one anywhere else.
  */
-async function renderUserSkillsGroup(containerEl: HTMLElement, host: SettingsPanelHost): Promise<void> {
+export async function renderUserSkillsGroup(containerEl: HTMLElement, host: SettingsPanelHost): Promise<void> {
 	containerEl.empty();
 	const { t } = host;
 	if (!host.skills.userSkillsAvailable) {
@@ -1545,7 +1545,7 @@ async function renderUserSkillsGroup(containerEl: HTMLElement, host: SettingsPan
  * the searched report below describes the *last* load, and the field's own
  * row is cheap to rebuild on blur, where focus has already left.
  */
-function renderUserSkillsDirRow(containerEl: HTMLElement, host: SettingsPanelHost): void {
+export function renderUserSkillsDirRow(containerEl: HTMLElement, host: SettingsPanelHost): void {
 	const { settings, t } = host;
 	const setting = new Setting(containerEl).setName(userSkillsDirName(t));
 	setting.setDesc(userSkillsDirDescription(t));
@@ -1603,7 +1603,7 @@ async function applyUserSkillsDirChange(containerEl: HTMLElement, host: Settings
  * different read entirely — and it dropped the diagnostics on the floor, so the
  * one place the reported `EACCES` belonged was the one place it never appeared.
  */
-function fillUserSkillsBody(containerEl: HTMLElement, host: SettingsPanelHost): void {
+export function fillUserSkillsBody(containerEl: HTMLElement, host: SettingsPanelHost): void {
 	const { t } = host;
 	const { skills, searched, diagnostics } = host.skills.lastSkillLoad().user;
 	containerEl.empty();
@@ -1645,7 +1645,7 @@ function fillUserSkillsBody(containerEl: HTMLElement, host: SettingsPanelHost): 
  * user left it, and a skill is reference material to glance at, not work to
  * switch into.
  */
-async function openVaultPath(app: App, path: string): Promise<void> {
+export async function openVaultPath(app: App, path: string): Promise<void> {
 	const file = app.vault.getAbstractFileByPath(path);
 	if (file instanceof TFile) {
 		await app.workspace.getLeaf("tab").openFile(file);
@@ -1680,7 +1680,7 @@ function renderLinkRow(containerEl: HTMLElement, row: AboutLink): void {
  * can say so), and inline. A dangling binding shows as missing rather than
  * "no key" because the fix is not typing a key — it is re-picking an entry.
  */
-function describeProviderRow(provider: ProviderConfig, modelCount: number, t: Translator): string {
+export function describeProviderRow(provider: ProviderConfig, modelCount: number, t: Translator): string {
 	const key = provider.secretRef
 		? t.t(provider.apiKey.trim() ? "settings.keyBound" : "settings.keyMissing")
 		: t.t(provider.apiKey.trim() ? "settings.keySet" : "settings.noKey");
@@ -1689,7 +1689,7 @@ function describeProviderRow(provider: ProviderConfig, modelCount: number, t: Tr
 }
 
 /** Row description for a model: its provider and the id sent to the server. */
-function describeModelRow(settings: SettingsPanelSettings, model: ModelConfig, t: Translator): string {
+export function describeModelRow(settings: SettingsPanelSettings, model: ModelConfig, t: Translator): string {
 	const provider = settings.providers.find((entry) => entry.id === model.providerId);
 	const providerName = provider ? describeProviderConfig(provider) : t.t("settings.providerMissing");
 	const active = settings.activeModelId === model.id ? t.t("settings.activeSuffix") : "";
@@ -1708,7 +1708,7 @@ function describeModelRow(settings: SettingsPanelSettings, model: ModelConfig, t
  * which is the very thing the requestUrl transport exists to avoid — a test
  * could then fail on CORS while real turns work, or pass while they do not.
  */
-async function testDraftProvider(host: SettingsPanelHost, draft: ProviderConfig): Promise<ConnectionTestResult> {
+export async function testDraftProvider(host: SettingsPanelHost, draft: ProviderConfig): Promise<ConnectionTestResult> {
 	const { models, fetch: fetchImpl } = createObsidianModels({
 		transport: host.settings.networkTransport,
 		providers: [draft],
@@ -1732,7 +1732,7 @@ async function testDraftProvider(host: SettingsPanelHost, draft: ProviderConfig)
  */
 const listingCaches = new Map<NetworkTransport, ModelListingCache>();
 
-function listingCacheFor(transport: NetworkTransport): ModelListingCache {
+export function listingCacheFor(transport: NetworkTransport): ModelListingCache {
 	const existing = listingCaches.get(transport);
 	if (existing) {
 		return existing;
@@ -1743,7 +1743,7 @@ function listingCacheFor(transport: NetworkTransport): ModelListingCache {
 }
 
 /** Same, for a model draft: the provider it names is resolved from saved settings. */
-async function testDraftModel(host: SettingsPanelHost, draft: ModelConfig): Promise<ConnectionTestResult> {
+export async function testDraftModel(host: SettingsPanelHost, draft: ModelConfig): Promise<ConnectionTestResult> {
 	const provider = host.settings.providers.find((entry) => entry.id === draft.providerId);
 	if (!provider) {
 		return { ok: false, detail: host.t.t("modelModal.providerMissing") };
