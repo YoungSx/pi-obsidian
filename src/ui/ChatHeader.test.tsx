@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import type { App } from "obsidian";
-import { flushRender, installDom } from "../testing/dom";
-import { installObsidianStub, lastMenu, platformMock, resetMenus } from "../testing/obsidianStub";
+import { flushRender, installDom } from "../testUtils/dom";
+import { installObsidianStub, lastMenu, platformMock, resetMenus } from "../testUtils/obsidianStub";
 import type { ChatSnapshot } from "../agent/ObsidianAgentService";
 import type { ContextFill, UsageTotals } from "../agent/usage";
 import type { ActiveSessionInfo } from "../session/ObsidianSessionManager";

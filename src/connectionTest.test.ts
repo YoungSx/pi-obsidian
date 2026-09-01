@@ -5,7 +5,7 @@ import { testModelConnection, testProviderConnection } from "./connectionTest";
 import { DEFAULT_CUSTOM_ENDPOINT_MAX_TOKENS } from "./customEndpoint";
 import type { ModelConfig, ProviderConfig, WireProtocol } from "./modelConfig";
 import { getT } from "./i18n";
-import { installObsidianStub } from "./testing/obsidianStub";
+import { installObsidianStub } from "./testUtils/obsidianStub";
 
 // The wire-body tests below build their provider through the plugin's own
 // `createObsidianModels`, which reaches `obsidian` for its transport; the module

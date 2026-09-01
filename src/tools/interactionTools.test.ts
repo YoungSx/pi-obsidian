@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it } from "bun:test";
-import { installDom } from "../testing/dom";
-import { installObsidianStub, resetNotices, shownNotices } from "../testing/obsidianStub";
+import { installDom } from "../testUtils/dom";
+import { installObsidianStub, resetNotices, shownNotices } from "../testUtils/obsidianStub";
 import { VIEW_TYPE_PIEM_CHAT } from "../constants";
 import type { App } from "obsidian";
 

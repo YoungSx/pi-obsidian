@@ -1,6 +1,6 @@
 import { describe, expect, it } from "bun:test";
 import type { Model } from "@earendil-works/pi-ai";
-import { installObsidianStub, requestUrlMock } from "../testing/obsidianStub";
+import { installObsidianStub, requestUrlMock } from "../testUtils/obsidianStub";
 
 installObsidianStub();
 

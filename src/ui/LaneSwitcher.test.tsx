@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
-import { flushRender, installDom } from "../testing/dom";
-import { installObsidianStub, lastMenu, resetMenus } from "../testing/obsidianStub";
+import { flushRender, installDom } from "../testUtils/dom";
+import { installObsidianStub, lastMenu, resetMenus } from "../testUtils/obsidianStub";
 import type { SessionLane } from "../session/ObsidianSessionManager";
 
 installObsidianStub();

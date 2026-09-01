@@ -1,6 +1,6 @@
 import { describe, expect, it } from "bun:test";
-import { installDom } from "./testing/dom";
-import { createObsidianHostModule, createStubApp, loadPluginBundle, type PluginHostRecord } from "./testing/pluginLoader";
+import { installDom } from "./testUtils/dom";
+import { createObsidianHostModule, createStubApp, loadPluginBundle, type PluginHostRecord } from "./testUtils/pluginLoader";
 
 /**
  * End-to-end load gate over the built artifact.

@@ -36,7 +36,7 @@ export default tseslint.config(
 		// Obsidian's `hide()`/`show()` assign `display` directly — that is the
 		// behaviour being reproduced — so the rule that rightly steers plugin
 		// code toward `setCssProps` is scoped off here, and only here.
-		files: ["src/testing/obsidianDom.ts"],
+		files: ["src/testUtils/obsidianDom.ts"],
 		rules: {
 			"obsidianmd/no-static-styles-assignment": "off",
 		},
@@ -47,7 +47,7 @@ export default tseslint.config(
 		// loader does. Node builtins and `eval` are the mechanism under test,
 		// so the rules that rightly forbid them in the plugin are scoped off
 		// here — and only here, by exact path.
-		files: ["src/testing/pluginLoader.ts", "src/testing/pluginLoader.test.ts"],
+		files: ["src/testUtils/pluginLoader.ts", "src/testUtils/pluginLoader.test.ts"],
 		rules: {
 			"import/no-nodejs-modules": "off",
 			"no-eval": "off",

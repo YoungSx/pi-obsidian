@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import type { DataAdapter } from "obsidian";
-import { flushRender, installDom } from "../testing/dom";
-import { installObsidianStub } from "../testing/obsidianStub";
+import { flushRender, installDom } from "../testUtils/dom";
+import { installObsidianStub } from "../testUtils/obsidianStub";
 import type { JSX } from "react";
 
 installObsidianStub();

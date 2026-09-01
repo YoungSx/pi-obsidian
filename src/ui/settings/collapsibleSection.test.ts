@@ -1,6 +1,6 @@
 import { describe, expect, it } from "bun:test";
-import { installDom } from "../../testing/dom";
-import { installObsidianDomHelpers } from "../../testing/obsidianDom";
+import { installDom } from "../../testUtils/dom";
+import { installObsidianDomHelpers } from "../../testUtils/obsidianDom";
 
 const document = installDom();
 installObsidianDomHelpers();

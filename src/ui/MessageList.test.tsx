@@ -3,8 +3,8 @@ import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import type { App, Component } from "obsidian";
 import type { AssistantMessage, ToolResultMessage, UserMessage } from "@earendil-works/pi-ai";
 import type { createRoot } from "react-dom/client";
-import { flushRender, installDom } from "../testing/dom";
-import { installObsidianStub, markdownRenderMock } from "../testing/obsidianStub";
+import { flushRender, installDom } from "../testUtils/dom";
+import { installObsidianStub, markdownRenderMock } from "../testUtils/obsidianStub";
 
 installObsidianStub();
 const document = installDom();

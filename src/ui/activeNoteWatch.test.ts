@@ -1,6 +1,6 @@
 import { describe, expect, it } from "bun:test";
 import type { App, EventRef, TFile } from "obsidian";
-import { installObsidianStub } from "../testing/obsidianStub";
+import { installObsidianStub } from "../testUtils/obsidianStub";
 
 installObsidianStub();
 

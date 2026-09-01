@@ -1,6 +1,6 @@
 import { describe, expect, it } from "bun:test";
 import { CUSTOM_ENDPOINT_PROVIDER, DEFAULT_PROVIDER } from "./constants";
-import { installObsidianStub } from "./testing/obsidianStub";
+import { installObsidianStub } from "./testUtils/obsidianStub";
 import type { PiemSettings } from "./settings";
 import type { ModelConfig, ProviderConfig, WireProtocol } from "./modelConfig";
 

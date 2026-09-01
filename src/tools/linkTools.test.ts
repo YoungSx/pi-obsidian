@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import { installObsidianStub } from "../testing/obsidianStub";
+import { installObsidianStub } from "../testUtils/obsidianStub";
 import type { App, CachedMetadata, TFile } from "obsidian";
 
 installObsidianStub();

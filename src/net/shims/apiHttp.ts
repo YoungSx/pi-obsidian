@@ -144,13 +144,13 @@ export function wireAbort(signal: AbortSignal | undefined, timeoutMs: number | u
 	} else if (signal) {
 		signal.addEventListener("abort", () => controller.abort(), { once: true });
 	}
-	let timer: ReturnType<typeof setTimeout> | undefined;
+	let timer: number | undefined;
 	if (timeoutMs !== undefined && timeoutMs > 0 && !controller.signal.aborted) {
-		timer = setTimeout(abort, timeoutMs);
+		timer = window.setTimeout(abort, timeoutMs);
 	}
 	return {
 		signal: controller.signal,
-		cleanup: () => clearTimeout(timer),
+		cleanup: () => window.clearTimeout(timer),
 	};
 
 	function abort() {

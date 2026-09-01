@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import { installObsidianStub } from "../testing/obsidianStub";
+import { installObsidianStub } from "../testUtils/obsidianStub";
 import type { App, TFile, TFolder } from "obsidian";
 import type { ExecutionEnv } from "@earendil-works/pi-agent-core";
 
