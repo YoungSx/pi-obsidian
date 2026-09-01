@@ -1842,8 +1842,14 @@ button.piem-chat__latest {
  * the border itself was part of the noise being removed, so focus adds a line
  * where none rested instead of recolouring one. `box-shadow` paints outside the
  * layout box, so the ring never shifts the rows inside the shell.
+ *
+ * `:focus-within` rather than an ancestor-matching pseudo-class on the shell:
+ * the ancestor-matching variant invalidates selectors across the panel on every
+ * caret move, and the broader reach is the more honest reading anyway — focus
+ * landed inside this panel, wherever among its buttons and textarea, so the
+ * ring follows it there too instead of going dark while a cancel button holds it.
  */
-.piem-chat__composer-shell:has(textarea:focus) {
+.piem-chat__composer-shell:focus-within {
 	box-shadow: 0 0 0 1px var(--background-modifier-border-focus);
 }
 
@@ -2395,9 +2401,12 @@ button.piem-chat__latest {
  *
  * Clipped away rather than moved off the top: neither `.piem-chat__transcript`
  * nor `.piem-chat` clips its overflow, so a negative `top` would leave the link
- * visible over the header instead of hiding it. `clip-path` removes it from view
- * without removing it from the focus order — unlike `display: none` or
- * `visibility: hidden`, which would make a skip link that can never be reached.
+ * visible over the header instead of hiding it. The classic `clip: rect(0 0 0 0)`
+ * on an absolutely positioned box removes it from view without removing it from
+ * the focus order — unlike `display: none` or `visibility: hidden`, which would
+ * make a skip link that can never be reached. `clip-path` rides along for
+ * engines that dropped the deprecated `clip` property, and the `:focus` rule
+ * below releases both.
  *
  * Positioned against `.piem-chat__transcript`, which is already
  * `position: relative`.
@@ -2406,6 +2415,7 @@ button.piem-chat__latest {
 	background: var(--background-secondary);
 	border: 1px solid var(--background-modifier-border);
 	border-radius: var(--radius-s);
+	clip: rect(0 0 0 0);
 	clip-path: inset(50%);
 	color: var(--text-normal);
 	font-size: var(--font-ui-smaller);
@@ -2426,6 +2436,9 @@ button.piem-chat__latest {
  * strand the user on an element they cannot see.
  */
 .piem-chat__skip-link:focus {
+	/* Releases both hiding layers: `clip` for the engines that honoured it,
+	 * `clip-path` for those that honour this instead. */
+	clip: auto;
 	clip-path: none;
 	outline: 2px solid var(--background-modifier-border-focus);
 	outline-offset: 1px;
@@ -2435,6 +2448,7 @@ button.piem-chat__latest {
 
 .piem-chat__visually-hidden {
 	border: 0;
+	clip: rect(0 0 0 0);
 	clip-path: inset(50%);
 	height: 1px;
 	overflow: hidden;
