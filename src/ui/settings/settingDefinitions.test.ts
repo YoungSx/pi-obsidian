@@ -51,6 +51,7 @@ function stubHost(overrides: Partial<SettingsPanelHost> = {}): SettingsPanelHost
 			logLevel: "info",
 		},
 		save: async () => {},
+		refresh: () => {},
 		secretStorage: "manual",
 		readSecret: () => "",
 		describeTarget: () => "target",
@@ -117,29 +118,20 @@ describe("buildSettingDefinitions", () => {
 		expect(reads).toBe(0);
 	});
 
-	it("renders a tab's rows when its page is opened", () => {
-		const host = stubHost();
-		const definitions = buildSettingDefinitions(host);
-		const page = (definitions[1] as { page: () => { display(): void; containerEl: HTMLElement; title: string } }).page();
+	it("keeps a page factory only while a tab still needs the imperative bridge", () => {
+		const definitions = buildSettingDefinitions(stubHost());
 
-		page.display();
-
-		// The Chat tab's first row; asserted through the stub's real DOM rather than
-		// a recording, so this fails if the page body is not what the tab renders
-		// into.
-		expect(page.containerEl.textContent).toContain(en.t("settings.showAgentDetails"));
-		expect(page.title).toBe(en.t("settings.tabChat"));
+		// Models has not moved its dynamic provider/model lists yet, so it still
+		// needs the bridge; Chat has moved and is now a real inline page.
+		expect(typeof (definitions[0] as { page?: unknown }).page).toBe("function");
+		expect((definitions[1] as { items?: unknown[] }).items).toBeArray();
 	});
 
-	it("clears the page body between opens, so revisiting a page does not double its rows", () => {
+	it("puts the Chat tab's ordinary toggle in a real control definition", () => {
 		const definitions = buildSettingDefinitions(stubHost());
-		const page = (definitions[1] as { page: () => { display(): void; containerEl: HTMLElement } }).page();
+		const chat = definitions[1] as { items: Array<{ name?: string; control?: { type?: string; key?: string } }> };
+		const details = chat.items.find((item) => item.name === en.t("settings.showAgentDetails"));
 
-		page.display();
-		const first = page.containerEl.querySelectorAll(".setting-item").length;
-		page.display();
-
-		expect(first).toBeGreaterThan(0);
-		expect(page.containerEl.querySelectorAll(".setting-item").length).toBe(first);
+		expect(details?.control).toEqual({ type: "toggle", key: "showAgentDetails" });
 	});
 });
