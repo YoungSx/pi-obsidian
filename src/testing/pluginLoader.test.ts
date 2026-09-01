@@ -45,12 +45,39 @@ describe("loadPluginBundle", () => {
 		expect(exports.probe()).rejects.toThrow(TypeError);
 	});
 
-	it("resolves node builtins, which Electron's renderer serves through its import map", async () => {
+	it("rejects dynamic imports of node builtins; desktop code must use require", async () => {
 		const bundlePath = bundleFixture(`module.exports = { probe: async () => typeof (await import("node:path")).join };`);
 
 		const exports = loadPluginBundle({ bundlePath, modules: {} }) as { probe(): Promise<string> };
 
-		expect(await exports.probe()).toBe("function");
+		expect(exports.probe()).rejects.toThrow(/Failed to resolve module specifier 'node:path'/);
+	});
+
+	it("reports every dynamic import the bundle attempts, including the tolerated ones", () => {
+		// pi-ai's env-api-keys.js fires exactly this shape at module scope, with no
+		// handler. The attempt has to stay observable, or the only evidence the
+		// bundle reached for an unavailable module is an unhandled rejection.
+		const bundlePath = bundleFixture(
+			`const spec = "node:" + "fs"; import(spec).then(m => { globalThis.__leaked = m; }); module.exports = {};`,
+		);
+		const attempted: string[] = [];
+
+		loadPluginBundle({ bundlePath, modules: {}, onDynamicImport: (id) => attempted.push(id) });
+
+		expect(attempted).toEqual(["node:fs"]);
+		expect((globalThis as { __leaked?: unknown }).__leaked).toBeUndefined();
+	});
+
+	it("still delivers the failure to a caller that handles it", async () => {
+		// The tolerated set is silent only for a fire-and-forget `.then(fn)`;
+		// awaiting one must not quietly succeed, or a real defect would pass.
+		const bundlePath = bundleFixture(
+			`module.exports = { probe: async () => { try { await import("node:" + "os"); return "resolved"; } catch (error) { return error.message; } } };`,
+		);
+
+		const exports = loadPluginBundle({ bundlePath, modules: {} }) as { probe(): Promise<string> };
+
+		expect(await exports.probe()).toMatch(/Failed to resolve module specifier 'node:os'/);
 	});
 
 	it("leaves import-like text inside strings alone", async () => {

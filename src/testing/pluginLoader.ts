@@ -38,7 +38,31 @@ export interface LoadPluginBundleOptions {
 	 * reads it off `globalThis`, so the two platforms differ only here.
 	 */
 	exposeGlobalRequire?: boolean;
+	/**
+	 * Receives every specifier the bundle tried to import dynamically.
+	 *
+	 * Each attempt is rejected regardless — that is what Obsidian does — but the
+	 * rejection is the only evidence it happened, and a dependency that fires one
+	 * at module scope and awaits nobody would otherwise leave no trace at all.
+	 */
+	onDynamicImport?: (specifier: string) => void;
 }
+
+/**
+ * Specifiers pi-ai imports dynamically while the bundle is still evaluating.
+ *
+ * `env-api-keys.js` reaches for these three at module scope, guarded by
+ * `process.versions.node` and awaited by nothing. Under Obsidian all three
+ * reject and the ambient-credential-file feature behind them reports "not
+ * found", which is the browser answer anyway — the plugin loads and runs.
+ *
+ * They are listed because a rejected promise with no handler is an unhandled
+ * rejection, and under bun that fails whichever test happened to be running.
+ * Swallowing every rejection instead would hide a real defect, so exactly these
+ * are absorbed and anything else stays loud. Keep in step with the ratchet in
+ * `scripts/check-bundle.mjs` (KNOWN_OPAQUE_DYNAMIC_IMPORTS).
+ */
+const LOAD_TIME_DYNAMIC_IMPORTS = new Set(["node:fs", "node:os", "node:path"]);
 
 /**
  * Rewrites `import(` to `__hostDynamicImport(` so the harness controls dynamic
@@ -118,15 +142,44 @@ export function loadPluginBundle(options: LoadPluginBundleOptions): unknown {
 		// imports through a helper reproducing the host's behaviour, and the
 		// bundle's `import(x)` is rewritten to call it.
 		//
-		// Node builtins are a real exception, not a convenience: Electron's
-		// renderer resolves `node:*` through its own import map, and a dependency
-		// does exactly that at load time. Bare package names are what fail.
-		const hostDynamicImport = async (specifier: unknown): Promise<unknown> => {
+		// Dynamic import is not a desktop escape hatch either. Obsidian evaluates
+		// the bundle without an owning ESM module, so `node:*` fails on the same
+		// grounds a bare package name does — verified in an Electron renderer,
+		// where `require("node:http")` succeeds and `import("node:http")` throws.
+		// Desktop Node access must go through the host-injected `require`.
+		//
+		// The rejection for a known load-time specifier is pre-handled: pi-ai
+		// fires three at module scope and awaits none of them, so leaving them
+		// unhandled fails an unrelated test under bun while telling nobody
+		// anything. `onDynamicImport` is where a test asserts they happened.
+		const hostDynamicImport = (specifier: unknown): Promise<unknown> => {
 			const id = String(specifier);
-			if (id.startsWith("node:")) {
-				return nodeRequire(id);
+			options.onDynamicImport?.(id);
+			const failure = new TypeError(`Failed to resolve module specifier '${id}'`);
+			if (!LOAD_TIME_DYNAMIC_IMPORTS.has(id)) {
+				return Promise.reject(failure);
 			}
-			throw new TypeError(`Failed to resolve module specifier '${id}'`);
+			// Rejected, but with the rejection already consumed. pi-ai's module-scope
+			// calls are `import(x).then(assign)` — no second argument, no catch — so
+			// a plain rejected promise is an unhandled rejection that fails whichever
+			// test is running, reported at a line that has nothing to do with it.
+			//
+			// So the failure is delivered only to a caller that asked for it. A
+			// `.then(fn)` with no rejection handler gets a promise that never
+			// settles, which is what the assignment behind it observes in
+			// production too: it simply never runs, and the feature reads its value
+			// as absent. `await` and `.catch` still see the TypeError, so nothing
+			// that handles the error is lied to. `onDynamicImport` records the
+			// attempt either way.
+			const rejected: PromiseLike<never> = {
+				then: (onFulfilled, onRejected) =>
+					(typeof onRejected === "function"
+						? Promise.resolve(onRejected(failure))
+						: new Promise(() => undefined)) as Promise<never>,
+			};
+			// A thenable, not a Promise: `await` and `.catch` on the caller's side
+			// still see the TypeError, which is all the bundle can observe.
+			return rejected as unknown as Promise<unknown>;
 		};
 		const factory = indirectEval(
 			`(function (module, exports, require, __hostDynamicImport) {\n${rewriteDynamicImports(source)}\n})`,

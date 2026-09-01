@@ -49,6 +49,31 @@ const METAFILE = `${BUNDLE}.meta.json`;
 const MAX_BUNDLE_BYTES = Math.round(1.75 * 1024 * 1024);
 
 /**
+ * Dynamic imports with a non-literal specifier that today's bundle still has.
+ *
+ * A ratchet rather than a ban, because these three are inherited, unreachable
+ * in practice, and non-fatal — while the check that finds them is new. All
+ * three come from pi-ai reaching for node builtins through a variable
+ * specifier so browser bundlers cannot follow it:
+ *
+ * - `env-api-keys.js` fires `node:fs`/`node:os`/`node:path` at module scope,
+ *   guarded by `process.versions.node`. Under Obsidian each one rejects, and
+ *   nothing awaits them, so they surface as unhandled rejections at load and
+ *   the feature behind them (ambient credential files) reports "not found".
+ * - `auth/context.js` does the same inside `fileExists`, which is already
+ *   wrapped in try/catch and returns false — the browser answer anyway.
+ * - `auth/oauth/load.js` is the OAuth flow loader, which nothing here calls.
+ *
+ * So the number is what the bundle measurably has, and the gate's job is to
+ * stop it from growing: a *new* opaque import is the dangerous case, because
+ * the code that adds one intends the module to load, and under Obsidian's eval
+ * it never will. If a pi upgrade removes one, the count drops and the gate
+ * fails too — deliberately, so the improvement gets recorded here instead of
+ * leaving room to silently regress.
+ */
+const KNOWN_OPAQUE_DYNAMIC_IMPORTS = 3;
+
+/**
  * Dependencies removed on purpose, which no import may bring back.
  *
  * Each of these was reachable only transitively, so nothing in `src/` names it
@@ -134,6 +159,37 @@ const FORBIDDEN_IMPORT_KINDS = new Map([
  * by the hook. Everything is marked external, so nothing is actually read from
  * disk; this is a parse, not a real build.
  */
+/**
+ * Counts dynamic imports esbuild's resolver cannot see.
+ *
+ * `onResolve` only fires for a literal specifier, so `import("node:http")` is
+ * reported while `import(variable)` is invisible — which is exactly the form
+ * pi-ai's lazy OAuth loaders use, and exactly the form that throws under
+ * Obsidian's eval.
+ *
+ * A regex alone cannot answer this: minified dependencies embed `import(` in
+ * error-message strings, which is why the resolver was preferred in the first
+ * place. So the count comes from a difference. The source is re-emitted with
+ * `dynamic-import` marked unsupported, which makes esbuild lower every real
+ * dynamic import — literal or not — to `require`, while leaving text inside
+ * strings untouched. Whatever the token count drops by was genuinely a dynamic
+ * import, and the parser decided that, not a pattern.
+ */
+const DYNAMIC_IMPORT_TOKEN = /(^|[^\w$.])import\s*\(/g;
+
+function countImportTokens(code) {
+	return (code.match(DYNAMIC_IMPORT_TOKEN) ?? []).length;
+}
+
+async function countDynamicImports(source) {
+	const lowered = await esbuild.transform(source, {
+		format: "cjs",
+		supported: { "dynamic-import": false },
+		logLevel: "silent",
+	});
+	return countImportTokens(source) - countImportTokens(lowered.code);
+}
+
 async function collectImports(source) {
 	const imports = [];
 	await esbuild.build({
@@ -205,6 +261,34 @@ for (const entry of imports) {
 	}
 }
 
+// The resolver above reports only the literal ones, so this is the count that
+// decides. A variable specifier fails at load time exactly as a literal does,
+// and until this check existed it reached production reported as clean.
+let dynamicImportCount = 0;
+try {
+	dynamicImportCount = await countDynamicImports(source);
+} catch (error) {
+	console.error(`check-bundle: cannot re-emit ${BUNDLE} to count dynamic imports`);
+	console.error(error.message);
+	process.exit(1);
+}
+const literalDynamicImports = imports.filter((entry) => entry.kind === "dynamic-import").length;
+const opaqueDynamicImports = dynamicImportCount - literalDynamicImports;
+if (opaqueDynamicImports > KNOWN_OPAQUE_DYNAMIC_IMPORTS) {
+	failures.push({
+		name: `new dynamic import with a non-literal specifier (${opaqueDynamicImports} sites, ${KNOWN_OPAQUE_DYNAMIC_IMPORTS} known)`,
+		why: `${FORBIDDEN_IMPORT_KINDS.get("dynamic-import")} A variable specifier is invisible to the resolver, which is why this form shipped unreported until it was counted separately. pi-ai's lazy OAuth loaders (auth/oauth/load.js) are the known source of new ones. Register the flow statically, or reach the module through the host-injected require.`,
+		at: "-",
+	});
+}
+if (opaqueDynamicImports < KNOWN_OPAQUE_DYNAMIC_IMPORTS) {
+	failures.push({
+		name: `stale dynamic-import baseline (${opaqueDynamicImports} sites, ${KNOWN_OPAQUE_DYNAMIC_IMPORTS} expected)`,
+		why: "Fewer than recorded, which is progress that has to be locked in: lower KNOWN_OPAQUE_DYNAMIC_IMPORTS in this file to the new count, or the ratchet drifts back up unnoticed.",
+		at: "-",
+	});
+}
+
 for (const check of TEXT_CHECKS) {
 	check.pattern.lastIndex = 0;
 	for (const match of source.matchAll(check.pattern)) {
@@ -262,6 +346,10 @@ if (failures.length > 0) {
 
 const kinds = [...new Set(imports.map((entry) => entry.kind))].sort().join(", ");
 const headroom = formatSize(MAX_BUNDLE_BYTES - sizeInBytes);
+// The tolerated count is printed rather than left implicit: it is inherited
+// debt that fails under Obsidian's eval, and a silent "clean" would read as
+// the bundle having none at all.
+const opaque = opaqueDynamicImports > 0 ? `; ${opaqueDynamicImports} tolerated opaque dynamic import(s)` : "";
 console.log(
-	`check-bundle: ${BUNDLE} clean (${imports.length} imports, kinds: ${kinds || "none"}; ${formatSize(sizeInBytes)} of ${formatSize(MAX_BUNDLE_BYTES)}, ${headroom} headroom)`,
+	`check-bundle: ${BUNDLE} clean (${imports.length} imports, kinds: ${kinds || "none"}; ${formatSize(sizeInBytes)} of ${formatSize(MAX_BUNDLE_BYTES)}, ${headroom} headroom${opaque})`,
 );
