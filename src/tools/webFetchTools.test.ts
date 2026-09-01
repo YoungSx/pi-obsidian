@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, mock } from "bun:test";
 import { installObsidianStub, requestUrlMock } from "../testing/obsidianStub";
+import { stubWindowFetch } from "../testing/windowFetch";
 
 installObsidianStub();
 
@@ -119,8 +120,8 @@ describe("web_fetch transport routing", () => {
 				new Response("streamed", { status: 200, headers: { "content-type": "text/plain" } }),
 			),
 		);
-		const originalFetch = globalThis.fetch;
-		globalThis.fetch = fetchMock as unknown as typeof globalThis.fetch;
+		// Stubbed on `window`, which is the path the fetch transport takes.
+		const restore = stubWindowFetch(fetchMock);
 		try {
 			requestUrlMock.mockImplementation(async () => requestUrlResponse("buffered", 200));
 
@@ -135,7 +136,7 @@ describe("web_fetch transport routing", () => {
 			// "OK"), so the line reads "HTTP 200 " — the body is what the model reads.
 			expect(textOf(result)).toBe("HTTP 200 \nstreamed");
 		} finally {
-			globalThis.fetch = originalFetch;
+			restore();
 		}
 	});
 });
