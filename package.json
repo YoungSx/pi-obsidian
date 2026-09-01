@@ -1,6 +1,6 @@
 {
 	"name": "piem",
-	"version": "1.0.0",
+	"version": "1.0.2",
 	"description": "Run the Piem agent inside Obsidian with vault-scoped tools and a chat side panel.",
 	"main": "main.js",
 	"type": "module",
