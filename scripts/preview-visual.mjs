@@ -47,8 +47,12 @@ for (const required of ["container-type: inline-size", ".piem-chat {", ".setting
 // `setIcon` replaced. A Proxy over the namespace does not survive Bun's
 // `mock.module`, and a naive spread loses non-enumerable exports (`debounce`),
 // so the copy enumerates property names instead.
-const { installObsidianStub, markdownRenderMock } = await import("../src/testUtils/obsidianStub.ts");
+const { installObsidianStub, markdownRenderMock, setStubIconPainter } = await import("../src/testUtils/obsidianStub.ts");
 installObsidianStub();
+// Settings row buttons (`addExtraButton`) render through the stub itself, not
+// through the mocked `setIcon` — point the stub's painter at the same registry
+// so pencil/trash glyphs draw for real.
+setStubIconPainter((element, name) => setIconWithIcons(element, name));
 const stubNamespace = await import("obsidian");
 const stubCopy = Object.fromEntries(Object.getOwnPropertyNames(stubNamespace).map((name) => [name, stubNamespace[name]]));
 // Vendor marks (`piem-vendor-*`) register through `addIcon` in onload, outside
@@ -615,7 +619,9 @@ async function mountSettings(tabId) {
 	// Async rows (session counts, skill loads) fill in after the click.
 	await settle(() => container.querySelectorAll(".setting-item").length >= 2, 10);
 	return {
-		element: container.firstElementChild ?? container,
+		// The whole wrapper: firstElementChild is only the tab strip, and the
+		// tabpanel — everything under test — would be left out of the page.
+		element: container,
 		cleanup: async () => {
 			container.remove();
 			document.body.replaceChildren();
@@ -758,6 +764,114 @@ const TOKENS = `
 	--scrollbar-thumb-bg: #555;
 `;
 
+// Settings rows, buttons, inputs, and toggles get their look from Obsidian's
+// app.css, not the plugin stylesheet — without this the settings pages render
+// as bare HTML. Faithful to the default dark theme, layout values exact so
+// spacing defects in the plugin's own rules still show; colors approximate.
+const OBSIDIAN_CORE_SHIM = `body { color: var(--text-normal); font-family: var(--font-interface); font-size: var(--font-ui-medium); }
+.setting-item {
+	align-items: center;
+	border-bottom: 1px solid var(--background-modifier-border);
+	display: flex;
+	padding-bottom: 18px;
+	padding-top: 18px;
+}
+.setting-item:last-child { border-bottom: none; }
+.setting-item-info { flex: 1 1 0; margin-right: 16px; min-width: 0; }
+.setting-item-name { color: var(--text-normal); font-size: var(--font-ui-medium); line-height: 24px; }
+.setting-item-description { color: var(--text-muted); font-size: var(--font-ui-small); line-height: 18px; }
+.setting-item-control { align-items: center; display: flex; flex-shrink: 0; gap: var(--size-4-2); }
+.setting-item-heading { border-bottom: none; padding-bottom: 0; padding-top: var(--size-4-6); }
+.setting-item-heading .setting-item-name { font-weight: var(--font-semibold); }
+button {
+	background-color: var(--interactive-normal);
+	border: 0;
+	border-radius: 6px;
+	box-shadow: var(--shadow-s);
+	color: var(--text-normal);
+	cursor: pointer;
+	font-family: var(--font-interface);
+	font-size: var(--font-ui-small);
+	height: 30px;
+	line-height: 17px;
+	padding: var(--size-2-1) var(--size-4-3);
+	white-space: nowrap;
+}
+button:hover { background-color: var(--interactive-hover); }
+button.mod-cta { background-color: var(--interactive-accent); color: var(--text-on-accent); }
+button.mod-destructive { background-color: rgba(var(--background-modifier-error-rgb), 0.15); color: var(--text-error); }
+select.dropdown {
+	appearance: none;
+	background-color: var(--background-secondary);
+	border: 1px solid var(--background-modifier-border);
+	border-radius: var(--radius-s);
+	color: var(--text-normal);
+	cursor: pointer;
+	font-family: var(--font-interface);
+	font-size: var(--font-ui-small);
+	height: 30px;
+	padding: 0 20px 0 8px;
+}
+input.text-input {
+	background-color: var(--background-secondary);
+	border: 1px solid var(--background-modifier-border);
+	border-radius: var(--radius-s);
+	color: var(--text-normal);
+	font-family: var(--font-interface);
+	font-size: var(--font-ui-small);
+	height: 30px;
+	padding: 0 8px;
+}
+input.text-input:focus { border-color: var(--background-modifier-border-focus); outline: none; }
+/* The checkbox inside the pill is visually silent — the pill's pseudo-element
+   knob is the whole affordance, matching app.css. */
+.checkbox-container input[type="checkbox"] {
+	appearance: none;
+	cursor: pointer;
+	height: 100%;
+	inset: 0;
+	margin: 0;
+	opacity: 0;
+	position: absolute;
+	width: 100%;
+}
+.checkbox-container {
+	background-color: var(--background-modifier-border-hover);
+	border-radius: 20px;
+	cursor: pointer;
+	flex-shrink: 0;
+	height: 20px;
+	position: relative;
+	width: 40px;
+}
+.checkbox-container::after {
+	background: #fff;
+	border-radius: 50%;
+	content: "";
+	height: 16px;
+	left: 2px;
+	position: absolute;
+	top: 2px;
+	transition: left 0.1s linear;
+	width: 16px;
+}
+.checkbox-container.is-enabled { background-color: var(--interactive-accent); }
+.checkbox-container.is-enabled::after { left: 22px; }
+.extra-setting-button { align-self: center; color: var(--text-muted); cursor: pointer; display: flex; height: 20px; padding: var(--size-2-1); width: 20px; }
+.extra-setting-button:hover { color: var(--text-normal); }
+.extra-setting-button svg { height: var(--icon-s); width: var(--icon-s); }
+/* Icon buttons ride Obsidian's clickable-icon: transparent until hover, icon
+   colored, minimum hit area. Obsidian's app.css fully resets the UA button
+   look (appearance/border/padding/shadow); mirror that here — resetting only
+   the background still leaves Chromium's default button frame visible. */
+.clickable-icon { appearance: none; background-color: transparent; border: none; box-shadow: none; color: var(--icon-color); cursor: pointer; display: flex; padding: 0; }
+.clickable-icon:hover { color: var(--icon-color-hover); }
+/* Snap Chromium double-paints underlined anchors (bug, not a plugin defect);
+   the default theme styles links with accent color and no underline anyway. */
+a { color: var(--text-accent); cursor: pointer; text-decoration: none; }
+a:hover { text-decoration: underline; }
+`;
+
 /**
  * The panel inside a real leaf. Chat and inspector pages get the three widths
  * the transcript harness uses — same DOM serialized once, so a width-dependent
@@ -783,6 +897,7 @@ body { background: #111; color: var(--text-normal); font-family: var(--font-inte
 .harness-leaf { background: var(--background-secondary); contain: strict; isolation: isolate; height: 640px; }
 .view-content { height: 100%; width: 100%; }
 ${styles}
+${OBSIDIAN_CORE_SHIM}
 </style></head><body>
 ${panels}
 </body></html>`;
@@ -795,8 +910,12 @@ function settingsPage(title, innerHtml) {
 :root {${TOKENS}}
 body { background: #111; margin: 0; padding: 16px; }
 .harness-leaf { background: var(--background-primary); contain: strict; isolation: isolate; height: 760px; width: 720px; }
-.view-content { height: 100%; width: 100%; overflow-y: auto; }
+/* Obsidian pads the settings pane on the vertical-tab-content element in
+   app.css; the harness mounts the plugin's tab content directly, so the
+   padding lives here — inside the strict leaf, which clips overflow. */
+.view-content { box-sizing: border-box; height: 100%; width: 100%; overflow-y: auto; padding: var(--size-4-8); }
 ${styles}
+${OBSIDIAN_CORE_SHIM}
 </style></head><body>
 <div class="harness-leaf"><div class="view-content">${innerHtml}</div></div>
 </body></html>`;
@@ -825,7 +944,7 @@ async function main() {
 				await cleanup();
 			}
 		} catch (error) {
-			console.error(`scenario ${name} failed:`, error?.message ?? error);
+			console.error(`scenario ${name} failed:`, error?.stack ?? error);
 		}
 	}
 	writeFileSync(join(OUT_DIR, "visual-manifest.json"), JSON.stringify(manifest, null, 2));
