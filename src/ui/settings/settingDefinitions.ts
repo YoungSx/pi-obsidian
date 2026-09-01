@@ -1,5 +1,7 @@
 import { SettingPage, type SettingDefinitionItem } from "obsidian";
 import { settingsTabs, type SettingsPanelHost } from "./SettingsPanel";
+import { chatDefinitions } from "./chatDefinitions";
+import { generalDefinitions } from "./generalDefinitions";
 
 /**
  * Bridges the panel's tabs onto Obsidian's declarative settings API.
@@ -63,9 +65,19 @@ class PanelTabPage extends SettingPage {
  * {@link renderSettingsPanel} lives outside `settings.ts`.
  */
 export function buildSettingDefinitions(host: SettingsPanelHost): SettingDefinitionItem[] {
-	return settingsTabs(host).map((tab) => ({
-		type: "page" as const,
-		name: tab.label,
-		page: () => new PanelTabPage(tab.label, (containerEl) => tab.render(containerEl)),
-	}));
+	// Tabs whose rows have been lifted into definitions, keyed by tab id. A tab
+	// absent here still renders through its `page` factory, which is what makes
+	// the migration incremental: a section moves when its rows are expressed, and
+	// the ones that have not moved are untouched rather than half-converted.
+	const declarative: Record<string, (host: SettingsPanelHost) => SettingDefinitionItem[]> = {
+		chat: chatDefinitions,
+		general: generalDefinitions,
+	};
+
+	return settingsTabs(host).map((tab) => {
+		const items = declarative[tab.id]?.(host);
+		return items
+			? { type: "page" as const, name: tab.label, items }
+			: { type: "page" as const, name: tab.label, page: () => new PanelTabPage(tab.label, (el) => tab.render(el)) };
+	});
 }

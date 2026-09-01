@@ -104,6 +104,21 @@ export interface SettingsPanelHost {
 	settings: SettingsPanelSettings;
 	/** Persists the current settings and refreshes the agent's configuration. */
 	save(): Promise<void>;
+	/**
+	 * Rebuilds the tab from fresh definitions.
+	 *
+	 * The declarative replacement for "empty a container and render into it
+	 * again": adding a provider changes which rows exist, and `update()` re-runs
+	 * `getSettingDefinitions()` so the framework rebuilds from the new list. That
+	 * is also what makes a list's search query survive the change — the framework
+	 * owns the query and reapplies it after each render, which the old
+	 * hand-rolled filter had to reconstruct by reading it back out of the DOM.
+	 *
+	 * For a change that only flips whether a row is visible or enabled, this is
+	 * heavier than needed; those go through the framework's own predicate
+	 * re-evaluation instead.
+	 */
+	refresh(): void;
 	/** Whether this device can encrypt secrets at rest. */
 	secretStorage: SecretStorageState;
 	/**
@@ -337,7 +352,7 @@ function refreshModelsTab(containerEl: HTMLElement, host: SettingsPanelHost): vo
 	renderModelsTab(containerEl, host, filterQuery);
 }
 
-function renderModelsTab(containerEl: HTMLElement, host: SettingsPanelHost, filterQuery = ""): void {
+export function renderModelsTab(containerEl: HTMLElement, host: SettingsPanelHost, filterQuery = ""): void {
 	const refresh = (): void => refreshModelsTab(containerEl, host);
 
 	// The panel's answer to "where is my prompt actually going", which the old
@@ -363,7 +378,7 @@ function renderModelsTab(containerEl: HTMLElement, host: SettingsPanelHost, filt
 	renderNetworkGroup(containerEl, host);
 }
 
-function renderProviderList(containerEl: HTMLElement, host: SettingsPanelHost, refresh: () => void): void {
+export function renderProviderList(containerEl: HTMLElement, host: SettingsPanelHost, refresh: () => void): void {
 	const { settings, t } = host;
 
 	new Setting(containerEl)
@@ -444,7 +459,7 @@ function renderProviderList(containerEl: HTMLElement, host: SettingsPanelHost, r
 	}
 }
 
-function renderModelList(
+export function renderModelList(
 	containerEl: HTMLElement,
 	host: SettingsPanelHost,
 	refresh: () => void,
@@ -628,7 +643,7 @@ function renderModelList(
  * collapsible: storage is not advanced configuration, it is something every
  * long-term user eventually needs and should not have to unfold to find.
  */
-function renderChatTab(containerEl: HTMLElement, host: SettingsPanelHost): void {
+export function renderChatTab(containerEl: HTMLElement, host: SettingsPanelHost): void {
 	const { t } = host;
 
 	/*
@@ -708,7 +723,7 @@ function renderSendShortcutRow(containerEl: HTMLElement, host: SettingsPanelHost
  * once is not made to hunt for what they set. Automatic compaction itself has no
  * row here — it is a hard rule, so there is nothing left to turn off.
  */
-function renderCompactionGroup(containerEl: HTMLElement, host: SettingsPanelHost): void {
+export function renderCompactionGroup(containerEl: HTMLElement, host: SettingsPanelHost): void {
 	const { settings, t } = host;
 	const body = createCollapsibleSection(containerEl, {
 		label: compactionGroupLabel(t),
@@ -795,7 +810,7 @@ function renderTokenRow(containerEl: HTMLElement, options: TokenRowOptions): voi
  * line a user has no way to find them. Rendered only when the folder actually
  * holds something, so it is not permanent furniture.
  */
-function renderLegacyChatsNotice(containerEl: HTMLElement, host: SettingsPanelHost): void {
+export function renderLegacyChatsNotice(containerEl: HTMLElement, host: SettingsPanelHost): void {
 	const notice = containerEl.createEl("p", { cls: "piem-settings-legacy" });
 	void host.countLegacySessions().then(({ count, dir }) => {
 		if (count === 0) {
@@ -814,7 +829,7 @@ function renderLegacyChatsNotice(containerEl: HTMLElement, host: SettingsPanelHo
  * leave the previous folder in force instead of falling back to the default,
  * which would repoint the plugin on a typo.
  */
-function renderSessionDirRow(containerEl: HTMLElement, host: SettingsPanelHost): void {
+export function renderSessionDirRow(containerEl: HTMLElement, host: SettingsPanelHost): void {
 	const { settings, t } = host;
 	const setting = new Setting(containerEl).setName(sessionDirName(t));
 	setting.setDesc(`${sessionDirDescription(t)} ${sessionDirRestartHint(t)}`);
@@ -860,7 +875,7 @@ function renderSessionDirRow(containerEl: HTMLElement, host: SettingsPanelHost):
 	});
 }
 
-function renderRetentionRow(containerEl: HTMLElement, host: SettingsPanelHost): void {
+export function renderRetentionRow(containerEl: HTMLElement, host: SettingsPanelHost): void {
 	const { settings, t } = host;
 
 	const setting = new Setting(containerEl).setName(retentionName(t));
@@ -911,7 +926,7 @@ function renderRetentionRow(containerEl: HTMLElement, host: SettingsPanelHost): 
  * transport has been moved off its default, since that is the reader for whom
  * the contents actually matter; everyone else gets two collapsed lines.
  */
-function renderNetworkGroup(containerEl: HTMLElement, host: SettingsPanelHost): void {
+export function renderNetworkGroup(containerEl: HTMLElement, host: SettingsPanelHost): void {
 	const body = createCollapsibleSection(containerEl, {
 		label: host.t.t("settings.networkHeading"),
 		description: host.t.t("settings.networkHeadingDesc"),
@@ -1069,7 +1084,7 @@ function renderLanguageRows(containerEl: HTMLElement, host: SettingsPanelHost): 
  * that second list on purpose: pi reads those directories, and a switch that
  * only half-owns its subject would lie about where the truth lives.
  */
-function renderSkillsTab(containerEl: HTMLElement, host: SettingsPanelHost): void {
+export function renderSkillsTab(containerEl: HTMLElement, host: SettingsPanelHost): void {
 	const { t } = host;
 
 	new Setting(containerEl)
@@ -1207,7 +1222,7 @@ function renderSkillProblems(containerEl: HTMLElement, diagnostics: readonly Ski
  * and splitting them across tabs would make "扩展能力" a promise the tab
  * strip does not keep.
  */
-function renderExtensionsTab(containerEl: HTMLElement, host: SettingsPanelHost): void {
+export function renderExtensionsTab(containerEl: HTMLElement, host: SettingsPanelHost): void {
 	renderSkillsTab(containerEl, host);
 	renderMcpSection(containerEl, host);
 }
@@ -1221,7 +1236,7 @@ function renderExtensionsTab(containerEl: HTMLElement, host: SettingsPanelHost):
  * agent's configuration, and the connect happens on that path, so there is one
  * road from "config changed" to "agent sees the new tools".
  */
-function renderMcpSection(containerEl: HTMLElement, host: SettingsPanelHost): void {
+export function renderMcpSection(containerEl: HTMLElement, host: SettingsPanelHost): void {
 	const { t } = host;
 
 	new Setting(containerEl)

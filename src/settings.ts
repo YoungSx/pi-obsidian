@@ -27,6 +27,7 @@ import {
 } from "./customEndpoint";
 import type { SettingsPanelHost } from "./ui/settings/SettingsPanel";
 import { buildSettingDefinitions } from "./ui/settings/settingDefinitions";
+import { isControlKey, readControlValue, writeControlValue } from "./ui/settings/controlKeys";
 import { getT, isLanguageSetting, resolveLanguage, type LanguageHost, type LanguageSetting, type Translator } from "./i18n";
 import { DEFAULT_SEND_SHORTCUT, isSendShortcutSetting, type SendShortcut } from "./ui/keyboard";
 import { SkillManager } from "./skills/skillManager";
@@ -521,6 +522,39 @@ export class PiemSettingTab extends PluginSettingTab {
 	}
 
 	/**
+	 * Reads the value a declarative `control` should render.
+	 *
+	 * Overridden rather than inherited because the base implementation reaches
+	 * into `this.plugin.settings` by bare string. That is the same object this
+	 * would read, but going through {@link readControlValue} is what makes the key
+	 * checked against the settings type — an unrecognized key returns undefined
+	 * here instead of silently rendering a row bound to nothing.
+	 */
+	getControlValue(key: string): unknown {
+		return isControlKey(key) ? readControlValue(this.plugin.settings, key) : undefined;
+	}
+
+	/**
+	 * Persists a declarative `control`'s new value.
+	 *
+	 * The override is required, not stylistic: the inherited version calls
+	 * `saveData()` and stops, while this plugin's {@link PiemPlugin.saveSettings}
+	 * also refreshes the running agent's configuration and redraws the chat
+	 * header. A control that took the default path would appear to save and leave
+	 * the agent on the previous model.
+	 *
+	 * A rejected value is not persisted. {@link writeControlValue} guards each
+	 * union-typed setting, and writing a value it refused would put a chord or a
+	 * log threshold nobody handles into the vault.
+	 */
+	async setControlValue(key: string, value: unknown): Promise<void> {
+		if (!isControlKey(key) || !writeControlValue(this.plugin.settings, key, value)) {
+			return;
+		}
+		await this.buildHost().save();
+	}
+
+	/**
 	 * The panel's view of the plugin.
 	 *
 	 * Assembled per call rather than cached: the language is resolved once here
@@ -544,6 +578,9 @@ export class PiemSettingTab extends PluginSettingTab {
 					this.update();
 				}
 			},
+			// Structural mutations (add/remove rows) need fresh definitions; `update()`
+			// is the framework-owned replacement for the old tab-local empty+render.
+			refresh: () => this.update(),
 			secretStorage: this.secretStorageTier,
 			readSecret: (id) => this.secretEnvironment?.keychain().read(id) ?? "",
 			openLogView: () => this.plugin.openLogView(),
