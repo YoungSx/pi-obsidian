@@ -6,6 +6,10 @@ on:
 
 permissions:
     contents: write
+    # Artifact attestations: the signing step below mints an OIDC token and
+    # uploads attestation records to the repo's attestation store.
+    id-token: write
+    attestations: write
 
 jobs:
     release:
@@ -100,6 +104,17 @@ jobs:
                       exit 1
                   fi
                   node scripts/check-bundle.mjs dist/main.js
+
+            # Cryptographic proof that these files were built by this repo,
+            # from the tag that triggered this run — Scorecard's "artifact
+            # attestation" check. Sits after the dist/ byte-compare so it signs
+            # exactly the bytes that were verified, not a rebuild.
+            - uses: actions/attest-build-provenance@v2
+              with:
+                  subject-path: |
+                      dist/main.js
+                      dist/manifest.json
+                      dist/styles.css
 
             - uses: softprops/action-gh-release@v2
               with:
