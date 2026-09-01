@@ -30,8 +30,8 @@
 		"happy-dom": "^20.11.6",
 		"jiti": "2.6.1",
 		"tslib": "2.4.0",
-		"typescript": "^5.8.3",
-		"typescript-eslint": "8.35.1"
+		"typescript": "6.0.3",
+		"typescript-eslint": "8.69.0"
 	},
 	"dependencies": {
 		"@earendil-works/pi-agent-core": "^0.84.3",

@@ -105,7 +105,7 @@ export function ChatApp({ service, inputController, component, draftStore, onOpe
 	 */
 	const [suggestions, setSuggestions] = useState<{ revision: number; scope: SuggestionScope; actions: QuickAction[] }>(() => ({
 		revision: snapshot.sessionRevision,
-		scope: "empty" as SuggestionScope,
+		scope: "empty",
 		actions: [],
 	}));
 	// Serializes suggestion requests: the newest call wins, an older one landing

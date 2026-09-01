@@ -145,7 +145,7 @@ function withTimeoutParam(inputSchema: unknown): { schema: TSchema; injected: bo
 					description: `How long to wait for this call, in milliseconds. Default ${Math.round(CALL_TIMEOUT_DEFAULT_MS / 1000)}s; raise it for a call you expect to be slow.`,
 				},
 			},
-		} as TSchema,
+		},
 	};
 }
 

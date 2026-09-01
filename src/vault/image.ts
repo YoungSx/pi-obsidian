@@ -169,7 +169,7 @@ export function sanitizeMessageForLog(message: AgentMessage): AgentMessage {
 	// so the returned object is the same shape with only the image blocks swapped.
 	const typed = message as unknown as { content: (TextContent | ImageContent)[] };
 	const content = typed.content.map((block) =>
-		block.type === "image" ? ({ type: "text", text: imageLogPlaceholder(block.mimeType) } as TextContent) : block,
+		block.type === "image" ? { type: "text", text: imageLogPlaceholder(block.mimeType) } : block,
 	);
 	return { ...message, content } as AgentMessage;
 }

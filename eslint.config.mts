@@ -1,9 +1,10 @@
-import tseslint from 'typescript-eslint';
 import obsidianmd from "eslint-plugin-obsidianmd";
 import globals from "globals";
-import { globalIgnores } from "eslint/config";
+// `defineConfig` from eslint core, not `tseslint.config`: typescript-eslint
+// deprecated its own wrapper in favour of this one.
+import { defineConfig, globalIgnores } from "eslint/config";
 
-export default tseslint.config(
+export default defineConfig(
 	{
 		languageOptions: {
 			globals: {
@@ -64,6 +65,24 @@ export default tseslint.config(
 		rules: {
 			"import/no-nodejs-modules": "off",
 			"no-restricted-globals": "off",
+		},
+	},
+	{
+		// The scanner turns these off, and its reason holds here: they report on
+		// whatever the type checker could not narrow, which for this plugin is
+		// almost entirely third-party surface (pi-ai's `AgentMessage` union, the
+		// MCP client's tool payloads). `tsc` accepts the same code — see the
+		// `errorMessage` read in `settleRunLedger`, which typechecks as
+		// `string | undefined` while the rule calls it `any` — so keeping them on
+		// buys noise rather than safety, and a suppression comment per site is
+		// worse than saying so once here.
+		files: ["**/*.{ts,tsx}"],
+		rules: {
+			"@typescript-eslint/no-unsafe-assignment": "off",
+			"@typescript-eslint/no-unsafe-member-access": "off",
+			"@typescript-eslint/no-unsafe-call": "off",
+			"@typescript-eslint/no-unsafe-argument": "off",
+			"@typescript-eslint/no-unsafe-return": "off",
 		},
 	},
 	globalIgnores([

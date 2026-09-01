@@ -153,7 +153,7 @@ export function SubagentEntryIcon({ snapshots, onOpen }: SubagentEntryIconProps)
 			onFocus={() => setOpenedBy((current) => current ?? "focus")}
 			onBlur={(event) => {
 				// Focus moving to a row inside the popover must not close it.
-				if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
+				if (!event.currentTarget.contains(event.relatedTarget)) {
 					closeNow();
 				}
 			}}

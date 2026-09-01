@@ -231,7 +231,7 @@ export function ContextGauge({
 			onFocus={() => setOpenedBy("press")}
 			onBlur={(event) => {
 				// Focus moving to the tidy button inside the popover must not close it.
-				if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
+				if (!event.currentTarget.contains(event.relatedTarget)) {
 					closeNow();
 				}
 			}}

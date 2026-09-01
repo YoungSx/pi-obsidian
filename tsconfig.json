@@ -1,6 +1,14 @@
 {
 	"compilerOptions": {
 		"baseUrl": "src",
+		// Deprecated in TS 6, gone in 7. Kept for now because dropping it is its own
+		// change (every non-relative import would need rewriting); silenced so the
+		// upgrade is not blocked on that.
+		"ignoreDeprecations": "6.0",
+		// TS 6 no longer picks these up implicitly the way 5.x did: without the
+		// explicit list, `bun-types` is not loaded and every `import ... from
+		// "bun:test"` fails to resolve (153 errors across the test suite).
+		"types": ["bun", "node", "react", "react-dom"],
 		"inlineSourceMap": true,
 		"inlineSources": true,
 		"module": "ESNext",

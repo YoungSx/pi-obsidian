@@ -309,6 +309,20 @@ const OPENAI_COMPLETIONS_COMPAT = {
  * (`x-api-key` plus `anthropic-version` for Anthropic, `Authorization` for
  * OpenAI), so the plugin only has to supply the key as `options.apiKey`.
  */
+/**
+ * The `Model.input` modes a configured endpoint accepts.
+ *
+ * A function rather than two shared constants: `Model.input` is a mutable array,
+ * so a hoisted one would be handed to every model built here and an edit through
+ * any of them would reach all the others. Naming the element type is also what
+ * keeps it from widening — a bare ternary over two array literals infers
+ * `string[]`, which `Model.input` rejects.
+ */
+type InputMode = "text" | "image";
+function inputModes(supportsImages: boolean): InputMode[] {
+	return supportsImages ? ["text", "image"] : ["text"];
+}
+
 export function buildConfiguredModel(model: ModelConfig, provider: ProviderConfig): Model<WireProtocol> {
 	const base = {
 		id: model.modelApiId,
@@ -318,7 +332,7 @@ export function buildConfiguredModel(model: ModelConfig, provider: ProviderConfi
 		reasoning: model.reasoning,
 		// Image input is a capability the user declares (or the builtin catalog
 		// recommends), so the send path can gate attachments on it.
-		input: (model.supportsImages ? ["text", "image"] : ["text"]) as ("text" | "image")[],
+		input: inputModes(model.supportsImages),
 		cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
 		contextWindow: model.contextWindow ?? DEFAULT_CUSTOM_ENDPOINT_CONTEXT_WINDOW,
 		maxTokens: model.maxTokens ?? DEFAULT_CUSTOM_ENDPOINT_MAX_TOKENS,
