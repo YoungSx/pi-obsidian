@@ -16,7 +16,7 @@ import { requestUrl, type RequestUrlParam, type RequestUrlResponse } from "obsid
  * - {@link createObsidianStreamingFetch} — native `fetch`, real streaming,
  *   subject to CORS.
  *
- * Both return a `typeof globalThis.fetch` so they satisfy pi-ai's
+ * Both return a `typeof window.fetch` so they satisfy pi-ai's
  * `FetchFunction` and can be passed as `options.fetch`.
  */
 
@@ -221,7 +221,7 @@ function toResponse(response: RequestUrlResponse): Response {
  * a stall from down here. A wedged endpoint is ended by the user pressing stop,
  * which the race below turns into a real rejection.
  */
-export function createObsidianRequestUrlFetch(): typeof globalThis.fetch {
+export function createObsidianRequestUrlFetch(): typeof window.fetch {
 	const obsidianFetch = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
 		const url = resolveUrl(input);
 		const method = resolveMethod(input, init);
@@ -269,7 +269,7 @@ export function createObsidianRequestUrlFetch(): typeof globalThis.fetch {
 		}
 	};
 
-	return obsidianFetch as typeof globalThis.fetch;
+	return obsidianFetch as typeof window.fetch;
 }
 
 /**
@@ -278,14 +278,14 @@ export function createObsidianRequestUrlFetch(): typeof globalThis.fetch {
  * Subject to CORS: reliable on desktop for providers that allow browser
  * origins, but can fail on mobile or with stricter providers.
  */
-export function createObsidianStreamingFetch(): typeof globalThis.fetch {
-	return ((input: RequestInfo | URL, init?: RequestInit) => globalThis.fetch(input, init)) as typeof globalThis.fetch;
+export function createObsidianStreamingFetch(): typeof window.fetch {
+	return ((input: RequestInfo | URL, init?: RequestInit) => window.fetch(input, init)) as typeof window.fetch;
 }
 
 /** Transport strategy for provider HTTP requests. */
 export type NetworkTransport = "requestUrl" | "fetch";
 
 /** Resolves the configured transport to a concrete `fetch` implementation. */
-export function createFetchForTransport(transport: NetworkTransport): typeof globalThis.fetch {
+export function createFetchForTransport(transport: NetworkTransport): typeof window.fetch {
 	return transport === "fetch" ? createObsidianStreamingFetch() : createObsidianRequestUrlFetch();
 }

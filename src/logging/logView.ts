@@ -105,7 +105,7 @@ export class PiemLogView extends ItemView {
 			return;
 		}
 		this.repaintScheduled = true;
-		requestAnimationFrame(() => {
+		window.requestAnimationFrame(() => {
 			this.repaintScheduled = false;
 			// A closed view can still be in the buffer's listener set for one
 			// frame; `onClose` unsubscribes, this covers the race before it ran.

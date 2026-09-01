@@ -106,7 +106,7 @@ function createSink(adapter: LogAdapterDouble, options: { maxBytes?: number } = 
 		path: PATH,
 		rotatedPath: ROTATED,
 		maxBytes: options.maxBytes,
-		schedule: () => 0 as unknown as ReturnType<typeof setTimeout>,
+		schedule: () => 0,
 	});
 }
 

@@ -47,7 +47,7 @@ export interface ConnectionTestOptions {
 	 * turn does. Optional only so a unit test can drive a probe directly; the
 	 * plugin always supplies one from `createObsidianModels`.
 	 */
-	fetch?: typeof globalThis.fetch;
+	fetch?: typeof window.fetch;
 }
 
 /**
@@ -208,7 +208,7 @@ export async function testProviderConnection(
 	}
 
 	try {
-		const listing = await probeModelListing(provider, { fetch: options.fetch ?? globalThis.fetch, signal: options.signal });
+		const listing = await probeModelListing(provider, { fetch: options.fetch ?? window.fetch, signal: options.signal });
 		return describeListingResult(provider, listing, t);
 	} catch (error) {
 		return { ok: false, detail: describeError(error, t) };

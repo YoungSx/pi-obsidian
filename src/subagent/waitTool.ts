@@ -181,7 +181,10 @@ export function createWaitSubagentTool(context: SubagentToolsContext): AgentTool
 				}
 			}
 
-			const window = clampWait(params.timeoutMs, context.waitPacing);
+			// Named `waitWindow`, not `window`: the timer below has to be the global
+			// `window.setTimeout` (popout-window compatibility), and a local called
+			// `window` would shadow it into calling this object instead.
+			const waitWindow = clampWait(params.timeoutMs, context.waitPacing);
 			// Entries never reject here: each outcome — report, failure, or "the
 			// window closed first" — is data for the parent, not a tool error.
 			const settled = Promise.all(
@@ -190,11 +193,11 @@ export function createWaitSubagentTool(context: SubagentToolsContext): AgentTool
 					() => undefined,
 				)),
 			);
-			await Promise.race([settled, new Promise((resolve) => setTimeout(resolve, window.value))]);
+			await Promise.race([settled, new Promise((resolve) => window.setTimeout(resolve, waitWindow.value))]);
 
 			// A clamped request is reported whatever the outcome: the model needs it
 			// to tell a slow child from its own rejected pacing.
-			const pacing = window.clamped ? { requestedTimeoutMs: params.timeoutMs, effectiveTimeoutMs: window.value } : {};
+			const pacing = waitWindow.clamped ? { requestedTimeoutMs: params.timeoutMs, effectiveTimeoutMs: waitWindow.value } : {};
 			const anyRunning = targets.some((entry) => !entry.settled);
 			if (anyRunning) {
 				return textResult(

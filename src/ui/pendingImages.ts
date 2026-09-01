@@ -47,5 +47,5 @@ export function toImageContents(images: readonly PendingImage[]): ImageContent[]
 }
 
 function newPendingImageId(): string {
-	return globalThis.crypto?.randomUUID?.() ?? Math.random().toString(16).slice(2);
+	return window.crypto?.randomUUID?.() ?? Math.random().toString(16).slice(2);
 }

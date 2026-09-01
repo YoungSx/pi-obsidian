@@ -89,7 +89,6 @@ interface PendingAnswer {
  * is not a state the dialog offers.
  */
 export function buildAskUserForm(container: HTMLElement, questions: readonly AskUserQuestion[], t: Translator, finish: Finish): void {
-	const document = container.ownerDocument;
 	// Question and its pending answer travel together everywhere below; indexing
 	// two parallel arrays would trip noUncheckedIndexedAccess at every use.
 	const items = questions.map((question) => ({ question, state: { checked: new Set<string>(), other: "" } as PendingAnswer }));
@@ -129,41 +128,23 @@ export function buildAskUserForm(container: HTMLElement, questions: readonly Ask
 	for (const item of items) {
 		const question = item.question;
 		const state = item.state;
-		const block = document.createElement("div");
-		block.className = "piem-ask-question";
+		const block = container.createDiv({ cls: "piem-ask-question" });
 
-		const headerEl = document.createElement("div");
-		headerEl.className = "piem-ask-question-header";
-		headerEl.textContent = question.header;
-
-		const questionEl = document.createElement("div");
-		questionEl.className = "piem-ask-question-text";
-		questionEl.textContent = question.question;
-
-		block.append(headerEl, questionEl);
+		block.createDiv({ cls: "piem-ask-question-header", text: question.header });
+		block.createDiv({ cls: "piem-ask-question-text", text: question.question });
 
 		const optionButtons: HTMLButtonElement[] = [];
 
 		for (const option of question.options) {
-			const button = document.createElement("button");
-			button.type = "button";
-			button.className = "piem-ask-option";
+			const button = block.createEl("button", { cls: "piem-ask-option", attr: { type: "button" } });
 
-			const check = document.createElement("span");
-			check.className = "piem-ask-option-check";
-			check.textContent = "✓";
+			const check = button.createSpan({ cls: "piem-ask-option-check", text: "✓" });
 			check.hidden = true;
 
-			const labelEl = document.createElement("span");
-			labelEl.className = "piem-ask-option-label";
-			labelEl.textContent = option.label;
-			button.append(check, labelEl);
+			button.createSpan({ cls: "piem-ask-option-label", text: option.label });
 
 			if (option.description) {
-				const descEl = document.createElement("span");
-				descEl.className = "piem-ask-option-description";
-				descEl.textContent = option.description;
-				button.appendChild(descEl);
+				button.createSpan({ cls: "piem-ask-option-description", text: option.description });
 			}
 
 			button.addEventListener("click", () => {
@@ -198,38 +179,25 @@ export function buildAskUserForm(container: HTMLElement, questions: readonly Ask
 			});
 
 			optionButtons.push(button);
-			block.appendChild(button);
 		}
 
 		if (question.multiSelect === true) {
-			const hint = document.createElement("div");
-			hint.className = "piem-ask-question-hint";
-			hint.textContent = t.t("askUser.multiHint");
-			block.appendChild(hint);
+			block.createDiv({ cls: "piem-ask-question-hint", text: t.t("askUser.multiHint") });
 		}
 
-		const otherInput = document.createElement("input");
-		otherInput.type = "text";
-		otherInput.className = "piem-ask-other";
-		otherInput.placeholder = t.t("askUser.other");
+		const otherInput = block.createEl("input", {
+			cls: "piem-ask-other",
+			attr: { type: "text", placeholder: t.t("askUser.other") },
+		});
 		otherInput.addEventListener("input", () => {
 			state.other = otherInput.value;
 			refreshConfirm();
 		});
-		block.appendChild(otherInput);
-
-		container.appendChild(block);
 	}
 
-	const footer = document.createElement("div");
-	footer.className = "piem-ask-footer";
-	confirmButton = document.createElement("button");
-	confirmButton.type = "button";
-	confirmButton.className = "piem-ask-confirm";
-	confirmButton.textContent = t.t("askUser.confirm");
+	const footer = container.createDiv({ cls: "piem-ask-footer" });
+	confirmButton = footer.createEl("button", { cls: "piem-ask-confirm", text: t.t("askUser.confirm"), attr: { type: "button" } });
 	confirmButton.addEventListener("click", finishAll);
-	footer.appendChild(confirmButton);
-	container.appendChild(footer);
 
 	// Confirm starts disabled; nothing above has run the refresh that learns it.
 	refreshConfirm();

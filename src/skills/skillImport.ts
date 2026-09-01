@@ -333,7 +333,7 @@ export function parseProvenance(json: string | undefined): SkillProvenance | und
  */
 export class SkillImporter {
 	constructor(
-		private readonly fetchImpl: typeof globalThis.fetch,
+		private readonly fetchImpl: typeof window.fetch,
 		private readonly env: ExecutionEnv,
 		private readonly skillsDir: string = DEFAULT_SKILLS_DIR,
 	) {}
