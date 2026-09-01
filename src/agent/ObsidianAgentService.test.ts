@@ -1809,6 +1809,136 @@ describe("ObsidianAgentService run ledger and recovery", () => {
 	});
 });
 
+/**
+ * What the error banner is allowed to claim.
+ *
+ * pi reports a user's stop through the very field a provider failure uses:
+ * `state.errorMessage`. Left alone, pressing stop raised an assertive alert one
+ * line above the transcript's own "You stopped this reply." — a warning for
+ * something the user asked for, and a duplicate of a report that was already
+ * there. These tests pin the split: the abort is filtered out of the banner
+ * channel, a genuine failure is not.
+ */
+describe("ObsidianAgentService stop-vs-failure banner semantics", () => {
+	/** A settled assistant turn shaped like the one a provider returns. */
+	function assistantReply(model: Model<Api>, overrides: Partial<AssistantMessage>): AssistantMessage {
+		return {
+			role: "assistant",
+			content: [{ type: "text", text: "Half a thou" }],
+			api: model.api,
+			provider: model.provider,
+			model: model.id,
+			usage: {
+				input: 1_000,
+				output: 1,
+				cacheRead: 0,
+				cacheWrite: 0,
+				totalTokens: 1_001,
+				cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+			},
+			timestamp: Date.now(),
+			stopReason: "stop",
+			...overrides,
+		};
+	}
+
+	/**
+	 * Runs one turn that the provider ends with `ending`, held open until the
+	 * caller's `beforeEnd` hook has run so a stop can land mid-stream.
+	 *
+	 * The stream is gated rather than pre-canned because the abort has to be what
+	 * ends the run: `abort()` only signals, and the run settles when the stream
+	 * honours that signal — which is exactly the sequence that stamps
+	 * `state.errorMessage`.
+	 */
+	async function runTurnEndingWith(
+		ending: (model: Model<Api>) => AssistantMessage,
+		beforeEnd?: (service: ObsidianAgentServiceType) => void,
+	): Promise<ObsidianAgentServiceType> {
+		let gate: ReturnType<typeof createAssistantMessageEventStream> | undefined;
+		let gateModel: Model<Api> | undefined;
+		const streamFn: StreamFn = (model) => {
+			gate = createAssistantMessageEventStream();
+			gateModel = model;
+			return gate;
+		};
+		const service = createService(undefined, { streamFn });
+		await service.initialize();
+		const settled = service.sendPrompt("Write me something long");
+		await waitFor(() => gate !== undefined);
+		beforeEnd?.(service);
+		const message = ending(gateModel!);
+		// `error` is the event pi's loop reads for both endings; `reason` carries
+		// which one it was.
+		gate!.push({ type: "error", reason: message.stopReason === "aborted" ? "aborted" : "error", error: message });
+		gate!.end(message);
+		await settled;
+		return service;
+	}
+
+	it("raises no banner when the user pressed stop", async () => {
+		const service = await runTurnEndingWith(
+			(model) =>
+				assistantReply(model, {
+					stopReason: "aborted",
+					// The text pi's API layer stamps on a cancelled stream. It reaches
+					// `state.errorMessage` through `turn_end` like any failure would.
+					errorMessage: "Request was aborted",
+				}),
+			(live) => live.abort(),
+		);
+
+		const snapshot = service.getSnapshot();
+		expect(snapshot.errorMessage).toBeUndefined();
+		expect(snapshot.errorOpensSettings).toBe(false);
+		// Nor is it demoted to the quiet channel: the transcript's cutoff notice
+		// under the reply is the one report, and a second copy in the banner area
+		// is the duplication this fixes.
+		expect(snapshot.noticeMessage).toBeUndefined();
+		// The turn itself still carries the marker the transcript renders from, so
+		// "You stopped this reply." is unaffected by the banner's silence.
+		const last = snapshot.messages.at(-1);
+		expect(last?.role === "assistant" && last.stopReason).toBe("aborted");
+	});
+
+	it("still raises the banner for a provider failure", async () => {
+		const service = await runTurnEndingWith((model) =>
+			assistantReply(model, { stopReason: "error", errorMessage: "Upstream refused the request." }),
+		);
+
+		// The abort filter keys on the two markers agreeing; a failure matches
+		// neither, so nothing about the real error path changes.
+		expect(service.getSnapshot().errorMessage).toBe("Upstream refused the request.");
+	});
+
+	it("keeps reporting a failure whose wording merely mentions cancellation", async () => {
+		// The filter must not be a string match. Provider prose varies ("Request
+		// was aborted", "The operation was aborted", "upstream aborted the
+		// connection"), and a failure that happens to use the word is still a
+		// failure the user never asked for.
+		const service = await runTurnEndingWith((model) =>
+			assistantReply(model, { stopReason: "error", errorMessage: "Upstream aborted the connection." }),
+		);
+
+		expect(service.getSnapshot().errorMessage).toBe("Upstream aborted the connection.");
+	});
+
+	it("shows the next real failure after a stop, rather than staying silenced", async () => {
+		// The suppression is derived per snapshot from the current run's last
+		// turn, not latched. A failure on the following run must surface.
+		const stopped = await runTurnEndingWith(
+			(model) => assistantReply(model, { stopReason: "aborted", errorMessage: "Request was aborted" }),
+			(live) => live.abort(),
+		);
+		expect(stopped.getSnapshot().errorMessage).toBeUndefined();
+
+		const failing = await runTurnEndingWith((model) =>
+			assistantReply(model, { stopReason: "error", errorMessage: "Upstream refused the request." }),
+		);
+		expect(failing.getSnapshot().errorMessage).toBe("Upstream refused the request.");
+	});
+});
+
 describe("ObsidianAgentService multimodal send", () => {
 	it("blocks image send when the active model is text-only", async () => {
 		// Default service selects deepseek-v4-pro, whose `input` is ["text"].

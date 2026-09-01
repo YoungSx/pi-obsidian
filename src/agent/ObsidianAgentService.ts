@@ -323,6 +323,26 @@ function findPromptIndex(messages: AgentMessage[], index: number): number | null
 	return null;
 }
 
+/**
+ * Whether an agent-state error is only the report of a stop the user pressed.
+ *
+ * pi clears `state.errorMessage` when a run departs and its loop returns the
+ * moment a turn ends in `error` or `aborted`, so the field always belongs to the
+ * current run's last assistant turn. Both markers are required to agree — the
+ * turn says `aborted` *and* carries this exact text — because that pair is what
+ * makes the attribution provable rather than inferred from wording, which is
+ * provider-specific ("Request was aborted", "The operation was aborted", …) and
+ * would misfile a provider message that merely mentions cancellation.
+ */
+function isUserAbortReport(agent: Agent | null, agentError: string): boolean {
+	const messages = agent?.state.messages;
+	if (!messages) {
+		return false;
+	}
+	const lastAssistant = [...messages].reverse().find((message) => message.role === "assistant");
+	return lastAssistant?.role === "assistant" && lastAssistant.stopReason === "aborted" && lastAssistant.errorMessage === agentError;
+}
+
 function extractUserText(message: AgentMessage | undefined): string {
 	if (!message || message.role !== "user") {
 		return "";
@@ -3172,10 +3192,30 @@ export class ObsidianAgentService {
 		return this.agent;
 	}
 
-	/** The agent's own error, unless the user dismissed that exact message. */
+	/**
+	 * The agent's own error, unless the user dismissed that exact message — or
+	 * unless the "error" is only the user's own stop.
+	 *
+	 * pi reports an abort through the same field a provider failure uses: the
+	 * cancelled stream throws, the API layer stamps the partial message with
+	 * `stopReason: "aborted"` plus the thrown text, and `turn_end` copies that
+	 * text into `state.errorMessage`. The banner then raised an
+	 * `aria-live="assertive"` alert over something the user had just asked for,
+	 * one line above the transcript's own "You stopped this reply." — wrong
+	 * semantics and a duplicate at once.
+	 *
+	 * So an abort is filtered here rather than reworded: the cutoff notice under
+	 * the reply is the honest report, and it exists for every stop already
+	 * (`replyCutoff.ts`). A real failure is untouched — this recognises the abort
+	 * only by pi's own two markers agreeing, and any drift in that wiring
+	 * degrades to showing the banner rather than to swallowing an error.
+	 */
 	private visibleAgentError(agent: Agent | null): string | undefined {
 		const agentError = agent?.state.errorMessage;
-		return agentError && agentError === this.dismissedAgentError ? undefined : agentError;
+		if (!agentError || agentError === this.dismissedAgentError) {
+			return undefined;
+		}
+		return isUserAbortReport(agent, agentError) ? undefined : agentError;
 	}
 
 	private setError(message: string, opensSettings = false): void {
