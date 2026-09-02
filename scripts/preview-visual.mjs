@@ -466,6 +466,33 @@ SCENARIOS["chat-error"] = async () => {
 	return { element, cleanup };
 };
 
+/*
+ * The armed-edit state: one completed turn, then the user message's edit
+ * button is clicked for real — the notice is ChatApp-internal state, so there
+ * is no service-level entry; dispatching on the live button exercises the same
+ * path a user's click takes.
+ */
+SCENARIOS["chat-editing"] = async () => {
+	const { element, cleanup } = await mountChat({
+		streamFn: scriptedStreamFn([CHIPS_JSON, "Reading the three notes tagged `reading` now — one looks like a duplicate."]),
+		drive: async (service) => {
+			await service.sendPrompt("Check my reading notes for duplicates");
+			await settle(
+				() => !service.getSnapshot().isStreaming && document.querySelector(".piem-chat__message--assistant") !== null,
+			);
+			const edit = [...document.querySelectorAll("button[aria-label]")].find(
+				(button) => button.getAttribute("aria-label") === "Edit and resend",
+			);
+			if (!edit) {
+				throw new Error("edit button not found");
+			}
+			edit.click();
+			await settle(() => document.querySelector(".piem-chat__editing") !== null);
+		},
+	});
+	return { element, cleanup };
+};
+
 /** Inspector snapshots, hand-built: pure data, no live registry needed. */
 const INSPECTOR_SNAPSHOTS = [
 	{
