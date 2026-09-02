@@ -201,9 +201,12 @@ export function ChatApp({ service, inputController, component, draftStore, onOpe
 		}
 		const request = ++suggestionRequestRef.current;
 		const cached = service.peekQuickActionSuggestions("empty");
-		if (cached) {
-			setSuggestions({ revision: snapshot.sessionRevision, scope: "empty", actions: cached });
-		}
+		// The row is reset on every run, cached or not: "stale" means *this* note's
+		// previous answer, never the previous note's. Without the miss-side reset,
+		// switching to a note with no cache entry left the old note's chips in
+		// state — on screen for as long as the fresh request took, forever if it
+		// never landed. An empty row is the built-ins' cue in MessageList.
+		setSuggestions({ revision: snapshot.sessionRevision, scope: "empty", actions: cached ?? [] });
 		void service.suggestQuickActions("empty").then((actions) => {
 			if (request !== suggestionRequestRef.current) {
 				return;

@@ -207,17 +207,22 @@ class FakeAgentService {
 	 * that should have stayed quiet shows up as an absence, and answered from
 	 * `suggestionResults` — `null` is the service's failure shape, which is how
 	 * a test exercises "no fallback" without a network. `peekedSuggestions`
-	 * stands in for the service's cache: keyed the way the real one is, so a
-	 * stale-while-revalidate test can stage a previous visit's answer.
+	 * stands in for the service's cache, keyed by the active note path the
+	 * snapshot carries — the way the real cache is keyed — so a visit to a note
+	 * with no entry reads as a miss rather than surfacing another note's answer.
 	 */
 	readonly suggestionRequests: SuggestionScope[] = [];
 	suggestionResults: (QuickAction[] | null)[] = [];
-	peekedSuggestions: Partial<Record<SuggestionScope, QuickAction[]>> = {};
+	peekedSuggestions: Record<string, QuickAction[]> = {};
 	/** When set, `suggestQuickActions` holds its answer until this resolves — the gate a test lifts to interleave renders. */
 	suggestionsGate: Promise<void> | null = null;
 
 	peekQuickActionSuggestions(scope: SuggestionScope): QuickAction[] | undefined {
-		return this.peekedSuggestions[scope];
+		if (scope !== "empty") {
+			return undefined;
+		}
+		const activePath = this.snapshot.contextRefs.find((ref) => ref.kind === "active")?.path ?? "";
+		return this.peekedSuggestions[activePath];
 	}
 
 	async suggestQuickActions(scope: SuggestionScope): Promise<QuickAction[] | null> {
@@ -302,8 +307,8 @@ async function mountChat(
 		failSends?: boolean;
 		/** Queued answers for `suggestQuickActions`; must be set before mount, since the first request can fire during it. */
 		suggestionResults?: (QuickAction[] | null)[];
-		/** Chips `peekQuickActionSuggestions` serves, staged before mount for the same reason. */
-		peekedSuggestions?: Partial<Record<SuggestionScope, QuickAction[]>>;
+		/** Chips `peekQuickActionSuggestions` serves, keyed by active note path; staged before mount for the same reason. */
+		peekedSuggestions?: Record<string, QuickAction[]>;
 		/**
 		 * Held `suggestQuickActions` answers behind this gate, which must exist
 		 * before mount: the suggestion effect fires during it, and a gate added
@@ -622,10 +627,12 @@ describe("ChatApp quick actions", () => {
 });
 
 describe("ChatApp model-suggested quick actions", () => {
+	/** The active note's path, shared by the snapshot and the cache staging keyed on it. */
+	const NOTE_A_PATH = "Ideas/active-note.md";
 	/** A configured target with an active note, so both suggestion rows can appear. */
 	const readySnapshot: Partial<ChatSnapshot> = {
 		isConfigured: true,
-		contextRefs: [{ kind: "active", path: "Ideas/active-note.md", isPinned: false }],
+		contextRefs: [{ kind: "active", path: NOTE_A_PATH, isPinned: false }],
 	};
 
 	const agentChips: QuickAction[] = [
@@ -690,7 +697,7 @@ describe("ChatApp model-suggested quick actions", () => {
 		});
 		const { host, service } = await mountChat({
 			snapshot: readySnapshot,
-			peekedSuggestions: { empty: cachedChips },
+			peekedSuggestions: { [NOTE_A_PATH]: cachedChips },
 			suggestionResults: [agentChips],
 			suggestionsGate: gate,
 		});
@@ -709,7 +716,7 @@ describe("ChatApp model-suggested quick actions", () => {
 		const cachedChips: QuickAction[] = [{ id: "suggested-0", label: "Cached chip", prompt: "From the last visit." }];
 		const { host } = await mountChat({
 			snapshot: readySnapshot,
-			peekedSuggestions: { empty: cachedChips },
+			peekedSuggestions: { [NOTE_A_PATH]: cachedChips },
 			suggestionResults: [null],
 		});
 
@@ -717,6 +724,37 @@ describe("ChatApp model-suggested quick actions", () => {
 
 		// The request could not; the cache answers instead — the row never blanks.
 		expect(quickActionChips(host).some((chip) => chip.textContent === "Cached chip")).toBe(true);
+	});
+
+	it("drops the previous note's cached chips when the switched-to note has no cache entry", async () => {
+		const cachedChips: QuickAction[] = [{ id: "suggested-0", label: "Cached chip", prompt: "From the last visit." }];
+		let releaseRequest!: () => void;
+		const gate = new Promise<void>((resolve) => {
+			releaseRequest = resolve;
+		});
+		const { host, service } = await mountChat({
+			snapshot: readySnapshot,
+			peekedSuggestions: { [NOTE_A_PATH]: cachedChips },
+			suggestionResults: [agentChips, null],
+			suggestionsGate: gate,
+		});
+
+		// Note A's visit: its cached row fills the gap while the request is held.
+		expect(quickActionChips(host).some((chip) => chip.textContent === "Cached chip")).toBe(true);
+
+		// Switch to a note the cache has never answered: its key reads as a miss.
+		service.emit({ contextRefs: [{ kind: "active", path: "Ideas/other-note.md", isPinned: false }] });
+		await flushRender();
+
+		// Stale means *this* note's previous answer, never the previous note's:
+		// the row falls back to the built-ins now, and the fresh request for the
+		// new note still goes out.
+		expect(quickActionChips(host).some((chip) => chip.textContent === "Cached chip")).toBe(false);
+		expect(quickActionChips(host).some((chip) => chip.textContent === "Summarize this note")).toBe(true);
+		expect(service.suggestionRequests).toEqual(["empty", "empty"]);
+
+		releaseRequest();
+		await flushRender();
 	});
 
 	it("shows the model's follow-ups after a reply settles", async () => {
