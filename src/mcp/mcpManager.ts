@@ -19,14 +19,17 @@ import { slugifyServerName, type McpServerConfig } from "./mcpConfig";
  *
  * Three deliberate degradations, each disclosed rather than hidden:
  *
- * 1. **GET stream disabled.** Streamable HTTP servers may hold a GET SSE stream
- *    open for server→client notifications. Obsidian's `requestUrl` transport —
- *    the CORS-free path most MCP servers need — buffers whole responses, so a
- *    stream meant to stay open would never resolve at all. The SDK treats a 405 on the GET as
- *    "no server stream, carry on", so the fetch handed to the transport
- *    short-circuits GET with exactly that. Tool calls (POST) are unaffected.
- *    Cost: no server push and no `tools/list_changed` — the list refreshes when
- *    settings are saved.
+ * 1. **GET stream disabled on the buffered transport only.** Streamable HTTP
+ *    servers may hold a GET SSE stream open for server→client notifications.
+ *    Under Obsidian's `requestUrl` transport nothing is readable until the
+ *    response completes, so a stream meant to stay open would never resolve at
+ *    all — the SDK reads a 405 on that GET as "no server stream, carry on", and
+ *    the fetch handed to the transport short-circuits it with exactly that.
+ *    Tool calls (POST) are unaffected. Cost, and only on that transport: no
+ *    server push and no `tools/list_changed`, so the list refreshes when
+ *    settings are saved. Under the `fetch` transport the stream is left alone
+ *    and both come back — the workaround is scoped to the problem it solves,
+ *    not applied unconditionally.
  * 2. **No OAuth flow.** A static bearer token covers the servers a personal
  *    vault realistically talks to; OAuth providers can be added behind the same
  *    `authProvider` seam later.
@@ -185,10 +188,17 @@ function uniqueToolName(base: string, taken: ReadonlySet<string>): string {
  * Wraps a fetch so the transport's GET SSE probe always gets the 405 answer
  * that means "no server stream".
  *
+ * For the buffered transport only — {@link McpManager.openClient} applies it
+ * when the user's transport is `requestUrl` and hands the bare fetch through
+ * otherwise. The wrapper exists because `requestUrl` exposes no incremental
+ * read, so a GET the server intends to hold open resolves when the server
+ * finally closes it, or never; a 405 is the one status the SDK already reads as
+ * "this server has no GET stream", which makes it the honest answer to give on
+ * behalf of a channel that cannot carry one.
+ *
  * Everything else — the POSTs that carry the protocol — passes through
- * untouched, so the user's chosen transport (requestUrl or fetch) stays the one
- * and only outbound channel. Throwing never enters the picture: a silent 405 is
- * the one status the SDK already understands as "this server has no GET stream".
+ * untouched, so the user's chosen transport stays the one and only outbound
+ * channel. Throwing never enters the picture.
  */
 export function createNoGetStreamFetch(baseFetch: FetchLike): FetchLike {
 	return async (url, init) => {
@@ -372,8 +382,13 @@ export class McpManager {
 	 */
 	private async openClient(server: McpServerConfig): Promise<Client> {
 		const baseFetch = this.fetchFactory();
+		// Suppressing the GET stream is a workaround for a buffered transport, so
+		// it applies to exactly that transport. On `fetch` the stream resolves
+		// incrementally like any other, and letting it open is what buys server
+		// push and `tools/list_changed`. See {@link createNoGetStreamFetch}.
+		const clientFetch = this.transport() === "requestUrl" ? createNoGetStreamFetch(baseFetch) : baseFetch;
 		const transport = new StreamableHTTPClientTransport(new URL(server.url), {
-			fetch: createNoGetStreamFetch(baseFetch),
+			fetch: clientFetch,
 			requestInit: server.token === "" ? undefined : { headers: { Authorization: `Bearer ${server.token}` } },
 		});
 		const client = new Client(mcpClientInfo(this.pluginVersion));

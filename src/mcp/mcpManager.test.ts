@@ -70,13 +70,49 @@ const STUB_PLUGIN_VERSION = "9.9.9-test";
 /** The fetch shape the test doubles actually implement, before the SDK's `preconnect` typing noise. */
 type FetchLike = (url: string | URL, init?: RequestInit) => Promise<Response>;
 
-function makeManager(servers: McpServerConfig[], fetchFactory: () => FetchLike): InstanceType<typeof McpManager> {
+function makeManager(
+	servers: McpServerConfig[],
+	fetchFactory: () => FetchLike,
+	transport: "requestUrl" | "fetch" = "requestUrl",
+): InstanceType<typeof McpManager> {
 	return new McpManager(
 		() => servers,
-		() => "requestUrl",
+		() => transport,
 		STUB_PLUGIN_VERSION,
 		fetchFactory,
 	);
+}
+
+/**
+ * Serves a complete handshake and records the method of every request that
+ * actually reached the transport.
+ *
+ * Unlike {@link scriptedFetch} this one does not pretend to be the production
+ * shim — it answers GET with the 405 a stream-less server would send, but it
+ * records the call first. That is what lets a test tell "the wrapper answered
+ * the probe" from "the probe went out and the server declined".
+ */
+function handshakeRecorder(): { methods: string[]; fetch: FetchLike } {
+	const methods: string[] = [];
+	const fetch = async (url: string | URL, init?: RequestInit): Promise<Response> => {
+		const method = (init?.method ?? "GET").toUpperCase();
+		methods.push(method);
+		if (method === "GET") {
+			return new Response(null, { status: 405 });
+		}
+		const body = typeof init?.body === "string" ? init.body : "";
+		if (body.includes('"method":"initialize"')) {
+			return handshakeResponses("session-stream")[0]!;
+		}
+		if (body.includes("notifications/initialized")) {
+			return new Response(null, { status: 202 });
+		}
+		return new Response(JSON.stringify({ jsonrpc: "2.0", id: 1, result: { tools: [] } }), {
+			status: 200,
+			headers: { "content-type": "application/json" },
+		});
+	};
+	return { methods, fetch };
 }
 
 describe("createNoGetStreamFetch", () => {
@@ -249,6 +285,33 @@ describe("McpManager", () => {
 		const [state] = manager.getServerStates();
 		expect(state?.status).toBe("ok");
 		expect(state?.toolCount).toBe(2);
+		await manager.dispose();
+	});
+
+	it("keeps the GET stream off the wire on the buffered transport", async () => {
+		const server = serverFixture({ name: "buffered", url: "https://b.example.com" });
+		const { methods, fetch } = handshakeRecorder();
+		const manager = makeManager([server], () => fetch, "requestUrl");
+		await manager.connect();
+
+		expect(manager.getServerStates()[0]?.status).toBe("ok");
+		// The wrapper answered the probe itself, so nothing GET-shaped was ever
+		// handed to a transport that could not have resolved it.
+		expect(methods).not.toContain("GET");
+		await manager.dispose();
+	});
+
+	it("lets the GET stream reach a streaming transport", async () => {
+		const server = serverFixture({ name: "streaming", url: "https://s.example.com" });
+		const { methods, fetch } = handshakeRecorder();
+		const manager = makeManager([server], () => fetch, "fetch");
+		await manager.connect();
+
+		expect(manager.getServerStates()[0]?.status).toBe("ok");
+		// The workaround is scoped to the transport that needs it: on `fetch` the
+		// SDK gets to ask for server push, and a 405 back is the server's answer
+		// rather than ours.
+		expect(methods).toContain("GET");
 		await manager.dispose();
 	});
 
