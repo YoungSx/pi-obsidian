@@ -122,13 +122,22 @@ commands.
   <sub>The same errand, on a phone. Nothing is missing.</sub>
 </p>
 
-Piem ships with `isDesktopOnly: false` and means it. Streaming, tools,
-subagents, skills, images — all of it works on a phone.
+Piem ships with `isDesktopOnly: false` and means it. Tools, subagents, skills,
+images — all of it works on a phone. So does streaming, once you turn it on.
 
-That commitment costs something, and it is worth knowing what: MCP servers are
-**remote only**, because a stdio transport would spawn child processes and a
-phone cannot. A capability that cannot exist on mobile gets refused for
+That commitment costs something, and it is worth knowing what.
+
+**MCP servers are remote only.** A stdio transport would spawn child processes
+and a phone cannot. A capability that cannot exist on mobile gets refused for
 everyone rather than shipped as a desktop-only surprise.
+
+**Token-by-token streaming is off by default.** Obsidian's `requestUrl` is the
+only request path free of CORS on every platform, and it has no incremental
+read at all — a reply lands whole, when it finishes. Real streaming means the
+browser's own `fetch`, which most endpoints do accept; it is one setting away
+(Models → Network → Network transport). It stays the non-default because
+whether it works is the endpoint's call rather than ours, and a locally hosted
+model usually has to be told to allow it.
 
 ## 🔓 Before you install: it edits without asking
 

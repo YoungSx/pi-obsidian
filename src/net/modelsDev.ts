@@ -16,9 +16,14 @@ import { createFetchForTransport, type FetchFn } from "./obsidianFetch";
  * cache behind, so the next form open tries again.
  *
  * Fetching goes through {@link createFetchForTransport} with the `requestUrl`
- * transport rather than raw `window.fetch`: the panel's origin is
- * `app://obsidian.md`, models.dev does not send permissive CORS headers, and a
- * settings-time probe has no need to stream.
+ * transport rather than raw `window.fetch`, and hardcodes it rather than
+ * following the user's setting. Not because `fetch` would fail today: as of
+ * 2026-09-02 models.dev answers `access-control-allow-origin: *`, and this
+ * request (GET, `accept` only) is a simple one that is never preflighted, so it
+ * would go through from any of Obsidian's three platform origins. The reason is
+ * that there is nothing to buy by depending on that. A settings-time probe has
+ * no need to stream, so `requestUrl` costs it nothing — and in exchange the
+ * model form stops being one third-party CORS config change away from breaking.
  */
 
 /** The one endpoint models.dev publishes, carrying every provider it tracks. */
