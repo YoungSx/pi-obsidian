@@ -310,6 +310,7 @@ function snapshot(overrides: Partial<ChatSnapshot> = {}): ChatSnapshot {
 		isRewinding: false,
 		// The metrics these tests assert on live behind the agent-details tier.
 		showAgentDetails: true,
+		traceExpand: "collapsed",
 		language: "en",
 		sendShortcut: "enter",
 		contextRefs: [],

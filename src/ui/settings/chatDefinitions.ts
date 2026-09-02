@@ -59,6 +59,23 @@ export function chatDefinitions(host: SettingsPanelHost): SettingDefinitionItem[
 			desc: t.t("settings.showAgentDetailsDesc"),
 			control: { type: "toggle", key: "showAgentDetails" },
 		},
+		{
+			// A dropdown rather than a toggle set: the three modes are degrees of
+			// the same dial — how much machine traffic greets the reader open — and
+			// a boolean for "high value" against "everything" would need two rows
+			// to explain what one word does.
+			name: t.t("settings.traceExpand"),
+			desc: t.t("settings.traceExpandDesc"),
+			control: {
+				type: "dropdown",
+				key: "traceExpand",
+				options: {
+					collapsed: t.t("settings.traceExpandCollapsed"),
+					highValue: t.t("settings.traceExpandHighValue"),
+					expanded: t.t("settings.traceExpandExpanded"),
+				},
+			},
+		},
 		compactionPage(host),
 		{
 			// A heading rather than a collapsible: storage is not advanced

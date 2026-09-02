@@ -29,6 +29,7 @@ import { createObsidianTools } from "../tools/obsidianTools";
 import { fetchQuickActionSuggestions, lastAssistantText, type SuggestionScope } from "./quickActionSuggestionRequest";
 import { QuickActionSuggestionCache } from "./quickActionSuggestionCache";
 import type { QuickAction } from "../ui/quickActionSuggestions";
+import type { TraceExpandSetting } from "../ui/traceExpand";
 import { DEFAULT_THINKING_LEVEL } from "../constants";
 import {
 	describeModelTarget,
@@ -246,6 +247,13 @@ export interface ChatSnapshot {
 	 * the UI reads one snapshot rather than reaching for settings itself.
 	 */
 	showAgentDetails: boolean;
+	/**
+	 * How much machine traffic starts open in the transcript. Mirrored onto the
+	 * snapshot for the same reason as {@link showAgentDetails}: the UI reads one
+	 * snapshot, and a settings save already rides the notify path that makes the
+	 * change visible mid-conversation.
+	 */
+	traceExpand: TraceExpandSetting;
 	/**
 	 * Language the panel renders in, already resolved from the user's setting.
 	 *
@@ -2329,6 +2337,7 @@ export class ObsidianAgentService {
 			isRewinding: this.retryInFlight,
 			isConfigured: this.hasApiKey(),
 			showAgentDetails: settings.showAgentDetails,
+			traceExpand: settings.traceExpand,
 			// `getLanguage` is newer than this plugin's minAppVersion, so the shipped
 			// Vault declarations do not carry it; the cast is what lets the optional
 			// call be feature-detected at runtime.

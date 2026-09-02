@@ -21,6 +21,7 @@ function host(overrides: Partial<SettingsPanelHost> = {}): SettingsPanelHost {
 			models: [],
 			networkTransport: "requestUrl",
 			showAgentDetails: false,
+		traceExpand: "collapsed",
 			sendShortcut: "enter",
 			language: "en",
 			sessionRetention: 0,

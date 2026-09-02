@@ -31,6 +31,7 @@ import { SettingsPanelState } from "./ui/settings/panelState";
 import { isControlKey, readControlValue, writeControlValue } from "./ui/settings/controlKeys";
 import { getT, isLanguageSetting, resolveLanguage, type LanguageHost, type LanguageSetting, type Translator } from "./i18n";
 import { DEFAULT_SEND_SHORTCUT, isSendShortcutSetting, type SendShortcut } from "./ui/keyboard";
+import { DEFAULT_TRACE_EXPAND, isTraceExpandSetting, type TraceExpandSetting } from "./ui/traceExpand";
 import { SkillManager } from "./skills/skillManager";
 import { userSkillsSupported } from "./skills/userSkills";
 import { normalizeUserSkillsDir } from "./skills/userSkillsDir";
@@ -63,6 +64,12 @@ export interface PiemSettings {
 	 * way. Readers who do want the numbers turn it on once.
 	 */
 	showAgentDetails: boolean;
+	/**
+	 * How much of the transcript's machine traffic starts open — the default
+	 * behind every thinking, tool-call, and tool-result row. Rows stay openable
+	 * by hand either way; this is the state the reader meets, not a permission.
+	 */
+	traceExpand: TraceExpandSetting;
 	/**
 	 * Language the interface speaks. `"auto"` follows the host vault's language
 	 * (resolved once per load); the concrete values override it.
@@ -144,6 +151,7 @@ export const DEFAULT_SETTINGS: PiemSettings = {
 	providerApiKeys: {},
 	networkTransport: "requestUrl",
 	showAgentDetails: false,
+	traceExpand: DEFAULT_TRACE_EXPAND,
 	language: "auto",
 	sendShortcut: DEFAULT_SEND_SHORTCUT,
 	sessionRetention: DEFAULT_SESSION_RETENTION,
@@ -214,6 +222,10 @@ export function normalizeSettings(data: Partial<PiemSettings> | null | undefined
 		// Absent in vaults written before the setting existed; those users get the
 		// quiet default rather than inheriting the old always-verbose panel.
 		showAgentDetails: data?.showAgentDetails === true,
+		// Absent in vaults written before the setting existed; those keep the
+		// collapsed transcript, which is what they were reading before the choice
+		// was one to make.
+		traceExpand: isTraceExpandSetting(data?.traceExpand) ? data.traceExpand : DEFAULT_TRACE_EXPAND,
 		language,
 		// Absent in vaults written before the setting existed. Those users get bare
 		// Enter, which adds a way to send rather than moving one: the Ctrl+Enter

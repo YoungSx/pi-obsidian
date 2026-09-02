@@ -651,6 +651,17 @@ export const en = {
 		showAgentDetails: "Show agent details",
 		showAgentDetailsDesc: "Show token counts, spend, and raw tool arguments in the chat panel.",
 		/**
+		 * The modes are stated as what the reader *sees*, not what the machine
+		 * does: "collapsed" names the transcript they get, and "high value" names
+		 * the exception rather than enumerating it — the diff row explains itself
+		 * when it opens.
+		 */
+		traceExpand: "Open tool activity",
+		traceExpandDesc: "How much of the machine traffic — thinking, tool calls, results — starts open in the transcript. Any row can still be opened or closed by hand.",
+		traceExpandCollapsed: "Everything collapsed",
+		traceExpandHighValue: "High-value rows open",
+		traceExpandExpanded: "Everything open",
+		/**
 		 * Names what the other key does under each option, because that is the
 		 * actual trade: whichever key does not send has to make a new line, and a
 		 * reader picking between them is deciding which one they press more often.

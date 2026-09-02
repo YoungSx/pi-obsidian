@@ -14,6 +14,7 @@ import { useT } from "./TranslatorContext";
 import type { Translator } from "../i18n";
 import { IconButton, ObsidianIcon } from "./ObsidianIcon";
 import { countDiffLines, describePendingTool, describeTool, isToolIdentifier, summarizeToolPayload, summarizeToolResult } from "./traceSummary";
+import { DEFAULT_TRACE_EXPAND, traceOpensByDefault, type TraceExpandSetting } from "./traceExpand";
 
 export interface MessageListProps {
 	messages: AgentMessage[];
@@ -35,6 +36,11 @@ export interface MessageListProps {
 	 * the `JSON.stringify` payload behind each call.
 	 */
 	showAgentDetails?: boolean;
+	/**
+	 * How much machine traffic starts open. Rows stay openable by hand either
+	 * way — this is the state the reader meets, not a permission.
+	 */
+	traceExpand?: TraceExpandSetting;
 	/**
 	 * Opens the plugin settings tab. Absent when the host cannot reach it, in
 	 * which case the empty state names the path in prose instead.
@@ -256,6 +262,7 @@ export function MessageList({
 	isInitializing = false,
 	isConfigured = true,
 	showAgentDetails = false,
+	traceExpand = DEFAULT_TRACE_EXPAND,
 	onOpenSettings,
 	onRetry,
 	onEditMessage,
@@ -270,7 +277,7 @@ export function MessageList({
 	suggestedActions = [],
 }: MessageListProps): React.JSX.Element {
 	const t = useT();
-	const context: MessageContext = { app, component, sourcePath, showAgentDetails, t };
+	const context: MessageContext = { app, component, sourcePath, showAgentDetails, traceExpand, t };
 	const activeIndex = streamingIndex(isStreaming, messages);
 	const regenerateIndex = regenerableIndex(messages);
 	const editIndex = editableQuestionIndex(messages);
@@ -707,6 +714,8 @@ interface MessageContext {
 	sourcePath: string;
 	/** Mirrors the user setting; decides tool naming and payload visibility. */
 	showAgentDetails: boolean;
+	/** Mirrors the user setting; the default open state of every trace row. */
+	traceExpand: TraceExpandSetting;
 	/**
 	 * Copy for the render helpers.
 	 *
@@ -784,6 +793,7 @@ function renderAssistantMessage(message: AssistantMessage, args: RenderArgs): Re
 					icon={live ? "loader-circle" : "brain"}
 					name={args.renderContext.t.t(live ? "chat.thinkingNow" : "chat.thoughtItThrough")}
 					className={live ? "piem-chat__trace--thinking piem-chat__trace--live" : "piem-chat__trace--thinking"}
+					open={traceOpensByDefault(args.renderContext.traceExpand, "thinking", false)}
 				>
 					<Block text={content.thinking} kind="thinking" isStreaming={args.isStreaming} context={args.renderContext} />
 				</Trace>
@@ -802,6 +812,7 @@ function renderAssistantMessage(message: AssistantMessage, args: RenderArgs): Re
 				nameIsIdentifier={isToolIdentifier(content.name, showDetails)}
 				detail={summarizeToolPayload(content.arguments)}
 				className={live ? "piem-chat__trace--live" : undefined}
+				open={traceOpensByDefault(args.renderContext.traceExpand, "toolCall", false)}
 				// Without the payload there is nothing behind the row to open, so it
 				// renders as a plain line rather than an empty disclosure.
 				body={showDetails ? <pre className="piem-chat__text">{JSON.stringify(content.arguments, null, 2)}</pre> : null}
@@ -824,6 +835,14 @@ interface TraceProps {
 	nameIsIdentifier?: boolean;
 	/** Revealed content; `null` renders a plain row with no disclosure affordance. */
 	body?: React.ReactNode;
+	/**
+	 * The row's initial open state, from the expand mode the reader chose. An
+	 * `open` attribute on a `<details>` sets the default, not a lock — the reader
+	 * can still close the row by hand, which is why this is passed at render
+	 * rather than managed as state: a re-render from a settings change restates
+	 * the preference without fighting the reader's clicks.
+	 */
+	open?: boolean;
 	children?: React.ReactNode;
 }
 
@@ -847,7 +866,7 @@ function traceNameClass(isIdentifier: boolean): string {
  * single `grep` could bury the model's actual prose. Everything mechanical now
  * collapses to a 1-line row the reader opens on demand.
  */
-function Trace({ icon, name, detail, className, nameIsIdentifier = false, body, children }: TraceProps): React.JSX.Element {
+function Trace({ icon, name, detail, className, nameIsIdentifier = false, body, open = false, children }: TraceProps): React.JSX.Element {
 	const revealed = body === undefined ? children : body;
 	const classes = ["piem-chat__trace", className].filter(Boolean).join(" ");
 	const row = (
@@ -862,7 +881,7 @@ function Trace({ icon, name, detail, className, nameIsIdentifier = false, body, 
 		return <div className={`${classes} piem-chat__trace--flat`}>{row}</div>;
 	}
 	return (
-		<details className={classes}>
+		<details className={classes} open={open}>
 			<summary className="piem-chat__trace-summary">{row}</summary>
 			<div className="piem-chat__trace-body">{revealed}</div>
 		</details>
@@ -884,8 +903,13 @@ function ToolResultTrace({ message, context }: { message: ToolResultMessage; con
 		// A diff-bearing result opens itself: the critique called the undo story
 		// the panel's biggest gap, and this is the previewable half of the answer
 		// (C option) — what the tool changed should be visible without a second
-		// interaction, while the call row above it stays closed.
-		<details className={classes} open={diff !== null}>
+		// interaction, while the call row above it stays closed. The expand mode
+		// sits on top of that: `highValue` keeps exactly this behaviour, and
+		// `expanded` opens the rest of the traffic besides.
+		<details
+			className={classes}
+			open={traceOpensByDefault(context.traceExpand, "toolResult", diff !== null)}
+		>
 			<summary className="piem-chat__trace-summary">
 				<ObsidianIcon name={message.isError ? "alert-triangle" : "check"} className="piem-chat__trace-icon" />
 				<span className={traceNameClass(isToolIdentifier(message.toolName, context.showAgentDetails))}>
@@ -941,7 +965,12 @@ function HarnessTrace({ message, context }: { message: AgentMessage; context: Me
 		return null;
 	}
 	return (
-		<Trace icon={harnessIcon(message.role)} name={harnessLabel(message.role, context.t)} className="piem-chat__trace--harness">
+		<Trace
+			icon={harnessIcon(message.role)}
+			name={harnessLabel(message.role, context.t)}
+			className="piem-chat__trace--harness"
+			open={traceOpensByDefault(context.traceExpand, "harness", false)}
+		>
 			{rendered}
 		</Trace>
 	);
