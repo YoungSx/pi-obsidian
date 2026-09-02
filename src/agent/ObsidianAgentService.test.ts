@@ -835,33 +835,40 @@ describe("ObsidianAgentService", () => {
 		expect(internals.pendingToolStarts.size).toBe(0);
 	});
 
-	it("ends the run after a tool fails and accepts the next prompt", async () => {
-		let requestCount = 0;
+	it("feeds a failed tool result back to the model instead of ending the run", async () => {
 		const scriptedStream = createToolCallingStreamFn("ls", "toolu_failed", { path: "Missing" });
+		const contexts: Context[] = [];
 		const streamFn: StreamFn = (model, context, options) => {
-			requestCount += 1;
+			contexts.push({ ...context, messages: [...context.messages] });
 			return scriptedStream(model, context, options);
 		};
 		const service = createService(new MemoryAdapter(), { streamFn });
 
 		expect(await service.sendPrompt("List the missing folder")).toBe(true);
 
-		const failed = service.getSnapshot();
-		expect(requestCount).toBe(1);
-		expect(failed.isStreaming).toBe(false);
-		expect(failed.pendingToolCalls).toEqual([]);
-		const toolResult = failed.messages.at(-1);
-		expect(toolResult?.role).toBe("toolResult");
-		if (toolResult?.role !== "toolResult") {
-			throw new Error("Expected the failed tool result to end the turn.");
-		}
-		expect(toolResult.isError).toBe(true);
-		expect(JSON.stringify(toolResult.content)).toContain("Folder not found: Missing");
+		// One run, two requests: pi started the recovery request itself instead
+		// of ending the run on the error (#208).
+		const settled = service.getSnapshot();
+		expect(contexts.length).toBe(2);
+		expect(settled.isStreaming).toBe(false);
+		expect(settled.pendingToolCalls).toEqual([]);
+		expect(settled.messages.at(-1)?.role).toBe("assistant");
 
-		expect(await service.sendPrompt("Continue with something else")).toBe(true);
-		expect(requestCount).toBe(2);
-		expect(service.getSnapshot().isStreaming).toBe(false);
-		expect(service.getSnapshot().messages.at(-1)?.role).toBe("assistant");
+		// The failure is in the transcript as an error tool result ...
+		const transcriptResult = settled.messages.find((message) => message.role === "toolResult");
+		if (transcriptResult?.role !== "toolResult") {
+			throw new Error("Expected the failed tool result in the transcript.");
+		}
+		expect(transcriptResult.isError).toBe(true);
+		expect(JSON.stringify(transcriptResult.content)).toContain("Folder not found: Missing");
+
+		// ... and the model actually saw it on the request after the failure.
+		const fedBack = contexts[1]?.messages.find((message) => message.role === "toolResult");
+		if (fedBack?.role !== "toolResult") {
+			throw new Error("Expected the failed tool result to be fed back to the model.");
+		}
+		expect(fedBack.isError).toBe(true);
+		expect(JSON.stringify(fedBack.content)).toContain("Folder not found: Missing");
 	});
 
 	it("declines a retry when nothing precedes the reply", async () => {
@@ -3023,8 +3030,8 @@ function createRecordingToolCallingStreamFn(
 		if (isFirst) {
 			const message: AssistantMessage = {
 				...base,
-				// The arguments must actually succeed: `shouldStopAfterTurn` ends the run
-				// after a failed tool result, which would swallow the second request
+				// The arguments must actually succeed: a failed tool result would
+				// make the agent loop turn again and swallow the second request
 				// these tests are about. `""` normalizes to the vault root.
 				content: [{ type: "toolCall", id: "call-1", name: toolName, arguments: { path: "" } }],
 				stopReason: "toolUse",

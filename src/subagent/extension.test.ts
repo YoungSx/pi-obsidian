@@ -388,9 +388,8 @@ describe("runSubagent", () => {
 	});
 
 	it("feeds a tool error back and lets the model recover", async () => {
-		// No `shouldStopAfterTurn` here, unlike the parent: the error is one
-		// turn's result, and the next request sees it — a bad call is a
-		// recoverable stumble, not a dead run.
+		// The error is one turn's result, and the next request sees it — a bad
+		// call is a recoverable stumble, not a dead run.
 		const failing = failingTool();
 		const result = await runSubagent({
 			task: "t",
