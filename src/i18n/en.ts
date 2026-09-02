@@ -219,6 +219,10 @@ export const en = {
 		contextAria: "Context window use",
 		contextValueText: "{estimated}{tokens} of {window} {unit} used, {percent} percent, {state}",
 		contextEstimatedPrefix: "Estimated ",
+		/** Popover line for prompt-cache use: the hit rate plus the cached volume. */
+		cacheLine: "cache {percent}% · {tokens} {unit}",
+		/** Popover footnote for thinking models: reasoning tokens already inside the reply count. */
+		reasoningNote: "incl. {tokens} reasoning",
 		/** Accessible name for the `/`-command autocomplete list. */
 		commandMenuAria: "Prompt commands and skills",
 		/** Source labels shown beside autocomplete entries. */

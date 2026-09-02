@@ -8,9 +8,48 @@ export interface UsageTotals {
 	cost: number;
 	/** Requests that reported usage, so a zero total can be told from "no data yet". */
 	requests: number;
+	/**
+	 * Prompt tokens billed as fresh (not served from cache), summed.
+	 *
+	 * pi-ai normalizes `input` to *exclude* cached tokens in every adapter, so
+	 * `input + cacheRead + cacheWrite` is the billed prompt total, which is what
+	 * makes a cache hit rate computable without trusting `totalTokens` (whose
+	 * fallback semantics vary by provider). Undefined while no request reported
+	 * the field — legacy transcripts and providers that never cache.
+	 */
+	input?: number;
+	/** Prompt tokens served from the prompt cache, summed. Undefined while unreported. */
+	cacheRead?: number;
+	/**
+	 * Prompt tokens written to the cache (what a later turn can hit), summed.
+	 * Undefined while unreported; providers that never cache report 0 rather
+	 * than omit the field, which the UI hides as "no cache activity".
+	 */
+	cacheWrite?: number;
+	/**
+	 * Reasoning tokens, summed. A subset of the visible output, so adding it to
+	 * the other fields would double-count: it annotates, it never adds to
+	 * {@link tokens}. Some providers only report it on thinking models.
+	 */
+	reasoning?: number;
 }
 
 export const EMPTY_USAGE_TOTALS: UsageTotals = { tokens: 0, cost: 0, requests: 0 };
+
+/**
+ * Adds two optional counters.
+ *
+ * `undefined` means "never reported" and must stay distinguishable from 0
+ * (reported-but-nothing), otherwise a single request that omits the field would
+ * silently present the breakdown as measured. Two unreported fields stay
+ * unreported; one reported value survives an unreported partner as itself.
+ */
+function plus(a: number | undefined, b: number | undefined): number | undefined {
+	if (a === undefined && b === undefined) {
+		return undefined;
+	}
+	return (a ?? 0) + (b ?? 0);
+}
 
 /**
  * Sums usage across a transcript.
@@ -29,6 +68,10 @@ export function sumUsage(messages: AgentMessage[], extra: Usage[] = []): UsageTo
 			tokens: totals.tokens + calculateContextTokens(usage),
 			cost: totals.cost + usage.cost.total,
 			requests: totals.requests + 1,
+			input: plus(totals.input, usage.input),
+			cacheRead: plus(totals.cacheRead, usage.cacheRead),
+			cacheWrite: plus(totals.cacheWrite, usage.cacheWrite),
+			reasoning: plus(totals.reasoning, usage.reasoning),
 		}),
 		EMPTY_USAGE_TOTALS,
 	);

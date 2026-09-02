@@ -1,5 +1,5 @@
 import { formatTokens } from "../agent/usage";
-import type { ContextFill } from "../agent/usage";
+import type { ContextFill, UsageTotals } from "../agent/usage";
 import type { Translator } from "../i18n";
 
 /**
@@ -119,4 +119,53 @@ export function tidyLabel(state: { isStreaming: boolean; isCompacting: boolean }
 		return t.t("context.tidyWhileStreaming");
 	}
 	return t.t("commands.tidyUp");
+}
+
+/**
+ * The cache readout as "cache 87% · 12.4k tokens", or undefined when there is
+ * nothing honest to say.
+ *
+ * The percent's denominator is `input + cacheRead + cacheWrite` — the billed
+ * prompt total, not `totalTokens`. pi-ai normalizes `input` to *exclude* cached
+ * tokens in every adapter, so that sum is exactly what the provider billed for
+ * the prompt, on every provider; `totalTokens` cannot stand in for it because
+ * some adapters derive their fallback total without the cache fields. The rate
+ * is therefore "the share of billed prompt tokens served from cache" — a
+ * property of the provider's caching, independent of how much the model replied.
+ *
+ * Gating: undefined while the provider reports no cache activity at all
+ * (`cacheRead + cacheWrite` both 0), which is how adapters for models without a
+ * prompt cache report — a "cache 0%" line on those would be noise, not signal.
+ * `input` is required on pi-ai's `Usage`, but a defensive undefined here
+ * declines the percentage rather than guessing a denominator.
+ */
+export function contextCacheLine(usage: UsageTotals, t: Translator): string | undefined {
+	const read = usage.cacheRead ?? 0;
+	const write = usage.cacheWrite ?? 0;
+	if (read + write === 0 || usage.input === undefined) {
+		return undefined;
+	}
+	const billedPrompt = usage.input + read + write;
+	return t.t("chat.cacheLine", {
+		percent: Math.round((read / billedPrompt) * 100),
+		tokens: formatTokens(read),
+		unit: t.t("chat.tokensSuffix"),
+	});
+}
+
+/**
+ * The reasoning note as "incl. 1.2k reasoning", or undefined when the provider
+ * reports no split.
+ *
+ * Shown, never added: reasoning tokens are a subset of the reply, so the tokens
+ * line above already counts them. Providers that expose a thinking breakdown
+ * report it even when it is 0, hence the `> 0` gate rather than an undefined
+ * check — a "incl. 0 reasoning" note is noise on exactly the models that do
+ * think.
+ */
+export function contextReasoningNote(usage: UsageTotals, t: Translator): string | undefined {
+	if (!usage.reasoning) {
+		return undefined;
+	}
+	return t.t("chat.reasoningNote", { tokens: formatTokens(usage.reasoning) });
 }

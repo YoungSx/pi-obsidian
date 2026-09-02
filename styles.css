@@ -442,7 +442,8 @@ button.piem-chat__context-open {
 	font-size: var(--font-ui-smaller);
 }
 
-.piem-chat__context-spend {
+.piem-chat__context-spend,
+.piem-chat__context-cache {
 	/* `--text-muted`, not the `--text-faint` this carried: the ramp note at the
 	 * top of the file (and the chips below) record that faint at `meta` — this
 	 * line's size — falls under the 4.5:1 WCAG asks. Faint is for icons, never
@@ -450,6 +451,14 @@ button.piem-chat__context-open {
 	color: var(--text-muted);
 	font-size: var(--font-ui-smaller);
 	font-variant-numeric: tabular-nums;
+}
+
+/* The reasoning footnote rides the same caveat tier as the note line above: it
+ * annotates the spend line (reasoning tokens are already inside it) rather than
+ * adding a figure of its own, so it stays prose-grey and untabular. */
+.piem-chat__context-reasoning {
+	color: var(--text-muted);
+	font-size: var(--font-ui-smaller);
 }
 
 /*
