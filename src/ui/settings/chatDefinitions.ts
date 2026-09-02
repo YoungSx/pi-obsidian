@@ -11,6 +11,7 @@ import {
 	type CompactionRowCopy,
 } from "./compactionCopy";
 import { createEffectLine } from "./effectLine";
+import { sectionNote } from "./sectionNote";
 import type { SettingsPanelHost } from "./panelHost";
 import {
 	describeLegacyChats,
@@ -66,6 +67,7 @@ export function chatDefinitions(host: SettingsPanelHost): SettingDefinitionItem[
 			type: "group",
 			heading: t.t("settings.chatHistoryHeading"),
 			items: [
+				sectionNote(t.t("settings.chatHistoryDesc")),
 				{
 					name: sessionDirName(t),
 					desc: `${sessionDirDescription(t)} ${sessionDirRestartHint(t)}`,

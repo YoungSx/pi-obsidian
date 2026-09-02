@@ -40,16 +40,45 @@ function host(overrides: Partial<SettingsPanelHost> = {}): SettingsPanelHost {
 }
 
 describe("modelsDefinitions", () => {
-	it("exposes provider and model collections as searchable lists", () => {
+	it("exposes provider and model collections as mutable lists", () => {
 		const settings = host().settings;
 		settings.providers.push({ id: "p", name: "Provider", baseUrl: "https://example.test", protocol: "openai-completions", apiKey: "", secretRef: "", source: "user" });
 		settings.models.push({ id: "m", providerId: "p", modelApiId: "model", displayName: "Model", reasoning: false, supportsImages: false });
 		const defs = modelsDefinitions(host({ settings }));
-		const lists = defs.filter((def) => (def as { type?: string }).type === "list") as Array<{ heading?: string; items?: unknown[]; search?: unknown }>;
+		const lists = defs.filter((def) => (def as { type?: string }).type === "list") as Array<{
+			heading?: string;
+			items?: Array<{ name?: string }>;
+			search?: unknown;
+		}>;
 
 		expect(lists.map((list) => list.heading)).toEqual([en.t("settings.providersHeading"), en.t("settings.modelsHeading")]);
-		expect(lists[1]?.items).toHaveLength(1);
-		expect(lists[1]?.search).toBeDefined();
+		// Matched by name rather than counted: each list also carries its section
+		// note, and a count would break on copy rather than on a missing row.
+		expect(lists[1]?.items?.map((item) => item.name)).toContain("Model");
+		// One model is below the threshold, so no search input: a box over a single
+		// row costs more attention than it saves.
+		expect(lists[1]?.search).toBeUndefined();
+	});
+
+	it("offers the list's own search once the models outgrow a glance", () => {
+		const settings = host().settings;
+		settings.providers.push({ id: "p", name: "Provider", baseUrl: "https://example.test", protocol: "openai-completions", apiKey: "", secretRef: "", source: "user" });
+		for (let i = 0; i < 8; i++) {
+			settings.models.push({ id: `m${i}`, providerId: "p", modelApiId: `model-${i}`, displayName: `Model ${i}`, reasoning: false, supportsImages: false });
+		}
+		const models = modelsDefinitions(host({ settings })).find((def) => (def as { heading?: string }).heading === en.t("settings.modelsHeading")) as {
+			search?: { match(definition: { name: string; desc?: string }, query: string): boolean };
+		};
+
+		// The framework owns the query and reapplies it after each render, which is
+		// what replaced writing it into a DOM attribute and reading it back before a
+		// rebuild.
+		expect(models.search).toBeDefined();
+		expect(models.search?.match({ name: "Model 3", desc: "openai · Provider" }, "MODEL 3")).toBe(true);
+		// Matched against the description too, so a reader can filter by the provider
+		// a model rides on rather than only by its name.
+		expect(models.search?.match({ name: "Model 3", desc: "openai · Provider" }, "provider")).toBe(true);
+		expect(models.search?.match({ name: "Model 3", desc: "openai · Provider" }, "anthropic")).toBe(false);
 	});
 
 	it("does not probe live target state while definitions are indexed", () => {

@@ -25,6 +25,14 @@ import { ProviderModal } from "./ProviderModal";
 import { createEffectLine } from "./effectLine";
 import { describeMissingBuiltinModel, describeModelRow, describeProviderRow } from "./modelsCopy";
 import { rowAction, type SettingsPanelHost } from "./panelHost";
+import { sectionNote } from "./sectionNote";
+
+/**
+ * Model count from which the list's search input earns its place. Below it,
+ * scanning a handful of rows beats typing; past it the list outgrows one glance
+ * and search starts saving time instead of costing it.
+ */
+const MODEL_SEARCH_MIN_ROWS = 8;
 
 /**
  * The Models tab as definitions.
@@ -49,6 +57,7 @@ export function modelsDefinitions(host: SettingsPanelHost): SettingDefinitionIte
 			type: "group",
 			heading: t.t("settings.networkHeading"),
 			items: [
+				sectionNote(t.t("settings.networkHeadingDesc")),
 				{
 					name: t.t("settings.networkTransport"),
 					desc: t.t("settings.networkTransportDesc"),
@@ -139,12 +148,16 @@ function providersList(host: SettingsPanelHost): SettingDefinitionItem {
 	return {
 		type: "list",
 		heading: t.t("settings.providersHeading"),
-		emptyState: t.t("settings.noProviders"),
 		addItem: {
 			name: t.t("settings.addProvider"),
 			action: () => openProviderModal(host),
 		},
-		items: settings.providers.map((provider) => providerDefinition(host, provider)),
+		// No `emptyState`: a list holding the section note is never empty, so the
+		// framework would never draw it. The note carries the empty sentence instead.
+		items: [
+			sectionNote(t.t("settings.providersDesc"), settings.providers.length === 0 ? t.t("settings.noProviders") : undefined),
+			...settings.providers.map((provider) => providerDefinition(host, provider)),
+		],
 	};
 }
 
@@ -203,19 +216,33 @@ function modelsList(host: SettingsPanelHost, live: ModelsLiveState): SettingDefi
 	return {
 		type: "list",
 		heading: t.t("settings.modelsHeading"),
-		emptyState: hasProviders ? t.t("settings.noModels") : t.t("settings.modelsDescNoProviders"),
-		search: {
-			placeholder: t.t("settings.modelsFilterPlaceholder"),
-			match: (definition, query) => {
-				const haystack = `${definition.name} ${typeof definition.desc === "string" ? definition.desc : definition.desc?.textContent ?? ""}`.toLowerCase();
-				return haystack.includes(query.trim().toLowerCase());
-			},
-		},
+		// Offered only once the list outgrows a glance. Below the threshold scanning a
+		// handful of rows beats typing, and a search box over four models is a control
+		// that costs more attention than it saves.
+		search:
+			settings.models.length < MODEL_SEARCH_MIN_ROWS
+				? undefined
+				: {
+						placeholder: t.t("settings.modelsFilterPlaceholder"),
+						match: (definition, query) => {
+							const haystack = `${definition.name} ${typeof definition.desc === "string" ? definition.desc : (definition.desc?.textContent ?? "")}`;
+							return haystack.toLowerCase().includes(query.trim().toLowerCase());
+						},
+					},
 		addItem: {
 			name: t.t("settings.addModel"),
 			action: () => openModelModal(host),
 		},
-		items: settings.models.map((model) => modelDefinition(host, model, live)),
+		items: [
+			// Which sentence depends on whether anything can be bound yet: with no
+			// provider there is nothing to bind a model to, and explaining what a model
+			// is would answer a question the reader has not reached.
+			sectionNote(
+				t.t(hasProviders ? "settings.modelsDescWithProviders" : "settings.modelsDescNoProviders"),
+				hasProviders && settings.models.length === 0 ? t.t("settings.noModels") : undefined,
+			),
+			...settings.models.map((model) => modelDefinition(host, model, live)),
+		],
 	};
 }
 

@@ -399,9 +399,7 @@ export const zhCN: DeepPartial<EnCopy> = {
 		modelsCount: "{count} 个模型",
 		// 模型列表上方的筛选行。超过一屏行数才出现——扫几行比打字快，
 		// 控件得先挣到自己的位置。
-		modelsFilterLabel: "筛选",
 		modelsFilterPlaceholder: "输入名称、ID 或提供方以筛选…",
-		modelsFilterEmpty: "没有匹配的模型。",
 		providerMissing: "提供方缺失",
 		activeSuffix: " · 当前",
 		showAgentDetails: "显示代理详情",
