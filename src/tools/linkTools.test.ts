@@ -1,6 +1,7 @@
-import { describe, expect, it } from "bun:test";
+import { afterAll, describe, expect, it } from "bun:test";
 import { installObsidianStub } from "../testUtils/obsidianStub";
-import type { App, CachedMetadata, TFile } from "obsidian";
+import { stubWindowTimers } from "../testUtils/windowStub";
+import type { App, CachedMetadata, EventRef, TFile } from "obsidian";
 
 installObsidianStub();
 
@@ -366,6 +367,102 @@ describe("abort handling", () => {
 		expect(visitedSources).toBe(1);
 	});
 });
+
+describe("metadata wait", () => {
+	// The wait reaches its timer through `window`, so bare `bun test` needs the stub.
+	const restoreTimers = stubWindowTimers();
+
+	afterAll(() => {
+		restoreTimers();
+	});
+
+	it("waits for the index instead of reporting a just-written note uncached", async () => {
+		// The same object backs both getFileCache and the wait's getCache, so
+		// filling it mid-test is the cache landing Obsidian would report.
+		const metadata: Record<string, CachedMetadata> = {};
+		const app = createLinkApp({ paths: ["Note.md"], resolvedLinks: { "Note.md": {} }, metadata });
+		const index = attachIndexEvents(app.metadataCache, metadata);
+
+		const pending = createNoteMetadataTool(app).execute("tool-call", { path: "Note.md" });
+		expect(index.listenerCount("changed")).toBe(1);
+
+		metadata["Note.md"] = {};
+		index.trigger("changed");
+
+		const result = await pending;
+		expect(textOf(result)).not.toContain("has not cached this note yet");
+		expect(result.details).toMatchObject({ indexed: true });
+	});
+
+	it("waits for the note's link row to resolve, not just for the cache", async () => {
+		const metadata: Record<string, CachedMetadata> = {};
+		const app = createLinkApp({ paths: ["Note.md"], resolvedLinks: {}, metadata });
+		const index = attachIndexEvents(app.metadataCache, metadata);
+
+		const pending = createNoteLinksTool(app).execute("tool-call", { path: "Note.md" });
+		expect(index.listenerCount("changed")).toBe(1);
+
+		// The cache lands first; the second pass that fills resolvedLinks has not
+		// run, so the wait must keep holding.
+		metadata["Note.md"] = {};
+		index.trigger("changed");
+		await new Promise((resolve) => setTimeout(resolve, 1));
+		expect(index.listenerCount("changed")).toBe(1);
+
+		(app.metadataCache.resolvedLinks as Record<string, Record<string, number>>)["Note.md"] = {};
+		index.trigger("resolve");
+
+		const result = await pending;
+		expect(textOf(result)).not.toContain("still indexing");
+		expect(textOf(result)).toContain("Outgoing (0):\n(none)");
+		expect(result.details).toMatchObject({ indexed: true });
+	});
+});
+
+/**
+ * Gives the fixture's metadataCache the event surface the real one has —
+ * `getCache`, `on`, `offref`, `trigger` — so a test can land the cache the way
+ * Obsidian does, after the tool is already waiting.
+ */
+function attachIndexEvents(
+	metadataCache: App["metadataCache"],
+	cache: Record<string, CachedMetadata>,
+): { trigger: (name: "changed" | "resolve") => void; listenerCount: (name: "changed" | "resolve") => number } {
+	const target = metadataCache as unknown as Record<string, unknown>;
+	const listeners = new Map<string, Array<() => void>>();
+	const refs = new Map<EventRef, { name: string; callback: () => void }>();
+	target.getCache = (path: string) => cache[path] ?? null;
+	target.on = (name: string, callback: (...args: unknown[]) => unknown) => {
+		const ref = {} as EventRef;
+		const entry = { name, callback: () => void callback() };
+		const bucket = listeners.get(name) ?? [];
+		bucket.push(entry.callback);
+		listeners.set(name, bucket);
+		refs.set(ref, entry);
+		return ref;
+	};
+	target.offref = (ref: EventRef) => {
+		const entry = refs.get(ref);
+		if (!entry) {
+			return;
+		}
+		refs.delete(ref);
+		const bucket = listeners.get(entry.name) ?? [];
+		const position = bucket.indexOf(entry.callback);
+		if (position !== -1) {
+			bucket.splice(position, 1);
+		}
+	};
+	target.trigger = (name: string) => {
+		for (const callback of listeners.get(name) ?? []) {
+			callback();
+		}
+	};
+	return {
+		trigger: (name) => (target.trigger as (name: string) => void)(name),
+		listenerCount: (name) => listeners.get(name)?.length ?? 0,
+	};
+}
 
 interface LinkAppFixture {
 	paths: string[];
