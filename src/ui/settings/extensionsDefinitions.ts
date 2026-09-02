@@ -432,7 +432,14 @@ function mcpList(host: SettingsPanelHost): SettingDefinitionItem {
 			action: () => openMcpModal(host),
 		},
 		items: [
-			sectionNote(t.t("mcp.desc"), states.length === 0 ? t.t("mcp.empty") : undefined),
+			sectionNote(
+				t.t("mcp.desc"),
+				// Only while the transport that causes it is the one selected: on
+				// `fetch` the GET stream is left open and push works, so the line
+				// would be describing a limitation the reader does not have.
+				host.settings.networkTransport === "requestUrl" ? t.t("mcp.bufferedNoPush") : undefined,
+				states.length === 0 ? t.t("mcp.empty") : undefined,
+			),
 			...states.map((state) => mcpRow(host, state)),
 		],
 	};
