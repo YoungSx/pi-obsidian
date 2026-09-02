@@ -6,6 +6,19 @@ interface ObsidianIconProps {
 	className?: string;
 }
 
+/**
+ * A Lucide glyph, painted into a holder the size of the glyph.
+ *
+ * `piem-icon` is on every holder rather than left to the callers, because the
+ * shape it fixes is a property of `setIcon` and not of any one surface. `setIcon`
+ * appends an `<svg>`, which is an inline replaced box: inside a plain `<span>` it
+ * sits on the holder's text baseline and the holder's line box adds the font's
+ * descender below it, so the holder stands ~2px taller than the glyph and the
+ * glyph rides above its own centre. Every row that centres the holder next to a
+ * label — trace pills, the tidy button, the switchers — then draws the glyph
+ * ~2px above the words (#219). One rule in `styles.css` makes the holder a flex
+ * box, which has no line box and therefore no descender to carry.
+ */
 export function ObsidianIcon({ name, className }: ObsidianIconProps): React.JSX.Element {
 	const ref = useRef<HTMLSpanElement | null>(null);
 
@@ -18,7 +31,7 @@ export function ObsidianIcon({ name, className }: ObsidianIconProps): React.JSX.
 		setIcon(element, name);
 	}, [name]);
 
-	return <span ref={ref} className={className} aria-hidden="true" />;
+	return <span ref={ref} className={["piem-icon", className].filter(Boolean).join(" ")} aria-hidden="true" />;
 }
 
 interface IconButtonProps {
