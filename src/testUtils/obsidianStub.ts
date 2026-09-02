@@ -38,119 +38,6 @@ export const addIconMock = mock<(iconId: string, svgContent: string) => void>();
  * exactly what a test should pin. The deprecated `setWarning` is deliberately
  * absent: it is `setDestructive().setCta()` upstream, and nothing here calls it.
  */
-/**
- * Obsidian's dropdown, as a real `<select>` so a screenshot harness shows the
- * actual control styling and a test can read `value`. Options land in DOM
- * order; `onChange` fires only through a real `change` event, matching how a
- * user interacts with the control.
- */
-export class DropdownStub {
-	private readonly el: HTMLSelectElement;
-
-	constructor(parent: HTMLElement) {
-		this.el = parent.ownerDocument.createElement("select");
-		this.el.className = "dropdown";
-		parent.appendChild(this.el);
-	}
-
-	addOption(value: string, label: string): this {
-		const option = this.el.ownerDocument.createElement("option");
-		option.value = value;
-		option.textContent = label;
-		this.el.appendChild(option);
-		return this;
-	}
-
-	setValue(value: string): this {
-		this.el.value = value;
-		return this;
-	}
-
-	get value(): string {
-		return this.el.value;
-	}
-
-	onChange(handler: (value: string) => unknown): this {
-		this.el.addEventListener("change", () => {
-			void handler(this.el.value);
-		});
-		return this;
-	}
-}
-
-/** Obsidian's text input, a real `<input type="text">` wrapper. */
-export class TextStub {
-	private readonly el: HTMLInputElement;
-
-	constructor(parent: HTMLElement) {
-		this.el = parent.ownerDocument.createElement("input");
-		this.el.type = "text";
-		this.el.className = "text-input";
-		parent.appendChild(this.el);
-	}
-
-	setPlaceholder(placeholder: string): this {
-		this.el.placeholder = placeholder;
-		return this;
-	}
-
-	setValue(value: string): this {
-		this.el.value = value;
-		return this;
-	}
-
-	get value(): string {
-		return this.el.value;
-	}
-
-	/** The live element, for callers that need attributes (markers, type). */
-	get inputEl(): HTMLInputElement {
-		return this.el;
-	}
-
-	onChange(handler: (value: string) => unknown): this {
-		this.el.addEventListener("input", () => {
-			void handler(this.el.value);
-		});
-		return this;
-	}
-}
-
-/** Obsidian's toggle, a real `<input type="checkbox">` wrapper. */
-export class ToggleStub {
-	// Obsidian's toggle is a pill-shaped `div.checkbox-container` whose knob is
-	// a pseudo-element, with a real checkbox inside for keyboard and screen
-	// readers — not a bare styled `<input>`, which cannot host the knob.
-	private readonly el: HTMLInputElement;
-	private readonly container: HTMLElement;
-
-	constructor(parent: HTMLElement) {
-		this.container = parent.ownerDocument.createElement("div");
-		this.container.className = "checkbox-container";
-		this.el = parent.ownerDocument.createElement("input");
-		this.el.type = "checkbox";
-		this.container.appendChild(this.el);
-		parent.appendChild(this.container);
-	}
-
-	setValue(value: boolean): this {
-		this.el.checked = value;
-		this.container.classList.toggle("is-enabled", value);
-		return this;
-	}
-
-	get value(): boolean {
-		return this.el.checked;
-	}
-
-	onChange(handler: (value: boolean) => unknown): this {
-		this.el.addEventListener("change", () => {
-			void handler(this.el.checked);
-		});
-		return this;
-	}
-}
-
 export class SettingButtonStub {
 	text: string | undefined;
 	destructive = false;
@@ -302,15 +189,24 @@ export class ExtraButtonStub {
 export class ToggleStub {
 	onChangeHandler: ((value: boolean) => unknown) | undefined;
 	readonly toggleEl: HTMLInputElement;
+	// Obsidian's toggle is a pill-shaped `div.checkbox-container` whose knob is
+	// a pseudo-element, with a real checkbox inside for keyboard and screen
+	// readers — not a bare styled `<input>`, which cannot host the knob. The
+	// wrapper is what the screenshot harness styles, so it ships here.
+	private readonly container: HTMLElement;
 
 	constructor(parent: HTMLElement) {
+		this.container = parent.ownerDocument.createElement("div");
+		this.container.className = "checkbox-container";
 		this.toggleEl = parent.ownerDocument.createElement("input");
 		this.toggleEl.type = "checkbox";
-		parent.appendChild(this.toggleEl);
+		this.container.appendChild(this.toggleEl);
+		parent.appendChild(this.container);
 	}
 
 	setValue(value: boolean): this {
 		this.toggleEl.checked = value;
+		this.container.classList.toggle("is-enabled", value);
 		return this;
 	}
 
@@ -353,6 +249,9 @@ export class DropdownStub {
 
 	constructor(parent: HTMLElement) {
 		this.selectEl = parent.ownerDocument.createElement("select");
+		// Obsidian's own class, so the screenshot harness styles the control like
+		// the host would.
+		this.selectEl.className = "dropdown";
 		parent.appendChild(this.selectEl);
 	}
 
@@ -416,6 +315,8 @@ export class TextStub {
 	constructor(parent: HTMLElement) {
 		this.inputEl = parent.ownerDocument.createElement("input");
 		this.inputEl.type = "text";
+		// Obsidian's own class, same reason as `DropdownStub`'s.
+		this.inputEl.className = "text-input";
 		parent.appendChild(this.inputEl);
 	}
 
@@ -1240,12 +1141,6 @@ const obsidianStub = {
 			return this;
 		}
 
-		/** Promotes the row to a section heading, as Obsidian's `setHeading` does. */
-		setHeading(): this {
-			this.rowEl.addClass("setting-item-heading");
-			return this;
-		}
-
 		addButton(build: (button: SettingButtonStub) => unknown): this {
 			const stub = new SettingButtonStub(this.controlsEl);
 			// Recorded like the other controls: the builder hands the stub away and
@@ -1263,24 +1158,6 @@ const obsidianStub = {
 			// handle back onto what the row actually built.
 			this.extraButtons.push(stub);
 			build(stub);
-			return this;
-		}
-
-		/** A real `<select>`; `onChange` fires through the native change event. */
-		addDropdown(build: (dropdown: DropdownStub) => unknown): this {
-			build(new DropdownStub(this.controlsEl));
-			return this;
-		}
-
-		/** A real `<input type="text">` wrapped like Obsidian's TextComponent. */
-		addText(build: (text: TextStub) => unknown): this {
-			build(new TextStub(this.controlsEl));
-			return this;
-		}
-
-		/** A real `<input type="checkbox">` wrapped like Obsidian's ToggleComponent. */
-		addToggle(build: (toggle: ToggleStub) => unknown): this {
-			build(new ToggleStub(this.controlsEl));
 			return this;
 		}
 
