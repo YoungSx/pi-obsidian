@@ -1,5 +1,8 @@
 <p align="center">
-  <img src="assets/icon.png" width="120" alt="">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="assets/icon.png">
+    <img src="assets/icon-onlight.webp" width="120" alt="">
+  </picture>
 </p>
 
 <h1 align="center">Piem</h1>
@@ -14,7 +17,7 @@
 </p>
 
 <p align="center">
-  <img alt="Version" src="https://img.shields.io/github/manifest-json/v/YoungSx/piem?color=7c3aed&label=version">
+  <img alt="Version" src="https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fraw.githubusercontent.com%2FYoungSx%2Fpiem%2Fmaster%2Fmanifest.json&query=%24.version&label=version&color=7c3aed">
   <img alt="Minimum Obsidian version" src="https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fraw.githubusercontent.com%2FYoungSx%2Fpiem%2Fmaster%2Fmanifest.json&query=%24.minAppVersion&label=Obsidian&prefix=%E2%89%A5&color=7c3aed">
   <img alt="Mobile is first class" src="https://img.shields.io/badge/mobile-first%20class-7c3aed">
   <img alt="License" src="https://img.shields.io/github/license/YoungSx/piem?color=7c3aed">
@@ -78,7 +81,8 @@ dreading, coffee is a fair trade.
 | **Subagents, in parallel** | hand off a self-contained task; isolated transcript, capped at three levels by construction, not by a check — [how they work](docs/tools.md#subagents) |
 | **MCP servers** | remote tools merge into the agent's own tool set, name-spaced so a transcript never lies about where a tool came from — [connect one](docs/extending.md#mcp-servers) |
 | **Skills** | reusable instructions from bundled, from your vault, or from the `~/.pi` folders you already use with pi. Type <kbd>/</kbd> — [write one](docs/extending.md#skills) |
-| **Quick actions** | an empty panel offers first moves shaped by the note you have open; once the model answers, its own follow-ups take their place |
+| **Context that follows you** | the note you have open — path and body — rides along with every turn, and the conversation compacts itself when the window fills |
+| **Actions where you need them** | an empty panel offers first moves shaped by your open note; every reply offers copy, insert at cursor, append to the note, or ask again in place |
 | **Your endpoint, your key** | any OpenAI-compatible or Anthropic-messages base URL, nine providers suggested, capabilities auto-filled — [configure it](docs/settings.md#models) |
 | **Images** | paste or drop them into the composer and they ride along |
 | **English & 简体中文** | follows Obsidian's own language, with an override when you want otherwise |
@@ -110,7 +114,7 @@ commands.
 
 <p align="center">
   <img src="assets/screenshots/mobile-empty.webp" width="290" alt="Piem on a phone, empty panel: three suggested first actions and the composer, with the active note chip above it.">
-  &nbsp;&nbsp;
+  &nbsp;&nbsp;&nbsp;&nbsp;
   <img src="assets/screenshots/mobile-done.webp" width="290" alt="Piem on the same phone after the errand: a checklist of what it created and the backlink it added, with the reply actions below.">
 </p>
 

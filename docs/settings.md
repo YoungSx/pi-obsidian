@@ -36,6 +36,12 @@ substitute. A test that passes over `fetch` while your chats go through
 
 Behavior on top, storage underneath.
 
+Two things happen here without a switch, and both are worth knowing about. The
+note you have open is injected into **every** turn — its path and its body — so
+you never have to say "the note I'm looking at". And when the context window
+fills, the conversation compacts itself; *Tidy up earlier messages* in the
+command palette does the same thing on demand.
+
 - **Show agent details** — token counts, spend, and raw tool arguments in the
   chat panel. Off by default; turn it on when you want to see what the agent
   actually sent.

@@ -102,6 +102,24 @@ about the case `pre-wrap` fails on.
 - Keep the plugin small. Avoid large dependencies. Prefer browser-compatible packages.
 - Generated output should be placed at the plugin root or `dist/` depending on your build setup. Release artifacts must end up at the top level of the plugin folder in the vault (`main.js`, `manifest.json`, `styles.css`).
 
+- **`README.md` is a showcase; `docs/` is the manual.** The README exists to make a
+  new reader want the plugin: one real errand shown start to finish, screenshots,
+  the tip jar high on the page, a five-minute setup, and links out. Reference
+  material lives in `docs/` — `tools`, `extending`, `settings`, `security` — split
+  by what a reader came to find out. When you are tempted to add a paragraph of
+  detail to the README, that paragraph belongs in `docs/`; the README earned its
+  length back once and will lose it again one honest paragraph at a time.
+- **Both languages ship together.** `README.md` / `README.zh-CN.md` and every
+  `docs/<name>.md` / `docs/<name>.zh-CN.md` are a pair. A change to one is not
+  finished until the other matches — the Chinese side is a peer document, not a
+  translation queue. Cross-links between docs use the reader's own language
+  (`tools.zh-CN.md` links to `security.zh-CN.md`), and anchors differ per
+  language, so check both after renaming a heading.
+- **Screenshots are real, and they go stale.** `assets/screenshots/` holds real
+  captures from a real vault, not renders; see its own README for what each one
+  shows and how to retake it. A UI change that makes one of them a lie is not
+  done until the capture is retaken.
+
 ## Manifest rules (`manifest.json`)
 
 - Must include (non-exhaustive):  
@@ -147,7 +165,7 @@ about the case `pre-wrap` fails on.
 - **Release with `npm run release -- patch` (or `minor` / `major` / an explicit `1.2.3`).** It is the whole flow: bump, gates, commit, tag, push. Add `--dry-run` to stop before the commit and see what it would do.
 - The bump is committed to `master` **before** the tag is cut, and the tag points at that commit. This ordering is the point, not an implementation detail: Obsidian's plugin-store bot reads the version out of the *default branch's* `manifest.json` and looks for a release tagged exactly that. The retired tag-only flow stamped the version inside CI's throwaway checkout and never wrote it back, so `master` sat at `0.1.0-alpha.9` while thirty-odd releases shipped past it — every one of them invisible to the store.
 - Tags carry **no leading `v`**; Obsidian matches the manifest's version verbatim. The script writes the tag, so this cannot be got wrong by hand. Legacy `v*` tags stay on GitHub; don't add more.
-- **The version lives in `manifest.json` and nowhere else.** `package.json` and `versions.json` are stamped from it; everything else must read it at runtime — `this.manifest.version` in a `Plugin` subclass, or a constructor argument for a module that is not one (see `McpManager`'s `pluginVersion`). `npm run check:version` fails the build on a hardcoded version anywhere under `src/` or in either README, and runs in both CI workflows.
+- **The version lives in `manifest.json` and nowhere else.** `package.json` and `versions.json` are stamped from it; everything else must read it at runtime — `this.manifest.version` in a `Plugin` subclass, or a constructor argument for a module that is not one (see `McpManager`'s `pluginVersion`). `npm run check:version` fails the build on a hardcoded version anywhere under `src/`, in any markdown at the repo root, or anywhere under `docs/` — it enumerates the *roots* prose lives in rather than a list of files, so splitting a doc out never smuggles a version literal past it. `worklogs/` is deliberately out of scope: an entry there records what a release looked like the day it was written. Runs in both CI workflows.
 - Why that gate exists: `src/mcp/mcpManager.ts` reported `{ name: "piem", version: "1.0.0" }` to every MCP server for two releases after 1.0.0, and both READMEs called a shipped 1.0.x plugin "early alpha (`0.1.0-alpha.x`)". Neither could fail any other gate, because nothing reads those strings back. The old `scripts/stamp-version.mjs` stamped a hardcoded list of three files, so a version in a fourth place was invisible to it by construction — which is why the gate enumerates where the version *may* live rather than where it must be written.
 
 ## Agent capability

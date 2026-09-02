@@ -11,6 +11,8 @@ a settings tab.
 Sent to the model provider you configured:
 
 - your prompts and the conversation history;
+- **the note you have open** — path and full body — on every single turn, whether
+  or not your question is about it;
 - vault content returned by tools — note bodies, search results, file listings,
   frontmatter;
 - tool results, including anything `web_fetch` brought back;

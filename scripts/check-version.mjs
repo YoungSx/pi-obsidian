@@ -51,9 +51,23 @@ import ts from "typescript";
 /** Where the version legitimately lives. Everything else is a copy. */
 const VERSION_HOMES = ["manifest.json", "package.json", "versions.json"];
 
-/** Source tree scanned for version literals, and the docs scanned for stale prose. */
+/** Source tree scanned for version literals. */
 const SOURCE_ROOT = process.argv[2] ?? "src";
-const DOC_FILES = ["README.md", "README.zh-CN.md"];
+
+/**
+ * Where reader-facing prose lives: the repo root, and `docs/` recursively.
+ *
+ * Roots, not a file list. `DOC_FILES` used to name the two READMEs by hand, and
+ * the day the README split its reference material into `docs/`, four new prose
+ * files became invisible to this gate by construction — the identical failure
+ * `stamp-version.mjs` had with its list of three. The root is deliberately
+ * non-recursive so `worklogs/` stays out: an entry there describes what a
+ * release looked like on the day it was written, and rewriting it on the next
+ * release would destroy the record. If a CHANGELOG is ever added, naming the
+ * current version is the whole point of its top entry, so it needs an exemption
+ * here rather than a rewrite of its heading.
+ */
+const DOC_ROOTS = [".", "docs"];
 
 /**
  * A SemVer-shaped string, anchored so it is the whole literal.
@@ -85,6 +99,33 @@ function collectSources(root) {
 	};
 	walk(root);
 	return found;
+}
+
+/** Every markdown doc under `DOC_ROOTS`; the root itself is not recursed. */
+function collectDocs() {
+	const found = new Set();
+	const walk = (dir, recurse) => {
+		let entries;
+		try {
+			entries = readdirSync(dir);
+		} catch {
+			return;
+		}
+		for (const entry of entries) {
+			const path = dir === "." ? entry : join(dir, entry);
+			if (statSync(path).isDirectory()) {
+				if (recurse) {
+					walk(path, true);
+				}
+			} else if (path.endsWith(".md")) {
+				found.add(path);
+			}
+		}
+	};
+	for (const root of DOC_ROOTS) {
+		walk(root, root !== ".");
+	}
+	return [...found].sort();
 }
 
 /**
@@ -145,6 +186,7 @@ const version = currentVersion();
 const failures = [];
 
 const sources = collectSources(SOURCE_ROOT).filter((file) => !isExemptSource(file));
+const docs = collectDocs();
 
 for (const file of sources) {
 	for (const literal of versionLiteralsIn(file)) {
@@ -171,7 +213,7 @@ for (const file of sources) {
 // fine (AGENTS.md does it deliberately), but writing the *current* one means a
 // sentence that silently becomes false on the next release. Both READMEs said
 // "early alpha (0.1.0-alpha.x)" through the whole 1.0.x line.
-for (const doc of DOC_FILES) {
+for (const doc of docs) {
 	let text;
 	try {
 		text = readFileSync(doc, "utf8");
@@ -203,5 +245,5 @@ if (failures.length > 0) {
 }
 
 console.log(
-	`check-version: ${version} lives only in ${VERSION_HOMES.join(", ")} (${sources.length} sources and ${DOC_FILES.length} docs clean)`,
+	`check-version: ${version} lives only in ${VERSION_HOMES.join(", ")} (${sources.length} sources and ${docs.length} docs clean)`,
 );

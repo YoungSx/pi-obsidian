@@ -1,7 +1,7 @@
 import { describe, expect, it } from "bun:test";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 
 /**
  * Tests for the version-drift gate.
@@ -35,7 +35,9 @@ interface GateResult {
 /**
  * Runs the gate over a synthetic tree.
  *
- * `sources` are written under `src/`, `docs` at the root beside the manifest.
+ * `sources` are written under `src/`; `docs` keys are paths relative to the
+ * scratch root, so `"docs/tools.md"` lands in a subdirectory the gate has to
+ * discover rather than one it was handed.
  * The subprocess's cwd is the scratch dir so `manifest.json` and the README
  * paths resolve there, while `node_modules` still resolves up to the repo for
  * the TypeScript parser.
@@ -58,7 +60,9 @@ async function runGate(files: {
 			writeFileSync(join(sourceRoot, name), contents);
 		}
 		for (const [name, contents] of Object.entries(files.docs ?? {})) {
-			writeFileSync(join(dir, name), contents);
+			const target = join(dir, name);
+			mkdirSync(dirname(target), { recursive: true });
+			writeFileSync(target, contents);
 		}
 
 		const proc = Bun.spawn(["node", SCRIPT, sourceRoot], {
@@ -117,6 +121,18 @@ describe("check-version", () => {
 		expect(result.output).toContain("README.md:3");
 	});
 
+	it("finds a doc the gate was never told about", async () => {
+		// The README's reference material moved into docs/ in the same change
+		// that made this scan enumerate roots instead of files. Under the old
+		// hardcoded pair, a version literal here was invisible by construction —
+		// which is the failure mode that killed stamp-version.mjs.
+		const result = await runGate({
+			docs: { "docs/tools.md": `# Tools\n\nAs of ${SCRATCH_VERSION}, the agent has these.\n` },
+		});
+		expect(result.exitCode).toBe(1);
+		expect(result.output).toContain("docs/tools.md:3");
+	});
+
 	it("passes a clean tree and says where the version is allowed to live", async () => {
 		const result = await runGate({
 			sources: { "main.ts": `export const version = () => plugin.manifest.version;\n` },
@@ -167,6 +183,16 @@ describe("check-version", () => {
 			// about the gate's limit rather than pretending to a proof.
 			const result = await runGate({
 				sources: { "compose.ts": `export const v = (minor: string) => "3." + minor + ".5";\n` },
+			});
+			expect(result.exitCode).toBe(0);
+		});
+
+		it("leaves the worklogs archive alone", async () => {
+			// A worklog describes what a release looked like on the day it was
+			// written. Rewriting it on the next release would destroy the record,
+			// so the root scan is non-recursive and the folder stays out.
+			const result = await runGate({
+				docs: { "worklogs/2026-01-shipping.md": `Shipped ${SCRATCH_VERSION} today.\n` },
 			});
 			expect(result.exitCode).toBe(0);
 		});
