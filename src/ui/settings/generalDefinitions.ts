@@ -3,7 +3,7 @@ import { LANGUAGES, getT } from "../../i18n";
 import { LOG_LEVEL_SETTINGS } from "../../logging/logLevel";
 import { aboutLinks, describeVersion } from "./aboutCopy";
 import { describeSecretPortability, describeSecretStorage } from "./secretStorageCopy";
-import type { SettingsPanelHost } from "./SettingsPanel";
+import type { SettingsPanelHost } from "./panelHost";
 
 /**
  * The General tab as declarative definitions.

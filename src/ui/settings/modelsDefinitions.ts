@@ -1,5 +1,9 @@
 import { type SettingDefinitionItem, type SettingDefinitionRender, type SettingGroupItem } from "obsidian";
-import { createFetchForTransport } from "../../net/obsidianFetch";
+import { createFetchForTransport, type NetworkTransport } from "../../net/obsidianFetch";
+import { createObsidianModels } from "../../net/streamFn";
+import { ModelListingCache } from "../../net/modelListingCache";
+import { testModelConnection, testProviderConnection } from "../../connectionTest";
+import type { ConnectionTestResult } from "../../connectionTest";
 import { fetchModelsDevIndex } from "../../net/modelsDev";
 import {
 	describeModelConfig,
@@ -18,15 +22,9 @@ import {
 import { openConfirmDelete } from "./confirmDelete";
 import { ModelModal } from "./ModelModal";
 import { ProviderModal } from "./ProviderModal";
-import {
-	describeModelRow,
-	describeProviderRow,
-	listingCacheFor,
-	rowAction,
-	testDraftModel,
-	testDraftProvider,
-	type SettingsPanelHost,
-} from "./SettingsPanel";
+import { createEffectLine } from "./effectLine";
+import { describeMissingBuiltinModel, describeModelRow, describeProviderRow } from "./modelsCopy";
+import { rowAction, type SettingsPanelHost } from "./panelHost";
 
 /**
  * The Models tab as definitions.
@@ -44,7 +42,6 @@ export function modelsDefinitions(host: SettingsPanelHost): SettingDefinitionIte
 	const live = new ModelsLiveState(host);
 	return [
 		statusLine(host, live),
-		missingBuiltinNotice(host),
 		providersList(host),
 		modelsList(host, live),
 		activeModelControl(host, live),
@@ -70,16 +67,38 @@ export function modelsDefinitions(host: SettingsPanelHost): SettingDefinitionIte
 	];
 }
 
+/**
+ * Where a prompt is actually going, and why it may not be what was configured.
+ *
+ * The panel's answer to "which model replied", which the old layout could only
+ * convey by which controls looked enabled. The substitution warning hangs off the
+ * same row rather than sitting above the section as its own paragraph: it is
+ * about this sentence — a vault configured against a builtin this build no longer
+ * carries is silently answered by a different one, and the two facts are
+ * unreadable apart.
+ *
+ * Both parts are set in `render` because both read live model state, and
+ * `getSettingDefinitions()` runs once at registration purely to index. Probing
+ * the selected model for a search that never opens this page would make indexing
+ * cost a model resolution.
+ */
 function statusLine(host: SettingsPanelHost, live: ModelsLiveState): SettingDefinitionItem {
 	return {
 		name: host.t.t("settings.statusActiveModel"),
 		searchable: false,
-		// Resolving the target can read live model state, so it belongs behind
-		// render: definitions are built at registration for search indexing, and
-		// indexing must not probe a page the reader never opened.
 		render: (setting) => {
 			live.statusEl = setting.descEl;
 			live.refreshStatus();
+			const missing = host.missingBuiltinModel();
+			if (missing) {
+				// The effect-line slot every other consequence in this panel uses, so
+				// the substitution reads as a consequence of the row above it rather
+				// than as a plugin fault. Warn rather than error: nothing is broken,
+				// something was answered by a stand-in.
+				const notice = createEffectLine(setting.descEl);
+				notice.setText(describeMissingBuiltinModel(missing, host.describeTarget(), host.t));
+				notice.addClass("piem-settings-effect--warn");
+			}
 			return () => {
 				if (live.statusEl === setting.descEl) live.statusEl = undefined;
 			};
@@ -115,22 +134,11 @@ class ModelsLiveState {
 	}
 }
 
-function missingBuiltinNotice(host: SettingsPanelHost): SettingDefinitionItem {
-	const missing = host.missingBuiltinModel();
-	return {
-		name: missing ? host.t.t("settings.missingBuiltinModel") : "",
-		desc: missing ? host.describeTarget() : undefined,
-		visible: () => missing !== undefined,
-		searchable: false,
-	};
-}
-
 function providersList(host: SettingsPanelHost): SettingDefinitionItem {
 	const { settings, t } = host;
 	return {
 		type: "list",
 		heading: t.t("settings.providersHeading"),
-		cls: "piem-settings-providers",
 		emptyState: t.t("settings.noProviders"),
 		addItem: {
 			name: t.t("settings.addProvider"),
@@ -195,7 +203,6 @@ function modelsList(host: SettingsPanelHost, live: ModelsLiveState): SettingDefi
 	return {
 		type: "list",
 		heading: t.t("settings.modelsHeading"),
-		cls: "piem-settings-models",
 		emptyState: hasProviders ? t.t("settings.noModels") : t.t("settings.modelsDescNoProviders"),
 		search: {
 			placeholder: t.t("settings.modelsFilterPlaceholder"),
@@ -297,4 +304,62 @@ function activeModelControl(host: SettingsPanelHost, live: ModelsLiveState): Set
 			});
 		},
 	};
+}
+
+/**
+ * Model listings collected this session, one cache per transport.
+ *
+ * Module-level rather than owned by a build: the definitions are rebuilt on every
+ * `update()`, so anything a build owns is gone by the next one — and a cache that
+ * emptied whenever the user added a provider would re-probe on the next form,
+ * which is the cost it exists to avoid.
+ *
+ * Keyed by transport rather than rebuilt on change, because the transport is part
+ * of what the answer depended on. A probe that came back empty because `fetch`
+ * was blocked by CORS should not keep a switch to `requestUrl` from trying again,
+ * and both answers stay usable if the user switches back.
+ */
+const listingCaches = new Map<NetworkTransport, ModelListingCache>();
+
+/**
+ * Runs a provider test against the draft rather than the saved row.
+ *
+ * The draft's provider is registered in a throwaway `Models` collection, which
+ * is what lets a user verify an edit before committing it — testing the stored
+ * row would report on configuration they are in the middle of replacing.
+ *
+ * The bundle's `fetch` travels with the probe so the test uses the transport the
+ * user selected. Without it the request would go out on the platform `fetch`,
+ * which is the very thing the requestUrl transport exists to avoid — a test
+ * could then fail on CORS while real turns work, or pass while they do not.
+ */
+async function testDraftProvider(host: SettingsPanelHost, draft: ProviderConfig): Promise<ConnectionTestResult> {
+	const { models, fetch: fetchImpl } = createObsidianModels({
+		transport: host.settings.networkTransport,
+		providers: [draft],
+	});
+	return testProviderConnection(models, draft, host.settings.models, host.t, { fetch: fetchImpl });
+}
+
+/** Same, for a model draft: the provider it names is resolved from saved settings. */
+async function testDraftModel(host: SettingsPanelHost, draft: ModelConfig): Promise<ConnectionTestResult> {
+	const provider = host.settings.providers.find((entry) => entry.id === draft.providerId);
+	if (!provider) {
+		return { ok: false, detail: host.t.t("modelModal.providerMissing") };
+	}
+	const { models, fetch: fetchImpl } = createObsidianModels({
+		transport: host.settings.networkTransport,
+		providers: [provider],
+	});
+	return testModelConnection(models, draft, provider, host.t, { fetch: fetchImpl });
+}
+
+function listingCacheFor(transport: NetworkTransport): ModelListingCache {
+	const existing = listingCaches.get(transport);
+	if (existing) {
+		return existing;
+	}
+	const cache = new ModelListingCache({ fetch: createFetchForTransport(transport) });
+	listingCaches.set(transport, cache);
+	return cache;
 }

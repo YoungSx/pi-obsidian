@@ -2,7 +2,7 @@ import { isLanguageSetting } from "../../i18n";
 import { isLogLevelSetting } from "../../logging/logLevel";
 import { isSendShortcutSetting } from "../keyboard";
 import type { NetworkTransport } from "../../net/obsidianFetch";
-import type { SettingsPanelSettings } from "./SettingsPanel";
+import type { SettingsPanelSettings } from "./panelHost";
 
 /**
  * The settings a declarative `control` may bind to, and how those bindings read

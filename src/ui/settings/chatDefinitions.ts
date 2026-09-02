@@ -11,7 +11,7 @@ import {
 	type CompactionRowCopy,
 } from "./compactionCopy";
 import { createEffectLine } from "./effectLine";
-import type { SettingsPanelHost } from "./SettingsPanel";
+import type { SettingsPanelHost } from "./panelHost";
 import {
 	describeLegacyChats,
 	describeRetention,

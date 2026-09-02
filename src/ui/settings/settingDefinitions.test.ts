@@ -9,7 +9,8 @@ installObsidianDomHelpers();
 installObsidianStub();
 
 const { buildSettingDefinitions } = await import("./settingDefinitions");
-import type { SettingsPanelHost } from "./SettingsPanel";
+import { SettingsPanelState } from "./panelState";
+import type { SettingsPanelHost } from "./panelHost";
 
 const en = getT("en");
 
@@ -80,7 +81,7 @@ function stubHost(overrides: Partial<SettingsPanelHost> = {}): SettingsPanelHost
 
 describe("buildSettingDefinitions", () => {
 	it("exposes every tab as a navigable page, so each enters the settings search", () => {
-		const definitions = buildSettingDefinitions(stubHost());
+		const definitions = buildSettingDefinitions(stubHost(), new SettingsPanelState());
 
 		expect(definitions.map((entry) => (entry as { type?: string }).type)).toEqual(["page", "page", "page", "page"]);
 		expect(definitions.map((entry) => (entry as { name: string }).name)).toEqual([
@@ -93,7 +94,7 @@ describe("buildSettingDefinitions", () => {
 
 	it("names pages in the host's language, so a language change re-labels the navigation", () => {
 		const zh = getT("zh-cn");
-		const definitions = buildSettingDefinitions(stubHost({ t: zh }));
+		const definitions = buildSettingDefinitions(stubHost({ t: zh }), new SettingsPanelState());
 
 		expect((definitions[0] as { name: string }).name).toBe(zh.t("settings.tabModels"));
 		// The guard against a copy regression that would make this test tautological:
@@ -102,34 +103,36 @@ describe("buildSettingDefinitions", () => {
 		expect(zh.t("settings.tabModels")).not.toBe(en.t("settings.tabModels"));
 	});
 
-	it("defers every tab's render to page navigation, so indexing does not read the vault", () => {
+	it("builds without probing live state, so indexing costs nothing", () => {
 		let reads = 0;
 		const host = stubHost({
-			// Called by the Models tab on render and by nothing else, which makes it
-			// the probe for whether building definitions rendered anything.
+			// Resolving the active target reads the selected model; the Models page
+			// defers it into a render callback for exactly this reason.
 			describeTarget: () => {
 				reads++;
 				return "target";
 			},
 		});
 
-		buildSettingDefinitions(host);
+		buildSettingDefinitions(host, new SettingsPanelState());
 
 		expect(reads).toBe(0);
 	});
 
-	it("keeps a page factory only while a tab still needs the imperative bridge", () => {
-		const definitions = buildSettingDefinitions(stubHost());
+	it("declares every page's rows inline, so none is drawn outside the index", () => {
+		const definitions = buildSettingDefinitions(stubHost(), new SettingsPanelState());
 
-		// Models and Chat have moved to inline definitions; Extensions still owns
-		// asynchronous skill/MCP lifecycle work through the bridge.
-		expect((definitions[0] as { items?: unknown[] }).items).toBeArray();
-		expect((definitions[1] as { items?: unknown[] }).items).toBeArray();
-		expect(typeof (definitions[2] as { page?: unknown }).page).toBe("function");
+		// A page carrying a `page` factory instead of `items` renders imperatively,
+		// which is exactly the state this migration removed: its rows would be on
+		// screen but absent from search. No page may have one.
+		for (const page of definitions) {
+			expect((page as { items?: unknown[] }).items).toBeArray();
+			expect((page as { page?: unknown }).page).toBeUndefined();
+		}
 	});
 
 	it("puts the Chat tab's ordinary toggle in a real control definition", () => {
-		const definitions = buildSettingDefinitions(stubHost());
+		const definitions = buildSettingDefinitions(stubHost(), new SettingsPanelState());
 		const chat = definitions[1] as { items: Array<{ name?: string; control?: { type?: string; key?: string } }> };
 		const details = chat.items.find((item) => item.name === en.t("settings.showAgentDetails"));
 

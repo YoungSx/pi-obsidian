@@ -9,7 +9,7 @@ installObsidianDomHelpers();
 installObsidianStub();
 
 const { generalDefinitions } = await import("./generalDefinitions");
-import type { SettingsPanelHost } from "./SettingsPanel";
+import type { SettingsPanelHost } from "./panelHost";
 
 const en = getT("en");
 

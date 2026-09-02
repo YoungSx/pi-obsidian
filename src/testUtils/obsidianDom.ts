@@ -1,11 +1,11 @@
 /**
  * Obsidian's DOM convenience helpers, for tests that render settings UI.
  *
- * Obsidian patches `createEl`, `createDiv`, `createSpan`, `setText`, and
- * `toggleClass` onto `HTMLElement.prototype` at runtime, and the settings panel
- * calls them directly. `installDom` provides the two the chat panel needs
- * (`empty`, `setCssProps`); the rest live here so a test that renders a settings
- * row does not have to reimplement them.
+ * Obsidian patches `createEl`, `createDiv`, `createSpan`, `setText`,
+ * `toggleClass`, `addClass`, and `removeClass` onto `HTMLElement.prototype` at
+ * runtime, and the settings rows call them directly. `installDom` provides the
+ * two the chat panel needs (`empty`, `setCssProps`); the rest live here so a test
+ * that renders a settings row does not have to reimplement them.
  *
  * The prototype is reached through an untyped record rather than a declared
  * interface: `obsidian`'s own declarations already augment `HTMLElement` with
@@ -64,6 +64,17 @@ export function installObsidianDomHelpers(): void {
 	};
 	prototype.toggleClass = function toggleClass(this: HTMLElement, cls: string, value: boolean): void {
 		this.classList.toggle(cls, value);
+	};
+	// Unconditional siblings of `toggleClass`. Present because production reaches
+	// for them where the condition is already decided — a modal that is always a
+	// settings modal, a verdict line that is already known to be a warning — and a
+	// missing one fails as `addClass is not a function` in whichever test first
+	// renders that path, rather than where the gap actually is.
+	prototype.addClass = function addClass(this: HTMLElement, ...classes: string[]): void {
+		this.classList.add(...classes);
+	};
+	prototype.removeClass = function removeClass(this: HTMLElement, ...classes: string[]): void {
+		this.classList.remove(...classes);
 	};
 	prototype.hide = function hide(this: HTMLElement): void {
 		this.style.display = "none";

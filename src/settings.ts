@@ -25,8 +25,9 @@ import {
 	normalizeCustomEndpoint,
 	type CustomEndpointConfig,
 } from "./customEndpoint";
-import type { SettingsPanelHost } from "./ui/settings/SettingsPanel";
+import type { SettingsPanelHost } from "./ui/settings/panelHost";
 import { buildSettingDefinitions } from "./ui/settings/settingDefinitions";
+import { SettingsPanelState } from "./ui/settings/panelState";
 import { isControlKey, readControlValue, writeControlValue } from "./ui/settings/controlKeys";
 import { getT, isLanguageSetting, resolveLanguage, type LanguageHost, type LanguageSetting, type Translator } from "./i18n";
 import { DEFAULT_SEND_SHORTCUT, isSendShortcutSetting, type SendShortcut } from "./ui/keyboard";
@@ -483,6 +484,15 @@ export function modelSupportsImages(model: Model<string>): boolean {
 export class PiemSettingTab extends PluginSettingTab {
 	private readonly plugin: PiemPlugin;
 	private readonly secretEnvironment: SecretEnvironment | null;
+	/**
+	 * What the rows keep between rebuilds.
+	 *
+	 * Owned here rather than by the modules that read it, because the tab is the
+	 * thing whose lifetime it should share: `getSettingDefinitions()` runs again on
+	 * every `update()`, and a slot that outlived the tab would show a previous
+	 * vault's skills to the next one.
+	 */
+	private readonly panelState = new SettingsPanelState();
 
 	constructor(app: App, plugin: PiemPlugin, secretEnvironment?: SecretEnvironment) {
 		super(app, plugin);
@@ -518,7 +528,7 @@ export class PiemSettingTab extends PluginSettingTab {
 	 * a search that never opens the page.
 	 */
 	getSettingDefinitions(): SettingDefinitionItem[] {
-		return buildSettingDefinitions(this.buildHost());
+		return buildSettingDefinitions(this.buildHost(), this.panelState);
 	}
 
 	/**

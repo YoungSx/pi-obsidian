@@ -1,85 +1,77 @@
-import { SettingPage, type SettingDefinitionItem } from "obsidian";
-import { settingsTabs, type SettingsPanelHost } from "./SettingsPanel";
+import type { SettingDefinitionItem } from "obsidian";
 import { chatDefinitions } from "./chatDefinitions";
+import { extensionsDefinitions } from "./extensionsDefinitions";
 import { generalDefinitions } from "./generalDefinitions";
 import { modelsDefinitions } from "./modelsDefinitions";
+import type { SettingsPanelHost } from "./panelHost";
+import { SettingsPanelState } from "./panelState";
 
 /**
- * Bridges the panel's tabs onto Obsidian's declarative settings API.
+ * The settings tab, as declarative definitions.
  *
  * `getSettingDefinitions()` replaced `display()` in 1.13.0, and the reason to
- * adopt it is not the deprecation: definitions are what Obsidian indexes for
- * its settings search, so anything still drawn from `display()` cannot be found
- * by a user typing the name of the setting they want. `display()` is bypassed
- * entirely once this returns a non-empty array, which makes the switch a single
- * step rather than something that can run half-migrated.
+ * adopt it is not the deprecation: definitions are what Obsidian indexes for its
+ * settings search, so anything drawn from `display()` cannot be found by a user
+ * typing the name of the setting they want. `display()` is bypassed entirely once
+ * this returns a non-empty array, which is why the switch is one step rather than
+ * something that can run half-migrated.
  *
- * Each tab becomes a {@link SettingDefinitionPage} with a `page` factory rather
- * than declarative `items`, which is the deliberate first move: the factory
- * hands the tab the one thing it already knows how to use — an empty container
- * — so the rows inside keep rendering exactly as they did, and the change is
- * confined to how a reader navigates between the four groups. The rows
- * themselves are lifted into real definitions afterwards, one section at a
- * time, and each one that moves becomes individually searchable.
+ * Each of the four groups is a {@link SettingDefinitionPage}: a navigable entry
+ * whose rows are declared inline. That replaces the tab strip this plugin drew
+ * for itself before the API existed — the strip existed because the panel had
+ * outgrown one scroll and because one group had to be able to re-render without
+ * destroying the controls in another, and the framework's navigation answers both
+ * without a custom `role="tablist"` to keep accessible.
  *
- * What this step already buys: the four page names enter the search index, the
- * in-panel tab strip is gone in favour of the navigation Obsidian draws for
- * every other plugin, and the deprecated override is off the class.
+ * Rows that need imperative behaviour keep it through `render`, which is what
+ * that field is for: blur-committed text fields that coerce what was typed, the
+ * MCP toggle's optimistic-then-reconciled verdict, the icon actions on a mutable
+ * row. `SettingDefinitionRender` still carries `name`, `desc`, and `aliases`, so
+ * those rows are searchable exactly like the fully declarative ones — the escape
+ * hatch costs nothing in findability.
+ *
+ * Called on every `update()` and once at registration for indexing, so the page
+ * bodies must stay cheap to build: reads that cost something run beside the build
+ * and rebuild when they land, rather than blocking a search that never opens the
+ * page.
  */
 
-/**
- * One tab's content, rendered into the page body Obsidian provides.
- *
- * A `SettingPage` subclass rather than a closure because the framework owns the
- * lifecycle: it constructs the page when the entry is opened and calls
- * {@link display} then, so the render happens on navigation rather than when the
- * definitions are built. That ordering is the point — `getSettingDefinitions()`
- * runs once at registration purely to index, and the tabs behind these pages
- * read the vault and probe the agent, work that must not happen for a search
- * that never opens them.
- */
-class PanelTabPage extends SettingPage {
-	constructor(
-		title: string,
-		private readonly draw: (containerEl: HTMLElement) => void,
-	) {
-		super();
-		this.title = title;
-	}
-
+/** One page's title and the rows behind it. */
+interface PageDefinition {
+	title(host: SettingsPanelHost): string;
 	/**
-	 * Obsidian calls this on every open, including a return to a page already
-	 * visited, so the container is emptied first: the tab renderers append, and
-	 * without the reset a second visit would show every row twice.
+	 * The rows. Takes the tab's state as well as the host so a page whose content
+	 * costs a disk read can hold the last answer across rebuilds; pages that need
+	 * nothing of the sort simply ignore it.
 	 */
-	display(): void {
-		this.containerEl.empty();
-		this.draw(this.containerEl);
-	}
+	items(host: SettingsPanelHost, state: SettingsPanelState): SettingDefinitionItem[];
 }
 
-/**
- * The panel as declarative definitions: one navigable page per tab.
- *
- * Kept a plain function of the host rather than a method on the tab so it can
- * be tested without constructing a `PluginSettingTab`, which is the same reason
- * {@link renderSettingsPanel} lives outside `settings.ts`.
- */
-export function buildSettingDefinitions(host: SettingsPanelHost): SettingDefinitionItem[] {
-	// Tabs whose rows have been lifted into definitions, keyed by tab id. A tab
-	// absent here still renders through its `page` factory, which is what makes
-	// the migration incremental: a section moves when its rows are expressed, and
-	// the ones that have not moved are untouched rather than half-converted.
-	const declarative: Record<string, (host: SettingsPanelHost) => SettingDefinitionItem[]> = {
-		models: modelsDefinitions,
-		chat: chatDefinitions,
-		general: generalDefinitions,
-	};
+const PAGES: readonly PageDefinition[] = [
+	{ title: (host) => host.t.t("settings.tabModels"), items: modelsDefinitions },
+	// Behaviour on top, storage underneath, separated by a section heading: both
+	// halves answer questions about the same thing — the conversation — and two or
+	// three rows cannot carry a page of their own.
+	{ title: (host) => host.t.t("settings.tabChat"), items: chatDefinitions },
+	{ title: (host) => host.t.t("settings.tabExtensions"), items: extensionsDefinitions },
+	// Controls first, prose last: language, shortcuts, logs, then the About
+	// material. Each held one or two rows and no page of their own; a reader
+	// reaching for any of them is doing the same thing — adjusting the plugin
+	// rather than configuring it.
+	{ title: (host) => host.t.t("settings.tabGeneral"), items: generalDefinitions },
+];
 
-	return settingsTabs(host).map((tab) => {
-		const items = declarative[tab.id]?.(host);
-		return items
-			? { type: "page" as const, name: tab.label, items }
-			: { type: "page" as const, name: tab.label, page: () => new PanelTabPage(tab.label, (el) => tab.render(el)) };
-	});
+/**
+ * The panel as definitions: one navigable page per group.
+ *
+ * A plain function of the host rather than a method on the tab, so it can be
+ * tested without constructing a `PluginSettingTab` — the same reason the row
+ * builders live outside `settings.ts`.
+ */
+export function buildSettingDefinitions(host: SettingsPanelHost, state: SettingsPanelState): SettingDefinitionItem[] {
+	return PAGES.map((page) => ({
+		type: "page" as const,
+		name: page.title(host),
+		items: page.items(host, state),
+	}));
 }

@@ -179,8 +179,7 @@
  * outrank it; `.piem-chat__latest` is the one such case.
  */
 button.piem-chat__command-menu-button,
-button.piem-chat__context-open,
-button.piem-settings-tab {
+button.piem-chat__context-open {
 	background: transparent;
 	box-shadow: none;
 }
@@ -2699,114 +2698,12 @@ button.piem-chat__latest {
 /* --- settings panel --- */
 
 /*
- * The panel is Obsidian's own settings surface, so it inherits almost
- * everything from `.setting-item`. What is added here is only what the tab
- * layout needs, plus the two things Obsidian has no idiom for: the active-model
- * status line and the connection-test verdict.
+ * The panel is Obsidian's own settings surface, and since the rows are declared
+ * rather than drawn, it inherits nearly everything from `.setting-item` — the
+ * navigation, the group headings, and the list affordances are all the host's.
+ * What is added here is only what Obsidian has no idiom for: the connection-test
+ * verdict, the folded description, and the modals' own scaffolding.
  */
-
-/*
- * Horizontal strip that scrolls rather than wraps. Four labels fit on a desktop
- * settings dialog, but the same dialog on a phone is far narrower — wrapping
- * would push the content down by a row and leave a ragged two-line strip, while
- * scrolling keeps the content's top edge where the user expects it.
- */
-.piem-settings-tabs {
-	border-bottom: 1px solid var(--background-modifier-border);
-	display: flex;
-	gap: var(--size-4-1);
-	margin-bottom: var(--size-4-4);
-	overflow-x: auto;
-	scrollbar-width: none;
-}
-
-.piem-settings-tabs::-webkit-scrollbar {
-	display: none;
-}
-
-/*
- * Styled as a tab rather than a button: no fill, no border, and the selected
- * one is marked by an underline that sits on the strip's own bottom border.
- * `box-shadow` draws it instead of `border-bottom` so switching tabs cannot
- * shift the label by a pixel.
- */
-.piem-settings-tab {
-	border: none;
-	border-radius: 0;
-	color: var(--text-muted);
-	cursor: pointer;
-	flex-shrink: 0;
-	font-size: var(--font-ui-small);
-	padding: var(--size-4-2) var(--size-4-3);
-	white-space: nowrap;
-}
-
-@media (hover: hover) {
-
-	.piem-settings-tab:hover {
-		background: transparent;
-		box-shadow: none;
-		color: var(--text-normal);
-	}
-}
-
-.piem-settings-tab.is-active {
-	box-shadow: inset 0 -2px 0 0 var(--text-accent);
-	color: var(--text-normal);
-	font-weight: var(--font-semibold);
-}
-
-/*
- * Obsidian draws the focus ring from the element's own box, and a transparent
- * tab has none worth outlining, so the ring is restated here — arrow-key
- * navigation is unusable if focus is invisible.
- */
-.piem-settings-tab:focus-visible {
-	outline: 2px solid var(--background-modifier-border-focus);
-	outline-offset: -2px;
-}
-
-/* The first row inside a tab has the strip above it, so it needs no top rule. */
-.piem-settings-tab-content > .setting-item:first-child {
-	border-top: none;
-	padding-top: 0;
-}
-
-/*
- * "Where is my prompt actually going" — the question the old layout never
- * answered, since the active target could only be inferred from which controls
- * looked enabled.
- */
-.piem-settings-status {
-	align-items: baseline;
-	background: var(--background-secondary);
-	border-radius: var(--radius-s);
-	display: flex;
-	flex-wrap: wrap;
-	gap: var(--size-4-1) var(--size-4-2);
-	margin-bottom: var(--size-4-4);
-	padding: var(--size-4-2) var(--size-4-3);
-}
-
-.piem-settings-status__label {
-	color: var(--text-muted);
-	font-size: var(--font-ui-smaller);
-}
-
-.piem-settings-status__value {
-	font-size: var(--font-ui-small);
-	font-weight: var(--font-semibold);
-	min-width: 0;
-	overflow-wrap: anywhere;
-}
-
-/* Stands in for a list that has no rows yet, and says what to do about it. */
-.piem-settings-empty {
-	color: var(--text-muted);
-	font-size: var(--font-ui-small);
-	margin: 0 0 var(--size-4-4);
-	overflow-wrap: anywhere;
-}
 
 /*
  * Disclosure group for advanced settings.
@@ -2989,58 +2886,15 @@ button.piem-chat__latest {
 /*
  * Notice about chats left in the folder an earlier release used.
  *
- * Rendered as a paragraph after the rows rather than inside one: it belongs to
- * neither setting, it appears only for vaults upgraded across the move, and it
- * disappears for good once those chats are dealt with.
+ * A row rather than a control: it belongs to neither setting above it, it appears
+ * only for vaults upgraded across the move, and it disappears for good once those
+ * chats are dealt with. Muted because it reports rather than asks.
  */
-.piem-settings-legacy {
+.piem-settings-legacy .setting-item-name {
 	color: var(--text-muted);
 	font-size: var(--font-ui-small);
-	margin: var(--size-4-4) 0 0;
+	font-weight: inherit;
 	overflow-wrap: anywhere;
-}
-
-.piem-settings-legacy:empty {
-	display: none;
-}
-
-/*
- * The "folders searched" report in the Skills tab.
- *
- * A sub-heading over a list of plain per-folder facts, plus the framing
- * sentence that makes an absent folder unremarkable. Muted like the
- * legacy-chats note because neither is a control; the label alone carries
- * weight so the rows below read as belonging to it.
- */
-.piem-settings-searched-label {
-	color: var(--text-normal);
-	font-size: var(--font-ui-small);
-	font-weight: var(--font-semibold);
-	margin: var(--size-4-4) 0 0;
-}
-
-.piem-settings-searched-desc {
-	color: var(--text-muted);
-	font-size: var(--font-ui-small);
-	margin: 0 0 var(--size-4-2);
-}
-
-/*
- * Configuration that no longer resolves, named at the top of the Models tab.
- *
- * Plain text in the warning colour, no fill and no rule: it reports a
- * substitution the user should know about, not a failure the panel is in, and a
- * coloured slab above the provider list would claim the latter. The wording
- * carries the state on its own, so colour is never the only signal.
- */
-.piem-settings-warning {
-	color: var(--text-warning);
-	font-size: var(--font-ui-small);
-	margin: 0 0 var(--size-4-4);
-	/* Diagnostics arrive as multi-line strings joined with `\n`; without this they
-	 * collapse into one unreadable run-on sentence. Same reason
-	 * `.piem-chat__banner-text` sets it. */
-	white-space: pre-line;
 }
 
 /*
@@ -3102,15 +2956,6 @@ button.piem-chat__latest {
 	position: sticky;
 	bottom: 0;
 	background: var(--modal-background);
-}
-
-/*
- * The model filter hides rows with the hidden attribute; the flex display on
- * .setting-item would otherwise override the user-agent default and leave
- * "hidden" rows visible.
- */
-.piem-settings-tab-content .setting-item[hidden] {
-	display: none;
 }
 
 /*
