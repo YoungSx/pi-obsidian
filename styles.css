@@ -80,6 +80,41 @@
 	padding: var(--size-4-2);
 }
 
+/* --- glyphs (src/ui/ObsidianIcon.tsx) --- */
+
+/*
+ * The holder every `setIcon` glyph is painted into.
+ *
+ * A flex box, and the reason is `setIcon` rather than any one surface: what it
+ * appends is an `<svg>`, which is an inline replaced box, so a holder that lays
+ * its children out as text sits the glyph on the holder's own baseline and puts
+ * the font's descender underneath it. The holder then stands 3-5px taller than
+ * the glyph — the strip scales with the row's font size — with the glyph pressed
+ * against its top edge. Every row in this file that pairs a glyph with a label
+ * centres the *holder* (`align-items: center`), which centres that phantom strip
+ * too and leaves the words ~2px below the glyph: measured at 1.5px on the trace
+ * pills and 2px on the tidy button, both reported in #219. A flex container has
+ * no line box, so the holder becomes exactly the glyph and `center` has nothing
+ * left to get wrong.
+ *
+ * `inline-flex` rather than `flex`, because a holder also lands in running text,
+ * where the surrounding line expects an inline-level box. As a flex item it is
+ * blockified to `flex` regardless, so no row here can tell the two apart.
+ *
+ * `.piem-chat__spinner` carried these two declarations by itself — it needed a
+ * real box to rotate about its centre — which is the same fix arrived at one
+ * surface at a time; it now inherits them from here.
+ *
+ * Size stays with the callers' own classes (`--icon-size`): how large a glyph
+ * should be depends on what it sits beside, and only the box's shape is
+ * universal. A holder that needs to align to the top of a paragraph rather than
+ * to a label's centre still says so itself — see `.piem-chat__banner-icon`.
+ */
+.piem-icon {
+	align-items: center;
+	display: inline-flex;
+}
+
 /* --- header --- */
 
 /*
@@ -137,6 +172,15 @@
 	align-items: center;
 	border-radius: var(--radius-s);
 	display: inline-flex;
+	/*
+	 * For the labelled members of the family, and inert for the rest: a button
+	 * whose only child is the glyph has nothing to space. Stated here because the
+	 * alternative was proven not to work — three switchers declared this same
+	 * `4-1` for themselves while the tidy row (#219) and the inspector's back
+	 * button did not, and a glyph set flush against its label in the same colour
+	 * reads as one smudged shape.
+	 */
+	gap: var(--size-4-1);
 	justify-content: center;
 	min-height: var(--size-4-8);
 	min-width: var(--size-4-8);
@@ -1597,9 +1641,6 @@ button.piem-chat__latest {
 	 * text, the same context the chips' 14px glyph serves, and the 18px button
 	 * default outweighed the words it was spinning for. */
 	--icon-size: var(--icon-xs);
-	align-items: center;
-	display: inline-flex;
-	justify-content: center;
 }
 
 .piem-chat__spinner,
@@ -2143,7 +2184,6 @@ button.piem-chat__latest {
 	--icon-color-hover: var(--text-normal);
 	color: var(--text-muted);
 	font-size: var(--font-ui-smaller);
-	gap: var(--size-4-1);
 	/* Overrides the shared icon-button floor: a flex item at `min-width: auto`
 	 * cannot shrink below its content, which would let a long model name push
 	 * Send off the end of a 300px sidebar instead of ellipsizing. */
@@ -2204,7 +2244,6 @@ button.piem-chat__latest {
 	color: var(--text-muted);
 	flex-shrink: 0;
 	font-size: var(--font-ui-smaller);
-	gap: var(--size-4-1);
 	padding-inline: var(--size-4-1);
 	width: auto;
 }
@@ -2246,7 +2285,6 @@ button.piem-chat__latest {
 	color: var(--text-muted);
 	flex-shrink: 0;
 	font-size: var(--font-ui-smaller);
-	gap: var(--size-4-1);
 	padding-inline: var(--size-4-1);
 	width: auto;
 }
