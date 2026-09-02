@@ -973,10 +973,10 @@ export class ObsidianAgentService {
 			if (stranded.length === 0) {
 				await agent.prompt([message]);
 			} else {
-				// Queued messages a run never injected — most often because
-				// `shouldStopAfterTurn` ended it before the next drain point —
-				// must not wait behind this one: the user typed the correction
-				// first. Order of arrival is the order of dispatch.
+				// Queued messages a run never injected — a run that died before
+				// its next drain point, most often on a provider error mid-
+				// request — must not wait behind this one: the user typed the
+				// correction first. Order of arrival is the order of dispatch.
 				agent.clearAllQueues();
 				await agent.prompt(dispatch);
 			}
@@ -1027,8 +1027,8 @@ export class ObsidianAgentService {
 	/**
 	 * Dispatches messages the finished run never injected.
 	 *
-	 * Two windows strand a steer: `shouldStopAfterTurn` returns the loop before
-	 * its end-of-turn drain point, and the last drain point itself races a
+	 * Two windows strand a steer: a run that dies on a provider error never
+	 * reaches its next drain point, and the last drain point itself races a
 	 * steer typed during the final reply. Either way the mirror outlives the
 	 * run while the words sit unseen by the model — waiting for a next send
 	 * that may never come. When the run ended on its own, dispatching them is
@@ -2587,11 +2587,6 @@ export class ObsidianAgentService {
 			steeringMode: "all",
 			followUpMode: "all",
 			toolExecution: "sequential",
-			// Pi normally feeds a failed tool result back to the model and starts
-			// another turn. A model that keeps retrying the same invalid call can
-			// therefore leave the panel responding forever. Let Pi finish the
-			// current turn normally, then end the run before another request starts.
-			shouldStopAfterTurn: ({ toolResults }) => toolResults.some((result) => result.isError),
 		});
 		this.agent = agent;
 		this.unsubscribeAgent = agent.subscribe((event) => this.handleAgentEvent(event));
@@ -2781,8 +2776,8 @@ export class ObsidianAgentService {
 			// Outside the persist guard on purpose: the resume has its own
 			// error path, and a dispatch failure must not surface disguised as
 			// a persist failure. A run that ended on its own may leave steers
-			// pi never injected — `shouldStopAfterTurn` returns the loop before
-			// its drain point, and the final drain point races a steer typed
+			// pi never injected — a run that died mid-request never reaches its
+			// next drain point, and the final drain point races a steer typed
 			// during the last reply. Dispatching them here is what the user
 			// asked for when they typed. Runs the user aborted are excluded
 			// inside the resume itself, and `abort()` also empties the mirror

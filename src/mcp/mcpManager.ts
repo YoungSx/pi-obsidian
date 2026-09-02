@@ -425,8 +425,9 @@ export class McpManager {
 				);
 				throwIfAborted(signal);
 				// MCP reports tool-level failure as a result, but pi's contract is
-				// throw-on-failure — throwing also engages shouldStopAfterTurn, the
-				// same path web_fetch's failures take.
+				// throw-on-failure — the agent turns the throw into an error tool
+				// result the next request can see, the same path web_fetch's
+				// failures take.
 				if (result.isError === true) {
 					const firstText = (result.content as ContentBlock[] | undefined)?.find(
 						(block): block is { type: "text"; text: string } => block.type === "text",
