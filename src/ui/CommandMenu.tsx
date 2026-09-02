@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
+import type { RefObject } from "react";
 import { prepareFuzzySearch, sortSearchResults } from "obsidian";
 import type { SearchResult } from "obsidian";
 import { useT } from "./TranslatorContext";
@@ -40,6 +41,16 @@ interface CommandMenuProps {
 	onSelect: (command: CommandEntry) => void;
 	/** Called when the user dismisses the menu (Escape or blur). */
 	onClose: () => void;
+	/**
+	 * The composer's textarea, which this menu must never render without.
+	 *
+	 * The menu renders nothing while a query matches nothing, so on its own it
+	 * has no element to ask which document its keys arrive on. The textarea is
+	 * always there, always in the same document as the keys the user types, and
+	 * this menu already leans on it for the combobox pattern — so it is the
+	 * anchor for the keydown binding too.
+	 */
+	anchorRef: RefObject<HTMLTextAreaElement | null>;
 }
 
 /**
@@ -64,7 +75,7 @@ interface CommandMenuProps {
  * the user is typing the command — so the ownership boundary is fixed by the
  * pattern, not by preference.
  */
-export function CommandMenu({ commands, query, menuId, onActiveChange, onSelect, onClose }: CommandMenuProps): React.JSX.Element | null {
+export function CommandMenu({ commands, query, menuId, onActiveChange, onSelect, onClose, anchorRef }: CommandMenuProps): React.JSX.Element | null {
 	const t = useT();
 	const matches = useMemo(() => {
 		if (!query) {
@@ -114,15 +125,29 @@ export function CommandMenu({ commands, query, menuId, onActiveChange, onSelect,
 	}, [activeIndex]);
 
 	/*
-	 * The keydown handler reads live state through this ref, so the document
-	 * listener can be bound once (on mount) and never churned on every keystroke.
-	 * A re-binding effect would leave stale listeners on the document across test
+	 * The keydown handler reads live state through this ref, so the listener can
+	 * be bound once per document and never churned on every keystroke. A
+	 * re-binding effect would leave stale listeners on the document across test
 	 * teardowns that do not unmount — and the ref is also the cheaper, correct
 	 * shape: one listener, reading whatever the latest render wrote.
 	 */
 	const stateRef = useRef({ matches, activeIndex, onSelect, onClose });
 	stateRef.current = { matches, activeIndex, onSelect, onClose };
 
+	/*
+	 * Which document the menu listens on: the one the composer's textarea lives
+	 * in, asked per bind rather than read once from the module-global `document`
+	 * — which is always the main window's, leaving a panel dragged into a popout
+	 * window with a menu listening on a document its keys never reach. The
+	 * textarea is the anchor because the menu itself renders nothing on a
+	 * zero-match frame, and that frame still has to keep its Escape branch
+	 * (below) working — a component with no DOM cannot answer the question alone.
+	 *
+	 * Bound once per document: the handler reads live state through `stateRef`,
+	 * so a re-binding effect on every keystroke would only churn listeners
+	 * (and strand stale ones across teardowns that do not unmount). The one
+	 * event that re-binds is the window itself changing — see below.
+	 */
 	useEffect(() => {
 		const handleKeyDown = (event: KeyboardEvent): void => {
 			// An input method mid-composition owns the keyboard: Enter accepts the
@@ -174,13 +199,33 @@ export function CommandMenu({ commands, query, menuId, onActiveChange, onSelect,
 			}
 		};
 
-		// Capture phase on document, ahead of the composer's own send handler, so
-		// Enter here never reaches send. Bound once for the menu's lifetime.
-		document.addEventListener("keydown", handleKeyDown, { capture: true });
+		// Capture phase, ahead of the composer's own send handler, so Enter here
+		// never reaches send.
+		const anchor = anchorRef.current;
+		if (!anchor) {
+			return;
+		}
+		let doc = anchor.ownerDocument;
+		doc.addEventListener("keydown", handleKeyDown, { capture: true });
+		// Dragging the leaf to another window moves the DOM without remounting
+		// React, so the document the keys land on changes underneath this
+		// listener; re-hang on the element's own migration announcement.
+		// Optional call because happy-dom's elements carry no Obsidian
+		// augmentation — under `bun test` there is no announcement, and the
+		// binding simply lives until the effect tears down.
+		const unwatchMigration = anchor.onWindowMigrated?.((win) => {
+			// Removed from the document it was bound to — `doc`, not a fresh read of
+			// `anchor.ownerDocument`, which is the other document by now and would
+			// strand the old listener.
+			doc.removeEventListener("keydown", handleKeyDown, { capture: true });
+			doc = win.document;
+			doc.addEventListener("keydown", handleKeyDown, { capture: true });
+		});
 		return () => {
-			document.removeEventListener("keydown", handleKeyDown, { capture: true });
+			doc.removeEventListener("keydown", handleKeyDown, { capture: true });
+			unwatchMigration?.();
 		};
-	}, []);
+	}, [anchorRef]);
 
 	if (matches.length === 0) {
 		return null;

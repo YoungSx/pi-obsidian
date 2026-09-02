@@ -8,6 +8,7 @@ import { ChatApp } from "./ChatApp";
 import { ChatInputController } from "./ChatInputController";
 import { resolveWorkingNotePath, watchActiveNote } from "./activeNoteWatch";
 import { watchSessionFile } from "./sessionFileWatch";
+import { watchWindowFocus } from "./windowFocusWatch";
 import type { DraftStore } from "../session/DraftStore";
 import { getT } from "../i18n";
 
@@ -82,7 +83,14 @@ export class PiemChatView extends ItemView {
 		// Re-syncing on focus is the cheap net: the user just looked back at the
 		// app, which is exactly when a change made elsewhere becomes relevant, and
 		// the name comparison makes a no-op focus read invisible.
-		this.registerDomEvent(window, "focus", () => void this.service.syncExternalSessionChange());
+		//
+		// The net hangs off the window this view's element belongs to — not the
+		// module-global `window`, which is always the main one and would leave the
+		// net deaf in a popout window, where the panel has its own. The watcher
+		// follows the leaf when Obsidian migrates it between windows; reading the
+		// window once at construction (or off `activeWindow`, which is whichever
+		// window is focused *now*) is what goes stale.
+		this.register(watchWindowFocus(this.contentEl, () => void this.service.syncExternalSessionChange()));
 	}
 
 	getViewType(): string {

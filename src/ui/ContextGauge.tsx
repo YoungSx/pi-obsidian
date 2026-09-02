@@ -2,6 +2,7 @@ import React, { useEffect, useId, useRef, useState } from "react";
 import { formatCost, formatTokens } from "../agent/usage";
 import type { ContextFill, UsageTotals } from "../agent/usage";
 import { IconButton } from "./ObsidianIcon";
+import { usePointerDownOutside } from "./usePointerDownOutside";
 import {
 	contextCacheLine,
 	contextGaugeName,
@@ -133,26 +134,13 @@ export function ContextGauge({
 	/*
 	 * A pressed popover is dismissed by pressing elsewhere.
 	 *
-	 * Blur alone does not cover it. Tapping outside does not reliably move focus
+	 * Blur alone does not cover it: tapping outside does not reliably move focus
 	 * on iOS Safari, which leaves a touch reader with an open panel and nowhere
-	 * obvious to tap — and touch is precisely the input that has no pointer-leave
-	 * to fall back on. Capture phase and `pointerdown` follow `CommandMenu`, so
-	 * the dismissal lands before the press it is reacting to does anything else.
+	 * obvious to tap. The full rule — including the document it has to listen on
+	 * to survive a popout window — lives in `usePointerDownOutside`, shared with
+	 * `SubagentEntryIcon`.
 	 */
-	useEffect(() => {
-		if (openedBy !== "press") {
-			return;
-		}
-		const handlePointerDown = (event: PointerEvent): void => {
-			if (!wrapperRef.current?.contains(event.target as Node | null)) {
-				closeNow();
-			}
-		};
-		document.addEventListener("pointerdown", handlePointerDown, { capture: true });
-		return () => {
-			document.removeEventListener("pointerdown", handlePointerDown, { capture: true });
-		};
-	}, [openedBy]);
+	usePointerDownOutside(wrapperRef, openedBy === "press", closeNow);
 
 	/*
 	 * Hover, for pointers that actually have one.

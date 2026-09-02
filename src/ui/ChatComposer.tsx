@@ -440,6 +440,7 @@ export function ChatComposer({
 						commands={commands}
 						query={commandQuery ?? ""}
 						menuId={menuId}
+						anchorRef={textareaRef}
 						onActiveChange={setActiveOptionId}
 						onSelect={selectCommand}
 						onClose={() => setMenuOpen(false)}

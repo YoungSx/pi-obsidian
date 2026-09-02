@@ -2,6 +2,7 @@ import React, { useEffect, useId, useRef, useState } from "react";
 import type { SubagentSnapshot } from "../subagent/inspectorModel";
 import { anyRunning } from "../subagent/inspectorModel";
 import { ObsidianIcon } from "./ObsidianIcon";
+import { usePointerDownOutside } from "./usePointerDownOutside";
 import { statusText, timingLine } from "./inspectorCopy";
 import { useT } from "./TranslatorContext";
 
@@ -73,23 +74,11 @@ export function SubagentEntryIcon({ snapshots, onOpen }: SubagentEntryIconProps)
 	 * A focus-opened popover is dismissed by pressing elsewhere.
 	 *
 	 * Blur alone does not cover it: tapping outside does not reliably move focus
-	 * on iOS Safari. Capture phase and `pointerdown` follow `ContextGauge` and
-	 * `CommandMenu`, so the dismissal lands before the press does anything else.
+	 * on iOS Safari. The full rule — including the document it has to listen on
+	 * to survive a popout window — lives in `usePointerDownOutside`, shared with
+	 * `ContextGauge`.
 	 */
-	useEffect(() => {
-		if (openedBy !== "focus") {
-			return;
-		}
-		const handlePointerDown = (event: PointerEvent): void => {
-			if (!wrapperRef.current?.contains(event.target as Node | null)) {
-				closeNow();
-			}
-		};
-		document.addEventListener("pointerdown", handlePointerDown, { capture: true });
-		return () => {
-			document.removeEventListener("pointerdown", handlePointerDown, { capture: true });
-		};
-	}, [openedBy]);
+	usePointerDownOutside(wrapperRef, openedBy === "focus", closeNow);
 
 	/*
 	 * Hover, for pointers that actually have one.
