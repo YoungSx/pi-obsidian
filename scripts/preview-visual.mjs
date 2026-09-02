@@ -65,7 +65,16 @@ const setIconWithIcons = (element, name) => {
 	element.empty();
 	const template = element.ownerDocument.createElement("template");
 	template.innerHTML = svg;
-	element.append(template.content.firstElementChild ?? template.content);
+	const painted = template.content.firstElementChild;
+	// Obsidian's own copy of the Lucide set carries `svg-icon`; the static
+	// download does not (`class="lucide lucide-archive"`). Without the class the
+	// shim's `.svg-icon` sizing rule matches nothing and every glyph paints at
+	// the file's natural 24px, which is 1.5x what the plugin asks for and enough
+	// to make an alignment verdict lie — the harness would report a gap the app
+	// does not have, and miss one it does. Stamped here rather than widened in
+	// CSS, because the class is what the real `setIcon` produces.
+	painted?.classList.add("svg-icon");
+	element.append(painted ?? template.content);
 };
 const { mock } = await import("bun:test");
 mock.module("obsidian", () => ({
@@ -496,6 +505,26 @@ SCENARIOS["chat-editing"] = async () => {
 			}
 			edit.click();
 			await settle(() => document.querySelector(".piem-chat__editing") !== null);
+		},
+	});
+	return { element, cleanup };
+};
+
+/*
+ * The context popover, opened. The gauge's own click path opens it — the state
+ * lives in `ContextGauge`, so pressing the live ring is the only way to reach it
+ * — and the popover is the only surface that renders a labelled icon button next
+ * to three lines of readout, which is what makes it the page where an icon that
+ * sits above its label (#219) is visible at all.
+ */
+SCENARIOS["chat-context-popover"] = async () => {
+	const { element, cleanup } = await mountChat({
+		streamFn: scriptedStreamFn([CHIPS_JSON, "Three notes tagged `reading`, two of them duplicates."]),
+		drive: async (service) => {
+			await service.sendPrompt("Audit my reading list");
+			await settle(() => !service.getSnapshot().isStreaming && document.querySelector(".piem-chat__context-gauge") !== null);
+			document.querySelector(".piem-chat__context-gauge").click();
+			await settle(() => document.querySelector(".piem-chat__context-popover") !== null);
 		},
 	});
 	return { element, cleanup };
