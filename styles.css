@@ -2245,6 +2245,10 @@ button.piem-chat__latest {
 	display: flex;
 	gap: var(--size-4-1);
 	padding-block: var(--size-4-1);
+	/* The pen icon is painted in the same accent as the bar; without this inset
+	 * the two fuse into one blob — every seam inside the row is one `4-1` gap
+	 * except the line-to-icon one, so the marker keeps the same rhythm. */
+	padding-inline-start: var(--size-4-1);
 }
 
 .piem-chat__editing-icon {
