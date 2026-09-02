@@ -63,6 +63,34 @@ describe("normalizeSettings with customEndpoint", () => {
 	});
 });
 
+describe("normalizeSettings narrowing the network transport", () => {
+	it("defaults to the buffered transport when data.json says nothing", () => {
+		// The default is the one that works from every origin without asking an
+		// endpoint's permission, at the cost of streaming. Changing it is a product
+		// decision, so it is pinned here rather than left to be read off a literal.
+		expect(normalizeSettings({}).networkTransport).toBe("requestUrl");
+		expect(DEFAULT_SETTINGS.networkTransport).toBe("requestUrl");
+	});
+
+	it("keeps an explicit fetch selection", () => {
+		expect(normalizeSettings({ networkTransport: "fetch" }).networkTransport).toBe("fetch");
+	});
+
+	it("falls back to the buffered transport for anything the network layer cannot serve", () => {
+		// The narrowing is a two-branch ternary, so every unrecognised value — a
+		// hand-edited data.json, or a transport some future build adds that this
+		// one does not implement — lands on the implementation that always exists
+		// instead of reaching createFetchForTransport as an unknown string.
+		expect(normalizeSettings({ networkTransport: "xhr" as never }).networkTransport).toBe("requestUrl");
+		expect(normalizeSettings({ networkTransport: null as never }).networkTransport).toBe("requestUrl");
+		expect(normalizeSettings({ networkTransport: "" as never }).networkTransport).toBe("requestUrl");
+	});
+
+	it("round-trips, so loading and saving does not drift the selection", () => {
+		expect(normalizeSettings(normalizeSettings({ networkTransport: "fetch" })).networkTransport).toBe("fetch");
+	});
+});
+
 describe("getSelectedModel priority", () => {
 	it("returns the custom endpoint model when base URL and model id are set", () => {
 		const settings = normalizeSettings({

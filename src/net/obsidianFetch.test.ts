@@ -172,6 +172,50 @@ describe("createObsidianRequestUrlFetch", () => {
 		expect((await pending).status).toBe(200);
 	});
 
+	it("makes no part of the response readable until the whole of it has arrived", async () => {
+		// Why this transport cannot stream, expressed as behaviour rather than as
+		// a claim about Obsidian's internals: while the request is in flight there
+		// is no `Response` at all, so pi-ai's SSE parser has nothing to attach to
+		// and the first event of a turn cannot surface before the last one.
+		let settle: ((response: unknown) => void) | undefined;
+		requestUrlMock.mockReturnValue(
+			new Promise((resolve) => {
+				settle = resolve;
+			}),
+		);
+		const obsidianFetch = createObsidianRequestUrlFetch();
+		const pending = obsidianFetch("https://api.example.com/v1/chat", { method: "POST", body: "{}" });
+
+		let body: ReadableStream<Uint8Array> | null | undefined;
+		void pending.then((response) => {
+			body = response.body;
+		});
+		await new Promise((resolve) => setTimeout(resolve, 20));
+		// Not "the body read back empty" — there is no body object in existence to
+		// read from, which is a stronger and more honest statement of the limit.
+		expect(body).toBeUndefined();
+
+		const sse = 'data: {"i":1}\n\ndata: {"i":2}\n\ndata: [DONE]\n\n';
+		settle?.({ status: 200, headers: { "content-type": "text/event-stream" }, arrayBuffer: textToArrayBuffer(sse) });
+		const response = await pending;
+
+		// And then all of it, with no further trip to make: the same fact from the
+		// other side. Deliberately not asserting how many chunks the read takes —
+		// that varies by runtime (bun splits large buffers, undici does not) and
+		// none of those reads waits on a network either way.
+		const reader = response.body!.getReader();
+		let seen = "";
+		for (;;) {
+			const { done, value } = await reader.read();
+			if (done) {
+				break;
+			}
+			seen += new TextDecoder().decode(value);
+		}
+		expect(seen).toBe(sse);
+		expect(requestUrlMock).toHaveBeenCalledTimes(1);
+	});
+
 	// The `Response` constructor is stricter than HTTP, and `requestUrl` hands
 	// back whatever the wire carried. Everything below is a response a real
 	// server can legitimately send that the unguarded constructor refused to
