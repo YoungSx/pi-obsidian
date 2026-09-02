@@ -3,9 +3,9 @@
  * DOM they produce, and writes each scenario as a standalone HTML page that
  * loads the shipped `styles.css` over Obsidian's token values. Sibling of
  * `preview-transcript.mjs` — same output folder, same Chromium — but the markup
- * is not hand-written fixtures: it is what `ChatApp`, `SubagentInspectorApp`
- * and `renderSettingsPanel` actually emit, so a spacing or alignment defect in
- * a component is a defect in the page.
+ * is not hand-written fixtures: it is what `ChatApp` and `SubagentInspectorApp`
+ * actually emit, so a spacing or alignment defect in a component is a defect in
+ * the page.
  *
  * Companion: `measure-visual.mjs` screenshots the pages this writes.
  *
@@ -35,7 +35,7 @@ if (!icons) {
 	throw new Error(`icons.json not found (looked in ${OUT_DIR}, ${OUT_DIR}/polish, ${HERE})`);
 }
 
-for (const required of ["container-type: inline-size", ".piem-chat {", ".setting-item", ".piem-chat__icon-button"]) {
+for (const required of ["container-type: inline-size", ".piem-chat {", ".piem-chat__icon-button"]) {
 	if (!styles.includes(required)) {
 		throw new Error(`styles.css no longer carries ${required}; the page would not render what the plugin ships`);
 	}
@@ -49,9 +49,8 @@ for (const required of ["container-type: inline-size", ".piem-chat {", ".setting
 // so the copy enumerates property names instead.
 const { installObsidianStub, markdownRenderMock, setStubIconPainter } = await import("../src/testUtils/obsidianStub.ts");
 installObsidianStub();
-// Settings row buttons (`addExtraButton`) render through the stub itself, not
-// through the mocked `setIcon` — point the stub's painter at the same registry
-// so pencil/trash glyphs draw for real.
+// The stub's own `setIcon` points at the painter registry — wire it to the
+// icons.json resolver so glyphs draw for real in the serialized pages.
 setStubIconPainter((element, name) => setIconWithIcons(element, name));
 const stubNamespace = await import("obsidian");
 const stubCopy = Object.fromEntries(Object.getOwnPropertyNames(stubNamespace).map((name) => [name, stubNamespace[name]]));
@@ -90,8 +89,8 @@ markdownRenderMock.mockImplementation(async ({ el, markdown }) => {
 
 const { installDom, flushRender } = await import("../src/testUtils/dom.ts");
 const document = installDom();
-// The settings panel uses Obsidian's prototype helpers (`toggleClass`, …) that
-// plain DOM lacks; the settings tests install the same layer.
+// Chat's controller and stub-rendered rows use Obsidian's prototype helpers
+// (`toggleClass`, …) that plain DOM lacks; the tests install the same layer.
 const { installObsidianDomHelpers } = await import("../src/testUtils/obsidianDom.ts");
 installObsidianDomHelpers();
 
@@ -104,8 +103,6 @@ const { ObsidianAgentService } = await import("../src/agent/ObsidianAgentService
 const { ObsidianSessionManager } = await import("../src/session/ObsidianSessionManager.ts");
 const { DEFAULT_SETTINGS } = await import("../src/settings.ts");
 const { SubagentInspectorApp } = await import("../src/ui/SubagentInspector.tsx");
-const { renderSettingsPanel } = await import("../src/ui/settings/SettingsPanel.ts");
-const { getT } = await import("../src/i18n/index.ts");
 const { DEFAULT_SESSION_DIR, getLegacySessionDir } = await import("../src/session/sessionDir.ts");
 const { DEFAULT_SESSION_RETENTION } = await import("../src/session/retention.ts");
 const { createAssistantMessageEventStream } = await import("@earendil-works/pi-ai");
@@ -581,96 +578,6 @@ async function mountInspector(snapshots, selectionRequest) {
 SCENARIOS["subagent-list"] = async () => mountInspector(INSPECTOR_SNAPSHOTS);
 SCENARIOS["subagent-detail"] = async () => mountInspector(INSPECTOR_SNAPSHOTS, { id: "sub-1", token: 1 });
 
-function makeSettingsHost(settings) {
-	const t = getT("en");
-	return {
-		app: makeAppStub(memoryAdapter()),
-		settings,
-		save: async () => {},
-		secretStorage: "delegated",
-		readSecret: () => "",
-		describeTarget: () => "DeepSeek · DeepSeek V4 Pro",
-		t,
-		contextWindow: () => 131_072,
-		countStoredSessions: async () => 12,
-		missingBuiltinModel: () => undefined,
-		activeSessionDir: () => ".obsidian/piem/sessions",
-		openLogView: () => {},
-		countLegacySessions: async () => ({ count: 0, dir: "" }),
-		manifest: { version: "1.0.6" },
-		skills: {
-			list: async () => ({
-				rows: [
-					{
-						name: "weekly-review",
-						description: "Reviews the last 7 days of notes and drafts a summary into Daily/.",
-						path: "Skills/weekly-review/SKILL.md",
-						dirName: "weekly-review",
-						provenance: { source: "github-tree", url: "https://github.com/example/skills/tree/main/weekly-review", ref: "main", commit: "abc1234" },
-					},
-					{
-						name: "reading-list",
-						description: "Keeps Books/*.md tidy: merges duplicates, refreshes frontmatter tags.",
-						path: "Skills/reading-list/SKILL.md",
-						dirName: "reading-list",
-					},
-				],
-			}),
-			fetchSource: async () => {
-				throw new Error("not used in the visual harness");
-			},
-			install: async () => {},
-			update: async () => ({ status: "up-to-date" }),
-			remove: async () => {},
-			refreshAgent: async () => {},
-			lastSkillLoad: () => ({ vault: [], user: { skills: [], diagnostics: [], searched: [] }, templates: [] }),
-			userSkillsAvailable: true,
-		},
-		mcp: {
-			states: () => [
-				{ id: "mcp-honeycomb", name: "honeycomb", url: "https://mcp.example.com/honeycomb", enabled: true, status: "ok", toolCount: 18 },
-				{ id: "mcp-railway", name: "railway", url: "https://mcp.example.com/railway", enabled: true, status: "error", toolCount: 0, error: "connect ECONNREFUSED 127.0.0.1:9090" },
-				{ id: "mcp-notes", name: "notes", url: "https://mcp.example.com/notes", enabled: false, status: "disabled", toolCount: 0 },
-			],
-			test: async () => 3,
-		},
-	};
-}
-
-/**
- * Settings pages. `renderSettingsPanel` opens on the tab its module-level
- * `lastActiveTabId` names, and the strip's buttons re-render in place — so the
- * tab switch is a real click on the real strip.
- */
-async function mountSettings(tabId) {
-	const host = makeSettingsHost(makeSettings());
-	const container = document.createElement("div");
-	container.className = "piem-settings";
-	document.body.appendChild(container);
-	renderSettingsPanel(container, host);
-	await flushRender();
-	const tabButton = container.querySelector(`#piem-settings-tab-${tabId}`);
-	if (!tabButton) {
-		throw new Error(`no tab button #piem-settings-tab-${tabId}`);
-	}
-	tabButton.click();
-	// Async rows (session counts, skill loads) fill in after the click.
-	await settle(() => container.querySelectorAll(".setting-item").length >= 2, 10);
-	return {
-		// The whole wrapper: firstElementChild is only the tab strip, and the
-		// tabpanel — everything under test — would be left out of the page.
-		element: container,
-		cleanup: async () => {
-			container.remove();
-			document.body.replaceChildren();
-		},
-	};
-}
-
-for (const tab of ["models", "chat", "extensions", "general"]) {
-	SCENARIOS[`settings-${tab}`] = () => mountSettings(tab);
-}
-
 /* ------------------------------------------------------------------ page assembly */
 
 /** Minimal markdown face for the stub renderer: the shapes replies actually carry. */
@@ -802,25 +709,11 @@ const TOKENS = `
 	--scrollbar-thumb-bg: #555;
 `;
 
-// Settings rows, buttons, inputs, and toggles get their look from Obsidian's
-// app.css, not the plugin stylesheet — without this the settings pages render
-// as bare HTML. Faithful to the default dark theme, layout values exact so
-// spacing defects in the plugin's own rules still show; colors approximate.
+// Buttons and links get their look from Obsidian's app.css, not the plugin
+// stylesheet — without this the pages' plain buttons render as bare HTML.
+// Faithful to the default dark theme, layout values exact so spacing defects
+// in the plugin's own rules still show; colors approximate.
 const OBSIDIAN_CORE_SHIM = `body { color: var(--text-normal); font-family: var(--font-interface); font-size: var(--font-ui-medium); }
-.setting-item {
-	align-items: center;
-	border-bottom: 1px solid var(--background-modifier-border);
-	display: flex;
-	padding-bottom: 18px;
-	padding-top: 18px;
-}
-.setting-item:last-child { border-bottom: none; }
-.setting-item-info { flex: 1 1 0; margin-right: 16px; min-width: 0; }
-.setting-item-name { color: var(--text-normal); font-size: var(--font-ui-medium); line-height: 24px; }
-.setting-item-description { color: var(--text-muted); font-size: var(--font-ui-small); line-height: 18px; }
-.setting-item-control { align-items: center; display: flex; flex-shrink: 0; gap: var(--size-4-2); }
-.setting-item-heading { border-bottom: none; padding-bottom: 0; padding-top: var(--size-4-6); }
-.setting-item-heading .setting-item-name { font-weight: var(--font-semibold); }
 button {
 	background-color: var(--interactive-normal);
 	border: 0;
@@ -838,66 +731,6 @@ button {
 button:hover { background-color: var(--interactive-hover); }
 button.mod-cta { background-color: var(--interactive-accent); color: var(--text-on-accent); }
 button.mod-destructive { background-color: rgba(var(--background-modifier-error-rgb), 0.15); color: var(--text-error); }
-select.dropdown {
-	appearance: none;
-	background-color: var(--background-secondary);
-	border: 1px solid var(--background-modifier-border);
-	border-radius: var(--radius-s);
-	color: var(--text-normal);
-	cursor: pointer;
-	font-family: var(--font-interface);
-	font-size: var(--font-ui-small);
-	height: 30px;
-	padding: 0 20px 0 8px;
-}
-input.text-input {
-	background-color: var(--background-secondary);
-	border: 1px solid var(--background-modifier-border);
-	border-radius: var(--radius-s);
-	color: var(--text-normal);
-	font-family: var(--font-interface);
-	font-size: var(--font-ui-small);
-	height: 30px;
-	padding: 0 8px;
-}
-input.text-input:focus { border-color: var(--background-modifier-border-focus); outline: none; }
-/* The checkbox inside the pill is visually silent — the pill's pseudo-element
-   knob is the whole affordance, matching app.css. */
-.checkbox-container input[type="checkbox"] {
-	appearance: none;
-	cursor: pointer;
-	height: 100%;
-	inset: 0;
-	margin: 0;
-	opacity: 0;
-	position: absolute;
-	width: 100%;
-}
-.checkbox-container {
-	background-color: var(--background-modifier-border-hover);
-	border-radius: 20px;
-	cursor: pointer;
-	flex-shrink: 0;
-	height: 20px;
-	position: relative;
-	width: 40px;
-}
-.checkbox-container::after {
-	background: #fff;
-	border-radius: 50%;
-	content: "";
-	height: 16px;
-	left: 2px;
-	position: absolute;
-	top: 2px;
-	transition: left 0.1s linear;
-	width: 16px;
-}
-.checkbox-container.is-enabled { background-color: var(--interactive-accent); }
-.checkbox-container.is-enabled::after { left: 22px; }
-.extra-setting-button { align-self: center; color: var(--text-muted); cursor: pointer; display: flex; height: 20px; padding: var(--size-2-1); width: 20px; }
-.extra-setting-button:hover { color: var(--text-normal); }
-.extra-setting-button svg { height: var(--icon-s); width: var(--icon-s); }
 /* Icon buttons ride Obsidian's clickable-icon: transparent until hover, icon
    colored, minimum hit area. Obsidian's app.css fully resets the UA button
    look (appearance/border/padding/shadow); mirror that here — resetting only
@@ -946,24 +779,6 @@ ${panels}
 </body></html>`;
 }
 
-/** Settings pages: one wide leaf, the modal-sized panel. */
-function settingsPage(title, innerHtml) {
-	return `<!doctype html>
-<html><head><meta charset="utf-8"><title>${title}</title><style>
-:root {${TOKENS}}
-body { background: #111; margin: 0; padding: 16px; }
-.harness-leaf { background: var(--background-primary); contain: strict; isolation: isolate; height: 760px; width: 720px; }
-/* Obsidian pads the settings pane on the vertical-tab-content element in
-   app.css; the harness mounts the plugin's tab content directly, so the
-   padding lives here — inside the strict leaf, which clips overflow. */
-.view-content { box-sizing: border-box; height: 100%; width: 100%; overflow-y: auto; padding: var(--size-4-8); }
-${styles}
-${OBSIDIAN_CORE_SHIM}
-</style></head><body>
-<div class="harness-leaf"><div class="view-content">${innerHtml}</div></div>
-</body></html>`;
-}
-
 async function main() {
 	mkdirSync(OUT_DIR, { recursive: true });
 	const CHAT_WIDTHS = [300, 390, 560];
@@ -973,14 +788,14 @@ async function main() {
 			const { element, cleanup } = await build();
 			try {
 				const inner = element.outerHTML;
-				const html = name.startsWith("settings-") ? settingsPage(name, inner) : page(name, inner, CHAT_WIDTHS);
+				const html = page(name, inner, CHAT_WIDTHS);
 				const file = join(OUT_DIR, `${name}.html`);
 				writeFileSync(file, html);
 				manifest.push({
 					name,
 					file,
-					width: name.startsWith("settings-") ? 780 : 3 * 560 + 2 * 20 + 32 + 40,
-					height: name.startsWith("settings-") ? 820 : 700,
+					width: 3 * 560 + 2 * 20 + 32 + 40,
+					height: 700,
 				});
 				console.log(`wrote ${file}`);
 			} finally {
