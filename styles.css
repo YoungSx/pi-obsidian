@@ -4019,57 +4019,60 @@ button.piem-chat__latest {
 }
 
 /*
- * `text-align` again, at a specificity that beats the host.
+ * `app.css` styles every `button:not(.clickable-icon)` as a form control, and
+ * themes pile their own button recipe on top — inline-flex plus a centring
+ * `justify-content` is a common one. Issue #226 is what that does to these
+ * rows: the host won the properties this sheet never restated, and each
+ * option's marker-and-text group floated to the centre of its full-width row,
+ * one staircase step per label length, while the Other row — a <label>, which
+ * button rules never touch — stayed flush left.
  *
- * The shared rule above is (0,1,0) and `app.css` centres button text at
- * `button:not(.clickable-icon)`, which is (0,1,1) — so on the button rows the
- * host won and every label and description rendered centred inside a correctly
- * placed box. The element-qualified selector ties that specificity and wins on
- * source order, the same trick the background reset below uses.
+ * The earlier fix tied the host's specificity at (0,1,1) and won on source
+ * order. That assumption broke: plugin styles are not guaranteed to sort after
+ * every stylesheet that styles a button. So this rule out-ranks instead of
+ * tying — the `.piem-ask` qualifier lifts it to (0,2,1), above
+ * `button:not(.clickable-icon)` and above the (0,1,1) a theme reaches with a
+ * bare class — and it states the whole layout contract, not just the chrome.
+ * Every property the row's design depends on is asserted here, because a
+ * property left to a (0,1,0) rule is a property a button-styling theme can
+ * quietly take.
  *
- * Not detectable from either `getBoundingClientRect()` or `getClientRects()`:
- * the label and description are flex items, so both are blockified and their
- * box and line-box left edges coincide. The centring happens to the text inside
- * that box. `text-align` has to be asserted, not measured.
+ * `height: auto` because the host's control height would crush a two-line row
+ * into one.
  */
-button.piem-ask-option,
-button.piem-ask-option .piem-ask-option-label,
-button.piem-ask-option .piem-ask-option-description {
+.piem-ask button.piem-ask-option {
+	align-items: start;
+	background: transparent;
+	border: 1px solid transparent;
+	box-shadow: none;
+	box-sizing: border-box;
+	display: flex;
+	/* The default, stated: a theme's `column` would stack the marker over the
+	 * text and turn every row two-lines tall. */
+	flex-direction: row;
+	gap: var(--size-4-2);
+	height: auto;
+	justify-content: flex-start;
+	min-height: var(--size-4-8);
+	padding: var(--size-4-2);
 	text-align: start;
+	white-space: normal;
+	width: 100%;
 }
 
 /*
- * `app.css` styles every `button:not(.clickable-icon)` as a form control at
- * (0,1,1) — the fill and inset shadow that put these rows in raised boxes. The
- * element-qualified selector ties that specificity and wins on source order,
- * which is the trick the panel's other bare buttons use; see the reset near the
- * top of this file. `height: auto` because that rule also pins a control height,
- * which would crush a two-line row into one.
+ * `text-align` again, at the same out-ranking specificity.
+ *
+ * The label and description are flex items, so both are blockified and their
+ * box and line-box left edges coincide — the centring happens to the text
+ * inside that box, invisible to `getBoundingClientRect()`. `text-align` has to
+ * be asserted, not measured, and asserted on the descendants too: the row rule
+ * alone leaves the host's centre winning inside a correctly placed box.
  */
-button.piem-ask-option {
-	background: transparent;
-	/*
-	 * Padding and border reclaimed from the host, at a specificity that beats it.
-	 *
-	 * The shared rule states `padding: var(--size-4-2)` and `border: 1px solid
-	 * transparent` for both row kinds, but `app.css` sets `padding: 0 12px` and
-	 * `border: none` at `button:not(.clickable-icon)` — (0,1,1) against the shared
-	 * rule's (0,1,0) — so only the <button> rows took the host's values. Measured
-	 * in Chromium, that put the option markers 12px from the row's left edge and
-	 * the Other row's marker at 9px (8px padding + 1px border): a 3px stagger down
-	 * the one vertical line the eye follows in a list of choices.
-	 *
-	 * Restating both here ties the host's specificity and wins on source order,
-	 * the same move `text-align` above needs. Every row is now 8px of padding
-	 * inside a 1px transparent border, so the markers share one column and the
-	 * selected row's visible border grows into space the resting rows already
-	 * reserved instead of shifting the text.
-	 */
-	border: 1px solid transparent;
-	box-shadow: none;
-	height: auto;
-	padding: var(--size-4-2);
-	white-space: normal;
+.piem-ask button.piem-ask-option,
+.piem-ask button.piem-ask-option .piem-ask-option-label,
+.piem-ask button.piem-ask-option .piem-ask-option-description {
+	text-align: start;
 }
 
 @media (hover: hover) {
