@@ -1822,6 +1822,18 @@ button.piem-chat__latest {
 	transition: color 0.15s ease-out;
 }
 
+/*
+ * The row above is a scroll box, and a chip's controls set its height, so they
+ * are flush with the scrollport's top and bottom edges — where the family's ring
+ * (2px at 1px offset) has nothing to be drawn into. Inset, so the ring loses
+ * nothing and the row's geometry does not change: this ring is ours to move,
+ * unlike the host inputs that made `.piem-settings-modal` reserve room instead,
+ * and `.piem-chat__context-open` next to it is already drawn this way.
+ */
+.piem-chat__context-row .piem-chat__icon-button:focus-visible {
+	outline-offset: -2px;
+}
+
 /* Focus on every device, hover only where a pointer can rest — see
  * `.piem-chat__message-actions` for why. */
 .piem-chat__context-chip:focus-within .piem-chat__context-action {
@@ -3087,10 +3099,39 @@ button.piem-chat__latest {
  * The provider and model forms are longer than a default modal is tall, so the
  * body scrolls inside a bounded height rather than growing past the viewport
  * and putting the save button out of reach.
+ *
+ * The 3px band is the focus ring's, and it is why the padding and the margin are
+ * the same number with opposite signs.
+ *
+ * A scroll container paints nothing outside its padding box, and `overflow-y`
+ * alone does not leave the inline axis alone — CSS computes a `visible` axis to
+ * `auto` when the other one is not `visible`, so this box clips on all four
+ * sides. A focus ring is drawn *outside* the control's border box (Obsidian's
+ * inputs draw 3px; this file's own rings are 2px at 1px offset, which is the same
+ * 3px), and Obsidian gives the first row in a modal no padding above it and every
+ * row's control the full width. So the ring had nothing to be drawn into: the
+ * name field lost the top 3px of its ring and every field lost the right 3px,
+ * which is #219's first two screenshots — 3px of ring on the left edge of a
+ * focused field against 1px on its right.
+ *
+ * The padding is the room; the equal negative margin gives the same 3px back to
+ * the layout, so the scrollport grows outward into the modal's own padding while
+ * the content box stays exactly where it was. Nothing moves — which matters
+ * because `.modal-title` is a sibling of this box, not a child, and a 3px inset
+ * here would leave every row 3px right of the title above it.
+ *
+ * Not solvable from the control's side: the ring belongs to Obsidian's input, and
+ * an override that pulled it inside the border box would be this plugin
+ * redrawing the host's focus treatment. Where the ring is one of *ours*, inside
+ * one of our own scroll boxes, the answer is the opposite and cheaper — draw it
+ * inset, as `.piem-chat__messages`, `.piem-chat__trace-summary` and
+ * `.piem-chat__context-row` do.
  */
 .piem-settings-modal {
+	margin-inline: -3px;
 	max-height: 70vh;
 	overflow-y: auto;
+	padding: 3px;
 }
 
 /*
@@ -3098,11 +3139,19 @@ button.piem-chat__latest {
  * screen no matter how far the body has scrolled — the cap above bounds the
  * form, this keeps its exit visible. Opaque, because rows pass underneath it.
  * The border-top the row already carries reads as the separator while stuck.
+ *
+ * Its own copy of the ring band, because the box's `padding` cannot cover this
+ * row: while stuck, `bottom: 0` pins the footer's border box to the scrollport's
+ * bottom edge, padding and all, so Save's ring would be clipped again at exactly
+ * the moment the form is long enough to need the sticky. Carried inside the
+ * row instead, where the footer's own opaque fill covers it and no gap opens
+ * under the buttons.
  */
 .piem-settings-modal .piem-settings-modal-footer {
 	position: sticky;
 	bottom: 0;
 	background: var(--modal-background);
+	padding-block-end: 3px;
 }
 
 /*
@@ -3803,6 +3852,17 @@ button.piem-chat__latest {
 	 */
 	max-height: 70vh;
 	overflow-y: auto;
+	/*
+	 * And the same 3px focus-ring band, for the same reason and by the same pair
+	 * of declarations — see `.piem-settings-modal` for the whole argument. The
+	 * controls that need it here are Confirm, which sits on the box's bottom edge
+	 * and wears Obsidian's own ring, and the full-width option rows, whose ring is
+	 * ours but would still lose its left and right band to the clip. No footer
+	 * rule to match the modal's: this footer does not stick, so the padding
+	 * reaches it.
+	 */
+	margin-inline: -3px;
+	padding: 3px;
 }
 
 /*

@@ -719,3 +719,83 @@ describe("scanner compatibility: hiding layers and the composer ring (issue #204
 		expect(body).toContain("clip-path: inset(50%)");
 	});
 });
+
+/*
+ * A ring nobody can see is a keyboard user with no idea where they are, which is
+ * why these sit here rather than beside the layout gates: WCAG 2.4.11 asks that
+ * the focus indicator be *visible*, and a scroll container is the one thing in
+ * this stylesheet that can take it away after the fact.
+ *
+ * The mechanism, once, since four rules answer to it: a scroll container paints
+ * nothing outside its padding box, `overflow-y: auto` drags the inline axis into
+ * `auto` with it (CSS computes a `visible` axis to `auto` when its partner is
+ * not `visible`), and a focus ring is drawn *outside* the control's border box —
+ * 2px at 1px offset for this file's own rings, 3px for the fields Obsidian
+ * styles. Any control flush with such a box's edge therefore loses its ring on
+ * that side, which is what #219's first two screenshots caught in the MCP form:
+ * 3px of ring down the left edge of a focused field against 1px down its right.
+ *
+ * Two answers, chosen by who owns the ring. Where it is Obsidian's, the box
+ * reserves the band (`padding`) and hands the same distance back to the layout
+ * (a negative margin), because redrawing the host's focus treatment from a
+ * plugin stylesheet is not a repair. Where both the scroller and the ring are
+ * ours, the ring moves inside the border box instead and no geometry changes.
+ *
+ * The measurement is in the comments on each rule; it was taken in Chromium
+ * against the real stylesheet, with the reserve ablated to confirm the clip
+ * comes back.
+ */
+describe("focus rings survive their scroll container (issue #219)", () => {
+	/** The band a rule reserves, read back from its own `padding`. */
+	function reservedBand(selector: string): number {
+		const body = declarations(ruleBody(selector));
+		const padding = /padding:\s*(\d+)px\s*;/.exec(body)?.[1];
+		if (padding === undefined) throw new Error(`${selector} reserves no uniform padding band`);
+		return Number(padding);
+	}
+
+	/*
+	 * `>= 3` rather than `=== 3`: the number has to cover the widest ring the box
+	 * can hold, and the two rings in play are both exactly 3px. A theme with a
+	 * fatter ring loses only the excess, which is the failure this cannot fix
+	 * from inside a plugin — but it must never be *narrower* than the rings this
+	 * file draws itself.
+	 */
+	for (const selector of [".piem-settings-modal", ".piem-ask"]) {
+		it(`reserves the ring's band inside ${selector}, without moving the content box`, () => {
+			const band = reservedBand(selector);
+			expect(band).toBeGreaterThanOrEqual(3);
+			// Equal and opposite: the scrollport grows outward, the content box
+			// stays put. Without this the rows would sit `band` px right of the
+			// modal title, which is a sibling of the scroll box and does not move.
+			expect(declarations(ruleBody(selector))).toContain(`margin-inline: -${band}px`);
+		});
+	}
+
+	/*
+	 * The modal footers stick. `bottom: 0` pins the footer's border box — padding
+	 * and all — to the scrollport's bottom edge, so the box's own reserve stops
+	 * covering Save at exactly the point the form is long enough to scroll.
+	 */
+	it("gives the sticky footer its own band, inside the row", () => {
+		const band = reservedBand(".piem-settings-modal");
+		expect(declarations(ruleBody(".piem-settings-modal .piem-settings-modal-footer"))).toContain(`padding-block-end: ${band}px`);
+		expect(declarations(ruleBody(".piem-settings-modal .piem-settings-modal-footer"))).toContain("position: sticky");
+	});
+
+	/*
+	 * The chips' controls set the height of a row that scrolls, so they are flush
+	 * with its top and bottom edges. Both the ring and the scroller are ours, so
+	 * the ring is drawn inside the border box — the treatment `.piem-chat__messages`
+	 * and `.piem-chat__trace-summary` already use for the same reason.
+	 */
+	it("insets the ring where both the scroller and the ring are ours", () => {
+		for (const selector of [
+			".piem-chat__context-row .piem-chat__icon-button:focus-visible",
+			".piem-chat__trace-summary:focus-visible",
+			".piem-chat__messages:focus-visible",
+		]) {
+			expect(declarations(ruleBody(selector))).toContain("outline-offset: -2px");
+		}
+	});
+});
