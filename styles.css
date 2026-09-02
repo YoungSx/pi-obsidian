@@ -1239,7 +1239,22 @@ button.piem-chat__context-open {
  */
 .piem-chat__trace {
 	font-size: var(--font-ui-smaller);
-	margin-top: var(--size-4-1);
+	/*
+	 * Traces appear in two containers, and each owns its own spacing — the row
+	 * carries none. As a transcript row (tool results) the messages column is a
+	 * flex layout whose `gap` already separates it from its neighbours; stacking
+	 * a margin on top of that gap read as extra space around a bare result row.
+	 * Inside a message the content is block flow, which has no gap, so the
+	 * margin below is the spacing — and `margin-block` rather than `margin-top`:
+	 * a pill followed by prose sat 0px below itself (the markdown wrappers strip
+	 * their children's edge margins) and 4px above, the crowding reported in
+	 * #225. Adjacent margins fold to one 4px gap whichever way the pair faces,
+	 * and the content edge rules above strip the outer faces.
+	 */
+}
+
+.piem-chat__message-content .piem-chat__trace {
+	margin-block: var(--size-4-1);
 }
 
 /*
@@ -1253,7 +1268,13 @@ button.piem-chat__context-open {
 	display: flex;
 	gap: var(--size-4-1);
 	min-height: var(--size-4-6);
-	padding: 0 var(--size-4-1);
+	/*
+	 * No inline padding: the glyph must sit on the text column's left edge (x=0
+	 * of the content box), or the pill reads as indented against the prose above
+	 * and below it — #225 again. The hover box is unaffected: it is painted by
+	 * the row itself, which was already flush; only the glyph sat 4px in.
+	 */
+	padding: 0;
 }
 
 .piem-chat__trace-summary {
@@ -1265,7 +1286,7 @@ button.piem-chat__context-open {
 	gap: var(--size-4-1);
 	list-style: none;
 	min-height: var(--size-4-6);
-	padding: 0 var(--size-4-1);
+	padding: 0;
 	user-select: none;
 }
 
