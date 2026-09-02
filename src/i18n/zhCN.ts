@@ -23,6 +23,7 @@ export const zhCN: DeepPartial<EnCopy> = {
 		askAboutNote: "询问此笔记",
 		ribbonOpenChat: "打开 Piem 助手",
 		menuAskAboutSelection: "询问所选内容",
+		menuAskAboutFile: "询问此文件",
 		noActiveNote: "没有可询问的当前笔记。",
 		couldNotOpenChat: "无法打开对话视图。",
 		openLogs: "打开日志视图",
