@@ -642,6 +642,12 @@ export class ObsidianAgentService {
 	/** Prevents two retries from racing while the branch pointer is being persisted. */
 	private retryInFlight = false;
 	/**
+	 * Latches a new-session swap while its disk work is still landing: a second
+	 * click inside that window would still see the previous session's messages
+	 * and mint a duplicate blank session behind the first one.
+	 */
+	private newSessionInFlight = false;
+	/**
 	 * Bundled and vault skills, reloaded whenever the agent is (re)built.
 	 *
 	 * Kept here rather than folded straight into the prompt so the diagnostics
@@ -1651,36 +1657,64 @@ export class ObsidianAgentService {
 		});
 	}
 
-	async newSession(): Promise<void> {
-		this.agent?.abort();
-		// Suggestions belong to the conversation that prompted them; a fresh chat
-		// must not inherit chips fetched for the last one.
-		this.suggestionController?.abort();
-		// The level is inherited from the conversation just left, not from a
-		// global setting: the user tuned it there and a fresh chat should not
-		// start from a value they never chose. Clamped to the model the new
-		// session will run on, since the previous one may have run another.
-		const inherited = await this.sessionManager.readLastSessionThinkingLevel();
-		const seed = clampThinkingLevel(getSelectedModel(this.getSettings()), inherited ?? DEFAULT_THINKING_LEVEL);
-		const defaults = this.getSessionDefaults();
-		this.sessionInfo = await this.sessionManager.createSession({ ...defaults, thinkingLevel: seed });
-		this.messageEntryIds = new WeakMap<object, string>();
-		// A brand-new session has one lane, no ledger, and no stranded reply; any
-		// comparison or offer the session just left was its own.
-		this.activeLane = "main";
-		this.resumableLanes.clear();
-		this.activeRunLedger = undefined;
-		await this.refreshLanes();
-		this.lastCompaction = undefined;
-		this.overheadUsage = [];
-		// Pins and a dismissed follow belong to the conversation that collected them;
-		// carrying either forward would shape a fresh chat the user never set up that
-		// way. The active note is left alone because it describes the workspace.
-		this.contextRefs.reset();
-		await this.replaceAgent([], seed);
-		this.panelError = undefined;
-		this.sessionRevision += 1;
-		this.notify();
+	async newSession(options?: { force?: boolean }): Promise<void> {
+		if (this.newSessionInFlight) {
+			return;
+		}
+		// A session with no turns and nothing running is already the blank sheet
+		// a click is asking for: swapping in another one would mint a duplicate
+		// empty session on disk and spend retention budget on it. A comparison
+		// session can show an empty lane while its branches hold real turns, so
+		// any lane beyond main counts as content. Double-clicks that outrun the
+		// first swap fall through to the in-flight latch above. A run in flight
+		// is *not* blank — "new session" mid-run still means abort-and-leave.
+		// `force` bypasses the blank check for the delete-the-last-session
+		// fallback, where the agent still shows the deleted session's state and
+		// must not count as content.
+		const agent = this.agent;
+		if (
+			!options?.force &&
+			agent &&
+			!agent.state.isStreaming &&
+			agent.state.messages.length === 0 &&
+			this.lanes.length <= 1
+		) {
+			return;
+		}
+		this.newSessionInFlight = true;
+		try {
+			this.agent?.abort();
+			// Suggestions belong to the conversation that prompted them; a fresh chat
+			// must not inherit chips fetched for the last one.
+			this.suggestionController?.abort();
+			// The level is inherited from the conversation just left, not from a
+			// global setting: the user tuned it there and a fresh chat should not
+			// start from a value they never chose. Clamped to the model the new
+			// session will run on, since the previous one may have run another.
+			const inherited = await this.sessionManager.readLastSessionThinkingLevel();
+			const seed = clampThinkingLevel(getSelectedModel(this.getSettings()), inherited ?? DEFAULT_THINKING_LEVEL);
+			const defaults = this.getSessionDefaults();
+			this.sessionInfo = await this.sessionManager.createSession({ ...defaults, thinkingLevel: seed });
+			this.messageEntryIds = new WeakMap<object, string>();
+			// A brand-new session has one lane, no ledger, and no stranded reply; any
+			// comparison or offer the session just left was its own.
+			this.activeLane = "main";
+			this.resumableLanes.clear();
+			this.activeRunLedger = undefined;
+			await this.refreshLanes();
+			this.lastCompaction = undefined;
+			this.overheadUsage = [];
+			// Pins and a dismissed follow belong to the conversation that collected them;
+			// carrying either forward would shape a fresh chat the user never set up that
+			// way. The active note is left alone because it describes the workspace.
+			this.contextRefs.reset();
+			await this.replaceAgent([], seed);
+			this.panelError = undefined;
+			this.sessionRevision += 1;
+			this.notify();
+		} finally {
+			this.newSessionInFlight = false;
+		}
 	}
 
 	/**
@@ -2091,7 +2125,10 @@ export class ObsidianAgentService {
 			await this.openSession(replacement.path);
 		}
 		if (!this.sessionManager.getActiveSessionPath()) {
-			await this.newSession();
+			// Forced: the agent still shows the just-deleted session's transcript,
+			// so the blank-sheet check would refuse and strand the panel on a dead
+			// session with no active path behind it.
+			await this.newSession({ force: true });
 		}
 	}
 
