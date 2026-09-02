@@ -317,6 +317,43 @@ describe("ObsidianAgentService", () => {
 		expect(JSON.stringify(restored.messages)).not.toContain("Second conversation");
 	});
 
+	it("keeps the blank sheet when new chat is clicked again", async () => {
+		const service = createService();
+		await service.initialize();
+		const original = service.getSnapshot().session;
+
+		// A chat with no turns is already what "new session" asks for; the
+		// repeated clicks must not mint duplicate empty sessions behind it.
+		await service.newSession();
+		await service.newSession();
+
+		expect(service.getSnapshot().session?.id).toBe(original?.id);
+		expect((await service.listSessions()).length).toBe(1);
+	});
+
+	it("collapses a double-click on new chat into a single fresh session", async () => {
+		const service = createService();
+		await service.sendPrompt("Something to leave behind");
+
+		// Both clicks race before the first swap lands; only one may create.
+		await Promise.all([service.newSession(), service.newSession()]);
+
+		expect((await service.listSessions()).length).toBe(2);
+	});
+
+	it("still creates a replacement when the last blank session is deleted", async () => {
+		const service = createService();
+		await service.initialize();
+		const deleted = service.getSnapshot().session?.path ?? "";
+
+		await service.deleteSession(deleted);
+
+		// The replacement must ignore the stale transcript of the deleted
+		// session — a blank sheet there does not mean "reuse it".
+		expect(service.getSnapshot().session?.path).toBeTruthy();
+		expect(service.getSnapshot().session?.path).not.toBe(deleted);
+	});
+
 	it("keeps a renamed session's name after the transcript is reloaded", async () => {
 		const service = createService();
 		await service.sendPrompt("First conversation");
