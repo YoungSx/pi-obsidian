@@ -1,0 +1,99 @@
+# 设置
+
+[← 回到 README](../README.zh-CN.md) · [English](settings.md)
+
+**设置 → Piem** 下有四页：Models、Chat、Extensions、General。
+
+## 模型
+
+这是唯一一页你必须去一次的。其余都有能用的默认值。
+
+**服务商**是你自己的端点——Piem 不托管任何东西。一个服务商 = 一个 base URL、
+一个 API 密钥、一种线路协议：
+
+| 协议 | 适用于 |
+| --- | --- |
+| `openai-completions` | OpenAI 兼容的 `/chat/completions` 端点 |
+| `openai-responses` | OpenAI 的 Responses API 及兼容端点 |
+| `anthropic-messages` | Anthropic 的 Messages API 及兼容端点 |
+
+模型 id 从内置的九家服务商目录里给出建议——Anthropic、DeepSeek、Groq、
+Mistral、Moonshot、OpenAI、OpenRouter、xAI、Z.AI——如果端点支持列举，也会直接
+从服务商那里实时拉取。
+
+**能力建议。** 对已知的模型 id，表单会自动填上它是否接受图片输入、上下文窗口
+多大、最大输出多少，数据来自 [models.dev](https://models.dev) 的实时索引，内
+置快照兜底。你手填的任何值都优先，并且从此不再被建议覆盖。
+
+**连接测试**走的是你为模型请求选择的那条传输通道——也就是你聊天时真正会用的那
+条，而不是一条方便的替代。如果测试走 `fetch` 而聊天走 `requestUrl`，那测的就
+是另一件事了。
+
+## Chat
+
+行为在上，存储在下。
+
+有两件事在这里不经开关就会发生，都值得知道。你正打开的那篇笔记会被注入**每
+一轮**——路径和正文都在——所以你永远不用说「我正在看的那篇」。以及上下文窗口
+将满时，对话会自己压缩；命令面板里的 *Tidy up earlier messages* 是同一件事的
+手动版。
+
+- **Show agent details** —— 在聊天面板里显示 token 数、花费和原始工具参数。
+  默认关；想看代理实际发了什么的时候打开它。
+- **压缩（Compaction）** —— 决定什么时候把对话总结掉腾地方的 reserve 与
+  retention 预算。Piem 按你为该模型配置的上下文窗口来规划。
+- **Chats to keep** —— 会话保留上限。超过上限后你再新建会话，最旧的那些会被
+  移到废纸篓。设成不限，就永远不会有东西被丢掉。
+- 会话目录就显示在这一页，所以你随时知道自己的对话记录躺在哪个文件夹。
+
+## Extensions
+
+MCP 服务器和技能导入。两者都在[扩展 Piem](extending.zh-CN.md) 里讲。
+
+## General
+
+- **语言** —— 英文或简体中文。默认跟随 Obsidian 自己的语言；这里的覆盖是为了
+  「我想让插件跟应用不同语言」这种情况。
+- **发送快捷键** —— <kbd>Enter</kbd> 发送，或者
+  <kbd>Ctrl</kbd>/<kbd>⌘</kbd>+<kbd>Enter</kbd> 发送、<kbd>Enter</kbd> 换行。
+  挑你已经有肌肉记忆的那个。
+- **日志等级**与**日志查看器** —— 日志视图作为独立叶子打开，服务商行为异常时
+  第一个该看的就是它。
+- **About** —— 正在跑的版本（从 `manifest.json` 读，绝不另抄一份）、若干链
+  接、什么会离开你的仓库的摘要，以及你的密钥在这台设备上是怎么存的。
+
+## 命令
+
+Piem 加进命令面板的全部内容，显示为 *Piem: …*：
+
+| 命令 | 做什么 |
+| --- | --- |
+| Open chat | 打开聊天侧栏 |
+| Open log view | 打开日志叶子 |
+| New chat | 起一段新对话 |
+| Stop response | 中止正在进行的这一轮 |
+| Tidy up earlier messages | 手动压缩对话 |
+| Focus chat input | 把光标跳进输入框 |
+| Ask about selection | 把你的选区作为问题发出去 |
+| Ask about this note | 把当前笔记作为问题发出去 |
+
+它们都能在 **设置 → 快捷键** 里绑定成你自己的热键。
+
+## 存储
+
+会话是 JSONL 文件，放在
+`<仓库配置目录>/plugins/piem/sessions/`，用 pi 兼容的第 3 版头部和树形条目
+（`id` / `parentId`）写入——和 pi 用的是同一种形状，所以一份对话记录不会被这个
+插件扣住。
+
+未发送的输入框草稿存在旁边的 `drafts.json` 里，这就是你打了一半的文字能在关
+掉面板后还在的原因。
+
+暂存的图片**从不**落盘。会话日志里存的是一个占位符而不是字节，所以一个会同步
+的仓库不会把你的截图带着到处跑。
+
+## 版本
+
+正在跑的版本住在 `manifest.json` 里，并显示在 **About** 中。已发布的各版本、
+以及每个版本所需的最低 Obsidian 版本，记录在
+[`versions.json`](../versions.json)。
