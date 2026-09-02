@@ -3,6 +3,7 @@ import { getAllTags } from "obsidian";
 import type { AgentTool } from "@earendil-works/pi-agent-core";
 import { Type } from "typebox";
 import { normalizeVaultPath } from "../vault/path";
+import { waitForMetadataReady } from "../vault/metadataWait";
 import { maxResultsParameter, vaultPathParameter } from "./parameters";
 import { getVaultFile } from "./vaultFiles";
 import { textResult, throwIfAborted } from "./toolResult";
@@ -30,6 +31,10 @@ const NoteMetadataParameters = Type.Object({
  * An empty link graph is indistinguishable from a note with no links unless the
  * two are named apart, and "this note has no links" is a conclusion the model
  * acts on, so the unindexed state says so explicitly.
+ *
+ * Both messages are reached only after {@link waitForMetadataReady} has waited
+ * out its budget — a deterministic wait on Obsidian's index events — so they
+ * describe a genuinely stuck index, not the ordinary post-write gap.
  */
 const LINK_INDEX_PENDING =
 	"Obsidian's link index is empty, which happens while a vault is still indexing. Link data is unavailable here, not absent from the note; retry before concluding this note has no links.";
@@ -63,6 +68,7 @@ export function createNoteLinksTool(app: App): AgentTool<typeof NoteLinksParamet
 			const maxResults = params.maxResults ?? 100;
 			const wantsOutgoing = direction !== "incoming";
 			const wantsIncoming = direction !== "outgoing";
+			await waitForMetadataReady(app, file.path, { signal, isReady: resolvedLinkRowReady });
 			const resolvedLinks = app.metadataCache.resolvedLinks;
 
 			const outgoing = wantsOutgoing ? toLinkReferences(resolvedLinks[file.path]) : [];
@@ -105,6 +111,7 @@ export function createNoteMetadataTool(app: App): AgentTool<typeof NoteMetadataP
 			throwIfAborted(signal);
 			const file = getVaultFile(app, normalizeVaultPath(params.path));
 			const maxResults = params.maxResults ?? 100;
+			await waitForMetadataReady(app, file.path, { signal });
 			const metadata = app.metadataCache.getFileCache(file);
 			const header = `Metadata for ${file.path}`;
 			if (!metadata) {
@@ -137,6 +144,17 @@ export function createNoteMetadataTool(app: App): AgentTool<typeof NoteMetadataP
 			});
 		},
 	};
+}
+
+/**
+ * Readiness for the link graph: the note's own row in `resolvedLinks`, not just
+ * its cache. Obsidian walks a note's links in a second pass after the cache
+ * lands, so a cache-only wait would still answer "no links" for a note whose
+ * links have not been resolved yet — exactly the false conclusion this tool
+ * exists to prevent.
+ */
+function resolvedLinkRowReady(app: App, path: string): boolean {
+	return app.metadataCache.resolvedLinks[path] !== undefined;
 }
 
 /**
