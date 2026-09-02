@@ -69,8 +69,10 @@ input**（聚焦聊天输入框）、**Ask about selection**（就所选内容�
 
 **笔记与 Obsidian** —— `get_active_note`（活跃笔记路径，可选返回选区/正文）、
 `get_note_links` / `get_note_metadata`（用 Obsidian 元数据缓存读链接、反链、
-标签与 frontmatter）、`open_note`、`open_side_panel`、`insert_at_cursor`、
-`goto_location`、`notify`、`ask_user`（代理可在对话中途向你提问的对话框）。
+标签与 frontmatter）、`update_frontmatter`（经 Obsidian 文件管理器原子改写
+YAML 头；头部会被整体重新序列化，键顺序可能改变、其中的注释会丢失）、
+`open_note`、`open_side_panel`、`insert_at_cursor`、`goto_location`、`notify`、
+`ask_user`（代理可在对话中途向你提问的对话框）。
 
 **任务** —— `list_tasks`、`summarize_tasks`（扫描全仓库的任务复选框）。
 

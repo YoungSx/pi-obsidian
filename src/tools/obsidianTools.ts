@@ -3,6 +3,7 @@ import type { AgentTool, ExecutionEnv, Skill } from "@earendil-works/pi-agent-co
 import { createEditTool, createReadTool, createWriteTool } from "@earendil-works/pi-agent-core";
 import { adaptHarnessTool } from "../vault/harnessAdapter";
 import { createNoteLinksTool, createNoteMetadataTool } from "./linkTools";
+import { createUpdateFrontmatterTool } from "./frontmatterTools";
 import { createActiveNoteTool } from "./noteTools";
 import { createOpenNoteTool, createOpenSidePanelTool } from "./navigationTools";
 import { createGotoLocationTool, createInsertAtCursorTool } from "./editorTools";
@@ -27,8 +28,9 @@ import type { PiemSettings } from "../settings";
  * mutations could interleave. The same env is reused to load prompt templates,
  * so a reload never hands the loader a different object than the tools queue on.
  *
-	 * The remaining tools (ls, find, grep, tasks, notes, skills, move, trash, and
-	 * the screen tools — open/panel/cursor/notify/ask) are application-specific
+	 * The remaining tools (ls, find, grep, tasks, notes, frontmatter, skills,
+	 * move, trash, and the screen tools — open/panel/cursor/notify/ask) are
+	 * application-specific
 	 * and stay hand-written. `read_skill` serves the loaded in-memory set,
 	 * including bundled skills that intentionally have no vault file. move/trash
 	 * stay out of the native set because pi's `FileSystem` rename replaces its
@@ -61,6 +63,7 @@ export function createObsidianTools(
 		createSummarizeTasksTool(app),
 		createNoteLinksTool(app),
 		createNoteMetadataTool(app),
+		createUpdateFrontmatterTool(app),
 		createActiveNoteTool(app),
 		createMoveNoteTool(app),
 		createTrashNoteTool(app),

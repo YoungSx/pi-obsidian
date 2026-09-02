@@ -79,7 +79,9 @@ match exactly once), `ls`, `find`, `grep`, `move_note`, `trash_note`.
 
 **Notes and Obsidian** — `get_active_note` (active note path, optionally
 selection/content), `get_note_links` / `get_note_metadata` (Obsidian's
-metadata cache for links, backlinks, tags, and frontmatter), `open_note`,
+metadata cache for links, backlinks, tags, and frontmatter), `update_frontmatter`
+(atomic YAML-header writes through Obsidian's file manager; it re-serializes the
+header, so key order may change and comments inside it are lost), `open_note`,
 `open_side_panel`, `insert_at_cursor`, `goto_location`, `notify`, `ask_user`
 (a dialog the agent can use to ask you a question mid-turn).
 
