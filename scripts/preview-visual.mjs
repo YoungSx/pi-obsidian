@@ -866,6 +866,11 @@ input.text-input:focus { border-color: var(--background-modifier-border-focus); 
    the background still leaves Chromium's default button frame visible. */
 .clickable-icon { appearance: none; background-color: transparent; border: none; box-shadow: none; color: var(--icon-color); cursor: pointer; display: flex; padding: 0; }
 .clickable-icon:hover { color: var(--icon-color-hover); }
+/* setIcon stamps width="24" height="24" on the SVG; Obsidian's app.css sizes
+   .svg-icon from --icon-size so every icon renders at 16px here. Without this
+   rule the SVGs paint at their natural 24px and every icon in the screenshots
+   is 1.5x too large — alignment verdicts lie. */
+.svg-icon { height: var(--icon-size, var(--icon-s)); width: var(--icon-size, var(--icon-s)); }
 /* Snap Chromium double-paints underlined anchors (bug, not a plugin defect);
    the default theme styles links with accent color and no underline anyway. */
 a { color: var(--text-accent); cursor: pointer; text-decoration: none; }
