@@ -450,6 +450,17 @@ SCENARIOS["chat-streaming"] = async () => {
 			);
 			// Hold the promise; abort in cleanup ends the turn.
 			void send;
+			// A draft left waiting mid-reply: the turn slot is Stop now, so the
+			// queue entry beside it is what the bar should show for this draft.
+			const textarea = document.querySelector(".piem-chat footer textarea");
+			if (!textarea) {
+				throw new Error("composer textarea not found");
+			}
+			Reflect.set(window.HTMLTextAreaElement.prototype, "value", "and check the third one too", textarea);
+			textarea.dispatchEvent(new Event("input", { bubbles: true }));
+			if (!(await settle(() => document.querySelector(".piem-chat__queue-button") !== null))) {
+				throw new Error("queue entry did not appear for the mid-reply draft");
+			}
 		},
 	});
 	return { element, cleanup };

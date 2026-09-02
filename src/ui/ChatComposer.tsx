@@ -170,6 +170,17 @@ export function ChatComposer({
 	const textareaRef = useRef<HTMLTextAreaElement | null>(null);
 	const onSendRef = useRef<() => void>(onSend);
 	const isBusy = isStreaming || isCompacting || isRewinding;
+	/*
+	 * The turn slot's phase. Compaction dominates: it is the one window where
+	 * sending is refused outright (a send would race the compactor), so the slot
+	 * names what is actually holding the turn rather than the run behind it.
+	 */
+	const turnPhase: "send" | "stop" | "stop-compaction" = isCompacting
+		? "stop-compaction"
+		: isBusy
+			? "stop"
+			: "send";
+	const sendDisabled = isInitializing || !isConfigured || !input.trim();
 	const [menuOpen, setMenuOpen] = useState(false);
 	// Per-instance rather than a constant: Obsidian allows several leaves of one
 	// view type, so two open chat panels would otherwise share one id and the
@@ -463,95 +474,99 @@ export function ChatComposer({
 						{thinkingSelector}
 						{laneSwitcher}
 						{contextGauge}
-						{isBusy ? (
-						/*
-						 * Stop stays during a run, and Send stays beside it: while the
-						 * agent answers, this button queues the draft rather than
-						 * starting a run, which is now a real outcome rather than the
-						 * error banner it replaced. During compaction there is no run
-						 * to queue into and a send mid-compact races the compactor,
-						 * so the button is off for that window alone.
-						 */
-						<>
-							<IconButton
-								icon="square"
-								label={t.t(isCompacting ? "chat.stopCompaction" : "chat.stopResponse")}
-								onClick={onAbort}
-								className="piem-chat__stop-button"
-							/>
-							{!isCompacting ? (
-								<SendButton
-									shortcut={shortcut}
-									isConfigured={isConfigured}
-									disabled={isInitializing || !isConfigured || !input.trim()}
-									onSend={onSend}
-								/>
-							) : null}
-						</>
-					) : (
-						<SendButton
-							shortcut={shortcut}
+						{isStreaming && input.trim() ? (
+							/*
+							 * The mouse half of mid-run queueing. The single turn slot has
+							 * become Stop, so this quiet text button keeps the draft's
+							 * queue path open for pointer users — the chord keeps working
+							 * regardless. It exists only while there is a draft worth
+							 * queueing, and it names itself, because an icon here would
+							 * just be the next thing a reader has to guess.
+							 */
+							<button type="button" className="piem-chat__queue-button" onClick={onSend}>
+								{t.t("chat.queueDraft")}
+							</button>
+						) : null}
+						{/*
+						 * One slot for the turn, not two buttons side by side: Send and
+						 * Stop are phases of the same control — whose turn it is — so the
+						 * slot changes what it is rather than the row gaining a control.
+						 * Same element in every phase, only props change: re-mounting
+						 * between phases (the old conditional-branch rendering) would drop
+						 * focus from the button a keyboard user is holding.
+						 */}
+						<TurnControl
+							phase={turnPhase}
 							isConfigured={isConfigured}
-							disabled={isInitializing || !isConfigured || !input.trim()}
+							disabled={sendDisabled}
+							shortcut={shortcut}
 							onSend={onSend}
+							onAbort={onAbort}
 						/>
-					)}
-				</div>
+					</div>
 			</div>
 		</footer>
 	);
 }
 
-interface SendButtonProps {
-	/** The chord in force on this device, already resolved for mobile. */
-	shortcut: SendShortcut;
-	/** Whether a key is configured; decides what the button says it is for. */
+interface TurnControlProps {
+	/** Which phase the turn slot is in; send and stop share the one element. */
+	phase: "send" | "stop" | "stop-compaction";
+	/** Whether a key is configured; decides what the send phase says it is for. */
 	isConfigured: boolean;
 	disabled: boolean;
+	/** The chord in force on this device, already resolved for mobile. */
+	shortcut: SendShortcut;
 	onSend: () => void;
+	onAbort: () => void;
 }
 
 /**
- * Send, with its shortcut printed on it — unless there is no keyboard to press.
+ * The turn slot — Send and Stop as phases of one button, not two side by side.
  *
- * Not an {@link IconButton}: this one carries visible text beside the glyph, and
- * that text has to be `aria-hidden` so a screen reader does not read the keycaps
- * "Ctrl+↵" as part of the button's name. The accessible name and the tooltip
- * both come from {@link sendButtonTitle}, which states the action and the chord
- * in one string.
+ * A turn control is a state machine, not a choice: whose turn is it, the
+ * composer's or the agent's. Splitting that across two buttons made the row
+ * carry a control that lied — while streaming, the button still named, painted
+ * and coloured itself "Send" while actually queueing — and parked a dead
+ * call-to-action beside Stop whenever the draft was empty. One slot changes
+ * what it is instead, the way Obsidian's own record and playback buttons do.
  *
- * With no key configured the name becomes the reason instead, and the keycaps go
- * away with it. A chord printed on a button that cannot fire is an instruction
- * that does not work, and it would compete with the one thing the button has to
- * say: that a key is what is missing. The chord returns as soon as pressing it
- * would do something.
+ * The element never unmounts across phases. React only keeps the DOM node — and
+ * with it keyboard focus — because the three phases render the same shape: one
+ * button whose icon, name, class and handler change together. A conditional
+ * branch here would remount and drop focus mid-keystroke.
  *
- * The same logic retires the chord on a phone, where the soft keyboard has no
- * Ctrl to hold: a keycap for a key the device does not have is a dead
- * instruction on the one control that must always be reachable. The binding
- * itself survives — a hardware keyboard on a tablet still sends through it, and
- * the textarea's `aria-keyshortcuts` keeps advertising that to assistive tech.
+ * The send phase keeps {@link SendButton}'s discipline intact: the chord rides
+ * on the button, hidden from assistive tech, and with no key configured the
+ * name becomes the reason and the keycaps go away with it.
  */
-function SendButton({ shortcut, isConfigured, disabled, onSend }: SendButtonProps): React.JSX.Element {
+function TurnControl({ phase, isConfigured, disabled, shortcut, onSend, onAbort }: TurnControlProps): React.JSX.Element {
 	const t = useT();
-	const showChord = isConfigured && !Platform.isMobile;
-	const name = !isConfigured
-		? t.t("chat.sendNeedsKey")
-		: showChord
-			? sendButtonTitle(shortcut, Platform.isMacOS, t)
-			: t.t("chat.sendMessage");
+	const showChord = phase === "send" && isConfigured && !Platform.isMobile;
+	const name =
+		phase === "send"
+			? !isConfigured
+				? t.t("chat.sendNeedsKey")
+				: showChord
+					? sendButtonTitle(shortcut, Platform.isMacOS, t)
+					: t.t("chat.sendMessage")
+			: phase === "stop-compaction"
+				? t.t("chat.stop")
+				: t.t("chat.stopResponse");
 
 	return (
 		<IconButton
-			icon="send"
+			icon={phase === "send" ? "send" : "square"}
 			label={name}
-			className="piem-chat__send-button mod-cta"
-			disabled={disabled}
-			onClick={onSend}
+			className={phase === "send" ? "piem-chat__send-button mod-cta" : "piem-chat__stop-button"}
+			disabled={phase === "send" && disabled}
+			onClick={phase === "send" ? onSend : onAbort}
 		>
 			{/*
 			 * Keycaps, hidden from assistive tech: the accessible name above already
 			 * carries the chord, and reading the glyphs would repeat it as symbols.
+			 * The stop phases render no children at all, so the slot's width snaps
+			 * from chord-bearing back to square rather than reserving space.
 			 */}
 			{showChord ? (
 				<span className="piem-chat__send-chord" aria-hidden="true">
