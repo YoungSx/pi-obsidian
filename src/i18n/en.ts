@@ -847,6 +847,17 @@ export const en = {
 	mcp: {
 		heading: "MCP servers",
 		desc: "Connect tools served by remote MCP (Model Context Protocol) servers. Their tools appear in chat with an mcp_ prefix; requests leave the vault to the URL you enter.",
+		/**
+		 * Shown only while the buffered transport is selected, because that is the
+		 * only state it describes.
+		 *
+		 * The degradation is real and was previously disclosed nowhere a user
+		 * looks — only in a source comment. Naming the transport and the tab it
+		 * lives under makes it actionable rather than merely honest: the reader
+		 * can go turn it off.
+		 */
+		bufferedNoPush:
+			"With the buffered network transport, a server cannot push to you: its tool list refreshes when you save settings, not when the server changes it. Switch the transport to Fetch under Models to get server push back.",
 		add: "Add server",
 		edit: "Edit",
 		delete: "Delete",
