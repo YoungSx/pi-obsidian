@@ -892,26 +892,35 @@ button.piem-chat__context-open {
 /* --- message actions --- */
 
 /*
- * Always rendered, never hover-revealed: hover-only controls are unreachable by
- * touch, and `isDesktopOnly: false` means this panel runs on a phone. Muted
- * until interacted with so the row does not compete with the reply itself.
+ * Rendered on every settled reply and the user's own turn, on every device —
+ * but *visible* two ways. On a pointer that can hover (desktop) the row is
+ * revealed by pointing anywhere at the message: the bubble or the row's own
+ * placeholder. On touch there is no hover, so the row simply stays visible —
+ * hover-only controls are unreachable by touch, and `isDesktopOnly: false`
+ * means this panel really does run on a phone. Muted until interacted with so
+ * the resting row does not compete with the reply itself.
  *
- * "Muted" is expressed as a colour, not as `opacity`, because these are icon
- * buttons and WCAG 1.4.11 wants 3:1 against the background in the resting
- * state. An `opacity` here cannot deliver that: Obsidian's own `.clickable-icon`
- * already carries `opacity: var(--icon-opacity)` (0.85), so a container value
- * multiplies with it. Measured in Chromium against the real app.css on
- * 2026-08-28, `opacity: 0.55` composited to an effective alpha of 0.47 and
- * 2.10:1 in the light theme and 2.80:1 in the dark one — both failing, and the
- * dark theme failing in a way that inspecting only `opacity: 0.55` hides.
- * Raising it does not rescue the approach either: 0.70 still measured 2.68:1.
+ * The reveal is gated on `@media (hover: hover)` — the same gate Obsidian uses
+ * in 123 separate blocks of app.css — because a touch tap leaves `:hover`
+ * latched on the tapped element until the next tap lands elsewhere, so an
+ * ungated rule would render as a permanently "active" row on a phone.
  *
- * Setting `--icon-color` rather than `color` is what makes this reach the
- * glyphs. `.clickable-icon` declares `color: var(--icon-color)` on itself, so a
- * `color` on this container loses to the button's own declaration; the custom
- * property inherits past it and wins. Same reason the row no longer needs a
- * coarse-pointer exception: there is no hover-dependent dimming left to undo.
- * Resting state now measures 4.64:1 light / 6.12:1 dark.
+ * The *placeholder* (the row's layout box) is never hidden, only the buttons'
+ * paint. Revealing a row that previously took no space would shove every
+ * message below it down mid-scroll — reading a transcript must not reflow
+ * because the mouse moved.
+ *
+ * `opacity` on the buttons is safe here, where the old per-state *dimming* via
+ * opacity was not: the variable is 0 or 1, never a fraction, so it cannot
+ * compound with `.clickable-icon`'s own 0.85 into a WCAG-failing wash. The
+ * visible state is the colour-treated one measured below (4.64:1 light /
+ * 6.12:1 dark).
+ *
+ * Colour treatment, since it still carries the visible state: `--icon-color`
+ * rather than `color` is what makes it reach the glyphs. `.clickable-icon`
+ * declares `color: var(--icon-color)` on itself, so a `color` on this container
+ * loses to the button's own declaration; the custom property inherits past it
+ * and wins. Resting state measures 4.64:1 light / 6.12:1 dark.
  *
  * `--icon-color-hover` has to be set alongside it. Obsidian re-declares
  * `color: var(--icon-color-hover)` inside `.clickable-icon:hover`, and that
@@ -931,6 +940,34 @@ button.piem-chat__context-open {
 }
 
 /*
+ * Desktop only: hide the buttons' paint until the pointer reaches the message.
+ * Touch keeps the row permanently visible (see above), and keyboard focus
+ * reveals via `:focus-within` below regardless of pointer kind.
+ */
+@media (hover: hover) {
+
+	.piem-chat__message-actions button {
+		opacity: 0;
+		transition: opacity 0.15s ease-out;
+	}
+
+	.piem-chat__message:hover .piem-chat__message-actions button {
+		opacity: 1;
+	}
+}
+
+/*
+ * Ungated, unlike the hiding above: on touch the buttons' base opacity is
+ * already 1, so this only re-asserts what is true there, while on desktop it
+ * keeps tabbing to a hidden action from landing on an invisible control. Focus
+ * states stay outside the hover gate for the same reason the colour rule below
+ * does — they must survive on devices that never hover.
+ */
+.piem-chat__message-actions:focus-within button {
+	opacity: 1;
+}
+
+/*
  * The edit action on the user's own turn. It reuses the reply actions' row and
  * its variables wholesale; only the justification differs, because the user
  * bubble is the right-aligned one and an action under it reads as belonging to
@@ -942,11 +979,13 @@ button.piem-chat__context-open {
 
 /*
  * Keyboard focus restores strength on every device; the pointer half is gated on
- * `hover: hover` below. A touch tap leaves `:hover` latched on the tapped element
+ * `hover: hover` above. A touch tap leaves `:hover` latched on the tapped element
  * until the next tap lands elsewhere, so an ungated hover rule renders as a
  * permanently "active" row on a phone — and this plugin ships
  * `isDesktopOnly: false`. Obsidian answers this the same way, in 123 separate
- * `@media (hover: hover)` blocks in `app.css`.
+ * `@media (hover: hover)` blocks in `app.css`. On desktop the same
+ * `:focus-within` also *reveals* the buttons, so tabbing to a hidden action
+ * never lands on an invisible control.
  */
 .piem-chat__message-actions:focus-within {
 	--icon-color: var(--text-normal);
@@ -963,7 +1002,8 @@ button.piem-chat__context-open {
 
 @media (prefers-reduced-motion: reduce) {
 
-	.piem-chat__message-actions {
+	.piem-chat__message-actions,
+	.piem-chat__message-actions button {
 		transition: none;
 	}
 }
