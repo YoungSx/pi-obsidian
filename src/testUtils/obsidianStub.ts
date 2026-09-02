@@ -575,6 +575,22 @@ export function getAllTags(cache: CachedMetadata): string[] | null {
 }
 
 /**
+ * Stand-in for Obsidian's `parseLinktext`: the linkpath is everything before the
+ * first `#`, the subpath the rest, and a reference without one has an empty
+ * subpath. That split is the whole contract embed resolution relies on — the
+ * heading/block subpath is deliberately not modeled beyond existing, because
+ * nothing in the plugin reads it. Aliases are likewise left in place: Obsidian's
+ * own splitter does not strip them, and the link parser above it is what does.
+ */
+export function parseLinktext(linktext: string): { path: string; subpath: string } {
+	const hashIndex = linktext.indexOf("#");
+	if (hashIndex === -1) {
+		return { path: linktext, subpath: "" };
+	}
+	return { path: linktext.slice(0, hashIndex), subpath: linktext.slice(hashIndex + 1) };
+}
+
+/**
  * Stand-in for Obsidian's fuzzy matcher: case-insensitive in-order subsequence
  * matching, adjacent hits collapsed into one range.
  *
@@ -706,6 +722,7 @@ export class SecretComponentStub {
 
 const obsidianStub = {
 	getAllTags,
+	parseLinktext,
 	prepareFuzzySearch,
 	sortSearchResults,
 	debounce,

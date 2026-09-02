@@ -1,4 +1,4 @@
-import { type App, TFile } from "obsidian";
+import { type App, parseLinktext, TFile } from "obsidian";
 import { clampThinkingLevel, getSupportedThinkingLevels, type ImageContent, type Usage } from "@earendil-works/pi-ai";
 import {
 	Agent,
@@ -929,9 +929,12 @@ export class ObsidianAgentService {
 		// Phase 2: resolve `![[cat.png]]` embeds into ImageContent read from the
 		// vault. The bytes travel alongside the text, so the embed syntax is
 		// stripped from the prompt — leaving `![[cat.png]]` in would hand the
-		// model a broken reference to a picture it has already been given.
+		// model a broken reference to a picture it has already been given. The
+		// active note anchors the resolution: a shortest-path embed means "the
+		// image this note links to", and the index resolves it from here.
 		const refs = extractImageRefs(modelPrompt);
-		const vaultImages = await this.readVaultImages(refs);
+		const sourcePath = this.contextRefs.list().find((ref) => ref.kind === "active")?.path ?? null;
+		const vaultImages = await this.readVaultImages(refs, sourcePath);
 		const promptText = vaultImages.length > 0 ? stripImageRefs(modelPrompt) : modelPrompt;
 		const allImages = images.length > 0 ? [...images, ...vaultImages] : vaultImages;
 
@@ -3183,27 +3186,61 @@ export class ObsidianAgentService {
 	 * skipped (never thrown) so one bad embed does not block the whole send, and a
 	 * notice names it so the user knows what was dropped. Vault access stays on
 	 * the service side of the existing boundary — the UI never touches the vault.
+	 *
+	 * Resolution is two-step, exact lookup first. `getFileByPath` answers the
+	 * embeds that already carry a full vault path, and running it first means the
+	 * link index below can only ever be asked about a lookup that already failed —
+	 * an unready or stale index cannot demote a path the vault itself would have
+	 * answered. What it *can* answer is the shortest-path embed `![[cat.png]]`
+	 * written into a note whose image lives in an attachment folder: no folder in
+	 * the reference, and the exact lookup only knows full paths.
 	 */
-	private async readVaultImages(paths: readonly string[]): Promise<ImageContent[]> {
+	private async readVaultImages(paths: readonly string[], sourcePath: string | null): Promise<ImageContent[]> {
 		if (paths.length === 0) {
 			return [];
 		}
 		const t = this.t();
 		const images: ImageContent[] = [];
 		for (const path of paths) {
-			const file = this.app.vault.getFileByPath(path);
+			const file = this.app.vault.getFileByPath(path) ?? this.resolveLinkpathDest(path, sourcePath);
 			if (!file) {
 				this.setNotice(t.t("chat.imageNotFound", { path }));
 				continue;
 			}
 			try {
 				const buffer = await this.app.vault.readBinary(file);
-				images.push({ type: "image", data: arrayBufferToBase64(buffer), mimeType: mimeTypeForPath(path) });
+				// The MIME type reads off the file that was found, not the reference
+				// that named it: the two carry the same extension for a full path, but
+				// a shortest-path embed resolved through the index may spell the
+				// folder differently and the file is what the bytes came from.
+				images.push({ type: "image", data: arrayBufferToBase64(buffer), mimeType: mimeTypeForPath(file.path) });
 			} catch {
 				this.setNotice(t.t("chat.imageNotFound", { path }));
 			}
 		}
 		return images;
+	}
+
+	/**
+	 * Resolves an embed reference the way Obsidian itself would, once the exact
+	 * vault lookup has already missed.
+	 *
+	 * `parseLinktext` splits the reference into its linkpath and any heading or
+	 * block subpath (an image embed has neither, but the split is the official
+	 * entry point and costs nothing), and `getFirstLinkpathDest` asks the
+	 * metadata cache for the file that linkpath best resolves to from
+	 * `sourcePath` — the active note the embed was written in, so a name shared
+	 * by several files resolves the way the note's own links do. That cache also
+	 * knows the shortest-path and frontmatter-alias forms `getFileByPath` cannot
+	 * see, which is exactly the embed shape the exact lookup misses.
+	 *
+	 * `null` — no note open, an index still building, or a genuinely broken link —
+	 * is a plain miss: `readVaultImages` reports it like any other unresolvable
+	 * embed, never as an error.
+	 */
+	private resolveLinkpathDest(path: string, sourcePath: string | null): TFile | null {
+		const linkpath = parseLinktext(path).path;
+		return this.app.metadataCache.getFirstLinkpathDest(linkpath, sourcePath ?? "");
 	}
 
 	private getSessionDefaults(): SessionDefaults {

@@ -1947,6 +1947,18 @@ describe("ObsidianAgentService stop-vs-failure banner semantics", () => {
 });
 
 describe("ObsidianAgentService multimodal send", () => {
+	/** The content blocks the first captured request carried, for image assertions. */
+	function firstRequestContent(contexts: Context[]): { type: string; text?: string; mimeType?: string }[] {
+		const firstContext = contexts[0];
+		if (!firstContext) {
+			throw new Error("Expected at least one captured request context.");
+		}
+		const userMessage = firstContext.messages.find((message) => message.role === "user") as
+			| { content?: unknown }
+			| undefined;
+		return (userMessage?.content as { type: string; text?: string; mimeType?: string }[]) ?? [];
+	}
+
 	it("blocks image send when the active model is text-only", async () => {
 		// Default service selects deepseek-v4-pro, whose `input` is ["text"].
 		const contexts: Context[] = [];
@@ -2032,6 +2044,88 @@ describe("ObsidianAgentService multimodal send", () => {
 			| undefined;
 		const content = (userMessage?.content as { type: string }[]) ?? [];
 		expect(content.some((block) => block.type === "image")).toBe(false);
+	});
+
+	it("resolves a shortest-path embed through the link index, anchored on the active note", async () => {
+		const contexts: Context[] = [];
+		const imageBytes = new TextEncoder().encode("fake-png-bytes").buffer as ArrayBuffer;
+		// `cat.png` lives in an attachment folder and the embed names it by the
+		// shortest path — a reference `getFileByPath` cannot answer, so the index
+		// is asked exactly as Obsidian would ask it: the linkpath first, and the
+		// note the embed was written in as the source the resolution anchors on.
+		const linkCalls: { linkpath: string; sourcePath: string }[] = [];
+		const { service } = createServiceWithMultimodalModel(
+			{ streamFn: createCapturingStreamFn(contexts), loadUserSkills: NO_USER_SKILLS },
+			{
+				imageFiles: new Map([["attachments/cat.png", imageBytes]]),
+				linkIndex: (linkpath, sourcePath) => {
+					linkCalls.push({ linkpath, sourcePath });
+					return { path: "attachments/cat.png" } as TFile;
+				},
+			},
+		);
+		service.setActiveNotePath("Notes/daily.md");
+
+		const sent = await service.sendPrompt("Look at ![[cat.png]] please");
+
+		expect(sent).toBe(true);
+		expect(linkCalls).toEqual([{ linkpath: "cat.png", sourcePath: "Notes/daily.md" }]);
+		const content = firstRequestContent(contexts);
+		expect(content.some((block) => block.type === "image" && block.mimeType === "image/png")).toBe(true);
+		// The embed syntax was still removed from the text block.
+		const textBlock = content.find((block) => block.type === "text");
+		expect(textBlock?.text ?? "").not.toContain("![[cat.png]]");
+	});
+
+	it("resolves a full-path embed by exact lookup, with the link index never asked", async () => {
+		const contexts: Context[] = [];
+		const imageBytes = new TextEncoder().encode("fake-png-bytes").buffer as ArrayBuffer;
+		// The index answers nothing at all — an unready index, say. That must not
+		// cost a full path anything: the exact lookup runs first, so the fallback
+		// only ever sees a reference the lookup already failed on. Recording the
+		// index's calls pins that ordering rather than just the outcome.
+		const linkCalls: { linkpath: string; sourcePath: string }[] = [];
+		const { service } = createServiceWithMultimodalModel(
+			{ streamFn: createCapturingStreamFn(contexts), loadUserSkills: NO_USER_SKILLS },
+			{
+				imageFiles: new Map([["attachments/cat.png", imageBytes]]),
+				linkIndex: (linkpath, sourcePath) => {
+					linkCalls.push({ linkpath, sourcePath });
+					return null;
+				},
+			},
+		);
+		service.setActiveNotePath("Notes/daily.md");
+
+		const sent = await service.sendPrompt("Look at ![[attachments/cat.png]] please");
+
+		expect(sent).toBe(true);
+		expect(linkCalls).toEqual([]);
+		expect(firstRequestContent(contexts).some((block) => block.type === "image")).toBe(true);
+		// Nothing was dropped, so nothing earned a notice.
+		expect(service.getSnapshot().noticeMessage).toBeUndefined();
+	});
+
+	it("reports a shortest-path embed the link index cannot resolve", async () => {
+		const contexts: Context[] = [];
+		const imageBytes = new TextEncoder().encode("fake-png-bytes").buffer as ArrayBuffer;
+		// Same shape as the resolvable case, but the index has nothing for the
+		// name — an unready index, or a link pointing nowhere. The miss surfaces
+		// the way it does for a full path: a notice, and no image in the send.
+		const { service } = createServiceWithMultimodalModel(
+			{ streamFn: createCapturingStreamFn(contexts), loadUserSkills: NO_USER_SKILLS },
+			{
+				imageFiles: new Map([["attachments/cat.png", imageBytes]]),
+				linkIndex: () => null,
+			},
+		);
+		service.setActiveNotePath("Notes/daily.md");
+
+		const sent = await service.sendPrompt("Look at ![[cat.png]] please");
+
+		expect(sent).toBe(true);
+		expect(service.getSnapshot().noticeMessage).toContain("cat.png");
+		expect(firstRequestContent(contexts).some((block) => block.type === "image")).toBe(false);
 	});
 
 	it("persists a placeholder, not base64, for an image-bearing user message", async () => {
@@ -2814,7 +2908,7 @@ function createServiceWithSettings(
  */
 function createServiceWithMultimodalModel(
 	overrides: { streamFn?: StreamFn; loadUserSkills?: typeof NO_USER_SKILLS } = {},
-	vault: { imageFiles?: Map<string, ArrayBuffer> } = {},
+	vault: { imageFiles?: Map<string, ArrayBuffer>; linkIndex?: (linkpath: string, sourcePath: string) => TFile | null } = {},
 	memoryAdapter: MemoryAdapter = new MemoryAdapter(),
 ): { service: ObsidianAgentServiceType; settings: PiemSettings } {
 	const adapter = asDataAdapter(memoryAdapter);
@@ -2836,7 +2930,7 @@ function createServiceWithMultimodalModel(
 	};
 	const sessionManager = new ObsidianSessionManager(adapter, SESSION_DIR, "obsidian-vault:Test");
 	const service = new ObsidianAgentService(
-		createFakeApp(adapter, {}, vault.imageFiles),
+		createFakeApp(adapter, {}, vault.imageFiles, vault.linkIndex),
 		() => settings,
 		sessionManager,
 		{
@@ -3060,11 +3154,19 @@ function createRecordingToolCallingStreamFn(
  * reads `readBinary` rather than the text-reading methods above. Each path is
  * registered as a regular `TFile` so lookups behave exactly like a vault that
  * contains those images.
+ *
+ * `metadataCache` is present so embed resolution never falls off the fake app,
+ * but its link index answers nothing by default — the exact `getFileByPath`
+ * lookup already covers every full path, and a test that needs the index to
+ * resolve (or to observe which linkpath and source it was asked about) passes
+ * its own `linkIndex`. The file it returns only needs a `path`: `readBinary`
+ * keys the staged bytes on it, exactly as the real vault would.
  */
 function createFakeApp(
 	adapter: DataAdapter,
 	vaultFiles: Record<string, string> = {},
 	imageFiles?: Map<string, ArrayBuffer>,
+	linkIndex?: (linkpath: string, sourcePath: string) => TFile | null,
 ): App {
 	const files = new Map<string, TFile>();
 	const folders = new Map<string, TFolder>();
@@ -3123,6 +3225,9 @@ function createFakeApp(
 				return files.get(path)!;
 			},
 			createFolder: async (path: string) => folderAt(path),
+		},
+		metadataCache: {
+			getFirstLinkpathDest: (linkpath: string, sourcePath: string) => linkIndex?.(linkpath, sourcePath) ?? null,
 		},
 		workspace: {
 			getActiveViewOfType: () => null,
