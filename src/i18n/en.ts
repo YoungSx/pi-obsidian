@@ -28,6 +28,7 @@ export const en = {
 		askAboutNote: "Ask about this note",
 		ribbonOpenChat: "Open Piem assistant",
 		menuAskAboutSelection: "Ask about selection",
+		menuAskAboutFile: "Ask about this file",
 		noActiveNote: "No active note to ask about.",
 		couldNotOpenChat: "Could not open the chat view.",
 		openLogs: "Open log view",
