@@ -217,7 +217,7 @@ describe("bare-button cascade against Obsidian's control chrome", () => {
 	 * neither `app.css` nor the plugin stylesheet. Only the shape of the selector
 	 * proves the fix, so that is what is pinned here.
 	 */
-	const RESET = "button.piem-chat__command-menu-button,\nbutton.piem-chat__context-open,\nbutton.piem-settings-tab";
+	const RESET = "button.piem-chat__command-menu-button,\nbutton.piem-chat__context-open";
 
 	it("resets the bare buttons with an element-qualified selector, not a bare class", () => {
 		// `ruleBody` matching at all proves the selector carries the element: a

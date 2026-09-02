@@ -1,6 +1,6 @@
 import { describe, expect, it } from "bun:test";
 import { isControlKey, readControlValue, writeControlValue } from "./controlKeys";
-import type { SettingsPanelSettings } from "./SettingsPanel";
+import type { SettingsPanelSettings } from "./panelHost";
 
 /**
  * The guard between a declarative `control` and the settings object.
