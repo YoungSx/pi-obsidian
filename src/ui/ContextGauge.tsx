@@ -1,11 +1,13 @@
 import React, { useEffect, useId, useRef, useState } from "react";
 import { formatCost, formatTokens } from "../agent/usage";
-import type { ContextFill } from "../agent/usage";
+import type { ContextFill, UsageTotals } from "../agent/usage";
 import { IconButton } from "./ObsidianIcon";
 import {
+	contextCacheLine,
 	contextGaugeName,
 	contextLevel,
 	contextPercent,
+	contextReasoningNote,
 	contextStateText,
 	contextTokenSummary,
 	meterTitle,
@@ -40,8 +42,8 @@ type OpenReason = "hover" | "press" | null;
 export interface ContextGaugeProps {
 	/** Occupancy, or null before the first measurement. Null renders nothing. */
 	fill: ContextFill | null;
-	/** Cumulative tokens and spend; shown in the popover behind the details tier. */
-	usage: { tokens: number; cost: number; requests: number };
+	/** Cumulative tokens and spend, with the cache/reasoning breakdown; shown in the popover behind the details tier. */
+	usage: UsageTotals;
 	/** Whether the panel may show agent-internal readouts (spend, raw counts). */
 	showAgentDetails: boolean;
 	/** A turn is in flight, so compaction cannot start. */
@@ -316,6 +318,13 @@ function ContextPopover({
 	const t = useT();
 	const level = contextLevel(fill);
 	const isBusy = isStreaming || isCompacting;
+	// Same tier as spend, but gated per line: a provider without a prompt cache
+	// reports the cache fields as 0 (not absent), and a provider without a
+	// thinking split omits `reasoning` — so each line answers for itself instead
+	// of assuming the session carries a breakdown at all.
+	const detailsVisible = showAgentDetails && usage.requests > 0;
+	const cacheLine = detailsVisible ? contextCacheLine(usage, t) : undefined;
+	const reasoningNote = detailsVisible ? contextReasoningNote(usage, t) : undefined;
 
 	return (
 		<div id={id} className="piem-chat__context-popover" role="group" aria-label={t.t("chat.contextAria")}>
@@ -332,6 +341,8 @@ function ContextPopover({
 					{formatTokens(usage.tokens)} {t.t("chat.tokensSuffix")} <span aria-hidden="true">·</span> {formatCost(usage.cost)}
 				</span>
 			) : null}
+			{cacheLine ? <span className="piem-chat__context-cache">{cacheLine}</span> : null}
+			{reasoningNote ? <span className="piem-chat__context-reasoning">{reasoningNote}</span> : null}
 			{/*
 			 * Always rendered, disabled while busy rather than hidden. `compactNow`
 			 * returns early during a stream and the single-flight guard rejects a

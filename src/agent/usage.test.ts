@@ -17,7 +17,16 @@ describe("sumUsage", () => {
 			assistantMessage(usage({ input: 200, output: 30, totalTokens: 230, cost: 1.25 })),
 		];
 
-		expect(sumUsage(messages)).toEqual({ tokens: 350, cost: 1.75, requests: 2 });
+		// The `usage()` helper mirrors a non-caching provider, which reports the
+		// cache fields as 0 rather than omitting them; only `reasoning` is absent.
+		expect(sumUsage(messages)).toEqual({
+			tokens: 350,
+			cost: 1.75,
+			requests: 2,
+			input: 300,
+			cacheRead: 0,
+			cacheWrite: 0,
+		});
 	});
 
 	it("falls back to the token breakdown when a provider omits totalTokens", () => {
@@ -30,7 +39,72 @@ describe("sumUsage", () => {
 		const messages = [assistantMessage(usage({ input: 10, output: 0, totalTokens: 10, cost: 0.1 }))];
 		const compaction = usage({ input: 500, output: 100, totalTokens: 600, cost: 2 });
 
-		expect(sumUsage(messages, [compaction])).toEqual({ tokens: 610, cost: 2.1, requests: 2 });
+		expect(sumUsage(messages, [compaction])).toEqual({
+			tokens: 610,
+			cost: 2.1,
+			requests: 2,
+			input: 510,
+			cacheRead: 0,
+			cacheWrite: 0,
+		});
+	});
+
+	it("accumulates the breakdown fields across messages", () => {
+		const messages = [
+			assistantMessage(usage({ input: 100, output: 20, cacheRead: 900, totalTokens: 1020, cost: 0.5 })),
+			assistantMessage(
+				usage({
+					input: 200,
+					output: 30,
+					cacheRead: 1_500,
+					totalTokens: 1730,
+					cost: 1.25,
+					reasoning: 12,
+				}),
+			),
+		];
+
+		const totals = sumUsage(messages);
+
+		expect(totals.input).toBe(300);
+		expect(totals.cacheRead).toBe(2_400);
+		expect(totals.cacheWrite).toBe(0);
+		expect(totals.reasoning).toBe(12);
+		// Reasoning is a subset of output: it must not inflate the context count.
+		expect(totals.tokens).toBe(2_750);
+	});
+
+	it("accumulates cacheWrite across turns without letting it re-enter the context count", () => {
+		const messages = [
+			assistantMessage(usage({ input: 100, output: 10, cacheWrite: 500, totalTokens: 610, cost: 0 })),
+			assistantMessage(usage({ input: 50, output: 5, cacheWrite: 300, totalTokens: 355, cost: 0 })),
+		];
+
+		const totals = sumUsage(messages);
+
+		expect(totals.cacheWrite).toBe(800);
+		expect(totals.tokens).toBe(965);
+	});
+
+	it("leaves the breakdown undefined while no message reported it", () => {
+		// A provider that never exposes a reasoning split omits the key entirely;
+		// summing must not dress that up as a measured zero.
+		const messages = [assistantMessage(usage({ input: 10, output: 5, totalTokens: 15, cost: 0 }))];
+
+		const totals = sumUsage(messages);
+
+		expect(totals.reasoning).toBeUndefined();
+	});
+
+	it("keeps a reported breakdown field once any message reported it", () => {
+		// One turn with the split and one without: the total is the sum of what
+		// was reported, not undefined — an absent field contributes nothing.
+		const messages = [
+			assistantMessage(usage({ input: 10, output: 5, totalTokens: 15, cost: 0, reasoning: 4 })),
+			assistantMessage(usage({ input: 10, output: 5, totalTokens: 15, cost: 0 })),
+		];
+
+		expect(sumUsage(messages).reasoning).toBe(4);
 	});
 });
 
@@ -106,13 +180,23 @@ function compactionSettings(overrides: Partial<CompactionSettings> = {}): Compac
 	return { ...DEFAULT_COMPACTION_SETTINGS, ...overrides };
 }
 
-function usage(parts: { input: number; output: number; cacheRead?: number; totalTokens: number; cost: number }): Usage {
+function usage(parts: {
+	input: number;
+	output: number;
+	cacheRead?: number;
+	cacheWrite?: number;
+	totalTokens: number;
+	cost: number;
+	reasoning?: number;
+}): Usage {
 	return {
 		input: parts.input,
 		output: parts.output,
 		cacheRead: parts.cacheRead ?? 0,
-		cacheWrite: 0,
+		cacheWrite: parts.cacheWrite ?? 0,
 		totalTokens: parts.totalTokens,
+		// Absent unless asked: mirrors the providers that never report a split.
+		reasoning: parts.reasoning,
 		cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: parts.cost },
 	};
 }

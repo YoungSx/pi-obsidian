@@ -143,6 +143,10 @@ export const zhCN: DeepPartial<EnCopy> = {
 		contextAria: "上下文窗口占用",
 		contextValueText: "已使用 {estimated}{tokens} / {window} {unit}，{percent}%，{state}",
 		contextEstimatedPrefix: "约 ",
+		/** Popover line for prompt-cache use: the hit rate plus the cached volume. */
+		cacheLine: "缓存 {percent}% · {tokens} {unit}",
+		/** Popover footnote for thinking models: reasoning tokens already inside the reply count. */
+		reasoningNote: "含推理 {tokens}",
 		commandMenuAria: "提示命令和技能",
 		commandKindTemplate: "提示",
 		commandKindSkill: "技能",

@@ -369,6 +369,81 @@ describe("ContextGauge spend tier", () => {
 	});
 });
 
+describe("ContextGauge usage breakdown", () => {
+	beforeEach(() => {
+		document.body.replaceChildren();
+	});
+
+	afterEach(() => {
+		unmountAllRoots();
+		document.body.replaceChildren();
+	});
+
+	it("shows the cache line behind the same details tier as spend", async () => {
+		const host = await renderGauge({
+			showAgentDetails: true,
+			usage: { tokens: 3_000, cost: 0.01, requests: 2, input: 300, cacheRead: 2_700 },
+		});
+
+		const popover = await openPopover(host);
+		expect(popover?.querySelector(".piem-chat__context-cache")?.textContent).toContain("cache 90%");
+	});
+
+	it("keeps the breakdown out of the popover when details are off", async () => {
+		const host = await renderGauge({
+			showAgentDetails: false,
+			usage: { tokens: 3_000, cost: 0.01, requests: 2, input: 300, cacheRead: 2_700 },
+		});
+
+		const popover = await openPopover(host);
+		expect(popover?.querySelector(".piem-chat__context-cache")).toBeNull();
+		expect(popover?.querySelector(".piem-chat__context-reasoning")).toBeNull();
+	});
+
+	it("omits the cache line for a provider that reports the fields as zero", async () => {
+		// Adapters for models without a prompt cache report 0, not absent — the
+		// line must be absent rather than reading "cache 0% · 0 tokens".
+		const host = await renderGauge({
+			showAgentDetails: true,
+			usage: { tokens: 500, cost: 0, requests: 1, input: 500, cacheRead: 0, cacheWrite: 0 },
+		});
+
+		expect((await openPopover(host))?.querySelector(".piem-chat__context-cache")).toBeNull();
+	});
+
+	it("omits the reasoning note when no provider reported a split", async () => {
+		const host = await renderGauge({
+			showAgentDetails: true,
+			usage: { tokens: 3_000, cost: 0.01, requests: 2, input: 300, cacheRead: 2_700 },
+		});
+
+		expect((await openPopover(host))?.querySelector(".piem-chat__context-reasoning")).toBeNull();
+	});
+
+	it("shows the reasoning note once a split has landed", async () => {
+		const host = await renderGauge({
+			showAgentDetails: true,
+			usage: { tokens: 3_000, cost: 0.01, requests: 2, reasoning: 1_500 },
+		});
+
+		expect((await openPopover(host))?.querySelector(".piem-chat__context-reasoning")?.textContent).toContain("1.5k");
+	});
+
+	it("renders both lines in Chinese", async () => {
+		const host = await renderGauge(
+			{
+				showAgentDetails: true,
+				usage: { tokens: 3_000, cost: 0.01, requests: 2, input: 300, cacheRead: 2_700, reasoning: 1_500 },
+			},
+			"zh-cn",
+		);
+
+		const popover = await openPopover(host);
+		expect(popover?.querySelector(".piem-chat__context-cache")?.textContent).toContain("缓存 90%");
+		expect(popover?.querySelector(".piem-chat__context-reasoning")?.textContent).toContain("含推理 1.5k");
+	});
+});
+
 describe("ContextGauge tidy action", () => {
 	beforeEach(() => {
 		document.body.replaceChildren();

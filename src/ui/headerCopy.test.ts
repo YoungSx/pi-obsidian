@@ -1,9 +1,11 @@
 import { describe, expect, it } from "bun:test";
-import type { ContextFill } from "../agent/usage";
+import type { ContextFill, UsageTotals } from "../agent/usage";
 import {
+	contextCacheLine,
 	contextGaugeName,
 	contextLevel,
 	contextPercent,
+	contextReasoningNote,
 	contextStateText,
 	contextTokenSummary,
 	contextValueText,
@@ -144,6 +146,68 @@ describe("tidyLabel", () => {
 	});
 });
 
+describe("contextCacheLine", () => {
+	/*
+	 * The denominator is `input + cacheRead + cacheWrite` — the billed prompt
+	 * total. pi-ai normalizes `input` to exclude cached tokens in every adapter,
+	 * so that sum is what the provider actually billed for the prompt; using
+	 * `totalTokens` instead would let a provider's fallback arithmetic (bedrock
+	 * derives one without the cache fields) skew the rate.
+	 */
+	it("divides cached reads by the billed prompt total", () => {
+		// 2.7k served from cache against 300 fresh + 2.7k cached = 3k billed.
+		const line = contextCacheLine(usageTotals({ input: 300, cacheRead: 2_700 }), en);
+
+		expect(line).toBe("cache 90% · 2.7k tokens");
+	});
+
+	it("counts fresh cache writes as billed prompt, so a cold turn reads 0% rather than hiding", () => {
+		const line = contextCacheLine(usageTotals({ input: 300, cacheWrite: 700, cacheRead: 0 }), en);
+
+		expect(line).toBe("cache 0% · 0 tokens");
+	});
+
+	it("stays undefined while the provider reports no cache activity at all", () => {
+		// Adapters for models without a prompt cache report the fields as 0, not
+		// absent — a "cache 0%" line there would be noise, not signal.
+		expect(contextCacheLine(usageTotals({ input: 500 }), en)).toBeUndefined();
+	});
+
+	it("declines the percentage when the fresh-prompt figure is missing", () => {
+		// `input` is required on pi-ai's Usage, so this is defensive: guessing a
+		// denominator from the cache fields alone would read 100%.
+		expect(contextCacheLine({ tokens: 100, cost: 0, requests: 1 }, en)).toBeUndefined();
+	});
+
+	it("rounds to a whole percent", () => {
+		expect(contextCacheLine(usageTotals({ input: 1, cacheRead: 2 }), en)).toBe("cache 67% · 2 tokens");
+	});
+
+	it("translates the frame, never the numbers", () => {
+		expect(contextCacheLine(usageTotals({ input: 300, cacheRead: 2_700 }), zh)).toBe("缓存 90% · 2.7k token");
+	});
+});
+
+describe("contextReasoningNote", () => {
+	it("names the reasoning share, which the tokens line above already counts", () => {
+		// A subset of output, so it annotates rather than adds.
+		expect(contextReasoningNote(usageTotals({ reasoning: 1_500 }), en)).toBe("incl. 1.5k reasoning");
+	});
+
+	it("stays undefined when no provider reported a split", () => {
+		expect(contextReasoningNote(usageTotals(), en)).toBeUndefined();
+	});
+
+	it("stays undefined on a reported zero, which thinking-capable providers emit on plain turns", () => {
+		// OpenAI and Google always set the field, possibly to 0 — "incl. 0" is noise.
+		expect(contextReasoningNote(usageTotals({ reasoning: 0 }), en)).toBeUndefined();
+	});
+
+	it("translates", () => {
+		expect(contextReasoningNote(usageTotals({ reasoning: 1_500 }), zh)).toBe("含推理 1.5k");
+	});
+});
+
 function fill(overrides: Partial<ContextFill> = {}): ContextFill {
 	return {
 		tokens: 12_400,
@@ -153,4 +217,8 @@ function fill(overrides: Partial<ContextFill> = {}): ContextFill {
 		heuristicOnly: true,
 		...overrides,
 	};
+}
+
+function usageTotals(overrides: Partial<UsageTotals> = {}): UsageTotals {
+	return { tokens: 3_000, cost: 0.01, requests: 2, input: 0, cacheRead: 0, cacheWrite: 0, ...overrides };
 }
