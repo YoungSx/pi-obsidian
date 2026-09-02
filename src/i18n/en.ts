@@ -627,9 +627,7 @@ export const en = {
 		 * rows, because scanning a handful beats typing — the control has to earn
 		 * its place before it appears.
 		 */
-		modelsFilterLabel: "Filter",
 		modelsFilterPlaceholder: "Type to filter by name, ID, or provider…",
-		modelsFilterEmpty: "No models match.",
 		providerMissing: "provider missing",
 		activeSuffix: " · active",
 		showAgentDetails: "Show agent details",

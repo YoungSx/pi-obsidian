@@ -28,6 +28,7 @@ import {
 	userSkillsSearchedLabel,
 } from "./userSkillsCopy";
 import { rowAction, type SettingsPanelHost } from "./panelHost";
+import { sectionNote } from "./sectionNote";
 
 /**
  * The Extensions tab as declarative definitions.
@@ -147,9 +148,6 @@ function vaultSkillsList(host: SettingsPanelHost, state: SettingsPanelState, sna
 	return {
 		type: "list",
 		heading: t.t("skills.heading"),
-		// Absent only before the first read lands, where an empty state would claim
-		// the folder is empty when it has not been looked at yet.
-		emptyState: snapshot ? t.t("skills.empty") : "",
 		addItem: {
 			name: t.t("skills.import"),
 			action: () =>
@@ -167,7 +165,14 @@ function vaultSkillsList(host: SettingsPanelHost, state: SettingsPanelState, sna
 				button.onClick(() => void announceReload(host, state, button));
 			},
 		],
-		items: (snapshot?.inventory.rows ?? []).map((row) => vaultSkillRow(host, state, row)),
+		// No `emptyState`: a list holding the section note is never empty, so the
+		// framework would never draw it. The empty sentence joins the note instead —
+		// and only once a read has landed, since before that the folder has not been
+		// looked in and claiming it is empty would be a guess.
+		items: [
+			sectionNote(t.t("skills.desc"), snapshot && snapshot.inventory.rows.length === 0 ? t.t("skills.empty") : undefined),
+			...(snapshot?.inventory.rows ?? []).map((row) => vaultSkillRow(host, state, row)),
+		],
 	};
 }
 
@@ -310,6 +315,7 @@ function userSkillsSection(host: SettingsPanelHost, state: SettingsPanelState, s
 			type: "group",
 			heading: t.t("skills.userHeading"),
 			items: [
+				sectionNote(t.t("skills.userDesc")),
 				{
 					name: userSkillsDirName(t),
 					desc: userSkillsDirDescription(t),
@@ -421,12 +427,14 @@ function mcpList(host: SettingsPanelHost): SettingDefinitionItem {
 	return {
 		type: "list",
 		heading: t.t("mcp.heading"),
-		emptyState: t.t("mcp.empty"),
 		addItem: {
 			name: t.t("mcp.add"),
 			action: () => openMcpModal(host),
 		},
-		items: states.map((state) => mcpRow(host, state)),
+		items: [
+			sectionNote(t.t("mcp.desc"), states.length === 0 ? t.t("mcp.empty") : undefined),
+			...states.map((state) => mcpRow(host, state)),
+		],
 	};
 }
 

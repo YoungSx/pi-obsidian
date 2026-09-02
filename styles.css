@@ -2884,6 +2884,21 @@ button.piem-chat__latest {
 }
 
 /*
+ * A section's explanatory sentence, sitting as the first row under its heading.
+ *
+ * A declarative group has a heading and no description slot, so the sentence is a
+ * row. Muted and normal-weight because it is not a setting: at a setting name's
+ * weight it would compete with the controls it introduces, and the reader would
+ * have to parse each row to find out which ones do something.
+ */
+.piem-settings-note .setting-item-name {
+	color: var(--text-muted);
+	font-size: var(--font-ui-small);
+	font-weight: inherit;
+	overflow-wrap: anywhere;
+}
+
+/*
  * Notice about chats left in the folder an earlier release used.
  *
  * A row rather than a control: it belongs to neither setting above it, it appears

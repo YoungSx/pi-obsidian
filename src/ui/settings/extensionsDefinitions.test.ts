@@ -125,13 +125,18 @@ describe("extensionsDefinitions", () => {
 		expect(record.refreshes).toBe(1);
 	});
 
-	it("does not claim the skills folder is empty before it has been read", () => {
-		// First build, before any read resolves: an `emptyState` here would render
-		// "no skills yet" over a folder nobody has looked in.
-		const definitions = extensionsDefinitions(stubHost(), new SettingsPanelState());
-		const skills = definitions[0] as { emptyState?: string };
+	it("does not claim the skills folder is empty before it has been read", async () => {
+		const state = new SettingsPanelState();
 
-		expect(skills.emptyState).toBe("");
+		// First build, before any read resolves: an empty sentence here would claim
+		// the folder holds nothing when nobody has looked in it.
+		const first = extensionsDefinitions(stubHost(), state)[0] as { items: Array<{ name: string }> };
+		expect(first.items[0]?.name).toBe(en.t("skills.desc"));
+
+		// Once a read has landed and come back with no rows, saying so is earned.
+		await settle();
+		const second = extensionsDefinitions(stubHost(), state)[0] as { items: Array<{ name: string }> };
+		expect(second.items[0]?.name).toContain(en.t("skills.empty"));
 	});
 
 	it("hides the user-level section where its folders cannot exist", async () => {
