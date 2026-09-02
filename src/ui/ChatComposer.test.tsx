@@ -21,28 +21,34 @@ const noop = (): void => undefined;
  * hint lived in a status line beside the button and the binding was fixed — so
  * the label and the behaviour are asserted against the same prop here.
  */
+function baseProps(overrides: Partial<Props> = {}): Props {
+	return {
+		input: "a draft",
+		isStreaming: false,
+		isCompacting: false,
+		isRewinding: false,
+		isInitializing: false,
+		isConfigured: true,
+		sendShortcut: "enter",
+		onInputChange: noop,
+		onSend: noop,
+		onAbort: noop,
+		commands: [],
+		...overrides,
+	};
+}
+
+async function renderInto(host: HTMLElement, props: Props): Promise<void> {
+	const root = roots.get(host) ?? createRoot(host);
+	roots.set(host, root);
+	root.render(<ChatComposer {...props} />);
+	await flushRender();
+}
+
 async function renderComposer(overrides: Partial<Props> = {}): Promise<HTMLElement> {
 	const host = document.createElement("div");
 	document.body.appendChild(host);
-	const root = roots.get(host) ?? createRoot(host);
-	roots.set(host, root);
-	root.render(
-		<ChatComposer
-			input="a draft"
-			isStreaming={false}
-			isCompacting={false}
-			isRewinding={false}
-			isInitializing={false}
-			isConfigured={true}
-			sendShortcut="enter"
-			onInputChange={noop}
-			onSend={noop}
-			onAbort={noop}
-			commands={[]}
-			{...overrides}
-		/>,
-	);
-	await flushRender();
+	await renderInto(host, baseProps(overrides));
 	return host;
 }
 
@@ -103,26 +109,54 @@ describe("ChatComposer send button", () => {
 		expect(sendButton(host)?.disabled).toBe(true);
 	});
 
-	it("keeps Send beside a labelled Stop while a turn is in flight", async () => {
-		const host = await renderComposer({ isStreaming: true });
+	it("turns the single slot into Stop mid-reply, and keeps a draft queueable", async () => {
+		const host = await renderComposer({ isStreaming: true, input: "a draft" });
 
+		// One slot, not two buttons: the element that was Send is now Stop.
+		expect(host.querySelectorAll(".piem-chat__send-button, .piem-chat__stop-button")).toHaveLength(1);
 		expect(host.querySelector(".piem-chat__stop-button")?.getAttribute("aria-label")).toBe("Stop response");
-		// A send mid-reply is no longer refused: it queues as a steer, so Send
-		// stays available for exactly the correction a reply in flight provokes.
-		expect(sendButton(host)?.disabled).toBe(false);
+		// The mouse half of queueing: with the slot busy, the draft's send path
+		// lives on this quiet text button, which only exists while a draft does.
+		expect(host.querySelector(".piem-chat__queue-button")?.textContent).toBe("Queue draft");
 	});
 
-	it("hides Send during compaction, which has no run to steer into", async () => {
-		const host = await renderComposer({ isCompacting: true });
+	it("does not offer the queue entry when there is nothing to queue", async () => {
+		const host = await renderComposer({ isStreaming: true, input: "   " });
 
-		expect(host.querySelector(".piem-chat__stop-button")?.getAttribute("aria-label")).toBe("Stop compaction");
-		expect(sendButton(host)).toBeNull();
+		expect(host.querySelector(".piem-chat__queue-button")).toBeNull();
 	});
 
-	it("names Stop after compaction when that is what it would cancel", async () => {
+	it("queues the draft when the queue entry is clicked mid-reply", async () => {
+		let sent = 0;
+		const host = await renderComposer({ isStreaming: true, onSend: () => void ++sent });
+
+		host.querySelector<HTMLButtonElement>(".piem-chat__queue-button")?.click();
+		expect(sent).toBe(1);
+	});
+
+	it("re-mounts nothing between phases, so a held Send keeps focus into Stop", async () => {
+		const host = document.createElement("div");
+		document.body.appendChild(host);
+		await renderInto(host, baseProps());
+		sendButton(host)?.focus();
+		const before = document.activeElement;
+
+		await renderInto(host, baseProps({ isStreaming: true, input: "a draft" }));
+
+		// Same fiber, same DOM node — the phase switch is a prop change, not a
+		// mount. The old side-by-side rendering unmounted Send and mounted Stop,
+		// dropping focus on the floor between the two; the class follows the
+		// phase, the element does not.
+		expect(document.activeElement).toBe(before);
+		expect(document.activeElement).toBe(host.querySelector(".piem-chat__stop-button"));
+	});
+
+	it("names Stop plainly during compaction, which the status bar narrates", async () => {
 		const host = await renderComposer({ isCompacting: true });
 
-		expect(host.querySelector(".piem-chat__stop-button")?.getAttribute("aria-label")).toBe("Stop compaction");
+		expect(host.querySelector(".piem-chat__stop-button")?.getAttribute("aria-label")).toBe("Stop");
+		expect(host.querySelectorAll(".piem-chat__send-button, .piem-chat__stop-button")).toHaveLength(1);
+		expect(host.querySelector(".piem-chat__queue-button")).toBeNull();
 	});
 });
 

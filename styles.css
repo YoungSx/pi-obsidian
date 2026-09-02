@@ -2352,8 +2352,10 @@ button.piem-chat__latest {
 }
 
 /*
- * Send rides on Obsidian's `mod-cta` (call-to-action) accent; Stop is a plain
- * icon button so it never competes visually with Send.
+ * Send rides on Obsidian's `mod-cta` (call-to-action) accent. Stop is the same
+ * slot in its other phase — a neutral icon recoloured to the error red, one
+ * loud control at a time because a red Stop sitting beside an accent Send
+ * would make the row two destinations wide.
  *
  * Not square any more: the send chord is printed on the button, so the width is
  * driven by its content. `min-width` stays as a floor for the touch target —
@@ -2391,6 +2393,36 @@ button.piem-chat__latest {
 
 .piem-chat__stop-button {
 	color: var(--text-error);
+}
+
+/*
+ * The mid-run queue entry for pointer users. Text, not an icon: an affordance
+ * this rare and momentary would spend a glyph the reader first has to learn.
+ * Muted by default — it must not pull the eye off the turn slot — and it lifts
+ * on hover to admit it is clickable. Obsidian themes every bare `button` as an
+ * interactive fill, so the fill, shadow, and border are reset back to text.
+ */
+.piem-chat__queue-button {
+	flex-shrink: 0;
+	min-height: var(--size-4-8);
+	padding-inline: var(--size-4-2);
+	color: var(--text-muted);
+	font-size: var(--font-ui-small);
+	background: transparent;
+	border: none;
+	border-radius: var(--radius-s);
+	box-shadow: none;
+	cursor: var(--cursor);
+	white-space: nowrap;
+}
+
+/* Hover only: a tap latches :hover on touch, and the entry would read as
+ * stuck-activated between taps. */
+@media (hover: hover) {
+	.piem-chat__queue-button:hover {
+		color: var(--text-normal);
+		background: var(--background-modifier-hover);
+	}
 }
 
 /* --- keyboard bypass --- */
@@ -2522,6 +2554,15 @@ button.piem-chat__latest {
 	}
 
 	.piem-chat__thinking-switcher {
+		min-height: var(--size-4-12);
+	}
+
+	/*
+	 * Height only. A bare <button>, like `.piem-chat__latest` — the shared rule
+	 * above never reaches it. It only appears mid-reply with a draft waiting,
+	 * which on a touch device is exactly the thumb zone.
+	 */
+	.piem-chat__queue-button {
 		min-height: var(--size-4-12);
 	}
 

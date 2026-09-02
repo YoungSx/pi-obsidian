@@ -169,28 +169,31 @@ describe("ChatComposer accessibility", () => {
 		expect(send?.getAttribute("aria-label")).toBe("Add an API key to send");
 	});
 
-	it("adds a labelled Stop control while streaming, keeping Send for the queued draft", async () => {
+	it("names the streamed phase Stop and routes the draft through the queue entry", async () => {
 		const host = await renderComposer({ isStreaming: true });
 
 		const stop = host.querySelector<HTMLButtonElement>(".piem-chat__stop-button");
 		expect(stop?.getAttribute("aria-label")).toBe("Stop response");
 		expect(stop?.disabled).toBe(false);
-		// Send survives the run: a mid-reply send queues the draft as a steer
-		// rather than raising the busy error it used to. Removing it would take
-		// away the only control that outcome is reachable through.
-		const send = host.querySelector<HTMLButtonElement>(".piem-chat__send-button");
-		expect(send).not.toBeNull();
-		expect(send?.disabled).toBe(false);
+		// The draft's send path survives the run, but not through a second turn
+		// button: mid-reply queueing lives on the quiet text entry beside the
+		// slot, so a screen reader hears two controls with disjoint jobs, not
+		// two buttons both claiming to send.
+		const queue = host.querySelector<HTMLButtonElement>(".piem-chat__queue-button");
+		expect(queue?.getAttribute("aria-label")).toBeNull();
+		expect(queue?.textContent).toBe("Queue draft");
 	});
 
 	it("withdraws Send during a compaction, which has no run to queue into", async () => {
 		// The one window where the composer still refuses: a compaction holds
 		// the turn with no run behind it, so there is nothing to steer and a
-		// send would race the compactor. Stop stays, and names what it stops.
+		// send would race the compactor. The slot stays, becomes Stop, and says
+		// only that — what the compactor is doing belongs to the status bar.
 		const host = await renderComposer({ isCompacting: true });
 
-		expect(host.querySelector(".piem-chat__stop-button")?.getAttribute("aria-label")).toBe("Stop compaction");
+		expect(host.querySelector(".piem-chat__stop-button")?.getAttribute("aria-label")).toBe("Stop");
 		expect(host.querySelector(".piem-chat__send-button")).toBeNull();
+		expect(host.querySelector(".piem-chat__queue-button")).toBeNull();
 	});
 
 	it("keeps the send hint out of any live region, so a settled turn does not re-announce it", async () => {

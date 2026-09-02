@@ -45,7 +45,13 @@ export const en = {
 		 */
 		placeholder: "Ask Piem, or / for commands…",
 		composerAria: "Message Piem",
-		stopCompaction: "Stop compaction",
+		/**
+		 * The stop phase's label while the compactor holds the turn. "Stop compaction"
+		 * named the mechanism and made the button carry two nouns; the status bar
+		 * just above already narrates what is happening, so the button only says
+		 * what it does.
+		 */
+		stop: "Stop",
 		stopResponse: "Stop response",
 		sendMessage: "Send message",
 		/**
@@ -188,6 +194,13 @@ export const en = {
 		queueImages: "{count} images",
 		/** Retract button on a queued chip. */
 		queueCancel: "Take back",
+		/**
+		 * The mouse half of mid-run queueing: while a reply streams the single
+		 * turn slot is Stop, so this quiet text button keeps the draft's queue
+		 * path open for pointer users. Visible only while a draft exists — the
+		 * chord keeps working regardless.
+		 */
+		queueDraft: "Queue draft",
 		/** Notice when a finished reply could not be written to the vault. The reader has the text either way, so this is a notice, not an alert. */
 		persistFailed: "This reply could not be saved to the vault: {error}",
 		/** Overflow-menu item that writes the transcript into the vault as a Markdown note. */

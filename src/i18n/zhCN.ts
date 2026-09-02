@@ -35,7 +35,8 @@ export const zhCN: DeepPartial<EnCopy> = {
 	chat: {
 		placeholder: "询问 Piem，或输入 / 使用命令…",
 		composerAria: "给 Piem 发消息",
-		stopCompaction: "停止整理",
+		/** 整理占住回合时的停止档位文案。上一版「停止整理」在按钮里塞了两个名词，机制说明交给正上方的状态栏，按钮只说它做什么。 */
+		stop: "停止",
 		stopResponse: "停止回复",
 		sendMessage: "发送消息",
 		sendNeedsKey: "填写 API 密钥后才能发送",
@@ -115,6 +116,8 @@ export const zhCN: DeepPartial<EnCopy> = {
 		queueImages: "{count} 张图",
 		/** 排队 chip 的撤回按钮。 */
 		queueCancel: "撤回",
+		/** 回复流式输出期间，回合槽位已是停止档位，这个安静的文字按钮为鼠标用户保留草稿的排队入口；只在有草稿时出现，键盘快捷键不受影响。 */
+		queueDraft: "排队发送",
 		/** 回复已生成但没能写进 vault。读者反正已看到正文，所以这是通知而不是警报。 */
 		persistFailed: "这条回复没能保存进笔记库：{error}",
 		/** 溢出菜单项：把对话记录写成 vault 里的 Markdown 笔记。 */
