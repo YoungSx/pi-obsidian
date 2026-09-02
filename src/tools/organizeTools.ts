@@ -46,15 +46,12 @@ export function createMoveNoteTool(app: App): AgentTool<typeof MoveNoteParameter
 	return {
 		name: "move_note",
 		label: "Move note",
-		// Today this is inert — `ObsidianAgentService` sets `toolExecution:
-		// "sequential"` globally, and pi's `agent-loop` short-circuits before it
-		// reads `hasSequentialToolCall`. It is still set because the native
-		// read/write/edit tools serialize through pi's file mutation queue, whose
-		// per-path locks are keyed off env object identity; a hand-written tool
-		// never enters that queue, so nothing would interlock a concurrent
-		// `move_note` and `write` on the same path. If the global default is ever
-		// relaxed, this flag is the only remaining defence, and one sequential
-		// tool is enough to serialize the whole batch.
+		// Load-bearing since the agent's `toolExecution` moved to "parallel": a
+		// hand-written tool never enters pi's file mutation queue (whose per-path
+		// locks are keyed off env object identity and which only the native
+		// read/write/edit tools consult), so without this flag nothing would
+		// interlock a concurrent `move_note` and `write` on the same path. One
+		// sequential tool is enough to serialize the whole batch.
 		executionMode: "sequential",
 		description:
 			"Rename or move a note or folder to a new vault-relative path. Prefer this over writing the note at the new path and trashing the old one: this goes through Obsidian's file manager, so inbound [[wikilinks]] are updated across the vault, the note keeps its history, and no duplicate is left behind. Missing destination folders are created. Refuses when anything already exists at the destination, so choose a free path or trash the occupant first.",
@@ -136,8 +133,8 @@ export function createTrashNoteTool(app: App): AgentTool<typeof TrashNoteParamet
 	return {
 		name: "trash_note",
 		label: "Trash note",
-		// See `move_note`: same reason, same non-participation in pi's file
-		// mutation queue.
+		// See `move_note`: same reason — a hand-written tool that mutates the
+		// vault outside pi's file mutation queue.
 		executionMode: "sequential",
 		// The name is half the safety story: `trash_note` states the recoverable
 		// nature of the operation in the one field the model always reads, and

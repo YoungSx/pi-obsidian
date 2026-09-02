@@ -2589,7 +2589,16 @@ export class ObsidianAgentService {
 			// all of it", so every queued message reaches the next turn.
 			steeringMode: "all",
 			followUpMode: "all",
-			toolExecution: "sequential",
+			// pi's per-tool `executionMode` marks only take effect once this is
+			// "parallel": the loop short-circuits to sequential when either this
+			// flag or any tool in the batch is marked sequential. Batches of pure
+			// read tools (read/ls/find/grep/…) now run concurrently — the latency
+			// win for long multi-tool turns — while every tool that mutates the
+			// vault, the editor, the screen, the network, or a remote server is
+			// pinned `executionMode: "sequential"` at its definition, so one such
+			// call serializes its whole batch exactly as before. The subagent
+			// runner keeps its own sequential default.
+			toolExecution: "parallel",
 		});
 		this.agent = agent;
 		this.unsubscribeAgent = agent.subscribe((event) => this.handleAgentEvent(event));

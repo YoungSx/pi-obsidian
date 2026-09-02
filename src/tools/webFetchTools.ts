@@ -52,6 +52,9 @@ export function createWebFetchTool(transport: NetworkTransport): AgentTool<typeo
 	return {
 		name: "web_fetch",
 		label: "Fetch a URL",
+		// Outbound, and not assumed idempotent: `method` can be POST/PUT/PATCH, so
+		// a server-visible side effect is possible and the call stays sequential.
+		executionMode: "sequential",
 		// The description is the disclosure AGENTS.md requires: it names the one
 		// thing every other tool avoids — data leaving the vault — so the model
 		// treats an outbound request as a deliberate act, and a reader auditing the

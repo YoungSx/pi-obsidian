@@ -1,4 +1,4 @@
-import type { AgentHarnessTool, ExecutionEnv, ExecutionToolContext } from "@earendil-works/pi-agent-core";
+import type { AgentHarnessTool, ExecutionEnv, ExecutionToolContext, ToolExecutionMode } from "@earendil-works/pi-agent-core";
 import type { AgentTool, AgentToolUpdateCallback, AgentToolResult } from "@earendil-works/pi-agent-core";
 import type { TSchema } from "typebox";
 import { VaultExecutionEnv } from "./VaultExecutionEnv";
@@ -17,7 +17,8 @@ import type { App } from "obsidian";
  * The low-level agent loop (`agent-loop.js`, `executePreparedToolCall`) always
  * calls `execute(id, args, signal, onUpdate)`; there is no hook to inject a
  * context. Closing over the environment is therefore the whole adaptation:
- * {@link adaptHarnessTool} binds a fixed context once and hands back a plain
+ * {@link adaptHarnessTool} binds a fixed context once (and optionally pins an
+ * `executionMode`, which pi's native tools ship without) and hands back a plain
  * `AgentTool` the existing `Agent` can register unchanged.
  */
 
@@ -27,6 +28,13 @@ export type HarnessContextSource<TContext> = TContext | (() => TContext | Promis
 export interface HarnessToolContextOptions<TContext> {
 	/** Context passed as the fifth `execute` argument. Resolved lazily when a function. */
 	context: HarnessContextSource<TContext>;
+	/**
+	 * Per-tool execution mark pinned onto the adapted tool, for the native
+	 * read/write/edit tools pi ships without one. Load-bearing rather than
+	 * decorative: the agent loop counts an omitted mark as "parallel", so an
+	 * unpinned mutation tool would silently join concurrent batches.
+	 */
+	executionMode?: ToolExecutionMode;
 }
 
 /**
@@ -50,6 +58,7 @@ export function adaptHarnessTool<TContext extends object | undefined, TParameter
 	};
 	return {
 		...tool,
+		executionMode: options.executionMode ?? tool.executionMode,
 		execute: async (
 			toolCallId: string,
 			params,

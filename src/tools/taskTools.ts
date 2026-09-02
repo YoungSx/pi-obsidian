@@ -51,6 +51,9 @@ export function createListTasksTool(app: App): AgentTool<typeof ListTasksParamet
 	return {
 		name: "list_tasks",
 		label: "List tasks",
+		// Reads Obsidian's metadata cache and `cachedRead`s the scope files — no
+		// mutation, so it is safe beside any other call in the same batch.
+		executionMode: "parallel",
 		description:
 			"List tasks discovered from Obsidian's metadata cache across the vault, a folder, or a Markdown note. Defaults to todo tasks; set status to all or done when needed.",
 		parameters: ListTasksParameters,
@@ -76,6 +79,8 @@ export function createSummarizeTasksTool(app: App): AgentTool<typeof SummarizeTa
 	return {
 		name: "summarize_tasks",
 		label: "Summarize tasks",
+		// Same cache-and-read walk as `list_tasks`, just aggregated differently.
+		executionMode: "parallel",
 		description:
 			"Summarize task counts discovered from Obsidian's metadata cache by Markdown note. Searches the whole vault by default, or a vault-relative folder/note path.",
 		parameters: SummarizeTasksParameters,

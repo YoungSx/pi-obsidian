@@ -411,6 +411,10 @@ export class McpManager {
 		return {
 			name,
 			label: mcpTool.name,
+			// A remote tool's read/write nature is declared by its server, not
+			// visible from here, so it is never assumed idempotent: pin sequential
+			// rather than let it join a concurrent batch by default.
+			executionMode: "sequential",
 			description: `${mcpTool.description ?? ""}\n\n${disclosure}`.trim(),
 			parameters: dial.schema,
 			execute: async (_toolCallId, params, signal): Promise<AgentToolResult<Record<string, unknown>>> => {

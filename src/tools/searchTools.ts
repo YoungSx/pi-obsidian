@@ -37,6 +37,10 @@ export function createLsTool(app: App): AgentTool<typeof LsParameters> {
 	return {
 		name: "ls",
 		label: "List folder",
+		// Pure read of the live vault index — no mutation, no user-visible effect —
+		// so it is safe beside any other call in the same batch. See `move_note` in
+		// organizeTools for the sequential counterpart of this mark.
+		executionMode: "parallel",
 		description: "List files and folders at a vault-relative folder path.",
 		parameters: LsParameters,
 		execute: async (_toolCallId, params, signal) => {
@@ -59,6 +63,8 @@ export function createFindTool(app: App): AgentTool<typeof FindParameters> {
 	return {
 		name: "find",
 		label: "Find files",
+		// Same pure read as `ls`: a snapshot of `vault.getFiles()` plus formatting.
+		executionMode: "parallel",
 		description: "Find vault files by case-insensitive substring or simple * and ? glob pattern.",
 		parameters: FindParameters,
 		execute: async (_toolCallId, params, signal) => {
@@ -85,6 +91,8 @@ export function createGrepTool(app: App): AgentTool<typeof GrepParameters> {
 	return {
 		name: "grep",
 		label: "Search file text",
+		// `cachedRead` never mutates, so overlapping greps contend on nothing.
+		executionMode: "parallel",
 		description: "Search text files in the vault. Supports literal matching by default and regex matching when regex is true.",
 		parameters: GrepParameters,
 		execute: async (_toolCallId, params, signal) => {
