@@ -34,6 +34,10 @@ export function createInsertAtCursorTool(app: App): AgentTool<typeof InsertAtCur
 	return {
 		name: "insert_at_cursor",
 		label: "Insert at cursor",
+		// A writer through the active editor: it replaces whatever selection the
+		// user holds, so two concurrent editor tools could interleave against the
+		// same cursor. Pinned sequential, matching the vault writers.
+		executionMode: "sequential",
 		description:
 			"Insert text exactly where the user's cursor is in the note they are looking at, replacing their selection if one exists. Unlike write and edit this rides the editor's undo stack, so the user can undo it with their usual shortcut. Use when the user asked for something to be added where they are looking — a sentence, a list item, a template snippet. For whole-note or precisely targeted changes use write or edit instead, and never use this on a note the user is not actively looking at: they cannot see what was inserted.",
 		parameters: InsertAtCursorParameters,
@@ -59,6 +63,9 @@ export function createGotoLocationTool(app: App): AgentTool<typeof GotoLocationP
 	return {
 		name: "goto_location",
 		label: "Go to location",
+		// Moves the user's cursor and focus — not a read, and racing it against
+		// `insert_at_cursor` would point the selection at the wrong span.
+		executionMode: "sequential",
 		description:
 			"Scroll the active note to a line and select it, so the user is looking at the exact spot you are talking about. Use right after editing so the user sees the change without hunting for it, and when pointing the user at something you found while reading. Only works on the note the user currently has open — to show them a different note use open_note.",
 		parameters: GotoLocationParameters,

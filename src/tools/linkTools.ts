@@ -58,6 +58,8 @@ export function createNoteLinksTool(app: App): AgentTool<typeof NoteLinksParamet
 	return {
 		name: "get_note_links",
 		label: "Get note links",
+		// Pure read of Obsidian's link index — no mutation, no screen effect.
+		executionMode: "parallel",
 		description:
 			"Read one note's connections from Obsidian's link index: outgoing links, backlinks, and unresolved links pointing at notes that do not exist. Prefer this over grep for any question about what references a note, because the index already resolves aliased links, heading anchors, and Markdown-style links that a text search misses.",
 		parameters: NoteLinksParameters,
@@ -104,6 +106,8 @@ export function createNoteMetadataTool(app: App): AgentTool<typeof NoteMetadataP
 	return {
 		name: "get_note_metadata",
 		label: "Get note metadata",
+		// Same metadata-cache read as `get_note_links`.
+		executionMode: "parallel",
 		description:
 			"Read one note's structured metadata from Obsidian's cache: frontmatter keys and values, tags from both frontmatter and note body, and the heading outline with line numbers. Prefer this over reading the whole note when the question is about frontmatter fields, tags, or note structure.",
 		parameters: NoteMetadataParameters,

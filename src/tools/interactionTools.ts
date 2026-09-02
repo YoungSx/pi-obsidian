@@ -62,6 +62,10 @@ export function createNotifyTool(app: App): AgentTool<typeof NotifyParameters> {
 	return {
 		name: "notify",
 		label: "Notify",
+		// `Notice` is queue-and-forget, so concurrent calls would not corrupt
+		// anything — but they would stack toasts out of order, and a notification
+		// is a user-visible side effect this file keeps one-at-a-time.
+		executionMode: "sequential",
 		description:
 			"Show a short toast notification that stays visible no matter what the user is looking at. Use it for completion or failure the user may be away from the chat panel for — a long reorganization finished, a step needs their attention. Do not use it to deliver the answer, report every step, or ask anything: the answer and questions belong in the chat.",
 		parameters: NotifyParameters,

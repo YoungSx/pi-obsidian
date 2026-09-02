@@ -22,11 +22,14 @@ import type { PiemSettings } from "../settings";
  * The three execution tools — read, write, edit — are pi's native harness
  * tools ({@link createReadTool} / {@link createWriteTool} /
  * {@link createEditTool}), adapted onto the shared {@link VaultExecutionEnv}
- * passed in as `env`. Sharing one env instance across all three is what
- * serializes their mutations: pi's file mutation queue keys per-path locks off
- * env object identity, so separate envs would each get their own queue and
- * mutations could interleave. The same env is reused to load prompt templates,
- * so a reload never hands the loader a different object than the tools queue on.
+ * passed in as `env`. Sharing one env instance across all three is what lets
+ * pi's file mutation queue interlock their mutations (it keys per-path locks
+ * off env object identity, so separate envs would each get their own queue);
+ * the explicit `executionMode: "sequential"` pins below are the primary
+ * serialization now that the agent runs batches of read-only tools in
+ * parallel — the queue stays as the per-path backstop. The same env is reused
+ * to load prompt templates, so a reload never hands the loader a different
+ * object than the tools queue on.
  *
 	 * The remaining tools (ls, find, grep, tasks, notes, frontmatter, skills,
 	 * move, trash, and the screen tools — open/panel/cursor/notify/ask) are
@@ -35,6 +38,12 @@ import type { PiemSettings } from "../settings";
 	 * including bundled skills that intentionally have no vault file. move/trash
 	 * stay out of the native set because pi's `FileSystem` rename replaces its
 	 * destination, while a user-facing move must refuse an occupied one.
+ *
+ * Every tool carries an explicit `executionMode` — pi treats an omitted mark
+ * as "parallel", and a batch runs concurrently unless one of its tools is
+ * pinned sequential, so the marks are the whole story of what may interleave.
+ * Only confirmed pure reads are "parallel"; everything that mutates the vault,
+ * the editor, the screen, or the network stays sequential.
  *
  * `web_fetch` is the sole outbound tool and is always present. It was gated
  * behind an off-by-default setting until the capability review in #52: a tool
@@ -53,9 +62,11 @@ export function createObsidianTools(
 	getSkills?: () => readonly Skill[],
 ): AgentTool[] {
 	const tools: AgentTool[] = [
-		adaptHarnessTool(createReadTool(), { context: { env } }),
-		adaptHarnessTool(createWriteTool(), { context: { env } }),
-		adaptHarnessTool(createEditTool(), { context: { env } }),
+		// pi's native harness tools ship without an `executionMode`, so the pin
+		// happens here, at the one place they are adapted into the agent's list.
+		adaptHarnessTool(createReadTool(), { context: { env }, executionMode: "parallel" }),
+		adaptHarnessTool(createWriteTool(), { context: { env }, executionMode: "sequential" }),
+		adaptHarnessTool(createEditTool(), { context: { env }, executionMode: "sequential" }),
 		createLsTool(app),
 		createFindTool(app),
 		createGrepTool(app),

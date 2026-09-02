@@ -186,6 +186,52 @@ describe("tool registration", () => {
 		// reasoning about pages it cannot reach — the failure the gate itself caused.
 		expect(tools(app).map((tool) => tool.name)).toContain("web_fetch");
 	});
+
+	it("marks exactly the pure reads parallel and everything else sequential", () => {
+		// pi's loop runs a batch concurrently unless one of its tools is pinned
+		// sequential (`ObsidianAgentService` now sets `toolExecution: "parallel"`),
+		// and an omitted mark counts as parallel — so the marks, not the default,
+		// are the whole story of what may interleave. This pins the audit: the
+		// parallel set is exactly the tools that only read, and every tool that
+		// mutates the vault, the editor, the screen, or the network is sequential.
+		// A new tool must pick a side before it registers; the loop-level proof of
+		// what these marks do lives in `parallelExecution.test.ts`.
+		const app = createTaskApp([]);
+		// The skills getter is what brings `read_skill` into the list at all.
+		const registered = createObsidianTools(app, createVaultHarnessContext(app).env, defaultSettings(), () => []);
+
+		const unmarked = registered.filter((tool) => tool.executionMode === undefined).map((tool) => tool.name);
+		expect(unmarked).toEqual([]);
+		expect(registered.filter((tool) => tool.executionMode === "parallel").map((tool) => tool.name).sort()).toEqual(
+			[
+				"read",
+				"ls",
+				"find",
+				"grep",
+				"list_tasks",
+				"summarize_tasks",
+				"get_note_links",
+				"get_note_metadata",
+				"get_active_note",
+				"read_skill",
+			].sort(),
+		);
+		expect(registered.filter((tool) => tool.executionMode === "sequential").map((tool) => tool.name).sort()).toEqual(
+			[
+				"write",
+				"edit",
+				"move_note",
+				"trash_note",
+				"open_note",
+				"open_side_panel",
+				"insert_at_cursor",
+				"goto_location",
+				"notify",
+				"ask_user",
+				"web_fetch",
+			].sort(),
+		);
+	});
 });
 
 describe("abort handling", () => {

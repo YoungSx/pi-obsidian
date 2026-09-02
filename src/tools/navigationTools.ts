@@ -73,6 +73,10 @@ export function createOpenNoteTool(app: App): AgentTool<typeof OpenNoteParameter
 	return {
 		name: "open_note",
 		label: "Open note",
+		// Opens leaves and moves the user's screen — a side effect, not a read.
+		// Two concurrent opens could race on leaf creation, and this pin is what
+		// keeps the pre-parallel behavior unchanged.
+		executionMode: "sequential",
 		description:
 			"Open a note on screen, or bring it to the front if it is already open. Prefer answering in text and only opening a note when the user asked to see it: every open moves the screen out from under the user, on mobile it replaces the chat entirely. Prefer this over telling the user a path and letting them find it themselves. Resolves 'note already open' to revealing the existing tab rather than opening a duplicate. Use background: true when the user should see the note later rather than now.",
 		parameters: OpenNoteParameters,
@@ -128,6 +132,8 @@ export function createOpenSidePanelTool(app: App): AgentTool<typeof SidePanelPar
 	return {
 		name: "open_side_panel",
 		label: "Open side panel",
+		// Same screen-mutation side effect as `open_note`.
+		executionMode: "sequential",
 		description:
 			"Open one of Obsidian's own side panes — vault search, backlinks, or outgoing links — so the user can watch the result alongside the chat. Use when the agent's answer is a set of notes the user will want to poke at, not when the answer fits in the reply.",
 		parameters: SidePanelParameters,

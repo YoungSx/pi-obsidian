@@ -15,6 +15,8 @@ export function createReadSkillTool(getSkills: () => readonly Skill[]): AgentToo
 	return {
 		name: "read_skill",
 		label: "Read skill",
+		// A lookup in the in-memory skill set — no vault access at all.
+		executionMode: "parallel",
 		description:
 			"Read the complete instructions for a skill listed in <available_skills>. Use the exact skill name instead of reading its location as a vault file.",
 		parameters: ReadSkillParameters,

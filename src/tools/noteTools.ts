@@ -13,6 +13,9 @@ export function createActiveNoteTool(app: App): AgentTool<typeof ActiveNoteParam
 	return {
 		name: "get_active_note",
 		label: "Get active note",
+		// Pure read of the active view's file, selection, and cached body — it
+		// never writes, so concurrent sibling calls are safe.
+		executionMode: "parallel",
 		// The active note's path arrives in the per-turn <context> block for the main
 		// conversation, so the wording steers that caller away from a no-argument
 		// call that only re-reads it. A subagent gets no such block, and the old
