@@ -160,6 +160,7 @@ describe("tool registration", () => {
 			"summarize_tasks",
 			"get_note_links",
 			"get_note_metadata",
+			"update_frontmatter",
 			"get_active_note",
 			"move_note",
 			"trash_note",

@@ -389,6 +389,9 @@ export function createStubApp(options: { secretStorage?: unknown } = {}): unknow
 		fileManager: {
 			generateMarkdownLink: () => "[[link]]",
 			trashFile: async (): Promise<void> => undefined,
+			// Atomic read-modify-write of a note's YAML header; the smoke test only
+			// needs the method to exist, so a no-op stub stands in for the real one.
+			processFrontMatter: async (): Promise<void> => undefined,
 		},
 		keymap: {},
 		scope: {},
