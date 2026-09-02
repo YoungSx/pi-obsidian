@@ -208,6 +208,60 @@ describe("icon contrast in the resting state (WCAG 1.4.11)", () => {
 	});
 });
 
+describe("message actions: revealed on hover where hover exists, visible where it doesn't", () => {
+	/*
+	 * The row must stay *laid out* on every device — only the buttons' paint is
+	 * hidden on desktop. Hiding the row itself would add the actions' height to
+	 * every message the moment the pointer reached it, shoving the transcript
+	 * down mid-scroll. So the `opacity: 0` lives on the buttons, and the row's
+	 * base rule keeps carrying no opacity at all (asserted by the contrast tests
+	 * above, which is what keeps the muted-colour treatment the resting state
+	 * is measured against).
+	 */
+	it("hides the buttons' paint, never the row's layout box", () => {
+		const hidden = ruleBody(".piem-chat__message-actions button");
+		expect(hidden).toContain("opacity: 0");
+		expect(ruleBody(".piem-chat__message-actions")).not.toMatch(/opacity\s*:/);
+	});
+
+	/*
+	 * A touch tap leaves `:hover` latched on the tapped element until the next
+	 * tap lands elsewhere, so an ungated rule renders as a permanently "active"
+	 * row on a phone — the same reason every other pointer rule here sits behind
+	 * this gate. Touch must simply never match the hiding rule.
+	 */
+	it("gates the hiding and the hover reveal behind a hover-capable pointer", () => {
+		for (const selector of [
+			".piem-chat__message-actions button",
+			".piem-chat__message:hover .piem-chat__message-actions button",
+		]) {
+			expect(gatingBlockFor(selector)).not.toBeNull();
+		}
+	});
+
+	it("reveals the row when the pointer reaches the message or focus lands on a button", () => {
+		// The hover target is the whole message — bubble plus the row's own
+		// placeholder — so moving toward the invisible buttons already wakes them.
+		const hover = ruleBody(".piem-chat__message:hover .piem-chat__message-actions button");
+		expect(hover).toContain("opacity: 1");
+
+		// Keyboard parity, ungated like every other focus state: on touch it
+		// re-asserts the always-visible baseline; on desktop it keeps tabbing to
+		// a hidden action from landing on an invisible control.
+		const focus = ruleBody(".piem-chat__message-actions:focus-within button");
+		expect(focus).toContain("opacity: 1");
+		expect(gatingBlockFor(".piem-chat__message-actions:focus-within button")).toBeNull();
+	});
+
+	it("switches the reveal animation off under reduced motion", () => {
+		// The stylesheet has several reduce blocks; the reveal's must be one of them.
+		const reduced = mediaBlocks("prefers-reduced-motion: reduce").some((block) =>
+			block.includes(".piem-chat__message-actions button"),
+		);
+		expect(reduced).toBe(true);
+	});
+});
+
 describe("bare-button cascade against Obsidian's control chrome", () => {
 	/*
 	 * `app.css` styles every `button:not(.clickable-icon)` as a filled form

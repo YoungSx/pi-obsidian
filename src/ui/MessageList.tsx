@@ -654,11 +654,11 @@ function MessageRow({ message, isStreaming, renderContext, onRetry, onEdit, onCo
 				) : null}
 				{message.role === "user" && (onEdit || onCompare) ? (
 					/*
-					 * Always-visible controls, mirroring the reply's actions row: on a
-					 * touch panel there is no hover to surface anything, and an action
-					 * offered only via long-press or a hidden menu is one a reader never
-					 * finds. They sit under the bubble — outside the card, in the row the
-					 * article owns — so the two roles read the same way.
+					 * Rendered controls, mirroring the reply's actions row; the
+					 * stylesheet reveals them on hover where hover exists and keeps
+					 * them visible on touch. They sit under the bubble — outside the
+					 * card, in the row the article owns — so the two roles read the
+					 * same way.
 					 */
 					<div className="piem-chat__message-actions">
 						{onEdit ? <IconButton icon="pen-line" label={renderContext.t.t("chat.editMessage")} onClick={onEdit} /> : null}

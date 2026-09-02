@@ -26,9 +26,10 @@ interface ReplyActionsProps {
  * whose entire premise is working with notes. Every action here is explicitly
  * user-initiated; none of them run on the agent's behalf.
  *
- * The row is always rendered rather than revealed on hover: hover-only controls
- * are unreachable by touch, and `isDesktopOnly: false` means this panel really
- * does run on a phone.
+ * The row is always *rendered* — the stylesheet decides its visibility: hover-
+ * revealed on pointers that can hover, permanently visible on touch, where
+ * hover-only controls are unreachable. Keeping the layout box present on every
+ * device also means the desktop reveal never reflows the transcript.
  */
 export function ReplyActions({ app, text, onRetry }: ReplyActionsProps): React.JSX.Element | null {
 	const t = useT();
