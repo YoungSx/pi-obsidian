@@ -309,7 +309,7 @@ export const zhCN: DeepPartial<EnCopy> = {
 	},
 
 	askUser: {
-		title: "Piem 提问",
+		title: "Piem：那我问你, look in my eyes!",
 		confirm: "确认",
 		other: "自己写一个…",
 		otherLabel: "自己写答案：{header}",
