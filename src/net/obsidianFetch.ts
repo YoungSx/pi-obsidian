@@ -4,18 +4,43 @@ import type { FetchFunction } from "@earendil-works/pi-ai";
 /**
  * Obsidian-backed `fetch` implementations for pi-ai provider requests.
  *
- * Obsidian renders plugins inside a page whose origin is `app://obsidian.md`,
- * so `window.fetch` is subject to CORS. Most model providers do not send
- * permissive CORS headers, which makes direct `fetch` unreliable — it works on
- * some desktop builds and fails on mobile. Obsidian's `requestUrl` bypasses
- * CORS entirely, but it buffers the whole response and therefore cannot stream.
+ * Obsidian renders plugins in a page whose origin differs per platform —
+ * `app://obsidian.md` on desktop, `capacitor://localhost` on iOS,
+ * `http://localhost` on Android — and `window.fetch` is subject to CORS under
+ * all three. `requestUrl` bypasses CORS entirely but has no incremental entry
+ * point at all, so it cannot stream. See {@link createObsidianRequestUrlFetch}
+ * for why that is structural rather than a gap in our usage.
  *
  * We expose both and let the caller choose:
  *
- * - {@link createObsidianRequestUrlFetch} — CORS-safe, no streaming. The
- *   response body is delivered as a single chunk once the request completes.
+ * - {@link createObsidianRequestUrlFetch} — CORS-free, no streaming. Every SSE
+ *   event becomes available at once, after the request completes.
  * - {@link createObsidianStreamingFetch} — native `fetch`, real streaming,
  *   subject to CORS.
+ *
+ * Why `fetch` is the non-default despite being the better experience. It is not
+ * that providers refuse browser origins: a 2026-09-02 sweep found 24 of 27
+ * model endpoints answering the preflight for our origins without special
+ * pleading. The reasons are narrower and all four survive that finding:
+ *
+ * 1. **Undocumented, so no SLA.** Almost none of those providers document
+ *    browser access, and OpenAI broke it twice in fifteen months (2025-10-15
+ *    `/v1/chat/completions`, 2026-01-29 `/v1/responses`) — fixed both times as
+ *    bugs, which is precisely the point: it is a bug either way it moves.
+ * 2. **The gate is the request-header set, not the origin.** Gemini's
+ *    `Access-Control-Allow-Headers` is a strict allowlist that 403s on any
+ *    `x-stainless-*`; Moonshot silently drops every CORS header past six
+ *    request headers. We stay under both by default (our SDK shim sends only
+ *    accept + content-type + authorization), but a user's per-model `headers`
+ *    can push us over.
+ * 3. **Local and self-hosted endpoints need the user to opt in.** Ollama
+ *    default-allows `app://*` but no pattern matching iOS's
+ *    `capacitor://localhost`; LM Studio needs `--cors`; anything behind a
+ *    self-hosted gateway is entirely the deployer's call.
+ * 4. **Two providers hard-block.** Tencent Hunyuan answers OPTIONS with 404 on
+ *    every path, and iFlytek Spark with a CORS-header-less 403.
+ *
+ * That is a shape worth defaulting away from, not one worth calling unreliable.
  *
  * Both return a {@link FetchFn} — an honest function signature, unlike
  * `typeof window.fetch`, whose type picks up bun-types' phantom `preconnect`
@@ -232,9 +257,28 @@ function toResponse(response: RequestUrlResponse): Response {
  * `fetch` backed by Obsidian's `requestUrl`.
  *
  * Bypasses CORS, so it works on desktop and mobile for every provider. The
- * tradeoff is that the response is fully buffered: pi-ai's SSE parser receives
- * the entire body as one chunk, so tokens appear all at once instead of
- * incrementally.
+ * tradeoff is that nothing is observable until the request completes: pi-ai's
+ * SSE parser can only start once the whole body is in memory, so every event of
+ * a turn becomes available at the same instant and tokens appear all at once.
+ *
+ * Note this is *not* "the body arrives as one chunk" — a `Response` built from
+ * an `ArrayBuffer` may well be read in several chunks (bun splits 200 KiB into
+ * two). Every one of those reads resolves from memory without waiting on the
+ * network, which is the part that matters and the part that cannot be improved
+ * from here.
+ *
+ * The absence of streaming is structural, not a gap in this usage. Obsidian's
+ * whole network surface is `request` and `requestUrl`; `RequestUrlParam` has no
+ * signal, no progress callback and no stream flag, and the three promise
+ * properties on `RequestUrlResponsePromise` that look like they might be
+ * incremental are not. Obsidian's own `obsidian-importer` re-implements the API
+ * for the browser by awaiting `arrayBuffer()` in full and then exposing those
+ * three as views onto that single settled promise — first-party code saying, in
+ * a comment, that both forms mean the same buffered value. The one recorded
+ * attempt to squeeze progressive delivery out of it anyway (Range headers
+ * against a never-ending stream, supernote-obsidian-plugin #210) is written up
+ * as a dead end. Two plugins that appear to stream through `requestUrl` are
+ * replaying a completed body on a timer.
  *
  * No deadline of its own. pi-ai treats `timeoutMs` as opt-in and leaves it
  * unset, so a transport that invented one would cut off requests the provider
@@ -296,8 +340,13 @@ export function createObsidianRequestUrlFetch(): FetchFn {
 /**
  * `fetch` using the platform implementation, preserving real streaming.
  *
- * Subject to CORS: reliable on desktop for providers that allow browser
- * origins, but can fail on mobile or with stricter providers.
+ * Subject to CORS on every platform — including mobile, whose two origins are
+ * waved through by the same endpoints that wave through the desktop one, so
+ * this is not the desktop-only path it is sometimes taken for. What it cannot
+ * reach is the four cases enumerated at the top of this file: an endpoint that
+ * blocks preflight outright, one whose allowlist rejects the user's extra
+ * per-model headers, a local server with CORS left off, and anything behind a
+ * gateway configured by someone else.
  */
 export function createObsidianStreamingFetch(): FetchFn {
 	return (input: RequestInfo | URL, init?: RequestInit) => window.fetch(input, init);

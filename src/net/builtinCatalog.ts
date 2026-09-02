@@ -49,8 +49,10 @@ import type { Model, Provider } from "@earendil-works/pi-ai";
  * `google` was carried until that invariant was applied to it. Its 8 KiB of
  * model data sat behind `@google/genai`, 270 KiB and 16% of the bundle, and the
  * adapter behind it throws on any `fetch` that is not `globalThis.fetch` — which
- * every request here is, because reaching Obsidian's `requestUrl` is the only
- * way past CORS from the `app://obsidian.md` origin. Nor is
+ * every request here is, because the transport has to be ours: `requestUrl` is
+ * the only path that is CORS-free by construction rather than by the endpoint's
+ * continued goodwill, and Obsidian's origin differs per platform anyway
+ * (`app://obsidian.md`, `capacitor://localhost`, `http://localhost`). Nor is
  * `google-generative-ai` a {@link WireProtocol}, so a configured endpoint could
  * not select it either. Both halves went. Gemini is still reachable the way it
  * always actually worked: a user-configured endpoint on Gemini's
