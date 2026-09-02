@@ -23,6 +23,7 @@ function settings(overrides: Partial<SettingsPanelSettings> = {}): SettingsPanel
 		models: [],
 		networkTransport: "requestUrl",
 		showAgentDetails: false,
+		traceExpand: "collapsed",
 		sendShortcut: "enter",
 		language: "en",
 		sessionRetention: 0,
@@ -120,6 +121,19 @@ describe("writeControlValue", () => {
 
 		expect(writeControlValue(stored, "networkTransport", "fetch")).toBe(true);
 		expect(stored.networkTransport).toBe("fetch");
+	});
+
+	it("writes a trace-expand mode the panel renders, and refuses one it does not", () => {
+		const stored = settings({ traceExpand: "collapsed" });
+
+		expect(writeControlValue(stored, "traceExpand", "highValue")).toBe(true);
+		expect(stored.traceExpand).toBe("highValue");
+
+		expect(writeControlValue(stored, "traceExpand", "expanded")).toBe(true);
+		expect(stored.traceExpand).toBe("expanded");
+
+		expect(writeControlValue(stored, "traceExpand", "open")).toBe(false);
+		expect(stored.traceExpand).toBe("expanded");
 	});
 
 	it("refuses a language outside the shipped set", () => {

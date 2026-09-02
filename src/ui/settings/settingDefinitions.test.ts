@@ -43,6 +43,7 @@ function stubHost(overrides: Partial<SettingsPanelHost> = {}): SettingsPanelHost
 			models: [],
 			networkTransport: "requestUrl",
 			showAgentDetails: false,
+		traceExpand: "collapsed",
 			sendShortcut: "enter",
 			language: "en",
 			sessionRetention: 0,
@@ -137,5 +138,21 @@ describe("buildSettingDefinitions", () => {
 		const details = chat.items.find((item) => item.name === en.t("settings.showAgentDetails"));
 
 		expect(details?.control).toEqual({ type: "toggle", key: "showAgentDetails" });
+	});
+
+	it("offers the trace expand mode as a three-option dropdown", () => {
+		const definitions = buildSettingDefinitions(stubHost(), new SettingsPanelState());
+		const chat = definitions[1] as { items: Array<{ name?: string; control?: { type?: string; key?: string; options?: Record<string, string> } }> };
+		const expand = chat.items.find((item) => item.name === en.t("settings.traceExpand"));
+
+		expect(expand?.control).toEqual({
+			type: "dropdown",
+			key: "traceExpand",
+			options: {
+				collapsed: en.t("settings.traceExpandCollapsed"),
+				highValue: en.t("settings.traceExpandHighValue"),
+				expanded: en.t("settings.traceExpandExpanded"),
+			},
+		});
 	});
 });

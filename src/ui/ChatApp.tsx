@@ -611,6 +611,7 @@ export function ChatApp({ service, inputController, component, draftStore, onOpe
 					isInitializing={isInitializing}
 					isConfigured={snapshot.isConfigured ?? false}
 					showAgentDetails={snapshot.showAgentDetails}
+					traceExpand={snapshot.traceExpand}
 					onOpenSettings={canOpenSettings ? () => openPluginSettings(app) : undefined}
 					onRetry={
 						snapshot.isStreaming || snapshot.isCompacting || snapshot.isRewinding

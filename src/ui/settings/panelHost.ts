@@ -6,6 +6,7 @@ import type { McpServerConfig } from "../../mcp/mcpConfig";
 import type { McpServerState } from "../../mcp/mcpManager";
 import type { ModelConfig, ProviderConfig } from "../../modelConfig";
 import type { NetworkTransport } from "../../net/obsidianFetch";
+import type { TraceExpandSetting } from "../../ui/traceExpand";
 import type { FetchedSkill, FetchedSource, UpdatePlan } from "../../skills/skillImport";
 import type { SkillInventory } from "../../skills/skillManager";
 import type { LanguageSetting, Translator } from "../../i18n";
@@ -185,6 +186,7 @@ export interface SettingsPanelSettings {
 	models: ModelConfig[];
 	networkTransport: NetworkTransport;
 	showAgentDetails: boolean;
+	traceExpand: TraceExpandSetting;
 	sendShortcut: SendShortcut;
 	language: LanguageSetting;
 	compaction?: CompactionConfig;

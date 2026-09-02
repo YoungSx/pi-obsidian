@@ -17,7 +17,7 @@ function host(overrides: Partial<SettingsPanelHost> = {}): SettingsPanelHost {
 	return {
 		app: {} as SettingsPanelHost["app"],
 		settings: {
-			providers: [], models: [], networkTransport: "requestUrl", showAgentDetails: false,
+			providers: [], models: [], networkTransport: "requestUrl", showAgentDetails: false, traceExpand: "collapsed",
 			sendShortcut: "enter", language: "en", sessionRetention: 0, sessionDir: "piem/chats",
 			userSkillsDir: "", mcpServers: [], logLevel: "info",
 		},

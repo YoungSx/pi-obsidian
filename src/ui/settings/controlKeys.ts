@@ -1,6 +1,7 @@
 import { isLanguageSetting } from "../../i18n";
 import { isLogLevelSetting } from "../../logging/logLevel";
 import { isSendShortcutSetting } from "../keyboard";
+import { isTraceExpandSetting } from "../traceExpand";
 import type { NetworkTransport } from "../../net/obsidianFetch";
 import type { SettingsPanelSettings } from "./panelHost";
 
@@ -45,6 +46,7 @@ import type { SettingsPanelSettings } from "./panelHost";
  */
 const CONTROL_KEYS = [
 	"showAgentDetails",
+	"traceExpand",
 	"language",
 	"sendShortcut",
 	"logLevel",
@@ -90,6 +92,10 @@ export function writeControlValue(settings: SettingsPanelSettings, key: ControlK
 		case "showAgentDetails":
 			if (typeof value !== "boolean") return false;
 			settings.showAgentDetails = value;
+			return true;
+		case "traceExpand":
+			if (!isTraceExpandSetting(value)) return false;
+			settings.traceExpand = value;
 			return true;
 		case "language":
 			if (!isLanguageSetting(value)) return false;

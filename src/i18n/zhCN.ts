@@ -412,6 +412,12 @@ export const zhCN: DeepPartial<EnCopy> = {
 		activeSuffix: " · 当前",
 		showAgentDetails: "显示代理详情",
 		showAgentDetailsDesc: "在对话面板中显示 token 数、花费和原始工具参数。",
+		// 选项按「读者看到的对话」措辞，不按机器行为：例外项由打开的 diff 行自己解释。
+		traceExpand: "工具动态展开方式",
+		traceExpandDesc: "对话流中思考、工具调用与结果默认展开多少。任何一行之后仍可手动开合。",
+		traceExpandCollapsed: "全部折叠",
+		traceExpandHighValue: "高价值行展开",
+		traceExpandExpanded: "全部展开",
 		sendShortcutDesc: "用哪个键发送消息。无论选哪项，Ctrl+回车 和 ⌘+回车 都能发送。",
 		sendShortcutEnter: "回车（Shift+回车 换行）",
 		sendShortcutModEnter: "Ctrl+回车 或 ⌘+回车（回车用于换行）",

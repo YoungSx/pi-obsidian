@@ -379,6 +379,25 @@ describe("normalizeSettings with the send shortcut", () => {
 	});
 });
 
+describe("normalizeSettings with traceExpand", () => {
+	it("gives a vault written before the setting existed the collapsed transcript", () => {
+		// The issue made all-collapsed the default; legacy vaults were already
+		// reading that transcript, so the choice changes nothing for them.
+		expect(normalizeSettings({}).traceExpand).toBe("collapsed");
+	});
+
+	it("keeps an explicit mode", () => {
+		expect(normalizeSettings({ traceExpand: "highValue" }).traceExpand).toBe("highValue");
+		expect(normalizeSettings({ traceExpand: "expanded" }).traceExpand).toBe("expanded");
+		expect(normalizeSettings({ traceExpand: "collapsed" }).traceExpand).toBe("collapsed");
+	});
+
+	it("falls back rather than persisting a mode the panel cannot honour", () => {
+		expect(normalizeSettings({ traceExpand: "open" as never }).traceExpand).toBe("collapsed");
+		expect(normalizeSettings({ traceExpand: null as never }).traceExpand).toBe("collapsed");
+	});
+});
+
 describe("normalizeSettings with mcpServers", () => {
 	it("gives a vault written before the setting existed an empty list", () => {
 		expect(normalizeSettings({}).mcpServers).toEqual([]);

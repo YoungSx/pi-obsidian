@@ -1232,6 +1232,7 @@ function baseSnapshot(): ChatSnapshot {
 		// The state this whole file is about: a target with no credential.
 		isConfigured: false,
 		showAgentDetails: false,
+		traceExpand: "collapsed",
 		language: "en",
 		contextRefs: [],
 		isFollowingActiveNote: true,

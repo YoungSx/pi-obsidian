@@ -555,6 +555,32 @@ describe("MessageList trace collapsing", () => {
 		expect(trace?.querySelector(".piem-chat__trace-name")?.textContent).toBe("Thinking…");
 	});
 
+	it("opens thinking and tool rows when the expand mode is all-open", async () => {
+		const host = renderMessages(
+			[assistantThinking("weighing options"), assistantToolCall("read", { path: "Note.md" })],
+			{ traceExpand: "expanded" },
+		);
+		await flushRender();
+
+		expect(host.querySelector("details.piem-chat__trace--thinking")?.hasAttribute("open")).toBe(true);
+		expect(host.querySelector("details.piem-chat__trace:not(.piem-chat__trace--result)")?.hasAttribute("open")).toBe(true);
+	});
+
+	it("keeps thinking closed but opens the diff result in the high-value mode", async () => {
+		const message = assistantBase();
+		const host = renderMessages(
+			[
+				message,
+				{ ...toolResult({ diff: "+1 line" }) },
+			].map((entry) => (entry === message ? assistantThinking("weighing options") : entry)),
+			{ traceExpand: "highValue" },
+		);
+		await flushRender();
+
+		expect(host.querySelector("details.piem-chat__trace--thinking")?.hasAttribute("open")).toBe(false);
+		expect(host.querySelector("details.piem-chat__trace--result")?.hasAttribute("open")).toBe(true);
+	});
+
 	it("settles the thinking row once prose starts behind it", async () => {
 		// The provider appends blocks in order, so thinking followed by text is
 		// finished thinking even though the turn is still streaming — the live
@@ -646,10 +672,21 @@ describe("MessageList streaming marks", () => {
 });
 
 describe("MessageList tool-result diff", () => {
-	it("opens a diff-bearing result on arrival, so the write is visible without a second interaction", async () => {
+	it("collapses a diff-bearing result under the default mode, which is the issue's all-collapsed transcript", async () => {
+		const host = renderMessages([toolResult({ diff: " 1 unchanged\n+2 added\n-3 removed" })]);
+		await flushRender();
+
+		const trace = host.querySelector("details.piem-chat__trace--result");
+		expect(trace).not.toBeNull();
+		expect(trace?.hasAttribute("open")).toBe(false);
+		// The counts stay on the row either way, so what changed is still readable closed.
+		expect(trace?.querySelector(".piem-chat__trace-detail")?.textContent).toBe("+1 -1");
+	});
+
+	it("opens a diff-bearing result in the high-value mode, so the write is visible without a second interaction", async () => {
 		// The previewable half of the undo story: a collapsed diff hid the one
 		// thing the reader most needs to check — what actually landed in the note.
-		const host = renderMessages([toolResult({ diff: " 1 unchanged\n+2 added\n-3 removed" })]);
+		const host = renderMessages([toolResult({ diff: " 1 unchanged\n+2 added\n-3 removed" })], { traceExpand: "highValue" });
 		await flushRender();
 
 		const trace = host.querySelector("details.piem-chat__trace--result");

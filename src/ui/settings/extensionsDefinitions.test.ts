@@ -40,6 +40,7 @@ function stubHost(overrides: Partial<SettingsPanelHost> = {}, record?: Recorder)
 			models: [],
 			networkTransport: "requestUrl",
 			showAgentDetails: false,
+		traceExpand: "collapsed",
 			sendShortcut: "enter",
 			language: "en",
 			sessionRetention: 0,
