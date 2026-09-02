@@ -641,8 +641,33 @@ button.piem-chat__context-open {
 	min-height: var(--size-4-8);
 }
 
+/*
+ * Pulled up onto the state icon's line.
+ *
+ * The row top-aligns its children so a wrapped message keeps both accessories
+ * beside its first line, and the icon on the left is a 16px box that lands there
+ * almost by itself — see the 2px it nudges itself by, and why. This is the same
+ * 16px glyph inside a 32px touch target, so top-aligning its *box* left the ✕
+ * 9px below the words: the excess height sits above the glyph as much as below
+ * it. Not new (it was 6.5px), but plain to see once the glyph stopped riding high
+ * inside the box — the `.piem-icon` fix in #219 — and the row's two accessories
+ * disagreeing about which line they belong to is the same defect that issue is
+ * about.
+ *
+ * So: half the button's excess height, less the sibling's own nudge. Both glyph
+ * centres then land on one line, which is a promise a px offset measured against
+ * the text could not make — the text's line box is the theme's to set, and it
+ * changes again on mobile. The 2px is `.piem-chat__banner-icon`'s; keep the two
+ * in step.
+ *
+ * The hit area moves with the box, into the banner's own top padding, and only in
+ * the block axis — it cannot reach the action button beside it. The coarse-pointer
+ * block at the end of this file raises the floor to 48px and restates the offset
+ * for it, because the excess this cancels grows with the floor.
+ */
 .piem-chat__banner-dismiss {
 	flex-shrink: 0;
+	margin-block-start: calc(2px - (var(--size-4-8) - var(--icon-s, 16px)) / 2);
 }
 
 /* --- transcript --- */
@@ -2613,6 +2638,15 @@ button.piem-chat__latest {
 	.piem-chat__send-button.mod-cta {
 		min-height: var(--size-4-12);
 		min-width: var(--size-4-12);
+	}
+
+	/*
+	 * The banner's ✕ cancels half of its own excess height to sit on the state
+	 * icon's line; the floor just above grew, so the excess did too. Same
+	 * expression as the desktop rule, one token further up the scale.
+	 */
+	.piem-chat__banner-dismiss {
+		margin-block-start: calc(2px - (var(--size-4-12) - var(--icon-s, 16px)) / 2);
 	}
 
 	/*
