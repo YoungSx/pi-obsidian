@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
+import { Window as HappyWindow } from "happy-dom";
 import { flushRender, installDom } from "../testUtils/dom";
 import { installObsidianStub } from "../testUtils/obsidianStub";
 
@@ -19,6 +20,14 @@ const { window: domWindow } = globalThis as unknown as {
 	window: { KeyboardEvent: typeof KeyboardEvent };
 };
 
+/*
+ * happy-dom's `Window` class and the DOM lib's `Window` type are two names for
+ * the same idea, and TypeScript will not unify them on its own. The cast is the
+ * whole bridge: the instance does implement the DOM surface, and that surface —
+ * `document`, `KeyboardEvent` — is all the migration test touches.
+ */
+type PopoutWindow = Window & typeof globalThis;
+
 const COMMANDS: CommandEntry[] = [
 	{ name: "summarize", description: "Summarize the active note", kind: "skill", invocation: "summarize" },
 	{ name: "echo", description: "Echo the arguments", kind: "template", invocation: "echo" },
@@ -38,6 +47,8 @@ interface Rendered {
 	closeCount: () => number;
 	/** Every id reported through `onActiveChange`, oldest first. */
 	activeReports: (string | null)[];
+	/** The migration announcement stand-in installed on the anchor textarea. */
+	migration: { listener?: (win: PopoutWindow) => void };
 	rerender: (query: string) => Promise<void>;
 }
 
@@ -47,6 +58,25 @@ async function renderMenu(query: string, commands: CommandEntry[] = COMMANDS): P
 	const onSelectCalls: string[] = [];
 	const activeReports: (string | null)[] = [];
 	let onCloseCalls = 0;
+	// A real textarea stands in for the composer's: the menu keys off it to learn
+	// which document its keydown belongs on, and the anchor is present from the
+	// first render — the menu itself renders nothing on a zero-match frame, and
+	// this suite drives exactly that frame.
+	const textarea = document.createElement("textarea");
+	const anchorRef: import("react").RefObject<HTMLTextAreaElement | null> = { current: textarea };
+	// happy-dom's elements carry no Obsidian augmentation, so the migration
+	// announcement is stood in here — installed before the first render, since
+	// the menu reads it while binding.
+	const migration: { listener?: (win: PopoutWindow) => void } = {};
+	Object.defineProperty(textarea, "onWindowMigrated", {
+		configurable: true,
+		value: (listener: (win: Window) => void) => {
+			migration.listener = listener;
+			return () => {
+				migration.listener = undefined;
+			};
+		},
+	});
 	const root = createRoot(host);
 	liveRoots.push(root);
 	const render = (q: string) =>
@@ -55,6 +85,7 @@ async function renderMenu(query: string, commands: CommandEntry[] = COMMANDS): P
 				commands={commands}
 				query={q}
 				menuId="piem-test-menu"
+				anchorRef={anchorRef}
 				onActiveChange={(id) => activeReports.push(id)}
 					onSelect={(command) => onSelectCalls.push(command.invocation)}
 				onClose={() => {
@@ -69,6 +100,7 @@ async function renderMenu(query: string, commands: CommandEntry[] = COMMANDS): P
 		onSelectCalls,
 		closeCount: () => onCloseCalls,
 		activeReports,
+		migration,
 		rerender: async (q: string) => {
 			render(q);
 			await flushRender();
@@ -252,6 +284,46 @@ describe("CommandMenu", () => {
 		await flushRender();
 
 		expect(result.defaultPrevented).toBe(true);
+		expect(closeCount()).toBe(1);
+	});
+
+	it("closes on Escape even with no matches, while the menu renders nothing", async () => {
+		// A zero-match frame removes the list — the menu's only DOM — but the
+		// `/unknown` draft is still open for editing, and Escape there must close
+		// the menu all the same. This is the frame that decides how the menu
+		// learns its document: it cannot ask its own element, which does not
+		// exist, so it asks the anchor the composer always renders.
+		const { closeCount, rerender } = await renderMenu("");
+		await rerender("nope");
+
+		const result = pressKey("Escape");
+		await flushRender();
+
+		expect(result.defaultPrevented).toBe(true);
+		expect(closeCount()).toBe(1);
+	});
+
+	it("re-hangs the keydown when the anchor migrates to a popout window, dropping the old binding", async () => {
+		// happy-dom's `Window` type bridges to the DOM lib's `Window` by cast: the
+		// instance implements the surface this test touches (`document`,
+		// `KeyboardEvent`), it just is not declared as that type.
+		const popout = new HappyWindow() as unknown as PopoutWindow;
+		const { closeCount, migration } = await renderMenu("");
+
+		// The panel is dragged out mid-life; React does not re-run the effect, so
+		// the re-hang has to come from the element's migration announcement.
+		migration.listener?.(popout);
+
+		// The main document's listener must be gone — a stranded one would close
+		// the menu from a window the panel no longer lives in.
+		const mainEvent = new domWindow.KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true });
+		document.dispatchEvent(mainEvent);
+		expect(mainEvent.defaultPrevented).toBe(false);
+		expect(closeCount()).toBe(0);
+
+		const popoutEvent = new popout.KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true });
+		popout.document.dispatchEvent(popoutEvent);
+		expect(popoutEvent.defaultPrevented).toBe(true);
 		expect(closeCount()).toBe(1);
 	});
 
