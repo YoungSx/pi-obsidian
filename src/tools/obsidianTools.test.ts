@@ -220,6 +220,7 @@ describe("tool registration", () => {
 			[
 				"write",
 				"edit",
+				"update_frontmatter",
 				"move_note",
 				"trash_note",
 				"open_note",
