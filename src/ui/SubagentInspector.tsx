@@ -14,6 +14,17 @@ export interface SubagentInspectorProps {
 	/** Which run the detail pane shows; null is the list. */
 	selectedId: string | null;
 	onSelect: (id: string | null) => void;
+	/**
+	 * Stops one run, on the user's orders.
+	 *
+	 * A callback prop rather than a field on the snapshot: snapshots stay plain
+	 * data — the thing a React tree can hold without holding a kill switch —
+	 * while the one real capability arrives here, explicit and testable with a
+	 * no-op.
+	 */
+	onStop: (id: string) => void;
+	/** Stops every running run; the list's "stop all". */
+	onStopAll: () => void;
 	/** Obsidian handles for rendering the report as Markdown. */
 	app: App;
 	component: Component;
@@ -22,14 +33,18 @@ export interface SubagentInspectorProps {
 /**
  * The subagent monitor: what Piem handed off, and what came back.
  *
- * One-way glass, and that is a design commitment rather than a missing feature.
- * The panel reads three rules, each of which removes a control a monitor would
- * otherwise grow:
+ * One-way glass with one pressure valve, and that is a design commitment rather
+ * than a missing feature. The panel reads three rules:
  *
- * 1. **Watch, do not stop.** No kill button. The parent agent decides when a
- *    child is no longer worth running — it has the fan-out's context and the
- *    `kill_subagent` tool — and a user pressing stop mid-report would produce an
- *    incomplete the parent then has to reason about without knowing why.
+ * 1. **Stop, but never steer.** The panel can cut a run short — one child, or
+ *    all of them — but cannot change what a child does. Stopping is the user's
+ *    circuit breaker: the parent may be burning tokens on work nobody wants
+ *    anymore, and `kill_subagent` only helps when the parent itself can be
+ *    persuaded to stop wanting it. A user-ordered kill walks the same abort
+ *    path as a tool-ordered one, so the child unwinds down one well-tested
+ *    route, and `killedBy: "user"` is what tells the parent whose decision the
+ *    cut-short report answers to — it must not retry work the user chose to end.
+ *    Steering — replying, redirecting mid-run — stays impossible: that is rule 2.
  * 2. **Watch, do not talk.** No reply box. A subagent's isolation is what makes
  *    its report trustworthy: it cannot see this conversation, so its answer is a
  *    function of its task alone. A side channel would break that quietly, and
@@ -37,6 +52,10 @@ export interface SubagentInspectorProps {
  * 3. **Session memory only.** Nothing here is written to disk. The snapshots come
  *    from the live registry, which dies with the service, so closing the vault
  *    ends the record — which is the same lifetime the transcripts already had.
+ *
+ * The kill controls render only while something is running, and vanish from the
+ * same registry event that flips the row to "cut short" — no confirmation, no
+ * toast: the state change on screen is the feedback.
  *
  * List and detail share one column rather than sitting side by side. The panel
  * lives in an Obsidian sidebar, ~300px wide, where two panes would each be too
@@ -48,6 +67,8 @@ export function SubagentInspector({
 	showAgentDetails,
 	selectedId,
 	onSelect,
+	onStop,
+	onStopAll,
 	app,
 	component,
 }: SubagentInspectorProps): React.JSX.Element {
@@ -65,11 +86,12 @@ export function SubagentInspector({
 					snapshot={selected}
 					showAgentDetails={showAgentDetails}
 					onBack={() => onSelect(null)}
+					onStop={onStop}
 					app={app}
 					component={component}
 				/>
 			) : (
-				<SubagentList snapshots={snapshots} onSelect={onSelect} />
+				<SubagentList snapshots={snapshots} onSelect={onSelect} onStopAll={onStopAll} />
 			)}
 		</div>
 	);
@@ -78,6 +100,8 @@ export function SubagentInspector({
 interface SubagentListProps {
 	snapshots: readonly SubagentSnapshot[];
 	onSelect: (id: string) => void;
+	/** Stops every running run; rendered only while at least one is running. */
+	onStopAll: () => void;
 }
 
 /**
@@ -88,7 +112,7 @@ interface SubagentListProps {
  * one's report. Newest-first would put the freshest row on top, which matters
  * for a feed you check repeatedly and not for a history you read once.
  */
-function SubagentList({ snapshots, onSelect }: SubagentListProps): React.JSX.Element {
+function SubagentList({ snapshots, onSelect, onStopAll }: SubagentListProps): React.JSX.Element {
 	const t = useT();
 
 	if (snapshots.length === 0) {
@@ -100,14 +124,26 @@ function SubagentList({ snapshots, onSelect }: SubagentListProps): React.JSX.Ele
 		);
 	}
 
+	const anyRunning = snapshots.some((snapshot) => snapshot.status === "running");
+
 	return (
 		<>
-			{/*
-			 * States the absence of controls outright. A panel with no stop button is
-			 * indistinguishable from a panel whose stop button has not loaded, and the
-			 * reader deserves to know which one this is before they go looking.
-			 */}
-			<p className="piem-subagents__notice">{t.t("subagents.readOnly")}</p>
+			<p className="piem-subagents__notice">
+				{t.t("subagents.panelNotice")}
+				{/*
+				 * Inside the notice because "you can stop" and the control that stops
+				 * belong in one breath — a separate toolbar row would read as a
+				 * command bar over the whole list, which is exactly the framing rule 2
+				 * refuses. Hidden entirely when nothing is running: a disabled stop-all
+				 * against a finished history is a button that can only ever do
+				 * nothing, and the record has no need of one.
+				 */}
+				{anyRunning ? (
+					<button type="button" className="piem-subagents__stop-all" onClick={onStopAll} aria-label={t.t("subagents.stopAllAria")}>
+						{t.t("subagents.stopAll")}
+					</button>
+				) : null}
+			</p>
 			<ul className="piem-subagents__list" aria-label={t.t("subagents.listAria")}>
 				{snapshots.map((snapshot) => (
 					<li key={snapshot.id}>
@@ -169,6 +205,8 @@ interface SubagentDetailProps {
 	snapshot: SubagentSnapshot;
 	showAgentDetails: boolean;
 	onBack: () => void;
+	/** Stops this run; rendered only while it is still running. */
+	onStop: (id: string) => void;
 	app: App;
 	component: Component;
 }
@@ -180,13 +218,14 @@ interface SubagentDetailProps {
  * it produced, then how it got there. The process record comes last and closed:
  * it is the longest thing on the page and the least often the answer.
  */
-function SubagentDetail({ snapshot, showAgentDetails, onBack, app, component }: SubagentDetailProps): React.JSX.Element {
+function SubagentDetail({ snapshot, showAgentDetails, onBack, onStop, app, component }: SubagentDetailProps): React.JSX.Element {
 	const t = useT();
 	const backRef = useRef<HTMLButtonElement | null>(null);
 	const note = incompleteNote(snapshot, t);
 	const report = reportBody(snapshot, t);
 	const usage = usageItems(snapshot, showAgentDetails, t);
 	const steps = processSteps(snapshot.messages, t);
+	const isRunning = snapshot.status === "running";
 
 	// Arriving here replaced the list, so `<body>` is holding focus and a keyboard
 	// reader has lost their place. The back control is what took the row's role.
@@ -206,6 +245,18 @@ function SubagentDetail({ snapshot, showAgentDetails, onBack, app, component }: 
 					<StatusDot status={snapshot.status} />
 					{statusText(snapshot.status, t)}
 				</span>
+				{/*
+				 * Right-aligned in the bar, present only while the run is live: the
+				 * same icon the chat composer's stop phase uses, so the gesture means
+				 * one thing across the plugin. No confirmation — the child's partial
+				 * report survives as incomplete, which is the undo. It vanishes on the
+				 * registry event the kill itself fires, which is the feedback.
+				 */}
+				{isRunning ? (
+					<span className="piem-subagents__detail-stop">
+						<IconButton icon="square" label={t.t("subagents.stopOne")} onClick={() => onStop(snapshot.id)} />
+					</span>
+				) : null}
 			</div>
 
 			<Section title={t.t("subagents.sectionTask")}>
@@ -373,6 +424,9 @@ export interface SubagentInspectorAppProps {
 	showAgentDetails: boolean;
 	/** The newest open-this-run request, or null when the panel was opened plainly. */
 	selectionRequest?: SelectionRequest | null;
+	/** Passed through to the inspector; the view owns what these actually do. */
+	onStop: (id: string) => void;
+	onStopAll: () => void;
 	app: App;
 	component: Component;
 }
@@ -388,6 +442,8 @@ export function SubagentInspectorApp({
 	snapshots,
 	showAgentDetails,
 	selectionRequest,
+	onStop,
+	onStopAll,
 	app,
 	component,
 }: SubagentInspectorAppProps): React.JSX.Element {
@@ -410,6 +466,8 @@ export function SubagentInspectorApp({
 			showAgentDetails={showAgentDetails}
 			selectedId={selectedId}
 			onSelect={setSelectedId}
+			onStop={onStop}
+			onStopAll={onStopAll}
 			app={app}
 			component={component}
 		/>

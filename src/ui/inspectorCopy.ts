@@ -79,6 +79,8 @@ export function incompleteNote(snapshot: SubagentSnapshot, t: Translator): strin
 		parts.push(t.t("subagents.killedByTeardown"));
 	} else if (snapshot.killedBy === "tool") {
 		parts.push(t.t("subagents.killedByTool"));
+	} else if (snapshot.killedBy === "user") {
+		parts.push(t.t("subagents.killedByUser"));
 	}
 	return parts.length > 0 ? parts.join(" ") : null;
 }

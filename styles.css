@@ -3307,7 +3307,7 @@ button.piem-chat__latest {
 }
 
 /*
- * Says outright that nothing here acts.
+ * The panel's standing fact: you can stop from here, you cannot talk from here.
  *
  * Muted and small: it is a standing fact about the panel, read once, not a
  * warning. `--text-muted` rather than `--text-faint` because at
@@ -3318,6 +3318,30 @@ button.piem-chat__latest {
 	color: var(--text-muted);
 	font-size: var(--font-ui-smaller);
 	margin: 0;
+}
+
+/*
+ * The one control inside the notice, inline where the sentence says stopping is
+ * possible. Styled as a quiet text link, not a button: the action is real but
+ * rare, and a filled or bordered button would weight the notice like a command
+ * bar over the record below.
+ */
+.piem-subagents__stop-all {
+	background: none;
+	border: none;
+	color: var(--text-muted);
+	cursor: pointer;
+	font-size: var(--font-ui-smaller);
+	margin-left: var(--size-4-2);
+	padding: 0;
+	text-decoration: underline;
+	text-underline-offset: 2px;
+}
+
+@media (hover: hover) {
+	.piem-subagents__stop-all:hover {
+		color: var(--text-normal);
+	}
 }
 
 .piem-subagents__list {
@@ -3521,6 +3545,16 @@ button.piem-chat__latest {
 	display: inline-flex;
 	font-size: var(--font-ui-smaller);
 	gap: var(--size-4-1);
+}
+
+/*
+ * The detail page's stop control, pushed to the bar's right edge: `auto` margin
+ * splits the bar into left group (back) and right group (status, stop) without
+ * inventing a third layout. Same icon as the composer's stop phase, so the
+ * square means one thing across the plugin.
+ */
+.piem-subagents__detail-stop {
+	margin-left: auto;
 }
 
 .piem-subagents__section {

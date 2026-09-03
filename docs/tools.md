@@ -101,7 +101,8 @@ parent → child → grandchild **by construction**, not by a check: a
 grandchild's tool set simply does not contain the spawn tools.
 
 A wait window that closes means "not done yet", never a kill. The subagent
-keeps working between waits.
+keeps working between waits. You can stop a run yourself from the subagent
+panel — the parent is told when that happens.
 
 <!-- SCREENSHOT: subagents.png — the subagent inspector with two or three
      subagents running. See assets/screenshots/SHOOTING.md -->

@@ -118,6 +118,14 @@ export class PiemSubagentView extends ItemView {
 					snapshots={snapshots}
 					showAgentDetails={chat.showAgentDetails}
 					selectionRequest={this.selectionRequest}
+					// The panel's stop controls land here: the view holds the registry
+					// handle, so the kill stays in the Obsidian layer and React keeps
+					// receiving pure data plus callbacks — same layering as the
+					// selection request above. A hostless kill (no owner signal) is the
+					// documented panel case: it sits outside every run and answers to
+					// the user, and `killedBy: "user"` is what the parent later reads.
+					onStop={(id) => this.service.getSubagentRegistry().kill(id, undefined, "user")}
+					onStopAll={() => this.service.getSubagentRegistry().killAllLive("user")}
 					app={this.service.getApp()}
 					component={this}
 				/>
