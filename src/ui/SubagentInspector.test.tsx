@@ -19,10 +19,11 @@ const { createRoot } = await import("react-dom/client");
  * The subagent monitor's markup contract.
  *
  * Three of these assertions are the feature's design commitments rather than its
- * behaviour — no stop control, no reply channel, nothing persisted — and they are
- * here because each is an *absence*. An absence is exactly what a later
- * well-meaning edit adds back ("the panel should let you stop a runaway child"),
- * and nothing else in the codebase would object.
+ * behaviour — stop without steering, no reply channel, nothing persisted — and
+ * they are here because each names a boundary. A boundary is exactly what a
+ * later well-meaning edit crosses ("the panel should also let you redirect a
+ * child"), and nothing else in the codebase would object. Stop exists since the
+ * monitor got a circuit breaker; a reply box did not and must not.
  *
  * Every mount is unmounted rather than detached. Detaching leaves the React root
  * alive with its document-level listeners still registered, which is how
@@ -57,6 +58,8 @@ async function renderInspector(
 			showAgentDetails={false}
 			selectedId={null}
 			onSelect={() => undefined}
+			onStop={() => undefined}
+			onStopAll={() => undefined}
 			app={app}
 			component={component}
 			{...overrides}
@@ -89,7 +92,7 @@ function text(host: HTMLElement): string {
 	return host.textContent ?? "";
 }
 
-describe("one-way glass", () => {
+describe("one-way glass with a pressure valve", () => {
 	beforeEach(() => {
 		document.body.replaceChildren();
 	});
@@ -101,17 +104,47 @@ describe("one-way glass", () => {
 		await flushRender();
 	});
 
-	it("offers no way to stop a running child", async () => {
+	it("stops a running child from its detail page, without confirmation", async () => {
 		/*
-		 * Rule 1: watch, do not stop. The parent agent owns that decision — it has
-		 * the fan-out's context and the `kill_subagent` tool — and a user pressing
-		 * stop mid-report produces an incomplete the parent then has to reason about
-		 * without knowing why.
+		 * Rule 1 as it now stands: the user's circuit breaker, not the parent's
+		 * monopoly. No confirmation because the partial report survives as
+		 * incomplete — that is the undo — and the detail page is where the reader
+		 * who has watched a run go sideways already is.
 		 */
-		const host = await renderInspector({ snapshots: [snapshot({ status: "running", report: undefined })], selectedId: "subagent-1" });
-		const labels = Array.from(host.querySelectorAll("button"), (button) => button.getAttribute("aria-label") ?? button.textContent ?? "");
+		const stops: string[] = [];
+		const host = await renderInspector({
+			snapshots: [snapshot({ status: "running", report: undefined })],
+			selectedId: "subagent-1",
+			onStop: (id) => stops.push(id),
+		});
+		const stop = host.querySelector<HTMLButtonElement>(".piem-subagents__detail-stop button");
 
-		expect(labels.some((label) => /stop|kill|cancel|abort|终止|停止/i.test(label))).toBe(false);
+		expect(stop).not.toBeNull();
+		expect(stop!.getAttribute("aria-label")).toBe("Stop this run");
+		stop!.click();
+		expect(stops).toEqual(["subagent-1"]);
+	});
+
+	it("offers no stop on a settled detail page — the run is over, there is nothing to stop", async () => {
+		const host = await renderInspector({ snapshots: [snapshot()], selectedId: "subagent-1" });
+
+		expect(host.querySelector(".piem-subagents__detail-stop")).toBeNull();
+	});
+
+	it("stops everything running from the list, and only then", async () => {
+		// One control for the whole fan-out, next to the sentence that says stopping
+		// is possible — and absent against a finished history, where it could only
+		// ever do nothing.
+		let stopAllCalls = 0;
+		const running = await renderInspector({ snapshots: [snapshot({ status: "running", report: undefined }), snapshot({ id: "b" })], onStopAll: () => (stopAllCalls += 1) });
+		const stopAll = running.querySelector<HTMLButtonElement>(".piem-subagents__stop-all");
+
+		expect(stopAll).not.toBeNull();
+		stopAll!.click();
+		expect(stopAllCalls).toBe(1);
+
+		const settled = await renderInspector({ snapshots: [snapshot()] });
+		expect(settled.querySelector(".piem-subagents__stop-all")).toBeNull();
 	});
 
 	it("offers no way to talk to a child", async () => {
@@ -127,12 +160,13 @@ describe("one-way glass", () => {
 		expect(host.querySelector("form")).toBeNull();
 	});
 
-	it("says outright that it only watches, since a missing control is otherwise ambiguous", async () => {
-		// A panel with no stop button is indistinguishable from a panel whose stop
-		// button has not loaded yet.
+	it("says what the panel does and does not do, since a missing control is otherwise ambiguous", async () => {
+		// Both halves matter: "you can stop" invites the reader who wants the
+		// circuit breaker, "not talk" preempts the one hunting for a reply box.
 		const host = await renderInspector({ snapshots: [snapshot()] });
 
-		expect(text(host)).toContain("This panel only watches");
+		expect(text(host)).toContain("You can stop a run from here");
+		expect(text(host)).toContain("not talk to it");
 	});
 });
 
@@ -330,6 +364,8 @@ describe("selection requests from outside the tree", () => {
 				snapshots={[snapshot({ id: "a", task: "First" }), snapshot({ id: "b", task: "Second" })]}
 				showAgentDetails={false}
 				selectionRequest={{ id: "b", token: 1 }}
+				onStop={() => undefined}
+				onStopAll={() => undefined}
 				app={app}
 				component={component}
 			/>,
@@ -345,6 +381,8 @@ describe("selection requests from outside the tree", () => {
 				snapshots={[snapshot()]}
 				showAgentDetails={false}
 				selectionRequest={null}
+				onStop={() => undefined}
+				onStopAll={() => undefined}
 				app={app}
 				component={component}
 			/>,

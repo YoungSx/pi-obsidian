@@ -1095,6 +1095,80 @@ describe("spawn/wait extension", () => {
 		}
 	});
 
+	it("a user kill from the monitor panel reaches the parent as the user's decision", async () => {
+		// The panel kills hostless — no owner signal — and records cause "user".
+		// What must survive the trip is attribution: the parent reading a
+		// cut-short report has to know the user, not it, ended the run, so it
+		// does not retry what the user chose to end.
+		const controller = new AbortController();
+		// Prefatory text plus a tool that hangs until aborted: same shape as the
+		// kill_subagent test, because only a run wedged in a tool leaves the
+		// partial-work trail an INCOMPLETE report carries — an aborted stream
+		// alone settles as a plain failure.
+		const stream = scriptedStreamFn([{ toolCall: { id: "t1", name: "grep" }, text: "Found two so far." }]);
+		const host: SubagentHost = {
+			...makeHost(stream),
+			createVaultTools: () => [
+				{
+					name: "grep",
+					label: "grep",
+					description: "hangs",
+					parameters: Type.Object({}),
+					execute: async (_id: string, _p: unknown, signal?: AbortSignal) =>
+						new Promise((_resolve, reject) => {
+							signal?.addEventListener("abort", () => reject(new Error("aborted")), { once: true });
+						}),
+				} as AgentTool,
+			],
+		};
+		const extension = createSubagentExtension(host, { waitPacing: TEST_PACING });
+		const tools = extension.createTools();
+		try {
+			await toolNamed(tools, "spawn_subagent").execute("c1", { task: "Sweep" }, controller.signal);
+			// Let the first turn land so there is prefatory text to salvage.
+			await new Promise((resolve) => setTimeout(resolve, 20));
+			const outcome = extension.registry.kill("subagent-1", undefined, "user");
+			expect(outcome).toBe("killed");
+			const entry = extension.registry.get("subagent-1")!;
+			expect(entry.killedBy).toBe("user");
+			// The kill is a synchronous abort; the unwind lands a tick later. Wait
+			// for it here so the wait below reads the settled entry instead of
+			// entering a wait window for a run that just ended.
+			await entry.promise.catch(() => undefined);
+			const collected = await toolNamed(tools, "wait_subagent").execute("c2", { subagentId: "subagent-1" }, controller.signal);
+			expect(textBlock(collected)).toContain("stopped by the user");
+			expect(textBlock(collected)).toContain("Found two so far.");
+			expect(textBlock(collected)).toContain("INCOMPLETE");
+		} finally {
+			extension.disposeAll();
+		}
+	});
+
+	it("killAllLive stops only the running children and counts them", async () => {
+		// The panel's "stop all" is one user action among live runs: settled
+		// entries stay exactly as the record keeps them, and the count is what
+		// the next snapshot's absence of the button is checked against.
+		const extension = createSubagentExtension(makeHost(hangingStreamFn()), { waitPacing: TEST_PACING });
+		const tools = extension.createTools();
+		const controller = new AbortController();
+		try {
+			await toolNamed(tools, "spawn_subagent").execute("c1", { task: "one" }, controller.signal);
+			await toolNamed(tools, "spawn_subagent").execute("c2", { task: "two" }, controller.signal);
+			// Settle the first deterministically with a tool kill, then stop all:
+			// only the second is live, so the count is 1 and the settled entry's
+			// record is left naming the tool, not overwritten by the sweep.
+			extension.registry.kill("subagent-1", controller.signal);
+			await toolNamed(tools, "wait_subagent").execute("c3", { subagentId: "subagent-1" }, controller.signal);
+			const killed = extension.registry.killAllLive("user");
+
+			expect(killed).toBe(1);
+			expect(extension.registry.get("subagent-1")!.killedBy).toBe("tool");
+			expect(extension.registry.get("subagent-2")!.killedBy).toBe("user");
+		} finally {
+			extension.disposeAll();
+		}
+	});
+
 	it("refuses a spawn past the concurrency limit and says how to recover", async () => {
 		const controller = new AbortController();
 		const extension = createSubagentExtension(makeHost(hangingStreamFn()), { waitPacing: TEST_PACING });
