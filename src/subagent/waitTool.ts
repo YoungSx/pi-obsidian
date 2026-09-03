@@ -126,6 +126,10 @@ function killedNote(entry: SubagentEntry): string {
 			return "was stopped by kill_subagent";
 		case "teardown":
 			return "was stopped when the session closed";
+		case "user":
+			// The user, not the parent, ordered this one — the parent must not own
+			// a decision it did not make, nor retry what the user chose to end.
+			return "was stopped by the user from the monitor panel";
 		default:
 			return "was stopped before it finished";
 	}

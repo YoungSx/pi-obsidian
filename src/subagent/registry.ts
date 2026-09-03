@@ -18,13 +18,13 @@ export interface SubagentEntry {
 	 * Why this child was cut short, when something cut it short.
 	 *
 	 * Recorded at the moment the kill is ordered rather than derived afterwards:
-	 * once the run unwinds, a parent-stop, a teardown, and an explicit
-	 * `kill_subagent` are indistinguishable from the aborted signal alone, and
-	 * the parent needs to know which one it was to word its own next move. With
-	 * no deadline on a run, this is the only account of why a child stopped
-	 * early.
+	 * once the run unwinds, a parent-stop, a teardown, an explicit `kill_subagent`
+	 * and a monitor-panel stop are indistinguishable from the aborted signal
+	 * alone, and the parent needs to know which one it was to word its own next
+	 * move. With no deadline on a run, this is the only account of why a child
+	 * stopped early.
 	 */
-	killedBy?: "parent" | "teardown" | "tool";
+	killedBy?: "parent" | "teardown" | "tool" | "user";
 	/** The spawn call's run signal; a wait only sees children of its own run. */
 	parentSignal: AbortSignal | undefined;
 	/** The task text the spawn was given, verbatim — what the inspector shows first. */
@@ -181,24 +181,56 @@ export class SubagentRegistry {
 	 * child that had already finished, a sibling belonging to another run. The
 	 * kill itself is the same `abort` that teardown and parent-stop use, so a
 	 * killed child unwinds down one well-tested path.
+	 *
+	 * `killedBy` records who ordered the kill — the `kill_subagent` tool by
+	 * default, the monitor panel's stop buttons otherwise — so the wait tool can
+	 * tell the parent whose decision the cut-short report answers to.
 	 */
-	kill(id: string, ownerSignal: AbortSignal | undefined): "killed" | "already-settled" | "not-found" | "not-yours" {
+	kill(
+		id: string,
+		ownerSignal: AbortSignal | undefined,
+		killedBy: "tool" | "user" = "tool",
+	): "killed" | "already-settled" | "not-found" | "not-yours" {
 		const entry = this.entries.get(id);
 		if (!entry) {
 			return "not-found";
 		}
 		// Scoped the same way an id-less wait is: a child may kill what it
 		// spawned, never a sibling or its own parent's other work. A hostless
-		// caller (no signal) is the test/CLI case and owns everything.
+		// caller (no signal) is the test/CLI case and owns everything — which is
+		// also the monitor panel's case: it sits outside every run and answers to
+		// the user, not to a signal.
 		if (ownerSignal !== undefined && entry.parentSignal !== ownerSignal) {
 			return "not-yours";
 		}
 		if (entry.settled) {
 			return "already-settled";
 		}
-		entry.killedBy = "tool";
+		entry.killedBy = killedBy;
 		entry.abort();
 		return "killed";
+	}
+
+	/**
+	 * Kills every live child on the user's orders, from the monitor panel.
+	 *
+	 * Not `disposeAll`: teardown also unwinds settled entries' listener hooks and
+	 * speaks a different cause — this is one user action among live runs, so it
+	 * touches only children still running and leaves settled entries exactly as
+	 * the record keeps them. Returns how many were killed, which is what lets the
+	 * button hide itself when there is nothing left to stop.
+	 */
+	killAllLive(killedBy: "user"): number {
+		let killed = 0;
+		for (const entry of this.entries.values()) {
+			if (entry.settled) {
+				continue;
+			}
+			entry.killedBy = killedBy;
+			entry.abort();
+			killed += 1;
+		}
+		return killed;
 	}
 
 	/**
