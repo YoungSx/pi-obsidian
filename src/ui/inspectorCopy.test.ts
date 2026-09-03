@@ -100,6 +100,13 @@ describe("a partial report says so, and says whose decision it was", () => {
 		// outside decision was involved.
 		expect(incompleteNote(snapshot({ killedBy: "parent" }), t)).toBe("It stopped because the chat turn stopped.");
 	});
+
+	it("attributes a user kill to the reader themselves, not to Piem or the chat", () => {
+		// The monitor panel's stop button is the one cause the reader caused, and
+		// "you" is the honest word for it — Piem did not decide, and the chat did
+		// not stop.
+		expect(incompleteNote(snapshot({ killedBy: "user" }), t)).toContain("You stopped it");
+	});
 });
 
 describe("the setup block reports what actually ran", () => {
