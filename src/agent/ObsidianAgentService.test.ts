@@ -1134,6 +1134,7 @@ describe("ObsidianAgentService", () => {
 	it("stops naming the active note once following is dismissed", async () => {
 		const contexts: Context[] = [];
 		const service = createService(new MemoryAdapter(), { streamFn: createCapturingStreamFn(contexts), loadUserSkills: NO_USER_SKILLS });
+		await service.initialize();
 		service.setActiveNotePath("Notes/today.md");
 
 		service.setFollowActiveNote(false);
@@ -1145,6 +1146,7 @@ describe("ObsidianAgentService", () => {
 	it("keeps naming a pinned note after the user navigates away", async () => {
 		const contexts: Context[] = [];
 		const service = createService(new MemoryAdapter(), { streamFn: createCapturingStreamFn(contexts), loadUserSkills: NO_USER_SKILLS });
+		await service.initialize();
 		service.setActiveNotePath("Notes/pinned.md");
 		service.pinContextRef("Notes/pinned.md");
 
@@ -1158,6 +1160,7 @@ describe("ObsidianAgentService", () => {
 
 	it("publishes the same refs the injection sends", async () => {
 		const service = createService();
+		await service.initialize();
 		service.setActiveNotePath("Notes/today.md");
 		service.pinContextRef("Notes/other.md");
 
@@ -1238,6 +1241,7 @@ describe("ObsidianAgentService", () => {
 
 	it("stops pinning at the cap", async () => {
 		const service = createService();
+		await service.initialize();
 		for (let index = 0; index < 8; index++) {
 			service.pinContextRef(`Notes/${index}.md`);
 		}
@@ -1674,9 +1678,12 @@ describe("ObsidianAgentService queued prompts (mid-run sends)", () => {
 
 	it("clears queued chips when the session changes", async () => {
 		const service = createService();
+		await service.initialize();
 		addStranded(service, "Queued for the old session");
 
-		await service.newSession();
+		// The fresh session is blank, so the plain call would be a no-op; force the
+		// swap the test is about.
+		await service.newSession({ force: true });
 
 		expect((service as unknown as { promptQueue: PromptQueue }).promptQueue.size).toBe(0);
 		expect(service.getSnapshot().queuedPrompts).toEqual([]);
