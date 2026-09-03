@@ -107,8 +107,7 @@
  *
  * Size stays with the callers' own classes (`--icon-size`): how large a glyph
  * should be depends on what it sits beside, and only the box's shape is
- * universal. A holder that needs to align to the top of a paragraph rather than
- * to a label's centre still says so itself — see `.piem-chat__banner-icon`.
+ * universal.
  */
 .piem-icon {
 	align-items: center;
@@ -572,9 +571,18 @@ button.piem-chat__context-open {
  * One surface for errors and notices, dismissible in both cases. The previous
  * banner had no close control, so a stale message stayed until the next turn
  * overwrote it.
+ *
+ * `center`, not `flex-start`: the accessories used to be pinned to the text's
+ * first line so a wrapped message kept them beside it, with px offsets
+ * cancelling each button's excess height above its glyph. That arithmetic runs
+ * on boxes the theme owns — its icon size, its clickable-icon padding — and
+ * #236 is what it looks like when a theme's metrics disagree: text, icon and ✕
+ * all riding high of centre by different amounts. Centring every child needs
+ * no measurement at all; on a wrapped message an accessory beside the block's
+ * middle is the standard banner reading.
  */
 .piem-chat__banner {
-	align-items: flex-start;
+	align-items: center;
 	border: 1px solid var(--background-modifier-border);
 	border-radius: var(--radius-s);
 	display: flex;
@@ -584,18 +592,15 @@ button.piem-chat__context-open {
 }
 
 /*
- * `--text-error` on `--background-modifier-error` is red on red, and some
- * community themes make that pairing unreadable. The text stays on
- * `--text-normal`; the border and the icon carry the state.
+ * `--background-modifier-error` is a solid red, and `--text-error` on it is red
+ * on red — #236's left half of the row was the icon's invisible slot, 44px of
+ * blank. The border carries the alarm so the row keeps one loud note; text and
+ * icon share `--text-normal` and stay legible on the red.
  */
 .piem-chat__banner--error {
 	background: var(--background-modifier-error);
 	border-color: var(--text-error);
 	color: var(--text-normal);
-}
-
-.piem-chat__banner--error .piem-chat__banner-icon {
-	color: var(--text-error);
 }
 
 .piem-chat__banner--notice,
@@ -612,12 +617,6 @@ button.piem-chat__context-open {
 
 .piem-chat__banner-icon {
 	flex-shrink: 0;
-	/* Optical alignment with one line of --font-ui-smaller text: the icon box is
-	 * taller than the glyphs, so a bare `align-items: flex-start` leaves it
-	 * floating high. Two pixels is tuned for the default theme's metrics; px on
-	 * purpose — an em value would scale off the icon's own font size and drift
-	 * across themes. */
-	margin-top: 2px;
 }
 
 .piem-chat__banner-text {
@@ -642,32 +641,16 @@ button.piem-chat__context-open {
 }
 
 /*
- * Pulled up onto the state icon's line.
- *
- * The row top-aligns its children so a wrapped message keeps both accessories
- * beside its first line, and the icon on the left is a 16px box that lands there
- * almost by itself — see the 2px it nudges itself by, and why. This is the same
- * 16px glyph inside a 32px touch target, so top-aligning its *box* left the ✕
- * 9px below the words: the excess height sits above the glyph as much as below
- * it. Not new (it was 6.5px), but plain to see once the glyph stopped riding high
- * inside the box — the `.piem-icon` fix in #219 — and the row's two accessories
- * disagreeing about which line they belong to is the same defect that issue is
- * about.
- *
- * So: half the button's excess height, less the sibling's own nudge. Both glyph
- * centres then land on one line, which is a promise a px offset measured against
- * the text could not make — the text's line box is the theme's to set, and it
- * changes again on mobile. The 2px is `.piem-chat__banner-icon`'s; keep the two
- * in step.
- *
- * The hit area moves with the box, into the banner's own top padding, and only in
- * the block axis — it cannot reach the action button beside it. The coarse-pointer
- * block at the end of this file raises the floor to 48px and restates the offset
- * for it, because the excess this cancels grows with the floor.
+ * The row centres each child, so this button needs no offset of its own — it is
+ * one glyph in a 32px box like every other icon button, and `center` makes its
+ * glyph land on the text's middle without measuring the theme. Its predecessors
+ * cancelled half the box's excess height with a calc over theme tokens; when a
+ * theme's metrics disagreed the same arithmetic put everything off-centre at
+ * once (#236). The hit area may reach into the banner's padding in the block
+ * axis only — it cannot overlap the action button beside it.
  */
 .piem-chat__banner-dismiss {
 	flex-shrink: 0;
-	margin-block-start: calc(2px - (var(--size-4-8) - var(--icon-s, 16px)) / 2);
 }
 
 /* --- transcript --- */
@@ -2659,15 +2642,6 @@ button.piem-chat__latest {
 	.piem-chat__send-button.mod-cta {
 		min-height: var(--size-4-12);
 		min-width: var(--size-4-12);
-	}
-
-	/*
-	 * The banner's ✕ cancels half of its own excess height to sit on the state
-	 * icon's line; the floor just above grew, so the excess did too. Same
-	 * expression as the desktop rule, one token further up the scale.
-	 */
-	.piem-chat__banner-dismiss {
-		margin-block-start: calc(2px - (var(--size-4-12) - var(--icon-s, 16px)) / 2);
 	}
 
 	/*
