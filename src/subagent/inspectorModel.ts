@@ -22,7 +22,7 @@ export interface SubagentSnapshot {
 	thinkingLevel: string;
 	status: ReturnType<typeof statusOf>;
 	/** Who ordered the kill, when one was ordered. */
-	killedBy?: "parent" | "teardown" | "tool";
+	killedBy?: SubagentEntry["killedBy"];
 	spawnedAt: number;
 	settledAt?: number;
 	/**
