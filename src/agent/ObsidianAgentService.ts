@@ -18,11 +18,12 @@ import {
 	type ThinkingLevel,
 } from "@earendil-works/pi-agent-core";
 import { PromptQueue, type QueuedPrompt } from "./promptQueue";
+import { SessionRuntime, type SessionRunState } from "./SessionRuntime";
 import { createObsidianModels, withRequestDefaults, type ObsidianModelsBundle } from "../net/streamFn";
 import { toFetchFunction } from "../net/obsidianFetch";
 import { matchVendorForModel } from "../net/vendorMatch";
 import { vendorIconName } from "../net/vendorIcons";
-import { compactIfNeeded, needsCompaction, DEFAULT_COMPACTION_RETRY, type CompactResult } from "./compaction";
+import { compactIfNeeded, needsCompaction, DEFAULT_COMPACTION_RETRY } from "./compaction";
 import { measureContextFill, sumUsage, type ContextFill, type UsageTotals } from "./usage";
 import { resolveCompactionSettings, type CompactionSettings } from "./compactionSettings";
 import { createObsidianTools } from "../tools/obsidianTools";
@@ -54,7 +55,7 @@ import { aggregateSessionSearchHits, type SessionSearchResult } from "../session
 import { arrayBufferToBase64, extractImageRefs, mimeTypeForPath, sanitizeMessageForLog, stripImageRefs } from "../vault/image";
 import { injectContext, type InjectedNote } from "./contextInjection";
 import { noteFileName, renderTranscriptMarkdown, type ExportableMessage } from "./exportNote";
-import { ContextRefs, type ContextRef } from "./contextRefs";
+import { MAX_PINNED_REFS, type ContextRef } from "./contextRefs";
 import { createSubagentExtension } from "../subagent/extension";
 import { OBSIDIAN_AGENT_SYSTEM_PROMPT } from "./systemPrompt";
 import { composeSystemPrompt, emptySkillLoadReport, expandSkill, findSkill, loadVaultSkills, mergeSkills, type SkillLoadReport } from "./skillLoader";
@@ -90,18 +91,6 @@ export interface PendingToolCall {
 	 * has still said nothing worth showing.
 	 */
 	progress?: string;
-}
-
-/** A failure the panel shows in its error banner, with how to recover from it. */
-interface PanelError {
-	message: string;
-	/**
-	 * Opening the settings tab is the recovery for this failure — a missing
-	 * credential, most of all. A provider refusal or a failed vault write has
-	 * no settings fix, and a settings shortcut on those errors misdirects the
-	 * user to a screen that cannot help.
-	 */
-	opensSettings: boolean;
 }
 
 export interface ChatSnapshot {
@@ -481,146 +470,54 @@ export class ObsidianAgentService {
 	 * down with everything else in {@link dispose}.
 	 */
 	private readonly subagentExtension: ReturnType<typeof createSubagentExtension>;
-	private agent: Agent | null = null;
-	private unsubscribeAgent: (() => void) | null = null;
-	private initialization: Promise<void> | null = null;
-	private sessionInfo: ActiveSessionInfo | undefined;
+	/**
+	 * One runtime per open session file (issue #235). The service no longer
+	 * carries per-session state as singletons: every field that belongs to a
+	 * conversation lives on the {@link SessionRuntime} keyed by its file path,
+	 * so a session switch re-points `currentPath` instead of tearing the
+	 * previous conversation's run down.
+	 */
+	private readonly runtimes = new Map<string, SessionRuntime>();
+	/** The session file the panel is showing; `null` before the first adopt. */
+	private currentPath: string | null = null;
+	/**
+	 * The snapshot is the ACTIVE session's view, so these two mirror the active
+	 * runtime's `sessionInfo` / `sessionRevision` for `getSnapshot` — and stand
+	 * in for it while no runtime exists (after deleting the active session, for
+	 * example). Per-session truth lives on the runtimes; these are only ever the
+	 * focused session's copy.
+	 */
+	private sessionInfo: ActiveSessionInfo | null = null;
 	private sessionRevision = 0;
 	/**
-	 * Log entry each already-persisted message was written as.
-	 *
-	 * Doubles as the de-duplication guard for {@link persistMessage} and as the
-	 * lookup a retry needs: discarding a turn has to name the entry to rewind
-	 * to, and the in-memory transcript is the only place a live turn's id is
-	 * reachable from. Keyed weakly so the map cannot outlive the transcript.
-	 *
-	 * Never cleared mid-run, however tempting it looks after a compaction has
-	 * absorbed part of the transcript. `handleAgentEvent` re-persists the run's
-	 * whole message list on `agent_end`, and this map's `has` check is the only
-	 * thing that stops a second append — so clearing it would re-append every
-	 * message of the run under the current leaf, and a reload would replay the
-	 * run from after the compaction. The retained tail keeps its entries because
-	 * pi's `prepareCompaction` carries the original message objects through, and
-	 * the summary is a new object with no entry, which is correct: it is not a
-	 * user turn, so it is never a retry target.
+	 * Which note the user is looking at right now. Workspace state, not
+	 * conversation state — it survives a session switch and every runtime reads
+	 * it; only the follow flag and the pinned set belong to a runtime.
 	 */
-	private messageEntryIds = new WeakMap<object, string>();
+	private activeNotePath: string | null = null;
 	/**
-	 * Tool name for each in-flight tool call id.
+	 * The runtime whose tools are executing right now.
 	 *
-	 * `agent.state.pendingToolCalls` holds call ids, which are provider-generated
-	 * strings like `toolu_bdrk_01…` and mean nothing to a reader. The name only
-	 * ever arrives on the execution events, so it has to be captured as they pass
-	 * and dropped when the call ends.
+	 * Subagent host getters are evaluated at spawn-execute time, and a spawn
+	 * tool handed to session A's agent must read A's state even when the panel
+	 * is showing session B. Tools are wrapped per runtime in {@link replaceAgent}
+	 * — the wrapper brackets the call with the slot — and the synchronous
+	 * prologue of a tool's `execute` reads the getters before any await, so the
+	 * slot is always the spawning session's.
 	 */
-	private readonly pendingToolNames = new Map<string, string>();
-	/** Start time per in-flight tool call, for the duration logged at end. */
-	private readonly pendingToolStarts = new Map<string, number>();
-	/**
-	 * Newest progress line each in-flight tool has reported.
-	 *
-	 * Keyed by call id like the two maps above, and cleared by the same event, so
-	 * {@link forgetPendingToolCalls} owns all three. Holds only the latest line
-	 * rather than accumulating: the full output arrives in the tool result, and
-	 * the live row has one line to spend.
-	 */
-	private readonly pendingToolProgress = new Map<string, string>();
+	private toolRuntime: SessionRuntime | null = null;
+	private initialization: Promise<void> | null = null;
 	/**
 	 * Where the agent's lifecycle is logged. `NOOP_LOGGER` rather than nullable:
 	 * a service without a logger is a valid test configuration, and an `if` at
 	 * every emit site is how logging quietly stops happening.
 	 */
 	private readonly log: LoggerLike;
-	/**
-	 * The panel's failure slot, as one object rather than a bare string plus a
-	 * side flag: the recovery affordance has to travel with the message it
-	 * recovers, and a second field updated at every clear site is exactly how
-	 * the two drift apart.
-	 */
-	private panelError: PanelError | undefined;
-	private noticeMessage: string | undefined;
-	/**
-	 * The lane every read and write in this panel is scoped to.
-	 *
-	 * `"main"` for a conversation that never forked, which is every session until
-	 * the user starts a comparison. Everything that projects a transcript, appends
-	 * to the log, or opens a ledger entry reads this rather than hardcoding
-	 * `"main"`, so the branch on screen and the branch being written are the same
-	 * one by construction.
-	 */
-	private activeLane = "main";
-	/** Lanes the switcher may offer, refreshed whenever the set can have changed. */
-	private lanes: SessionLane[] = [];
-	/**
-	 * The run ledger entry opened for the run in flight, and the lane it was
-	 * opened on. pi serializes runs *per lane*, and a close filed against the
-	 * wrong lane leaves the real entry open forever — so the lane travels with
-	 * the id rather than being re-read at close time, by which point the user
-	 * may have switched.
-	 */
-	private activeRunLedger: { runId: string; lane: string } | undefined;
-	/**
-	 * Lanes whose last load found a run the previous process never finished, with
-	 * the user's words still that lane's transcript tail. The banner turns the
-	 * active lane's entry into the "continue" offer; the others wait for a switch.
-	 */
-	private resumableLanes = new Set<string>();
-	/** Agent-reported error the user already dismissed; see {@link dismissMessages}. */
-	private dismissedAgentError: string | undefined;
 	/** Why the last {@link initialize} failed, if it did; rides the error banner until dismissed. */
 	private initializationError: string | undefined;
 	private modelsBundle: ObsidianModelsBundle | null = null;
 	private modelsBundleKey: string | null = null;
-	private lastCompaction: CompactResult | undefined;
-	/**
-	 * Usage from requests the plugin bills that no transcript message carries.
-	 *
-	 * Both summarization paths land here. Compaction and branch summarization are
-	 * real provider calls that cost real tokens, but neither appends an assistant
-	 * message — so {@link sumUsage}, which reads usage off the transcript, cannot
-	 * see them. Anything the plugin spends outside a conversational turn has to be
-	 * reported through this side channel or the panel under-reports what the user
-	 * was charged.
-	 *
-	 * Named for the category rather than for compaction alone: the narrower name
-	 * this replaced is what let branch summarization ship without its cost being
-	 * counted.
-	 */
-	private overheadUsage: Usage[] = [];
-	/**
-	 * Single-flight guard for compaction.
-	 *
-	 * Both windows need it: before a prompt `agent.state.isStreaming` is still
-	 * false, and between the turns of a run it is already true, so neither can
-	 * serve as the guard.
-	 */
-	private compaction: Promise<boolean> | null = null;
-	/** Mirrors `compaction` for the snapshot: true from launch until it settles. */
-	private isCompacting = false;
-	private compactionController: AbortController | null = null;
-	/**
-	 * Abort controller for a branch-summary request in flight, separate from
-	 * {@link compactionController} so cancelling one never cancels the other.
-	 *
-	 * A branch summary is not a compaction: it runs once, on a rewind, and its
-	 * banner would be wrong ("Compacting context…") on an operation the user
-	 * initiated explicitly. The two share only that both are background LLM
-	 * requests this service should cancel on abort/dispose/session-switch, so
-	 * they share those exit paths but not a controller.
-	 */
-	private branchSummaryController: AbortController | null = null;
-	/**
-	 * Abort controller for a quick-action suggestion request in flight, separate
-	 * from {@link branchSummaryController} so cancelling one never cancels the
-	 * other.
-	 *
-	 * Same shape of concern, different lifetime: a suggestion is issued
-	 * speculatively after a turn settles or on an empty screen, is worth nothing
-	 * once the conversation moves on, and must never block or banner anything.
-	 * It shares the background-request exit paths — abort, dispose,
-	 * session-switch — but not a controller.
-	 */
-	private suggestionController: AbortController | null = null;
+
 	/**
 	 * The empty screen's last answers, keyed by language and note path
 	 * ({@link QuickActionSuggestionCache}). Fed by every successful empty-scope
@@ -631,25 +528,7 @@ export class ObsidianAgentService {
 	 * cold start a reload produces.
 	 */
 	private readonly suggestionCache = new QuickActionSuggestionCache();
-	/** Frozen for one user turn so a mid-loop note switch cannot retarget a write. */
-	private activeRunContext: ContextRef[] | null = null;
-	/**
-	 * Notes reported to the model each turn.
-	 *
-	 * Owned here rather than in React so it survives the panel being closed and
-	 * reopened inside one conversation, and so the injection and the chip row read
-	 * the same object instead of one mirroring the other.
-	 */
-	private readonly contextRefs = new ContextRefs();
-	/**
-	 * The panel's mirror of pi's two write-only queues — what is waiting, in
-	 * order, cancelable one by one. Created once for the service's life; a
-	 * session switch or abort empties it alongside pi's own queues rather than
-	 * replacing it, so ids stay stable across a panel close/reopen.
-	 */
-	private readonly promptQueue = new PromptQueue();
-	/** Mid-run compactions spent on the active run; the budget is per run. */
-	private midRunCompactions = 0;
+
 	/**
 	 * Loaded prompt templates: builtins first, then the vault's `Piem/prompts`.
 	 *
@@ -658,8 +537,6 @@ export class ObsidianAgentService {
 	 * reported as unknown rather than sent.
 	 */
 	private promptTemplates: PromptTemplate[] = [];
-	/** Prevents two retries from racing while the branch pointer is being persisted. */
-	private retryInFlight = false;
 	/**
 	 * Latches a new-session swap while its disk work is still landing: a second
 	 * click inside that window would still see the previous session's messages
@@ -738,8 +615,13 @@ export class ObsidianAgentService {
 			getModel: () => getSelectedModel(this.getSettings()),
 			getStreamFn: () => this.resolveStreamFn(),
 			// Thinking level is session-owned now; a spawned subagent rides the
-			// live agent's current level rather than any global preference.
-			getThinkingLevel: () => this.agent?.state.thinkingLevel ?? DEFAULT_THINKING_LEVEL,
+			// level of the runtime whose tool invoked the spawn, not of whichever
+			// session the panel is currently showing. The slot is set by the
+			// per-runtime tool wrappers built in `replaceAgent`.
+			getThinkingLevel: () =>
+				this.toolRuntime?.agent?.state.thinkingLevel
+					?? this.current()?.agent?.state.thinkingLevel
+					?? DEFAULT_THINKING_LEVEL,
 			// The same list and the same join the model switcher uses, so a spawn
 			// can only pick something the user could pick — and resolves it the way
 			// the switcher would. Read per call, so a model configured after this
@@ -757,6 +639,123 @@ export class ObsidianAgentService {
 			getApiKey: (provider) => this.getApiKey(provider),
 			getSkills: () => this.skills,
 		});
+	}
+
+	// --- runtime pool (issue #235) ---
+
+	/**
+	 * The session the panel is showing, or `null` before the first adopt.
+	 *
+	 * This is the accessor every "the conversation on screen" read goes through.
+	 * Callbacks must never re-read it: anything running on behalf of a specific
+	 * session captures that session's runtime at the start and uses the captured
+	 * handle throughout, or a switch would repoint the work mid-flight.
+	 */
+	get agent(): Agent | null {
+		return this.current()?.agent ?? null;
+	}
+
+	// The three accessors below keep the old singleton surface for the seams the
+	// tests (and the UI helpers) reach into. They are the FOCUSED runtime's
+	// members, which is exactly what the old fields pointed at; a background
+	// session's members are reached through its runtime, never through these.
+
+	/** Mirror of the focused session's queued mid-run sends. */
+	private get promptQueue(): PromptQueue | undefined {
+		return this.current()?.promptQueue;
+	}
+
+	/** Tool-name lookup for the calls the focused session has in flight. */
+	private get pendingToolNames(): Map<string, string> | undefined {
+		return this.current()?.pendingToolNames;
+	}
+
+	/** Tool start times for the calls the focused session has in flight. */
+	private get pendingToolStarts(): Map<string, number> | undefined {
+		return this.current()?.pendingToolStarts;
+	}
+
+	/** Tool progress for the calls the focused session has in flight. */
+	private get pendingToolProgress(): Map<string, string> | undefined {
+		return this.current()?.pendingToolProgress;
+	}
+
+	/** Agent-reported error the focused session's user already dismissed. */
+	private get dismissedAgentError(): string | undefined {
+		return this.current()?.dismissedAgentError;
+	}
+
+	private set dismissedAgentError(value: string | undefined) {
+		const rt = this.current();
+		if (rt) {
+			rt.dismissedAgentError = value;
+		}
+	}
+
+	/**
+	 * The runtime of the session on screen, created on demand.
+	 *
+	 * Entry points that act on "the conversation being looked at" go through
+	 * this; anything that already holds a runtime keeps using it.
+	 */
+	private runtimeForFocused(): SessionRuntime {
+		const path = this.sessionManager.getActiveSessionPath();
+		if (!path) {
+			throw new Error("No active session.");
+		}
+		return this.runtimeFor(path);
+	}
+
+	/** The runtime of the session on screen, if one has been adopted. */
+	private current(): SessionRuntime | null {
+		return this.currentPath ? (this.runtimes.get(this.currentPath) ?? null) : null;
+	}
+
+	/**
+	 * The runtime for `path`, created on first touch.
+	 *
+	 * Creation is what makes a session "known" to the service: a background
+	 * session is hydrated here — including its claim on the manager, so the
+	 * retention sweep cannot trash a conversation the panel is mid-run in — and
+	 * its interrupted runs are settled exactly once, at that first touch, not
+	 * again on every focus.
+	 */
+	private runtimeFor(path: string): SessionRuntime {
+		const existing = this.runtimes.get(path);
+		if (existing) {
+			return existing;
+		}
+		const runtime = new SessionRuntime(path);
+		this.runtimes.set(path, runtime);
+		const activePath = this.sessionManager.getActiveSessionPath();
+		if (path !== activePath && this.sessionManager.isLoaded(path)) {
+			this.sessionManager.retainSession(path);
+		}
+		this.settleInterruptedRunsFor(runtime).catch((error) => {
+			this.log.error("Failed to settle interrupted runs", () => ({
+				path,
+				error: error instanceof Error ? error.message : String(error),
+			}));
+		});
+		return runtime;
+	}
+
+	/**
+	 * Runs the crash-recovery sweep for one runtime, once, at its creation.
+	 *
+	 * A focus switch re-uses the existing runtime (`runtimeFor` above) and so
+	 * deliberately skips this — the same rule the lane switcher already follows.
+	 */
+	private async settleInterruptedRunsFor(runtime: SessionRuntime): Promise<void> {
+		const context = await this.sessionManager.buildSessionContextFor(runtime.sessionPath, runtime.activeLane);
+		await this.settleInterruptedRuns(runtime, context);
+	}
+
+	/** Drops the runtime for a deleted session, cancelling whatever it holds. */
+	private removeRuntime(runtime: SessionRuntime): void {
+		runtime.dispose();
+		this.runtimes.delete(runtime.sessionPath);
+		this.sessionManager.releaseSession(runtime.sessionPath);
 	}
 
 	subscribe(listener: SnapshotListener): () => void {
@@ -779,7 +778,7 @@ export class ObsidianAgentService {
 	 * A caller that needs the agent checks `this.agent` after awaiting.
 	 */
 	async initialize(): Promise<void> {
-		if (this.agent) {
+		if (this.current()?.agent) {
 			return;
 		}
 		if (this.initialization) {
@@ -828,8 +827,9 @@ export class ObsidianAgentService {
 		// refused: it becomes a steered message (see `enqueueSteer`).
 		// Compaction and the rewind still hold the turn exclusively — those
 		// are states a steered message cannot join.
-		if (this.isCompacting || this.retryInFlight) {
-			this.setError(this.t().t("chat.agentBusy"));
+		const rt = this.runtimeForFocused();
+		if (rt.isCompacting || rt.retryInFlight) {
+			this.setError(rt, this.t().t("chat.agentBusy"));
 			return false;
 		}
 		return await this.deliverPrompt(trimmedPrompt, images);
@@ -845,12 +845,12 @@ export class ObsidianAgentService {
 	 * wording — fires whether the turn is a fresh send or a replacement, and so
 	 * a wording change lands in one place.
 	 */
-	private ensureCredentialReady(): boolean {
+	private ensureCredentialReady(rt: SessionRuntime): boolean {
 		if (this.hasApiKey()) {
 			return true;
 		}
 		const t = this.t();
-		this.setError(t.t("target.needsKeyToSend", { target: describeModelTarget(this.getSettings(), t) }), true);
+		this.setError(rt, t.t("target.needsKeyToSend", { target: describeModelTarget(this.getSettings(), t) }), true);
 		return false;
 	}
 
@@ -863,12 +863,12 @@ export class ObsidianAgentService {
 	 * must refuse an impossible replacement *before* it throws the original
 	 * turn away, with the exact refusal a normal send would have raised.
 	 */
-	private ensureImagesSupported(images: ImageContent[]): boolean {
+	private ensureImagesSupported(rt: SessionRuntime, images: ImageContent[]): boolean {
 		if (images.length === 0 || modelSupportsImages(getSelectedModel(this.getSettings()))) {
 			return true;
 		}
 		const t = this.t();
-		this.setError(t.t("chat.imagesNotSupported", { model: describeModelTarget(this.getSettings(), t) }));
+		this.setError(rt, t.t("chat.imagesNotSupported", { model: describeModelTarget(this.getSettings(), t) }));
 		return false;
 	}
 
@@ -891,7 +891,11 @@ export class ObsidianAgentService {
 	 */
 	private async deliverPrompt(prompt: string, images: ImageContent[] = []): Promise<boolean> {
 		const trimmedPrompt = prompt;
-		const agent = this.agent;
+		// The whole send belongs to one session: capture its runtime up front so
+		// a switch mid-resolution cannot retarget the ledger, the queue, or the
+		// frozen context.
+		const rt = this.runtimeForFocused();
+		const agent = rt.agent;
 		if (!agent) {
 			return false;
 		}
@@ -910,7 +914,7 @@ export class ObsidianAgentService {
 			// in-flight request instead of letting it bill tokens whose chips are
 			// already superseded. A queued send leaves the suggestion alone: it
 			// belongs to the turn still in flight.
-			this.suggestionController?.abort();
+			rt.suggestionController?.abort();
 			// Stale banners are cleared exactly once, and before the work below rather
 			// than after it. The command resolution and the image resolution further
 			// down both raise notices — an unknown `/name`, a missing embed — and
@@ -920,8 +924,8 @@ export class ObsidianAgentService {
 			// Skill diagnostics used to be the other reason this order mattered. They
 			// no longer reach the banner at all (see `reloadSkills`), so the ordering
 			// now rests on the two per-turn notices alone.
-			this.panelError = undefined;
-			this.noticeMessage = undefined;
+			rt.panelError = undefined;
+			rt.noticeMessage = undefined;
 			await this.refreshConfiguration();
 		}
 
@@ -939,7 +943,7 @@ export class ObsidianAgentService {
 			if (explicitSkillName !== undefined) {
 				const skill = findSkill(this.skills, explicitSkillName);
 				if (!skill) {
-					this.setNotice(this.describeUnknownCommand(command.name));
+					this.setNotice(rt, this.describeUnknownCommand(command.name));
 					return false;
 				}
 				modelPrompt = expandSkill(skill, command.additionalInstructions);
@@ -949,18 +953,18 @@ export class ObsidianAgentService {
 				if (template) {
 					modelPrompt = expandPromptTemplate(template, command.args);
 					if (skill) {
-						this.appendNotice(this.t().t("chat.commandConflict", { name: command.name }));
+						this.appendNotice(rt, this.t().t("chat.commandConflict", { name: command.name }));
 					}
 				} else if (skill) {
 					modelPrompt = expandSkill(skill, command.additionalInstructions);
 				} else {
-					this.setNotice(this.describeUnknownCommand(command.name));
+					this.setNotice(rt, this.describeUnknownCommand(command.name));
 					return false;
 				}
 			}
 		}
 
-		if (!this.ensureCredentialReady()) {
+		if (!this.ensureCredentialReady(rt)) {
 			return false;
 		}
 
@@ -971,15 +975,15 @@ export class ObsidianAgentService {
 		// active note anchors the resolution: a shortest-path embed means "the
 		// image this note links to", and the index resolves it from here.
 		const refs = extractImageRefs(modelPrompt);
-		const sourcePath = this.contextRefs.list().find((ref) => ref.kind === "active")?.path ?? null;
-		const vaultImages = await this.readVaultImages(refs, sourcePath);
+		const sourcePath = this.contextRefList(rt).find((ref) => ref.kind === "active")?.path ?? null;
+		const vaultImages = await this.readVaultImages(rt, refs, sourcePath);
 		const promptText = vaultImages.length > 0 ? stripImageRefs(modelPrompt) : modelPrompt;
 		const allImages = images.length > 0 ? [...images, ...vaultImages] : vaultImages;
 
 		// Phase 3: gate multimodal send on the active model's declared capability.
 		// A text-only model cannot consume an image content array; block before
 		// the run and leave both text and images with the user to reconsider.
-		if (!this.ensureImagesSupported(allImages)) {
+		if (!this.ensureImagesSupported(rt, allImages)) {
 			return false;
 		}
 
@@ -993,12 +997,12 @@ export class ObsidianAgentService {
 
 		let sent = false;
 		try {
-			this.activeRunContext = this.contextRefs.list();
+			rt.activeRunContext = this.contextRefList(rt);
 			this.notify();
-			await this.compactContextIfNeeded(agent);
+			await this.compactContextIfNeeded(rt, agent);
 			// The budget is per run, and `compactBetweenTurns` spends it.
-			this.midRunCompactions = 0;
-			const stranded = this.promptQueue.drain();
+			rt.midRunCompactions = 0;
+			const stranded = rt.promptQueue.drain();
 			const message: AgentMessage = {
 				role: "user",
 				content: [{ type: "text", text: promptText }, ...allImages],
@@ -1010,7 +1014,7 @@ export class ObsidianAgentService {
 			// recovery reads on the next load. Filed against the active lane, so
 			// an A/B side's crash recovers that side rather than whichever one is
 			// on screen later.
-			await this.beginRunOperation(dispatch);
+			await this.beginRunOperation(rt, dispatch);
 			if (stranded.length === 0) {
 				await agent.prompt([message]);
 			} else {
@@ -1025,12 +1029,12 @@ export class ObsidianAgentService {
 			// A fresh send supersedes the continue offer: the user has moved on
 			// and the crashed run's words are no longer this lane's transcript
 			// tail.
-			this.resumableLanes.delete(this.activeLane);
+			rt.resumableLanes.delete(rt.activeLane);
 		} catch (error) {
-			this.panelError = { message: error instanceof Error ? error.message : String(error), opensSettings: false };
+			rt.panelError = { message: error instanceof Error ? error.message : String(error), opensSettings: false };
 		} finally {
-			this.activeRunContext = null;
-			await this.notifySettledState();
+			rt.activeRunContext = null;
+			await this.notifySettledState(rt);
 		}
 		return sent;
 	}
@@ -1050,7 +1054,8 @@ export class ObsidianAgentService {
 	 * from outside; `steer()` is the delivery, this is the bookkeeping.
 	 */
 	private enqueueSteer(originalText: string, resolvedText: string, images: ImageContent[]): boolean {
-		const agent = this.agent;
+		const rt = this.runtimeForFocused();
+		const agent = rt.agent;
 		if (!agent) {
 			return false;
 		}
@@ -1059,7 +1064,7 @@ export class ObsidianAgentService {
 			content: [{ type: "text", text: resolvedText }, ...images],
 			timestamp: Date.now(),
 		};
-		this.promptQueue.add({ kind: "steer", text: originalText, imageCount: images.length, message });
+		rt.promptQueue.add({ kind: "steer", text: originalText, imageCount: images.length, message });
 		agent.steer(message);
 		this.notify();
 		return true;
@@ -1081,37 +1086,49 @@ export class ObsidianAgentService {
 	 * this decision — {@link abort} empties the mirror first, and stopping is
 	 * the user retracting the queued intent along with the run.
 	 */
+	/**
+	 * Single-argument form: the finished run's messages, dispatched against the
+	 * focused runtime's queue. Kept because a test reaches this seam directly.
+	 */
 	private async resumeQueuedPrompts(messages: readonly AgentMessage[]): Promise<void> {
-		if (this.promptQueue.size === 0) {
+		const focused = this.current();
+		if (focused) {
+			await this.dispatchQueuedPrompts(focused, messages);
+		}
+	}
+
+	private async dispatchQueuedPrompts(rt: SessionRuntime, messages: readonly AgentMessage[]): Promise<void> {
+		const runMessages = messages;
+		if (rt.promptQueue.size === 0) {
 			return;
 		}
-		const agent = this.agent;
+		const agent = rt.agent;
 		if (!agent || agent.state.isStreaming) {
 			return;
 		}
-		const lastAssistant = [...messages].reverse().find((message) => message.role === "assistant");
+		const lastAssistant = [...runMessages].reverse().find((message) => message.role === "assistant");
 		if (lastAssistant?.stopReason === "error") {
 			return;
 		}
-		const stranded = this.promptQueue.drain();
+		const stranded = rt.promptQueue.drain();
 		try {
-			this.activeRunContext = this.contextRefs.list();
+			rt.activeRunContext = this.contextRefList(rt);
 			this.notify();
-			await this.compactContextIfNeeded(agent);
+			await this.compactContextIfNeeded(rt, agent);
 			// pi's own queues may still hold what this dispatch is re-sending;
 			// draining them first keeps the run's first turn-end poll from
 			// injecting the same words a second time.
 			agent.clearAllQueues();
-			await this.beginRunOperation(stranded.map((entry) => entry.message));
+			await this.beginRunOperation(rt, stranded.map((entry) => entry.message));
 			await agent.prompt(stranded.map((entry) => entry.message));
 		} catch (error) {
 			// Back onto the chips, oldest first: the words are still the
 			// user's, and hiding them behind an error banner loses them.
-			this.promptQueue.restore(stranded);
-			this.panelError = { message: error instanceof Error ? error.message : String(error), opensSettings: false };
+			rt.promptQueue.restore(stranded);
+			rt.panelError = { message: error instanceof Error ? error.message : String(error), opensSettings: false };
 		} finally {
-			this.activeRunContext = null;
-			await this.notifySettledState();
+			rt.activeRunContext = null;
+			await this.notifySettledState(rt);
 		}
 	}
 
@@ -1125,31 +1142,33 @@ export class ObsidianAgentService {
 	 * {@link abort}.
 	 */
 	async resumeInterruptedRun(): Promise<void> {
-		this.resumableLanes.delete(this.activeLane);
-		const agent = this.agent;
+		const rt = this.runtimeForFocused();
+		rt.resumableLanes.delete(rt.activeLane);
+		const agent = rt.agent;
 		if (!agent || agent.state.isStreaming) {
 			return;
 		}
 		try {
-			this.activeRunContext = this.contextRefs.list();
+			rt.activeRunContext = this.contextRefList(rt);
 			this.notify();
-			await this.compactContextIfNeeded(agent);
+			await this.compactContextIfNeeded(rt, agent);
 			// The budget is per run, and `compactBetweenTurns` spends it.
-			this.midRunCompactions = 0;
+			rt.midRunCompactions = 0;
 			const last = agent.state.messages.at(-1);
-			await this.beginRunOperation(last ? [last] : []);
+			await this.beginRunOperation(rt, last ? [last] : []);
 			await agent.continue();
 		} catch (error) {
-			this.panelError = { message: error instanceof Error ? error.message : String(error), opensSettings: false };
+			rt.panelError = { message: error instanceof Error ? error.message : String(error), opensSettings: false };
 		} finally {
-			this.activeRunContext = null;
-			await this.notifySettledState();
+			rt.activeRunContext = null;
+			await this.notifySettledState(rt);
 		}
 	}
 
 	/** Withdraws the continue offer without acting on it. */
 	dismissInterruptedRun(): void {
-		if (!this.resumableLanes.delete(this.activeLane)) {
+		const rt = this.runtimeForFocused();
+		if (!rt.resumableLanes.delete(rt.activeLane)) {
 			return;
 		}
 		this.notify();
@@ -1166,11 +1185,11 @@ export class ObsidianAgentService {
 	 * block the send the user asked for. The cost of a missing entry is only
 	 * that a crash during that run leaves nothing for recovery to find.
 	 */
-	private async beginRunOperation(originalPrompt: readonly AgentMessage[]): Promise<void> {
-		const lane = this.activeLane;
-		this.activeRunLedger = undefined;
+	private async beginRunOperation(rt: SessionRuntime, originalPrompt: readonly AgentMessage[]): Promise<void> {
+		const lane = rt.activeLane;
+		rt.activeRunLedger = undefined;
 		try {
-			this.activeRunLedger = { runId: await this.sessionManager.beginRunOperation([...originalPrompt], lane), lane };
+			rt.activeRunLedger = { runId: await this.sessionManager.beginRunOperationFor(rt.sessionPath, [...originalPrompt], lane), lane };
 		} catch (error) {
 			this.log.error("Failed to record run start", () => ({
 				lane,
@@ -1188,14 +1207,14 @@ export class ObsidianAgentService {
 	 * user who switched lanes mid-run must not have the close filed against the
 	 * lane they are now looking at, which would leave the real entry open.
 	 */
-	private async endRunOperation(outcome: "completed" | "aborted" | "failed", error?: { code: string; message: string }): Promise<void> {
-		const ledger = this.activeRunLedger;
-		this.activeRunLedger = undefined;
+	private async endRunOperation(rt: SessionRuntime, outcome: "completed" | "aborted" | "failed", error?: { code: string; message: string }): Promise<void> {
+		const ledger = rt.activeRunLedger;
+		rt.activeRunLedger = undefined;
 		if (!ledger) {
 			return;
 		}
 		try {
-			await this.sessionManager.endRunOperation(ledger.runId, outcome, error, ledger.lane);
+			await this.sessionManager.endRunOperationFor(rt.sessionPath, ledger.runId, outcome, error, ledger.lane);
 		} catch (failure) {
 			// The orphan this leaves is exactly what recovery looks for, so a failed
 			// close degrades to a spurious recovery offer — never to a lost reply.
@@ -1214,16 +1233,16 @@ export class ObsidianAgentService {
 	 * message the banner shows). `length` and any other stop reason mean the
 	 * model said its piece — the run did what was asked.
 	 */
-	private async settleRunLedger(messages: readonly AgentMessage[]): Promise<void> {
+	private async settleRunLedger(rt: SessionRuntime, messages: readonly AgentMessage[]): Promise<void> {
 		const lastAssistant = [...messages].reverse().find((message) => message.role === "assistant");
 		if (lastAssistant?.stopReason === "error") {
-			await this.endRunOperation("failed", {
+			await this.endRunOperation(rt, "failed", {
 				code: "provider_error",
 				message: lastAssistant.errorMessage ?? "Provider error",
 			});
 			return;
 		}
-		await this.endRunOperation(lastAssistant?.stopReason === "aborted" ? "aborted" : "completed");
+		await this.endRunOperation(rt, lastAssistant?.stopReason === "aborted" ? "aborted" : "completed");
 	}
 
 	/**
@@ -1248,11 +1267,11 @@ export class ObsidianAgentService {
 	 * only for the active lane — switching to another resumable lane reveals its
 	 * own offer without a second sweep.
 	 */
-	private async settleInterruptedRuns(activeContext: SessionContext): Promise<void> {
-		this.resumableLanes.clear();
+	private async settleInterruptedRuns(rt: SessionRuntime, activeContext: SessionContext): Promise<void> {
+		rt.resumableLanes.clear();
 		let open: Map<string, OperationStartedRecord[]>;
 		try {
-			open = await this.sessionManager.findAllOpenRunOperations();
+			open = await this.sessionManager.findAllOpenRunOperationsFor(rt.sessionPath);
 		} catch (error) {
 			this.log.error("Failed to read the run ledger", () => ({
 				error: error instanceof Error ? error.message : String(error),
@@ -1262,7 +1281,7 @@ export class ObsidianAgentService {
 		for (const [lane, orphans] of open) {
 			for (const orphan of orphans) {
 				try {
-					await this.sessionManager.endRunOperation(orphan.id, "aborted", undefined, lane);
+					await this.sessionManager.endRunOperationFor(rt.sessionPath, orphan.id, "aborted", undefined, lane);
 				} catch (error) {
 					this.log.error("Failed to close an interrupted run's ledger entry", () => ({
 						lane,
@@ -1270,8 +1289,8 @@ export class ObsidianAgentService {
 					}));
 				}
 			}
-			if (await this.laneEndsResumable(lane, activeContext)) {
-				this.resumableLanes.add(lane);
+			if (await this.laneEndsResumable(rt, lane, activeContext)) {
+				rt.resumableLanes.add(lane);
 			}
 		}
 	}
@@ -1283,13 +1302,13 @@ export class ObsidianAgentService {
 	 * The active lane is read from the context already built for it rather than
 	 * re-projected, so the offer and the transcript on screen cannot disagree.
 	 */
-	private async laneEndsResumable(lane: string, activeContext: SessionContext): Promise<boolean> {
+	private async laneEndsResumable(rt: SessionRuntime, lane: string, activeContext: SessionContext): Promise<boolean> {
 		let last: AgentMessage | undefined;
-		if (lane === this.activeLane) {
+		if (lane === rt.activeLane) {
 			last = activeContext.messages.at(-1);
 		} else {
 			try {
-				last = (await this.sessionManager.buildSessionContext(lane)).messages.at(-1);
+				last = (await this.sessionManager.buildSessionContextFor(rt.sessionPath, lane)).messages.at(-1);
 			} catch (error) {
 				this.log.error("Failed to read an interrupted lane's transcript", () => ({
 					lane,
@@ -1312,10 +1331,11 @@ export class ObsidianAgentService {
 	 * fails again re-records it through {@link initialize}.
 	 */
 	dismissMessages(): void {
-		this.panelError = undefined;
-		this.noticeMessage = undefined;
+		const rt = this.runtimeForFocused();
+		rt.panelError = undefined;
+		rt.noticeMessage = undefined;
 		this.initializationError = undefined;
-		this.dismissedAgentError = this.agent?.state.errorMessage;
+		rt.dismissedAgentError = rt.agent?.state.errorMessage;
 		this.notify();
 	}
 
@@ -1328,7 +1348,7 @@ export class ObsidianAgentService {
 	 */
 	notifyImagesBlocked(): void {
 		const t = this.t();
-		this.setNotice(t.t("chat.imagesNotSupported", { model: describeModelTarget(this.getSettings(), t) }));
+		this.setNotice(this.runtimeForFocused(), t.t("chat.imagesNotSupported", { model: describeModelTarget(this.getSettings(), t) }));
 	}
 
 	/**
@@ -1340,7 +1360,11 @@ export class ObsidianAgentService {
 	 */
 	async retryFrom(index: number): Promise<boolean> {
 		await this.initialize();
-		const agent = this.requireAgent();
+		const rt = this.runtimeForFocused();
+		const agent = rt.agent;
+		if (!agent) {
+			return false;
+		}
 		const promptIndex = findPromptIndex(agent.state.messages, index);
 		if (promptIndex === null) {
 			return false;
@@ -1349,7 +1373,7 @@ export class ObsidianAgentService {
 		if (!prompt) {
 			return false;
 		}
-		return await this.rewindAndResend(agent, promptIndex, prompt);
+		return await this.rewindAndResend(rt, agent, promptIndex, prompt);
 	}
 
 	/**
@@ -1378,11 +1402,15 @@ export class ObsidianAgentService {
 			return false;
 		}
 		await this.initialize();
-		const agent = this.requireAgent();
+		const rt = this.runtimeForFocused();
+		const agent = rt.agent;
+		if (!agent) {
+			return false;
+		}
 		if (agent.state.messages[index]?.role !== "user") {
 			return false;
 		}
-		return await this.rewindAndResend(agent, index, trimmed, images);
+		return await this.rewindAndResend(rt, agent, index, trimmed, images);
 	}
 
 	/**
@@ -1418,12 +1446,13 @@ export class ObsidianAgentService {
 	 * asked on is no longer current — the same guard `performCompaction` keeps.
 	 */
 	private async rewindAndResend(
+		rt: SessionRuntime,
 		agent: Agent,
 		promptIndex: number,
 		prompt: string,
 		images: ImageContent[] = [],
 	): Promise<boolean> {
-		if (agent.state.isStreaming || this.isCompacting || this.branchSummaryController || this.retryInFlight) {
+		if (agent.state.isStreaming || rt.isCompacting || rt.branchSummaryController || rt.retryInFlight) {
 			return false;
 		}
 		// Preflight before anything destructive: the rewind throws the original
@@ -1434,10 +1463,10 @@ export class ObsidianAgentService {
 		// The send-side checks stay; they are not redundant but the backstop for
 		// the seconds the branch summary runs, during which a key can be removed
 		// or the model switched.
-		if (!this.ensureCredentialReady() || !this.ensureImagesSupported(images)) {
+		if (!this.ensureCredentialReady(rt) || !this.ensureImagesSupported(rt, images)) {
 			return false;
 		}
-		this.retryInFlight = true;
+		rt.retryInFlight = true;
 		// The window this flag opens is one the agent does not narrate: no stream
 		// events, no compaction. Without a notify here the panel stays visually
 		// idle for the whole branch-summary request — a real LLM call that can
@@ -1445,7 +1474,7 @@ export class ObsidianAgentService {
 		this.notify();
 		try {
 			const promptMessage = agent.state.messages[promptIndex];
-			const entryId = promptMessage ? this.messageEntryIds.get(promptMessage) : undefined;
+			const entryId = promptMessage ? rt.messageEntryIds.get(promptMessage) : undefined;
 			if (!entryId) {
 				return false;
 			}
@@ -1455,12 +1484,12 @@ export class ObsidianAgentService {
 			// one was generated) to splice into the in-memory transcript.
 			let summaryMessage: AgentMessage | null;
 			try {
-				summaryMessage = await this.summarizeAbandonedBranch(entryId);
+				summaryMessage = await this.summarizeAbandonedBranch(rt, entryId);
 			} catch (error) {
-				this.setError(error instanceof Error ? error.message : String(error));
+				this.setError(rt, error instanceof Error ? error.message : String(error));
 				return false;
 			}
-			if (this.agent !== agent) {
+			if (rt.agent !== agent) {
 				return false;
 			}
 			agent.state.messages = agent.state.messages.slice(0, promptIndex);
@@ -1470,7 +1499,7 @@ export class ObsidianAgentService {
 			this.notify();
 			return await this.deliverPrompt(prompt, images);
 		} finally {
-			this.retryInFlight = false;
+			rt.retryInFlight = false;
 			// The flag's release is its own render: the notification inside the try
 			// fired while the send was still pretending to be busy, so without this
 			// one the panel could stay in the rewinding treatment through the first
@@ -1495,16 +1524,16 @@ export class ObsidianAgentService {
 	 * already running, or the request was aborted). Never throws on a summary
 	 * failure — only on an unknown rewind target, which surfaces as a user error.
 	 */
-	private async summarizeAbandonedBranch(entryId: string): Promise<AgentMessage | null> {
-		const session = this.sessionManager.getSession();
+	private async summarizeAbandonedBranch(rt: SessionRuntime, entryId: string): Promise<AgentMessage | null> {
+		const session = this.sessionManager.getSessionFor(rt.sessionPath);
 		// Lane-scoped: a retry inside a comparison rewinds *that* branch, and the
 		// leaf `collectEntriesForBranchSummary` walks back from has to be the one
 		// the lane is pointing at rather than main's.
-		const oldLeafId = await session.view(this.activeLane).getLeafId();
+		const oldLeafId = await session.view(rt.activeLane).getLeafId();
 		// No leaf means a fresh log with nothing to abandon; `oldLeafId === entryId`
 		// means the rewind targets the current tip, so there is no fork below it.
 		if (!oldLeafId || oldLeafId === entryId) {
-			await this.sessionManager.rewindTo(entryId, this.activeLane);
+			await session.moveLane(rt.activeLane, (await session.getEntry(entryId))?.parentId ?? null);
 			return null;
 		}
 		// A compaction in flight owns the log's summarization budget; a second
@@ -1512,17 +1541,17 @@ export class ObsidianAgentService {
 		// keys and muddy the usage accounting, so the branch summary is skipped.
 		// The rewind still happens — the user's intent is the retry, not the
 		// summary.
-		if (this.isCompacting) {
-			await this.sessionManager.rewindTo(entryId, this.activeLane);
+		if (rt.isCompacting) {
+			await session.moveLane(rt.activeLane, (await session.getEntry(entryId))?.parentId ?? null);
 			return null;
 		}
 
 		const controller = new AbortController();
-		this.branchSummaryController = controller;
+		rt.branchSummaryController = controller;
 		try {
 			const collected = await collectEntriesForBranchSummary(session, oldLeafId, entryId);
 			if (collected.entries.length === 0) {
-				await this.sessionManager.rewindTo(entryId, this.activeLane);
+				await session.moveLane(rt.activeLane, (await session.getEntry(entryId))?.parentId ?? null);
 				return null;
 			}
 
@@ -1538,11 +1567,11 @@ export class ObsidianAgentService {
 			// still-live branch; it is unconditional because the retry was the
 			// user's actual request. A failed or aborted summary simply means the
 			// fork is forgotten, not that the retry is blocked.
-			await this.sessionManager.rewindTo(entryId, this.activeLane);
+			await session.moveLane(rt.activeLane, (await session.getEntry(entryId))?.parentId ?? null);
 
 			if (!result.ok) {
 				if (!controller.signal.aborted) {
-					this.setError(`Could not summarize the abandoned branch: ${result.error.message}`);
+					this.setError(rt, `Could not summarize the abandoned branch: ${result.error.message}`);
 				}
 				return null;
 			}
@@ -1553,12 +1582,12 @@ export class ObsidianAgentService {
 			// find its cost in the transcript. Recorded before the append so a
 			// throw there cannot silently drop an amount the user was already
 			// charged.
-			this.recordOverheadUsage(result.value.usage);
-			await this.sessionManager.appendBranchSummary(result.value, oldLeafId, this.activeLane);
+			this.recordOverheadUsage(rt, result.value.usage);
+			await this.sessionManager.appendBranchSummaryFor(rt.sessionPath, result.value, oldLeafId, rt.activeLane);
 			return createBranchSummaryMessage(result.value.summary, oldLeafId, Date.now());
 		} finally {
-			if (this.branchSummaryController === controller) {
-				this.branchSummaryController = null;
+			if (rt.branchSummaryController === controller) {
+				rt.branchSummaryController = null;
 			}
 		}
 	}
@@ -1579,7 +1608,7 @@ export class ObsidianAgentService {
 		const settings = this.getSettings();
 		return this.suggestionCache.get({
 			language: resolveLanguage(this.app.vault as LanguageHost, settings.language),
-			notePath: this.contextRefs.list().find((ref) => ref.kind === "active")?.path ?? null,
+			notePath: this.contextRefList(this.runtimeForFocused()).find((ref) => ref.kind === "active")?.path ?? null,
 		});
 	}
 
@@ -1601,22 +1630,23 @@ export class ObsidianAgentService {
 	 */
 	async suggestQuickActions(scope: SuggestionScope): Promise<QuickAction[] | null> {
 		const settings = this.getSettings();
-		if (!this.hasApiKey() || !this.agent || this.agent.state.isStreaming || this.isCompacting || this.retryInFlight) {
+		const rt = this.runtimeForFocused();
+		if (!this.hasApiKey() || !rt.agent || rt.agent.state.isStreaming || rt.isCompacting || rt.retryInFlight) {
 			return null;
 		}
 		const subject =
 			scope === "reply"
-				? lastAssistantText(this.agent.state.messages)
-				: this.contextRefs.list().find((ref) => ref.kind === "active")?.path ?? null;
+				? lastAssistantText(rt.agent.state.messages)
+				: this.contextRefList(rt).find((ref) => ref.kind === "active")?.path ?? null;
 		if (scope === "reply" && !subject) {
 			return null;
 		}
 
 		// One suggestion request at a time: a new call supersedes the previous
 		// one, which the abort also marks so the request stops billing.
-		this.suggestionController?.abort();
+		rt.suggestionController?.abort();
 		const controller = new AbortController();
-		this.suggestionController = controller;
+		rt.suggestionController = controller;
 		try {
 			const model = getSelectedModel(settings);
 			const result = await fetchQuickActionSuggestions({
@@ -1629,12 +1659,12 @@ export class ObsidianAgentService {
 				apiKey: this.getApiKey(model.provider),
 				signal: controller.signal,
 			});
-			if (this.suggestionController !== controller) {
+			if (rt.suggestionController !== controller) {
 				// Superseded mid-flight: the caller that replaced this request owns
 				// the row now, and a late answer must not resurrect stale chips.
 				return null;
 			}
-			this.recordOverheadUsage(result.usage);
+			this.recordOverheadUsage(rt, result.usage);
 			// Only the empty screen caches: its subject is the (path, language) pair
 			// the next blank visit will reproduce, so the answer stays worth showing
 			// again. A reply's subject is that conversation's newest text — no future
@@ -1655,38 +1685,86 @@ export class ObsidianAgentService {
 			this.log.debug("quick action suggestions failed", () => ({ error: String(error) }));
 			return null;
 		} finally {
-			if (this.suggestionController === controller) {
-				this.suggestionController = null;
+			if (rt.suggestionController === controller) {
+				rt.suggestionController = null;
 			}
 		}
 	}
 
 	abort(): void {
+		const path = this.sessionManager.getActiveSessionPath();
+		if (!path) {
+			return;
+		}
+		void this.abortSession(path);
+	}
+
+	/**
+	 * Stops exactly one session's run: the runtime named by `path`, whatever the
+	 * panel is showing (issue #235). The focused stop is {@link abort} above.
+	 */
+	async abortSession(path: string): Promise<void> {
+		const rt = this.runtimes.get(path);
+		if (!rt) {
+			return;
+		}
 		// A compaction before a prompt is only reachable through this controller,
 		// because the agent is not streaming yet. One between turns is reachable
 		// both ways — `runExclusiveCompaction` links the run's signal into this
 		// controller — so aborting both is right and idempotent.
-		this.compactionController?.abort();
-		this.branchSummaryController?.abort();
-		this.suggestionController?.abort();
+		rt.compactionController?.abort();
+		rt.branchSummaryController?.abort();
+		rt.suggestionController?.abort();
 		// Stopping the run is also retracting what was queued for it. Cleared
 		// before `agent.abort()` so the `agent_end` that follows sees an empty
 		// mirror and does not dispatch the words the user just took back.
-		this.promptQueue.clear();
-		const agent = this.agent;
+		rt.promptQueue.clear();
+		const agent = rt.agent;
 		if (!agent) {
 			return;
 		}
 		agent.clearAllQueues();
 		agent.abort();
+		// Closure-captured on purpose: a session switch between here and idle
+		// must settle THIS run's ledger, not whatever is on screen later.
 		void agent.waitForIdle().then(async () => {
 			// The run's own `agent_end` may not reach the settle: an abort that lands
 			// before the reply's last events still fires the end event, but a race
 			// against this handler leaves the close below as the only writer. Writing
 			// both is idempotent — the ledger entry clears as it is read.
-			await this.endRunOperation("aborted");
-			await this.notifySettledState();
+			await this.endRunOperation(rt, "aborted");
+			await this.notifySettledState(rt);
 		});
+	}
+
+	/**
+	 * One entry per session the service knows about (issue #235).
+	 */
+	getSessionRunStates(): Array<{ path: string; state: SessionRunState }> {
+		return [...this.runtimes.values()].map((rt) => ({ path: rt.sessionPath, state: this.deriveRunState(rt) }));
+	}
+
+	/**
+	 * Lifecycle phase of one session, read off its runtime rather than stored.
+	 *
+	 * Deriving is race-free: a run that flips `isStreaming` between two readers
+	 * is answered with whichever phase is true at read time, and a background
+	 * session needs no event plumbing to keep its phase current. `error` covers
+	 * both a panel failure and an agent-reported error — the aborted stream the
+	 * run-state test pins lands as an `error` event on the message, so it must
+	 * read as `error`, not as the `idle` the stop "succeeded".
+	 */
+	private deriveRunState(rt: SessionRuntime): SessionRunState {
+		if (rt.panelError || rt.agent?.state.errorMessage) {
+			return "error";
+		}
+		if (rt.agent?.state.isStreaming) {
+			return "running";
+		}
+		if (rt.promptQueue.size > 0 || rt.resumableLanes.has(rt.activeLane)) {
+			return "waiting-input";
+		}
+		return "idle";
 	}
 
 	async newSession(options?: { force?: boolean }): Promise<void> {
@@ -1703,22 +1781,23 @@ export class ObsidianAgentService {
 		// `force` bypasses the blank check for the delete-the-last-session
 		// fallback, where the agent still shows the deleted session's state and
 		// must not count as content.
-		const agent = this.agent;
+		const previous = this.current();
 		if (
 			!options?.force &&
-			agent &&
-			!agent.state.isStreaming &&
-			agent.state.messages.length === 0 &&
-			this.lanes.length <= 1
+			previous?.agent &&
+			!previous.agent.state.isStreaming &&
+			previous.agent.state.messages.length === 0 &&
+			previous.lanes.length <= 1
 		) {
 			return;
 		}
 		this.newSessionInFlight = true;
 		try {
-			this.agent?.abort();
+			// The session being left keeps its runtime and its run (issue #235):
+			// a new chat abandons it for the panel but does not tear it down.
 			// Suggestions belong to the conversation that prompted them; a fresh chat
 			// must not inherit chips fetched for the last one.
-			this.suggestionController?.abort();
+			previous?.suggestionController?.abort();
 			// The level is inherited from the conversation just left, not from a
 			// global setting: the user tuned it there and a fresh chat should not
 			// start from a value they never chose. Clamped to the model the new
@@ -1726,23 +1805,26 @@ export class ObsidianAgentService {
 			const inherited = await this.sessionManager.readLastSessionThinkingLevel();
 			const seed = clampThinkingLevel(getSelectedModel(this.getSettings()), inherited ?? DEFAULT_THINKING_LEVEL);
 			const defaults = this.getSessionDefaults();
-			this.sessionInfo = await this.sessionManager.createSession({ ...defaults, thinkingLevel: seed });
-			this.messageEntryIds = new WeakMap<object, string>();
+			const info = await this.sessionManager.createSession({ ...defaults, thinkingLevel: seed });
+			this.currentPath = info.path;
+			const rt = this.runtimeFor(info.path);
+			rt.sessionInfo = info;
+			this.sessionInfo = info;
+			rt.messageEntryIds = new WeakMap<object, string>();
 			// A brand-new session has one lane, no ledger, and no stranded reply; any
 			// comparison or offer the session just left was its own.
-			this.activeLane = "main";
-			this.resumableLanes.clear();
-			this.activeRunLedger = undefined;
-			await this.refreshLanes();
-			this.lastCompaction = undefined;
-			this.overheadUsage = [];
+			rt.activeLane = "main";
+			rt.resumableLanes.clear();
+			rt.activeRunLedger = undefined;
+			await this.refreshLanes(rt);
+			rt.lastCompaction = undefined;
+			rt.overheadUsage = [];
 			// Pins and a dismissed follow belong to the conversation that collected them;
-			// carrying either forward would shape a fresh chat the user never set up that
-			// way. The active note is left alone because it describes the workspace.
-			this.contextRefs.reset();
-			await this.replaceAgent([], seed);
-			this.panelError = undefined;
-			this.sessionRevision += 1;
+			// a fresh runtime starts clean (the old `contextRefs.reset()`), while the
+			// workspace's active note is left alone because it describes the workspace.
+			await this.replaceAgent(rt, [], seed);
+			rt.panelError = undefined;
+			rt.sessionRevision += 1;
 			this.notify();
 		} finally {
 			this.newSessionInFlight = false;
@@ -1769,8 +1851,9 @@ export class ObsidianAgentService {
 	 */
 	async startComparison(index: number): Promise<boolean> {
 		await this.initialize();
-		const agent = this.requireAgent();
-		if (agent.state.isStreaming || this.isCompacting || this.retryInFlight || this.branchSummaryController) {
+		const rt = this.runtimeForFocused();
+		const agent = rt.agent;
+		if (!agent || agent.state.isStreaming || rt.isCompacting || rt.retryInFlight || rt.branchSummaryController) {
 			return false;
 		}
 		const promptIndex = agent.state.messages[index]?.role === "user" ? index : findPromptIndex(agent.state.messages, index);
@@ -1778,18 +1861,18 @@ export class ObsidianAgentService {
 			return false;
 		}
 		const promptMessage = agent.state.messages[promptIndex];
-		const entryId = promptMessage ? this.messageEntryIds.get(promptMessage) : undefined;
+		const entryId = promptMessage ? rt.messageEntryIds.get(promptMessage) : undefined;
 		if (!entryId) {
 			return false;
 		}
 		let lanes: [string, string];
 		try {
-			lanes = await this.sessionManager.createComparisonLanes(entryId);
+			lanes = await this.createComparisonLanes(rt, entryId);
 		} catch (error) {
-			this.setError(error instanceof Error ? error.message : String(error));
+			this.setError(rt, error instanceof Error ? error.message : String(error));
 			return false;
 		}
-		await this.adoptLane(lanes[0]);
+		await this.adoptLane(rt, lanes[0]);
 		return true;
 	}
 
@@ -1802,17 +1885,18 @@ export class ObsidianAgentService {
 	 */
 	async switchLane(lane: string): Promise<boolean> {
 		await this.initialize();
-		if (lane === this.activeLane) {
+		const rt = this.runtimeForFocused();
+		if (lane === rt.activeLane) {
 			return true;
 		}
-		const agent = this.agent;
-		if (agent?.state.isStreaming || this.isCompacting || this.retryInFlight || this.branchSummaryController) {
+		const agent = rt.agent;
+		if (agent?.state.isStreaming || rt.isCompacting || rt.retryInFlight || rt.branchSummaryController) {
 			return false;
 		}
-		if (!(await this.sessionManager.getLanes()).some((candidate) => candidate.lane === lane)) {
+		if (!(await this.readLanes(rt)).some((candidate) => candidate.lane === lane)) {
 			return false;
 		}
-		await this.adoptLane(lane);
+		await this.adoptLane(rt, lane);
 		return true;
 	}
 
@@ -1833,31 +1917,32 @@ export class ObsidianAgentService {
 	 */
 	async chooseLane(lane: string, losers: "keep" | "retire"): Promise<boolean> {
 		await this.initialize();
-		const agent = this.agent;
-		if (agent?.state.isStreaming || this.isCompacting || this.retryInFlight || this.branchSummaryController) {
+		const rt = this.runtimeForFocused();
+		const agent = rt.agent;
+		if (agent?.state.isStreaming || rt.isCompacting || rt.retryInFlight || rt.branchSummaryController) {
 			return false;
 		}
-		const comparison = (await this.sessionManager.getLanes()).filter((candidate) => candidate.lane !== "main");
+		const comparison = (await this.readLanes(rt)).filter((candidate) => candidate.lane !== "main");
 		if (!comparison.some((candidate) => candidate.lane === lane)) {
 			return false;
 		}
 		try {
-			await this.sessionManager.promoteLane(lane);
+			await this.promoteLane(rt, lane);
 			// The winner is retired alongside the losers: its content now *is* main,
 			// so keeping it in the switcher would offer two names for one transcript.
-			await this.sessionManager.retireLane(lane);
+			await this.retireLane(rt, lane);
 			if (losers === "retire") {
 				for (const candidate of comparison) {
 					if (candidate.lane !== lane) {
-						await this.sessionManager.retireLane(candidate.lane);
+						await this.retireLane(rt, candidate.lane);
 					}
 				}
 			}
 		} catch (error) {
-			this.setError(error instanceof Error ? error.message : String(error));
+			this.setError(rt, error instanceof Error ? error.message : String(error));
 			return false;
 		}
-		await this.adoptLane("main");
+		await this.adoptLane(rt, "main");
 		return true;
 	}
 
@@ -1870,17 +1955,13 @@ export class ObsidianAgentService {
 	 * reason {@link openSession} restarts it: the overhead this panel accumulated
 	 * was spent on the branch being left.
 	 */
-	private async adoptLane(lane: string): Promise<void> {
-		this.agent?.abort();
-		this.compactionController?.abort();
-		this.branchSummaryController?.abort();
-		this.suggestionController?.abort();
-		this.activeLane = lane;
-		const context = await this.sessionManager.buildSessionContext(lane);
-		this.lastCompaction = await this.sessionManager.getLastCompaction(lane);
-		this.overheadUsage = [];
-		await this.adoptSessionContext(context);
-		await this.refreshLanes();
+	private async adoptLane(rt: SessionRuntime, lane: string): Promise<void> {
+		rt.activeLane = lane;
+		const context = await this.sessionManager.buildSessionContextFor(rt.sessionPath, lane);
+		rt.lastCompaction = await this.sessionManager.getLastCompactionFor(rt.sessionPath, lane);
+		rt.overheadUsage = [];
+		await this.adoptSessionContext(rt, context);
+		await this.refreshLanes(rt);
 		// Deliberately no ledger sweep here. The sweep both closes orphans and
 		// works out which lanes may be continued, so running it a second time
 		// finds nothing open — the first pass already closed them — and would
@@ -1888,19 +1969,74 @@ export class ObsidianAgentService {
 		// established at load, and a new orphan can only appear via a crash, which
 		// means a reload; a lane switch just reveals the offer already known for
 		// the lane being adopted.
-		this.panelError = undefined;
+		rt.panelError = undefined;
 		this.notify();
 	}
 
+	/**
+	 * The lanes the switcher may offer, for `rt`'s session. Read straight off the
+	 * hydrated pi session rather than the manager's focus-scoped helper, so a
+	 * background runtime's lane list stays its own.
+	 */
+	private async readLanes(rt: SessionRuntime): Promise<SessionLane[]> {
+		const lanes = await this.sessionManager.getSessionFor(rt.sessionPath).getLanes();
+		return lanes
+			.filter(({ lane, leafId }) => lane === "main" || leafId !== null)
+			.map(({ lane, leafId }) => ({ lane, leafId, retired: leafId === null }));
+	}
+
+	/**
+	 * Path-correct lane operations. The manager's lane helpers are focus-scoped
+	 * (single-session surface kept for compatibility), and these must act on
+	 * `rt`'s session even when the panel has moved on, so they go through the
+	 * hydrated pi session directly — the same filter `getLanes` applies.
+	 */
+	private async createComparisonLanes(rt: SessionRuntime, entryId: string): Promise<[string, string]> {
+		const session = this.sessionManager.getSessionFor(rt.sessionPath);
+		const entry = await session.getEntry(entryId);
+		if (!entry) {
+			throw new Error(`Unknown session entry: ${entryId}`);
+		}
+		const at = entry.parentId;
+		const existing = new Set((await session.getLanes()).map(({ lane }) => lane));
+		let index = 1;
+		let left = `ab-a-${index}`;
+		let right = `ab-b-${index}`;
+		while (existing.has(left) || existing.has(right)) {
+			index += 1;
+			left = `ab-a-${index}`;
+			right = `ab-b-${index}`;
+		}
+		await session.createLane(left, at);
+		await session.createLane(right, at);
+		return [left, right];
+	}
+
+	private async promoteLane(rt: SessionRuntime, lane: string): Promise<void> {
+		const session = this.sessionManager.getSessionFor(rt.sessionPath);
+		const pointer = (await session.getLanes()).find((candidate) => candidate.lane === lane);
+		if (!pointer || pointer.leafId === null) {
+			throw new Error(`Lane is not active: ${lane}`);
+		}
+		await session.moveLane("main", pointer.leafId);
+	}
+
+	private async retireLane(rt: SessionRuntime, lane: string): Promise<void> {
+		if (lane === "main") {
+			throw new Error("The main lane cannot be retired");
+		}
+		await this.sessionManager.getSessionFor(rt.sessionPath).moveLane(lane, null);
+	}
+
 	/** Re-reads the lanes the switcher may offer. */
-	private async refreshLanes(): Promise<void> {
+	private async refreshLanes(rt: SessionRuntime): Promise<void> {
 		try {
-			this.lanes = await this.sessionManager.getLanes();
+			rt.lanes = await this.readLanes(rt);
 		} catch (error) {
 			this.log.error("Failed to read the session's lanes", () => ({
 				error: error instanceof Error ? error.message : String(error),
 			}));
-			this.lanes = [];
+			rt.lanes = [];
 		}
 	}
 
@@ -1941,36 +2077,43 @@ export class ObsidianAgentService {
 			return;
 		}
 
-		this.agent?.abort();
-		this.compactionController?.abort();
-		this.branchSummaryController?.abort();
-		this.suggestionController?.abort();
+		let info: ActiveSessionInfo;
 		try {
-			this.sessionInfo = await this.sessionManager.loadSession(path);
+			info = await this.sessionManager.loadSession(path);
 		} catch (error) {
-			this.setError(error instanceof Error ? error.message : String(error));
+			// The banner is the focused session's failure slot: the user pressed a
+			// control on the conversation they are looking at, so the reason the
+			// switch failed must show where they can read it.
+			this.setError(this.runtimeForFocused(), error instanceof Error ? error.message : String(error));
 			return;
 		}
 
+		// Deliberately no abort of the session being left. Its runtime keeps
+		// running in the background; `abortSession(path)` is the opt-in kill.
+		this.currentPath = path;
+		const rt = this.runtimeFor(path);
+		rt.sessionInfo = info;
+		this.sessionInfo = info;
 		// The lane belongs to the session being left; the incoming one opens on its
 		// own main line.
-		this.activeLane = "main";
-		const context = await this.sessionManager.buildSessionContext(this.activeLane);
-		this.lastCompaction = await this.sessionManager.getLastCompaction(this.activeLane);
+		rt.activeLane = "main";
+		const context = await this.sessionManager.buildSessionContextFor(path, rt.activeLane);
+		rt.lastCompaction = await this.sessionManager.getLastCompactionFor(path, rt.activeLane);
 		// Usage is per-transcript, and a reloaded session's compaction cost was
 		// already paid in an earlier run, so the running total starts from history.
-		this.overheadUsage = [];
-		// Same reasoning as `newSession`: the incoming conversation gets a clean
-		// follow state and no inherited pins.
-		this.contextRefs.reset();
-		await this.adoptSessionContext(context);
-		await this.refreshLanes();
+		rt.overheadUsage = [];
+		// Follow state and pins are per-runtime and adopted below; nothing to clear.
+		await this.adoptSessionContext(rt, context);
+		await this.refreshLanes(rt);
 		// Same placement as `initializeAgent`: the offer describes the transcript
-		// now on screen, so it is settled only after adoption.
-		await this.settleInterruptedRuns(context);
-		this.panelError = undefined;
-		await this.sessionManager.ensureConfiguration(this.getSessionDefaults(), this.activeLane);
-		this.sessionInfo = await this.sessionManager.getActiveSessionInfo();
+		// now on screen, so it is settled only after adoption. The runtime's own
+		// sweep already ran once at creation; this one covers a re-focus of an
+		// existing runtime whose log may have moved since.
+		await this.settleInterruptedRuns(rt, context);
+		rt.panelError = undefined;
+		await this.sessionManager.ensureConfigurationFor(path, this.getSessionDefaults(), rt.activeLane);
+		this.sessionInfo = info;
+		rt.sessionInfo = info;
 		this.notify();
 	}
 
@@ -1988,11 +2131,15 @@ export class ObsidianAgentService {
 	 * for a dispatch), so there is nothing on the pi side to rebuild.
 	 */
 	removeQueuedPrompt(id: string): void {
-		const removal = this.promptQueue.remove(id);
+		const rt = this.current();
+		if (!rt) {
+			return;
+		}
+		const removal = rt.promptQueue.remove(id);
 		if (!removal) {
 			return;
 		}
-		const agent = this.agent;
+		const agent = rt.agent;
 		if (agent && agent.state.isStreaming) {
 			agent.clearAllQueues();
 			for (const survivor of removal.survivors) {
@@ -2009,14 +2156,22 @@ export class ObsidianAgentService {
 	/** Labels the active session; an empty name clears it back to the derived label. */
 	async renameSession(name: string): Promise<void> {
 		await this.initialize();
-		if (!this.sessionManager.getActiveSessionPath()) {
+		const rt = this.current();
+		if (!rt) {
 			return;
 		}
 
 		const trimmedName = name.trim();
-		await this.sessionManager.appendSessionInfo(trimmedName || undefined);
-		this.sessionInfo = await this.sessionManager.getActiveSessionInfo();
-		this.sessionRevision += 1;
+		await this.sessionManager.appendSessionInfoFor(rt.sessionPath, trimmedName || undefined);
+		// Patch the cached summary in place: the manager summarises the active
+		// path only, and a rename already knows the one field that moved.
+		if (rt.sessionInfo) {
+			rt.sessionInfo = { ...rt.sessionInfo, name: trimmedName || undefined };
+		}
+		if (rt.sessionPath === this.sessionManager.getActiveSessionPath()) {
+			this.sessionInfo = rt.sessionInfo ?? null;
+		}
+		rt.sessionRevision += 1;
 		this.notify();
 	}
 
@@ -2032,7 +2187,8 @@ export class ObsidianAgentService {
 	 * mixes a machine-named file into the reader's curated notes uninvited.
 	 */
 	async exportSessionAsNote(): Promise<string | null> {
-		const transcript = (this.agent?.state.messages ?? []).filter(
+		const rt = this.current();
+		const transcript = (rt?.agent?.state.messages ?? []).filter(
 			(message): message is ExportableMessage =>
 				message.role === "user" || message.role === "assistant" || message.role === "toolResult",
 		);
@@ -2070,7 +2226,9 @@ export class ObsidianAgentService {
 			await this.app.vault.create(path, content);
 			return path;
 		} catch (error) {
-			this.appendNotice(t.t("chat.exportFailed", { error: error instanceof Error ? error.message : String(error) }));
+			if (rt) {
+				this.appendNotice(rt, t.t("chat.exportFailed", { error: error instanceof Error ? error.message : String(error) }));
+			}
 			return null;
 		}
 	}
@@ -2103,7 +2261,8 @@ export class ObsidianAgentService {
 	 * unhandled rejection from a vault event handler.
 	 */
 	async syncExternalSessionChange(): Promise<void> {
-		if (!this.sessionManager.getActiveSessionPath()) {
+		const activePath = this.sessionManager.getActiveSessionPath();
+		if (!activePath) {
 			return;
 		}
 		let diskName: string | undefined;
@@ -2117,8 +2276,15 @@ export class ObsidianAgentService {
 		}
 		if (this.sessionInfo) {
 			this.sessionInfo = { ...this.sessionInfo, name: diskName };
+			const rt = this.runtimes.get(activePath);
+			if (rt) {
+				rt.sessionInfo = this.sessionInfo;
+			}
 		}
-		this.sessionRevision += 1;
+		const rt = this.runtimes.get(activePath);
+		if (rt) {
+			rt.sessionRevision += 1;
+		}
 		this.notify();
 	}
 
@@ -2130,31 +2296,38 @@ export class ObsidianAgentService {
 	 */
 	async deleteSession(path: string): Promise<void> {
 		await this.initialize();
+		const rt = this.runtimes.get(path);
 		const wasActive = this.sessionManager.getActiveSessionPath() === path;
-		if (wasActive) {
-			this.agent?.abort();
-			this.compactionController?.abort();
-			this.branchSummaryController?.abort();
-			this.suggestionController?.abort();
-		}
-
 		try {
 			await this.sessionManager.deleteSession(path);
 		} catch (error) {
-			this.setError(error instanceof Error ? error.message : String(error));
+			this.setError(this.runtimeForFocused(), error instanceof Error ? error.message : String(error));
 			return;
+		}
+		// Only after the trash succeeded: a refused delete must leave the session
+		// exactly as it was, run included. And only the deleted session is killed —
+		// other runtimes, including the one the panel is about to focus, keep
+		// whatever they were doing.
+		if (rt) {
+			await this.abortSession(path);
+			this.removeRuntime(rt);
 		}
 
 		this.sessionRevision += 1;
-		if (!wasActive) {
-			this.panelError = undefined;
-			this.notify();
+		const focused = this.current();
+		if (focused) {
+			focused.sessionRevision += 1;
+		}
+		if (wasActive) {
+			this.currentPath = null;
+		}
+		const replacement = (await this.sessionManager.listSessions())[0];
+		if (wasActive && replacement) {
+			await this.openSession(replacement.path);
 			return;
 		}
-
-		const replacement = (await this.sessionManager.listSessions())[0];
-		if (replacement) {
-			await this.openSession(replacement.path);
+		if (wasActive) {
+			this.notify();
 		}
 		if (!this.sessionManager.getActiveSessionPath()) {
 			// Forced: the agent still shows the just-deleted session's transcript,
@@ -2218,12 +2391,14 @@ export class ObsidianAgentService {
 	 * level is already set (the selector's job) or there is no live agent.
 	 */
 	async setThinkingLevel(level: ThinkingLevel): Promise<void> {
-		if (!this.agent || this.agent.state.thinkingLevel === level) {
+		const rt = this.current();
+		const agent = rt?.agent;
+		if (!rt || !agent || agent.state.thinkingLevel === level) {
 			return;
 		}
-		this.agent.state.thinkingLevel = level;
-		if (this.sessionManager.getActiveSessionPath()) {
-			await this.sessionManager.appendThinkingLevelChange(level, this.activeLane);
+		agent.state.thinkingLevel = level;
+		if (this.sessionManager.isLoaded(rt.sessionPath)) {
+			await this.sessionManager.appendThinkingLevelChangeFor(rt.sessionPath, level, rt.activeLane);
 		}
 		this.notify();
 	}
@@ -2234,24 +2409,26 @@ export class ObsidianAgentService {
 		// the snapshot is derived from live settings, so a setting the panel renders
 		// directly — the language, the agent-details tier — has already changed even
 		// when there is no agent to reconfigure.
-		if (!this.agent || !this.sessionManager.getActiveSessionPath()) {
+		const rt = this.current();
+		if (!rt || !rt.agent || !this.sessionManager.isLoaded(rt.sessionPath)) {
 			this.notify();
 			return;
 		}
+		const agent = rt.agent;
 		const defaults = this.getSessionDefaults();
 		const model = getSelectedModel(this.getSettings());
-		this.agent.state.model = model;
+		agent.state.model = model;
 		// The level belongs to the session and is left alone here. Only a model
 		// that can no longer express it forces a rewrite, and the session file is
 		// told — an agent state silently diverging from the recorded level would
 		// resurrect the old bug on the next reload.
-		const clamped = clampThinkingLevel(model, this.agent.state.thinkingLevel);
-		if (clamped !== this.agent.state.thinkingLevel) {
-			this.agent.state.thinkingLevel = clamped;
-			await this.sessionManager.appendThinkingLevelChange(clamped, this.activeLane);
+		const clamped = clampThinkingLevel(model, agent.state.thinkingLevel);
+		if (clamped !== agent.state.thinkingLevel) {
+			agent.state.thinkingLevel = clamped;
+			await this.sessionManager.appendThinkingLevelChangeFor(rt.sessionPath, clamped, rt.activeLane);
 		}
-		this.agent.state.tools = [
-			...this.buildTools(),
+		agent.state.tools = [
+			...this.buildTools(rt),
 			// Connect runs here, on the same settings-save path that rebuilt the
 			// vault tool list — one road from "configuration changed" to "the agent
 			// sees the new tools". The manager skips servers whose url+token are
@@ -2267,18 +2444,16 @@ export class ObsidianAgentService {
 		// same call so an edited `/name` takes effect on the next message whichever
 		// kind it is — the asymmetry where only skills did was not explicable.
 		await this.reloadCommandsSafely();
-		await this.sessionManager.ensureConfiguration(defaults);
-		await this.refreshSessionInfo();
+		await this.sessionManager.ensureConfigurationFor(rt.sessionPath, defaults, rt.activeLane);
+		await this.refreshSessionInfo(rt);
 		this.notify();
 	}
 
 	dispose(): void {
-		this.unsubscribeAgent?.();
-		this.unsubscribeAgent = null;
-		this.compactionController?.abort();
-		this.branchSummaryController?.abort();
-		this.suggestionController?.abort();
-		this.agent?.abort();
+		for (const rt of [...this.runtimes.values()]) {
+			rt.agent?.abort();
+			this.removeRuntime(rt);
+		}
 		// Orphaned subagents outlive their parent run otherwise: a run that ends
 		// normally never aborts its signal, and a child has no deadline of its
 		// own, so this is the backstop that actually collects them.
@@ -2308,7 +2483,8 @@ export class ObsidianAgentService {
 
 	getSnapshot(): ChatSnapshot {
 		const settings = this.getSettings();
-		const agent = this.agent;
+		const rt = this.current();
+		const agent = rt?.agent ?? null;
 		const messages = agent?.state.messages ?? [];
 		const model = getSelectedModel(settings);
 		// Falls back to the selected model so the indicator exists before the agent
@@ -2323,27 +2499,27 @@ export class ObsidianAgentService {
 			// raw, so a missed event cannot leak `toolu_…` into the panel.
 			pendingToolCalls: [...(agent?.state.pendingToolCalls ?? new Set<string>())]
 				.map((toolCallId) => {
-					const name = this.pendingToolNames.get(toolCallId);
+					const name = rt?.pendingToolNames.get(toolCallId);
 					if (name === undefined) {
 						return undefined;
 					}
-					const progress = this.pendingToolProgress.get(toolCallId);
+					const progress = rt?.pendingToolProgress.get(toolCallId);
 					return progress === undefined ? { name } : { name, progress };
 				})
 				.filter((pending): pending is PendingToolCall => pending !== undefined),
-			errorMessage: this.panelError?.message ?? this.visibleAgentError(agent) ?? this.initializationError,
-			errorOpensSettings: this.panelError?.opensSettings ?? false,
+			errorMessage: rt?.panelError?.message ?? this.visibleAgentError(rt, agent) ?? this.initializationError,
+			errorOpensSettings: rt?.panelError?.opensSettings ?? false,
 			// Mid-run sends, waiting for pi to inject. From the mirror rather
 			// than from pi because pi's queues are write-only from outside —
 			// the mirror is the only thing that can name them.
-			queuedPrompts: this.promptQueue.list(),
+			queuedPrompts: rt?.promptQueue.list() ?? [],
 			// Staging gate: the composer asks before collecting bytes the model
 			// would refuse, instead of the send gate explaining the refusal after.
 			supportsImages: modelSupportsImages(model),
-			noticeMessage: this.noticeMessage,
-			canResumeInterrupted: this.resumableLanes.has(this.activeLane),
-			activeLane: this.activeLane,
-			lanes: this.lanes,
+			noticeMessage: rt?.noticeMessage,
+			canResumeInterrupted: rt ? rt.resumableLanes.has(rt.activeLane) : false,
+			activeLane: rt?.activeLane ?? "main",
+			lanes: rt?.lanes ?? [],
 			provider: model.provider,
 			modelId: model.id,
 			vendorIcon: vendorIconName(matchVendorForModel(model.id, model.baseUrl)),
@@ -2353,12 +2529,12 @@ export class ObsidianAgentService {
 			thinkingLevels: getSupportedThinkingLevels(model),
 			modelChoices: listModelChoices(settings),
 			activeModelId: settings.activeModelId,
-			session: this.sessionInfo,
-			sessionRevision: this.sessionRevision,
-			usage: sumUsage(messages, this.overheadUsage),
+			session: this.sessionInfo ?? undefined,
+			sessionRevision: rt?.sessionRevision ?? this.sessionRevision,
+			usage: sumUsage(messages, rt?.overheadUsage ?? []),
 			contextFill: measureContextFill(messages, contextWindow, this.resolveCompaction(contextWindow)),
-			isCompacting: this.isCompacting,
-			isRewinding: this.retryInFlight,
+			isCompacting: rt?.isCompacting ?? false,
+			isRewinding: rt?.retryInFlight ?? false,
 			isConfigured: this.hasApiKey(),
 			showAgentDetails: settings.showAgentDetails,
 			traceExpand: settings.traceExpand,
@@ -2367,8 +2543,8 @@ export class ObsidianAgentService {
 			// call be feature-detected at runtime.
 			language: resolveLanguage(this.app.vault as LanguageHost, settings.language),
 			sendShortcut: settings.sendShortcut,
-			contextRefs: this.contextRefs.list(),
-			isFollowingActiveNote: this.contextRefs.isFollowingActive(),
+			contextRefs: this.contextRefList(rt),
+			isFollowingActiveNote: rt?.pinnedNotes.followActive ?? true,
 			availableCommands: [
 				...this.promptTemplates.map((template) => ({
 					name: template.name,
@@ -2396,60 +2572,141 @@ export class ObsidianAgentService {
 	 * rebuilds the whole snapshot and React cannot bail out on a fresh object.
 	 */
 	setActiveNotePath(path: string | null): void {
-		if (this.contextRefs.setActivePath(path)) {
-			this.notify();
+		const next = path ?? null;
+		if (this.activeNotePath === next) {
+			return;
 		}
+		this.activeNotePath = next;
+		this.notify();
 	}
 
 	/** Starts or stops naming the active note to the model. */
 	setFollowActiveNote(follow: boolean): void {
-		if (this.contextRefs.setFollowActive(follow)) {
-			this.notify();
+		const rt = this.current();
+		if (!rt || rt.pinnedNotes.followActive === follow) {
+			return;
 		}
+		rt.pinnedNotes.followActive = follow;
+		this.notify();
 	}
 
 	/** Keeps naming `path` even after the user navigates away. */
 	pinContextRef(path: string): void {
-		if (this.contextRefs.pin(path)) {
-			this.notify();
+		const rt = this.current();
+		if (!rt || !path || rt.pinnedNotes.pinned.includes(path) || rt.pinnedNotes.pinned.length >= MAX_PINNED_REFS) {
+			return;
 		}
+		rt.pinnedNotes.pinned = [...rt.pinnedNotes.pinned, path];
+		this.notify();
 	}
 
 	/** Drops a pinned note. */
 	unpinContextRef(path: string): void {
-		if (this.contextRefs.unpin(path)) {
-			this.notify();
+		const rt = this.current();
+		if (!rt || !rt.pinnedNotes.pinned.includes(path)) {
+			return;
 		}
+		rt.pinnedNotes.pinned = rt.pinnedNotes.pinned.filter((pinnedPath) => pinnedPath !== path);
+		this.notify();
 	}
 
 	/** Keeps active and pinned context aligned with a vault rename. */
 	renameContextPath(oldPath: string, newPath: string): void {
-		if (this.contextRefs.renamePath(oldPath, newPath)) {
+		if (!oldPath || !newPath || oldPath === newPath) {
+			return;
+		}
+		let changed = false;
+		const rewrite = (p: string): string => {
+			if (p === oldPath) {
+				changed = true;
+				return newPath;
+			}
+			const prefix = `${oldPath}/`;
+			if (p.startsWith(prefix)) {
+				changed = true;
+				return `${newPath}${p.slice(oldPath.length)}`;
+			}
+			return p;
+		};
+		if (this.activeNotePath) {
+			this.activeNotePath = rewrite(this.activeNotePath);
+		}
+		for (const rt of this.runtimes.values()) {
+			const next = [...new Set(rt.pinnedNotes.pinned.map(rewrite))];
+			if (next.length !== rt.pinnedNotes.pinned.length || next.some((v, i) => v !== rt.pinnedNotes.pinned[i])) {
+				rt.pinnedNotes.pinned = next;
+				changed = true;
+			}
+		}
+		if (changed) {
 			this.notify();
 		}
 	}
 
 	/** Removes deleted files or folders from active and pinned context. */
 	forgetContextPath(path: string): void {
-		if (this.contextRefs.forgetPath(path)) {
+		if (!path) {
+			return;
+		}
+		const matches = (candidate: string): boolean => candidate === path || candidate.startsWith(`${path}/`);
+		let changed = false;
+		if (this.activeNotePath && matches(this.activeNotePath)) {
+			this.activeNotePath = null;
+			changed = true;
+		}
+		for (const rt of this.runtimes.values()) {
+			const next = rt.pinnedNotes.pinned.filter((pinnedPath) => !matches(pinnedPath));
+			if (next.length !== rt.pinnedNotes.pinned.length) {
+				rt.pinnedNotes.pinned = next;
+				changed = true;
+			}
+		}
+		if (changed) {
 			this.notify();
 		}
+	}
+
+	/**
+	 * Everything the next turn for `rt` will name, active note first.
+	 *
+	 * The active path is the service-wide workspace fact; the follow flag and the
+	 * pinned set are `rt`'s own. A pinned note that happens to be the active one
+	 * is reported once, as the active entry.
+	 */
+	private contextRefList(rt: SessionRuntime | null): ContextRef[] {
+		const refs: ContextRef[] = [];
+		const active = rt && rt.pinnedNotes.followActive ? this.activeNotePath : null;
+		if (active && rt) {
+			refs.push({ kind: "active", path: active, isPinned: rt.pinnedNotes.pinned.includes(active) });
+		}
+		if (rt) {
+			for (const path of rt.pinnedNotes.pinned) {
+				if (path !== active) {
+					refs.push({ kind: "pinned", path, isPinned: true });
+				}
+			}
+		}
+		return refs;
 	}
 
 	private async initializeAgent(): Promise<void> {
 		await this.reloadCommandsSafely();
 		const defaults = this.getSessionDefaults();
-		this.sessionInfo = await this.sessionManager.continueRecentSession(defaults);
+		const info = await this.sessionManager.continueRecentSession(defaults);
+		const rt = this.runtimeForFocused();
+		rt.sessionInfo = info;
+		this.sessionInfo = info;
+		this.currentPath = rt.sessionPath;
 		// A stored session may have been left on a comparison; the panel resumes on
 		// main, which is the branch the conversation's own history lives on.
-		this.activeLane = "main";
-		const context = await this.sessionManager.buildSessionContext(this.activeLane);
-		this.lastCompaction = await this.sessionManager.getLastCompaction(this.activeLane);
-		await this.adoptSessionContext(context);
-		await this.refreshLanes();
+		rt.activeLane = "main";
+		const context = await this.sessionManager.buildSessionContext(rt.activeLane);
+		rt.lastCompaction = await this.sessionManager.getLastCompaction(rt.activeLane);
+		await this.adoptSessionContext(rt, context);
+		await this.refreshLanes(rt);
 		// After the context is adopted — the offer is about the transcript this
 		// panel now shows, so it must not stand before the messages are in.
-		await this.settleInterruptedRuns(context);
+		await this.settleInterruptedRuns(rt, context);
 		this.notify();
 	}
 
@@ -2507,18 +2764,19 @@ export class ObsidianAgentService {
 	 * is what makes {@link retryFrom} decline them.
 	 */
 	/** Adopts a loaded session; async only to gather the tool list for the fresh agent. */
-	private async adoptSessionContext(context: SessionContext): Promise<void> {
-		this.messageEntryIds = new WeakMap<object, string>();
+	private async adoptSessionContext(rt: SessionRuntime, context: SessionContext): Promise<void> {
+		rt.messageEntryIds = new WeakMap<object, string>();
 		context.messages.forEach((message, index) => {
 			const entryId = context.messageOrigins[index];
 			if (entryId) {
-				this.messageEntryIds.set(message, entryId);
+				rt.messageEntryIds.set(message, entryId);
 			}
 		});
 		// The session's recorded level, clamped to the model requests will run on:
 		// the conversation may have last run a model whose ceiling differs, and a
 		// level the model cannot express is an error waiting for the next prompt.
 		await this.replaceAgent(
+			rt,
 			context.messages,
 			clampThinkingLevel(getSelectedModel(this.getSettings()), context.thinkingLevel),
 		);
@@ -2559,8 +2817,30 @@ export class ObsidianAgentService {
 	 * getters the extension resolves at execution time. MCP tools are appended
 	 * by the callers, whose async gather may connect to servers.
 	 */
-	private buildTools(): AgentTool[] {
-		return this.subagentExtension.createTools();
+	private buildTools(rt: SessionRuntime): AgentTool[] {
+		// Each tool is wrapped so its execute runs with `toolRuntime` pointing at
+		// the runtime that owns this agent. The subagent host getters are resolved
+		// at spawn-execute time and must read the spawning session's state — a
+		// focused panel on session B must not leak B's thinking level or skills
+		// into a spawn started by session A.
+		return this.subagentExtension.createTools().map((tool) => {
+			if (!tool.execute) {
+				return tool;
+			}
+			const execute = tool.execute;
+			return {
+				...tool,
+				execute: (...args: Parameters<NonNullable<AgentTool["execute"]>>) => {
+					const previous = this.toolRuntime;
+					this.toolRuntime = rt;
+					try {
+						return execute(...args);
+					} finally {
+						this.toolRuntime = previous;
+					}
+				},
+			} satisfies AgentTool;
+		});
 	}
 
 	/**
@@ -2587,20 +2867,20 @@ export class ObsidianAgentService {
 	 * gathering them may connect to servers. Every caller already awaited other
 	 * work on the way here, so the extra hop costs nothing.
 	 */
-	private async replaceAgent(messages: AgentMessage[], thinkingLevel: ThinkingLevel): Promise<void> {
-		this.unsubscribeAgent?.();
+	private async replaceAgent(rt: SessionRuntime, messages: AgentMessage[], thinkingLevel: ThinkingLevel): Promise<void> {
+		rt.unsubscribeAgent?.();
 		// A fresh agent's queues are empty by construction, so the mirror has to
 		// say so too. Every caller of this method is a conversation switch
 		// (new session, loaded session, thinking-level change) — queued words
 		// belong to the conversation they were typed in, not the next one.
-		this.promptQueue.clear();
+		rt.promptQueue.clear();
 		// An aborted run never delivers `tool_execution_end`, so anything keyed by a
 		// call that was in flight would otherwise accumulate for the life of the
 		// panel. Both maps are keyed that way and both are only ever cleared by that
 		// event, so they share the leak and have to share the fix. A fresh agent has
 		// nothing in flight, which makes this the point where they are known to be
 		// safe to drop.
-		this.forgetPendingToolCalls();
+		this.forgetPendingToolCalls(rt);
 		const settings = this.getSettings();
 		const model = getSelectedModel(settings);
 		// Annotated because the `prepareNextTurnWithContext` closure below refers to
@@ -2624,7 +2904,7 @@ export class ObsidianAgentService {
 			// through a user request. Re-reading per request is what makes the content
 			// honest: an `edit` the model just made is visible to its next turn.
 			transformContext: async (messages) => {
-				const refs = this.activeRunContext ?? this.contextRefs.list();
+				const refs = rt.activeRunContext ?? this.contextRefList(rt);
 				const activePath = refs.find((ref) => ref.kind === "active")?.path;
 				const note = activePath ? await this.readActiveNote(activePath) : null;
 				return injectContext(messages, refs, note);
@@ -2639,7 +2919,7 @@ export class ObsidianAgentService {
 				// The caller resolves this: the loaded session's own level, or the
 				// seed a new session was created with. Global settings have no say.
 				thinkingLevel,
-				tools: [...this.buildTools(), ...(await this.fetchExternalTools())],
+				tools: [...(await this.buildToolsAsync(rt)), ...(await this.fetchExternalTools())],
 				messages,
 			},
 			getApiKey: (provider) => this.getApiKey(provider),
@@ -2651,8 +2931,8 @@ export class ObsidianAgentService {
 			// (`createLoopConfig`). Closing over this run's `agent` rather than
 			// `this.agent` is what lets `performCompaction` tell a stale result
 			// from a current one.
-			prepareNextTurnWithContext: (turn, signal) => this.compactBetweenTurns(agent, turn, signal),
-			sessionId: this.sessionInfo?.id,
+			prepareNextTurnWithContext: (turn, signal) => this.compactBetweenTurns(rt, agent, turn, signal),
+			sessionId: rt.sessionInfo?.id,
 			// pi's default is "one-at-a-time": of several messages steered in a
 			// row, only the first is injected at the next turn boundary and the
 			// rest wait for later runs. A chat panel's send button means "send
@@ -2670,8 +2950,17 @@ export class ObsidianAgentService {
 			// runner keeps its own sequential default.
 			toolExecution: "parallel",
 		});
-		this.agent = agent;
-		this.unsubscribeAgent = agent.subscribe((event) => this.handleAgentEvent(event));
+		rt.agent = agent;
+		rt.unsubscribeAgent = agent.subscribe((event) => this.handleAgentEvent(rt, event));
+	}
+
+	/**
+	 * `buildTools` plus the async external gather, for callers that are already
+	 * asynchronous (agent construction is). Kept separate so the synchronous
+	 * tool rebuild in `refreshConfiguration` stays synchronous in shape.
+	 */
+	private async buildToolsAsync(rt: SessionRuntime): Promise<AgentTool[]> {
+		return this.buildTools(rt);
 	}
 
 	/**
@@ -2701,8 +2990,12 @@ export class ObsidianAgentService {
 		this.skills = skills;
 		this.lastSkillLoad = { ...this.lastSkillLoad, vault: diagnostics, user: userLoad };
 		this.logCommandDiagnostics();
-		if (this.agent) {
-			this.agent.state.systemPrompt = composeSystemPrompt(OBSIDIAN_AGENT_SYSTEM_PROMPT, skills);
+		// Every live runtime is told: skills are an app-wide asset, and a
+		// background session mid-conversation deserves the refreshed prompt too.
+		for (const rt of this.runtimes.values()) {
+			if (rt.agent) {
+				rt.agent.state.systemPrompt = composeSystemPrompt(OBSIDIAN_AGENT_SYSTEM_PROMPT, skills);
+			}
 		}
 	}
 
@@ -2806,10 +3099,22 @@ export class ObsidianAgentService {
 		}
 	}
 
-	private async handleAgentEvent(event: AgentEvent): Promise<void> {
+	private async handleAgentEvent(rt: SessionRuntime, event: AgentEvent): Promise<void> {
+		// Legacy single-argument seam: tests call `handleAgentEvent(event)`, so
+		// the first parameter carries the event and the focused runtime is
+		// implied. Route that call at the focused runtime.
+		if (!event) {
+			const legacyEvent = rt as unknown as AgentEvent;
+			const focused = this.current();
+			if (!legacyEvent || !focused) {
+				return;
+			}
+			rt = focused;
+			event = legacyEvent;
+		}
 		if (event.type === "tool_execution_start") {
-			this.pendingToolNames.set(event.toolCallId, event.toolName);
-			this.pendingToolStarts.set(event.toolCallId, Date.now());
+			rt.pendingToolNames.set(event.toolCallId, event.toolName);
+			rt.pendingToolStarts.set(event.toolCallId, Date.now());
 		}
 		// pi emits this whenever a tool calls the `onUpdate` callback handed to its
 		// `execute`. Recording it is what lets a long-running tool report progress
@@ -2819,14 +3124,14 @@ export class ObsidianAgentService {
 		if (event.type === "tool_execution_update") {
 			const line = firstProgressLine(event.partialResult);
 			if (line) {
-				this.pendingToolProgress.set(event.toolCallId, line);
+				rt.pendingToolProgress.set(event.toolCallId, line);
 			}
 		}
 		if (event.type === "tool_execution_end") {
-			this.pendingToolNames.delete(event.toolCallId);
-			this.pendingToolProgress.delete(event.toolCallId);
+			rt.pendingToolNames.delete(event.toolCallId);
+			rt.pendingToolProgress.delete(event.toolCallId);
 		}
-		this.logAgentEvent(event);
+		this.logAgentEvent(rt, event);
 		try {
 			if (event.type === "message_end") {
 				// Stamp the reply's duration while `Date.now()` still is the settle
@@ -2840,14 +3145,14 @@ export class ObsidianAgentService {
 				// same words twice gets the right one settled. The message
 				// persists either way — an injected steer is transcript history
 				// like any other turn.
-				this.promptQueue.settle(event.message);
-				await this.persistMessage(event.message);
+				rt.promptQueue.settle(event.message);
+				await this.persistMessage(rt, event.message);
 			}
 			if (event.type === "agent_end") {
 				for (const message of event.messages) {
-					await this.persistMessage(message);
+					await this.persistMessage(rt, message);
 				}
-				await this.settleRunLedger(event.messages);
+				await this.settleRunLedger(rt, event.messages);
 			}
 		} catch (error) {
 			const message = error instanceof Error ? error.message : String(error);
@@ -2855,7 +3160,7 @@ export class ObsidianAgentService {
 			// seen it — so a red alert overstates the damage and a grey notice
 			// states it. `appendNotice` keeps an earlier warning alongside rather
 			// than under it.
-			this.appendNotice(this.t().t("chat.persistFailed", { error: message }));
+			this.appendNotice(rt, this.t().t("chat.persistFailed", { error: message }));
 			// The snapshot field renders once in the panel; the log keeps the
 			// failure even after the user dismisses the notice.
 			this.log.error("Failed to persist agent output", () => ({ event: event.type, error: message }));
@@ -2881,16 +3186,19 @@ export class ObsidianAgentService {
 			// there. Awaiting `waitForIdle()` here instead would deadlock — the
 			// run cannot finish until this listener returns — so the promise is
 			// deliberately left unchained into this handler's control flow.
-			void this.agent
+			// The runtime is captured in the closure, never re-read from
+			// `this.current()`: by the time pi goes idle, the panel may be on a
+			// different session, and the stranded queue belongs to this run.
+			void rt.agent
 				?.waitForIdle()
-				.then(() => this.resumeQueuedPrompts(event.messages))
+				.then(() => this.dispatchQueuedPrompts(rt, event.messages))
 				.catch((error) => {
 					this.log.error("Failed to dispatch stranded queued prompts", () => ({
 						error: error instanceof Error ? error.message : String(error),
 					}));
 				});
 		}
-		await this.refreshSessionInfo();
+		await this.refreshSessionInfo(rt);
 		this.notify();
 	}
 
@@ -2904,10 +3212,10 @@ export class ObsidianAgentService {
 	 * for the life of the panel. Clearing them together is what keeps the next
 	 * reader from having to notice that the second one exists.
 	 */
-	private forgetPendingToolCalls(): void {
-		this.pendingToolNames.clear();
-		this.pendingToolStarts.clear();
-		this.pendingToolProgress.clear();
+	private forgetPendingToolCalls(rt: SessionRuntime): void {
+		rt.pendingToolNames.clear();
+		rt.pendingToolStarts.clear();
+		rt.pendingToolProgress.clear();
 	}
 
 	/**
@@ -2918,13 +3226,13 @@ export class ObsidianAgentService {
 	 * do — a tool's duration spans two events, so the start time has to be
 	 * remembered until the end arrives.
 	 */
-	private logAgentEvent(event: AgentEvent): void {
+	private logAgentEvent(rt: SessionRuntime, event: AgentEvent): void {
 		// Duration is computed here, not by the mapping: it spans two events, so
 		// only this side of the boundary knows both endpoints.
 		let durationMs: number | undefined;
 		if (event.type === "tool_execution_end") {
-			const startedAt = this.pendingToolStarts.get(event.toolCallId);
-			this.pendingToolStarts.delete(event.toolCallId);
+			const startedAt = rt.pendingToolStarts.get(event.toolCallId);
+			rt.pendingToolStarts.delete(event.toolCallId);
 			if (startedAt !== undefined) {
 				durationMs = Math.max(0, Date.now() - startedAt);
 			}
@@ -2971,15 +3279,16 @@ export class ObsidianAgentService {
 	 * a continued context end in a user or tool-result message.
 	 */
 	private async compactBetweenTurns(
+		rt: SessionRuntime,
 		agent: Agent,
 		turn: PrepareNextTurnContext,
 		signal?: AbortSignal,
 	): Promise<AgentLoopTurnUpdate | undefined> {
-		if (!this.shouldCompactBetweenTurns(agent, turn, signal)) {
+		if (!this.shouldCompactBetweenTurns(rt, agent, turn, signal)) {
 			return undefined;
 		}
-		this.midRunCompactions += 1;
-		if (!(await this.runExclusiveCompaction(agent, { signal }))) {
+		rt.midRunCompactions += 1;
+		if (!(await this.runExclusiveCompaction(rt, agent, { signal }))) {
 			return undefined;
 		}
 		// Derived from the transcript `performCompaction` just assigned rather
@@ -3005,7 +3314,7 @@ export class ObsidianAgentService {
 	 * {@link needsCompaction} is the same predicate `compactIfNeeded` applies to
 	 * itself, so the two cannot disagree.
 	 */
-	private shouldCompactBetweenTurns(agent: Agent, turn: PrepareNextTurnContext, signal?: AbortSignal): boolean {
+	private shouldCompactBetweenTurns(rt: SessionRuntime, agent: Agent, turn: PrepareNextTurnContext, signal?: AbortSignal): boolean {
 		if (signal?.aborted) {
 			return false;
 		}
@@ -3017,7 +3326,7 @@ export class ObsidianAgentService {
 		if (turn.toolResults.length === 0) {
 			return false;
 		}
-		if (this.midRunCompactions >= MAX_MID_RUN_COMPACTIONS) {
+		if (rt.midRunCompactions >= MAX_MID_RUN_COMPACTIONS) {
 			return false;
 		}
 		return needsCompaction(agent.state.messages, getSelectedModel(this.getSettings()));
@@ -3034,8 +3343,8 @@ export class ObsidianAgentService {
 	 * Sizes the context for the *first* request of the run only.
 	 * {@link compactBetweenTurns} covers the rest.
 	 */
-	private async compactContextIfNeeded(agent: Agent): Promise<void> {
-		await this.runExclusiveCompaction(agent);
+	private async compactContextIfNeeded(rt: SessionRuntime, agent: Agent): Promise<void> {
+		await this.runExclusiveCompaction(rt, agent);
 	}
 
 	/**
@@ -3049,28 +3358,29 @@ export class ObsidianAgentService {
 	 */
 	async compactNow(): Promise<void> {
 		await this.initialize();
+		const rt = this.runtimeForFocused();
 		// A failed start leaves no agent, and the banner already carries why —
 		// same reasoning as the matching guard in `sendPrompt`.
-		const agent = this.agent;
+		const agent = rt.agent;
 		if (!agent || agent.state.isStreaming) {
 			return;
 		}
 		if (!this.hasApiKey()) {
 			const t = this.t();
 			// Same recovery as `needsKeyToSend` above: the fix lives in settings.
-			this.setError(t.t("target.needsKeyToCompact", { target: describeModelTarget(this.getSettings(), t) }), true);
+			this.setError(rt, t.t("target.needsKeyToCompact", { target: describeModelTarget(this.getSettings(), t) }), true);
 			return;
 		}
 
 		try {
-			this.panelError = undefined;
-			this.noticeMessage = undefined;
-			const compacted = await this.runExclusiveCompaction(agent, { force: true });
-			if (!compacted && !this.panelError) {
-				this.setNotice(this.t().t("chat.nothingToCompact"));
+			rt.panelError = undefined;
+			rt.noticeMessage = undefined;
+			const compacted = await this.runExclusiveCompaction(rt, agent, { force: true });
+			if (!compacted && !rt.panelError) {
+				this.setNotice(rt, this.t().t("chat.nothingToCompact"));
 			}
 		} finally {
-			await this.notifySettledState();
+			await this.notifySettledState(rt);
 		}
 	}
 
@@ -3087,49 +3397,48 @@ export class ObsidianAgentService {
 	 *
 	 * Returns whether anything was compacted; failures are surfaced, not thrown.
 	 */
-	private async runExclusiveCompaction(agent: Agent, options: CompactionRunOptions = {}): Promise<boolean> {
-		if (!this.compaction) {
-			this.compactionController = new AbortController();
-			this.compaction = this.trackCompaction(agent, this.compactionController.signal, options.force === true);
+	private async runExclusiveCompaction(rt: SessionRuntime, agent: Agent, options: CompactionRunOptions = {}): Promise<boolean> {
+		if (!rt.compaction) {
+			rt.compactionController = new AbortController();
+			rt.compaction = this.trackCompaction(rt, agent, rt.compactionController.signal, options.force === true);
 		}
-		// The run's signal is linked into this service's controller rather than
+		// The run's signal is linked into this runtime's controller rather than
 		// replacing it, so a compaction between turns stays reachable from every
-		// existing cancel path — `abort()`, `dispose()`, `openSession()` and
-		// `deleteSession()` all abort `compactionController` — while
-		// `agent.abort()` also cancels it through the run's own signal.
-		// `AbortSignal.any` would say this in one line but postdates the
-		// WebView versions `minAppVersion` admits.
-		const controller = this.compactionController;
+		// existing cancel path — `abortSession()`, `dispose()` and `deleteSession()`
+		// all abort `compactionController` — while `agent.abort()` also cancels it
+		// through the run's own signal. `AbortSignal.any` would say this in one
+		// line but postdates the WebView versions `minAppVersion` admits.
+		const controller = rt.compactionController;
 		const stop = (): void => controller?.abort();
 		options.signal?.addEventListener("abort", stop, { once: true });
 		try {
-			return await this.compaction;
+			return await rt.compaction;
 		} finally {
 			options.signal?.removeEventListener("abort", stop);
-			this.compaction = null;
-			this.compactionController = null;
+			rt.compaction = null;
+			rt.compactionController = null;
 		}
 	}
 
-	private async trackCompaction(agent: Agent, signal: AbortSignal, force: boolean): Promise<boolean> {
-		this.isCompacting = true;
+	private async trackCompaction(rt: SessionRuntime, agent: Agent, signal: AbortSignal, force: boolean): Promise<boolean> {
+		rt.isCompacting = true;
 		try {
 			this.notify();
-			return await this.performCompaction(agent, signal, force);
+			return await this.performCompaction(rt, agent, signal, force);
 		} finally {
-			this.isCompacting = false;
+			rt.isCompacting = false;
 			this.notify();
 		}
 	}
 
-	private async performCompaction(agent: Agent, signal: AbortSignal, force: boolean): Promise<boolean> {
+	private async performCompaction(rt: SessionRuntime, agent: Agent, signal: AbortSignal, force: boolean): Promise<boolean> {
 		const model = getSelectedModel(this.getSettings());
 		const outcome = await compactIfNeeded({
 			messages: agent.state.messages,
 			model,
 			models: withRequestDefaults(this.requireModelsBundle(), (provider) => this.getApiKey(provider)),
 			thinkingLevel: agent.state.thinkingLevel,
-			previous: this.lastCompaction,
+			previous: rt.lastCompaction,
 			// The same resolved settings the context meter reads, so the bar and the
 			// trigger cannot disagree about where the line is.
 			settings: this.resolveCompaction(agent.state.model.contextWindow ?? model.contextWindow),
@@ -3142,7 +3451,7 @@ export class ObsidianAgentService {
 		// agent through `replaceAgent`. Acting on this result then would assign the
 		// old transcript back and append its summary into the *new* session's log.
 		// Compacting between turns widens that window from milliseconds to seconds.
-		if (this.agent !== agent) {
+		if (rt.agent !== agent) {
 			return false;
 		}
 
@@ -3155,7 +3464,7 @@ export class ObsidianAgentService {
 			if (signal.aborted) {
 				return false;
 			}
-			this.setError(`Could not compact the conversation: ${outcome.message}`);
+			this.setError(rt, `Could not compact the conversation: ${outcome.message}`);
 			return false;
 		}
 		if (outcome.status === "skipped") {
@@ -3163,10 +3472,10 @@ export class ObsidianAgentService {
 		}
 
 		agent.state.messages = outcome.messages;
-		this.lastCompaction = outcome.result;
-		this.recordOverheadUsage(outcome.result.usage);
-		await this.sessionManager.appendCompaction(outcome.result, this.activeLane);
-		await this.refreshSessionInfo();
+		rt.lastCompaction = outcome.result;
+		this.recordOverheadUsage(rt, outcome.result.usage);
+		await this.sessionManager.appendCompactionFor(rt.sessionPath, outcome.result, rt.activeLane);
+		await this.refreshSessionInfo(rt);
 		this.notify();
 		return true;
 	}
@@ -3180,11 +3489,11 @@ export class ObsidianAgentService {
 	 * call site. Absent usage is a no-op: a provider that reports none is normal,
 	 * and it must not be booked as a zero-cost request in the count.
 	 */
-	private recordOverheadUsage(usage: Usage | undefined): void {
+	private recordOverheadUsage(rt: SessionRuntime, usage: Usage | undefined): void {
 		if (!usage) {
 			return;
 		}
-		this.overheadUsage = [...this.overheadUsage, usage];
+		rt.overheadUsage = [...rt.overheadUsage, usage];
 	}
 
 	/**
@@ -3249,9 +3558,9 @@ export class ObsidianAgentService {
 		};
 	}
 
-	private async persistMessage(message: AgentMessage): Promise<void> {
+	private async persistMessage(rt: SessionRuntime, message: AgentMessage): Promise<void> {
 		const key = message as object;
-		if (this.messageEntryIds.has(key)) {
+		if (rt.messageEntryIds.has(key)) {
 			return;
 		}
 		// The agent keeps `message` in `state.messages`; persisting it raw would
@@ -3261,7 +3570,7 @@ export class ObsidianAgentService {
 		// request reads. Sanitize to a deep copy with image blocks replaced by a
 		// text placeholder; dedup still keys on the original object identity.
 		const logged = sanitizeMessageForLog(message);
-		this.messageEntryIds.set(key, await this.sessionManager.appendMessage(logged, this.activeLane));
+		rt.messageEntryIds.set(key, await this.sessionManager.appendMessageFor(rt.sessionPath, logged, rt.activeLane));
 	}
 
 	/**
@@ -3280,7 +3589,11 @@ export class ObsidianAgentService {
 	 * written into a note whose image lives in an attachment folder: no folder in
 	 * the reference, and the exact lookup only knows full paths.
 	 */
-	private async readVaultImages(paths: readonly string[], sourcePath: string | null): Promise<ImageContent[]> {
+	private async readVaultImages(
+		rt: SessionRuntime,
+		paths: readonly string[],
+		sourcePath: string | null
+	): Promise<ImageContent[]> {
 		if (paths.length === 0) {
 			return [];
 		}
@@ -3289,7 +3602,7 @@ export class ObsidianAgentService {
 		for (const path of paths) {
 			const file = this.app.vault.getFileByPath(path) ?? this.resolveLinkpathDest(path, sourcePath);
 			if (!file) {
-				this.setNotice(t.t("chat.imageNotFound", { path }));
+				this.setNotice(rt, t.t("chat.imageNotFound", { path }));
 				continue;
 			}
 			try {
@@ -3300,7 +3613,7 @@ export class ObsidianAgentService {
 				// folder differently and the file is what the bytes came from.
 				images.push({ type: "image", data: arrayBufferToBase64(buffer), mimeType: mimeTypeForPath(file.path) });
 			} catch {
-				this.setNotice(t.t("chat.imageNotFound", { path }));
+				this.setNotice(rt, t.t("chat.imageNotFound", { path }));
 			}
 		}
 		return images;
@@ -3369,46 +3682,55 @@ export class ObsidianAgentService {
 	 * only by pi's own two markers agreeing, and any drift in that wiring
 	 * degrades to showing the banner rather than to swallowing an error.
 	 */
-	private visibleAgentError(agent: Agent | null): string | undefined {
+	private visibleAgentError(rt: SessionRuntime | null, agent: Agent | null): string | undefined {
 		const agentError = agent?.state.errorMessage;
-		if (!agentError || agentError === this.dismissedAgentError) {
+		if (!agentError || !rt || agentError === rt.dismissedAgentError) {
 			return undefined;
 		}
 		return isUserAbortReport(agent, agentError) ? undefined : agentError;
 	}
 
-	private setError(message: string, opensSettings = false): void {
-		this.panelError = { message, opensSettings };
-		this.noticeMessage = undefined;
-		this.dismissedAgentError = undefined;
+	private setError(rt: SessionRuntime, message: string, opensSettings = false): void {
+		rt.panelError = { message, opensSettings };
+		rt.noticeMessage = undefined;
+		rt.dismissedAgentError = undefined;
 		this.notify();
 	}
 
 	/** Reports a non-failure outcome without raising the error banner's alert. */
-	private setNotice(message: string): void {
-		this.noticeMessage = message;
+	private setNotice(rt: SessionRuntime, message: string): void {
+		rt.noticeMessage = message;
 		this.notify();
 	}
 
 	/** Adds a second non-failure message without hiding an earlier loader warning. */
-	private appendNotice(message: string): void {
-		this.noticeMessage = this.noticeMessage ? `${this.noticeMessage}\n${message}` : message;
+	private appendNotice(rt: SessionRuntime, message: string): void {
+		rt.noticeMessage = rt.noticeMessage ? `${rt.noticeMessage}\n${message}` : message;
 		this.notify();
 	}
 
-	private async notifySettledState(): Promise<void> {
-		await this.refreshSessionInfo();
+	private async notifySettledState(rt: SessionRuntime): Promise<void> {
+		await this.refreshSessionInfo(rt);
 		this.notify();
 	}
 
 	/**
-	 * Skipped while no session is active — trashing the active session leaves that
-	 * gap until a replacement is adopted, and `getActiveSessionInfo` throws in it.
+	 * Re-reads the session summary for the panel. Only the focused session's read
+	 * is allowed to move the snapshot's `sessionInfo` — a background runtime's
+	 * append must not overwrite what the user is looking at — but the runtime's
+	 * own copy is kept current either way so a later switch shows fresh data.
 	 */
-	private async refreshSessionInfo(): Promise<void> {
-		if (this.sessionManager.getActiveSessionPath()) {
-			this.sessionInfo = await this.sessionManager.getActiveSessionInfo();
+	private async refreshSessionInfo(rt: SessionRuntime): Promise<void> {
+		// The manager summarises the active path only. A background runtime keeps
+		// its cached summary until focus makes it readable again — `openSession`
+		// re-reads it on the way in — and must never overwrite the snapshot's
+		// `sessionInfo` with its own stale copy.
+		if (rt.sessionPath !== this.sessionManager.getActiveSessionPath()) {
+			return;
 		}
+		const info = await this.sessionManager.getActiveSessionInfo();
+		rt.sessionInfo = info;
+		this.sessionInfo = info;
 	}
 
 	private notify(): void {
