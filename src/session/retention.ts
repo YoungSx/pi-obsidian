@@ -40,13 +40,18 @@ export interface EvictionOptions {
 	/** How many to keep. {@link UNLIMITED_SESSION_RETENTION} keeps everything. */
 	limit: number;
 	/**
-	 * The session currently open, which is never evicted.
+	 * Paths with a session the plugin is holding live — hydrated and possibly
+	 * being written to right now. None of them is ever evicted.
 	 *
-	 * Recency alone would already spare it, but only as a side effect of it having
-	 * just been written. Naming it explicitly means a clock skew or a hand-edited
-	 * timestamp cannot make the plugin trash the conversation on screen.
+	 * Recency alone would already spare the chat on screen, but only as a side
+	 * effect of it having just been written. Naming the live paths explicitly
+	 * means a clock skew or a hand-edited timestamp cannot make the plugin trash
+	 * a conversation it holds open — and with several chats live at once (#235),
+	 * no single "active" pointer is enough: every hydrated session has a runtime
+	 * that may append to it, and trashing any one of them strands that runtime's
+	 * writes.
 	 */
-	activePath?: string | null;
+	protectedPaths?: readonly string[];
 }
 
 /**
@@ -64,14 +69,17 @@ export function selectSessionsToEvict(options: EvictionOptions): RetainableSessi
 		return [];
 	}
 
+	const protectedPaths = new Set(options.protectedPaths ?? []);
 	const candidates = [...options.sessions]
-		.filter((session) => session.path !== options.activePath)
+		.filter((session) => !protectedPaths.has(session.path))
 		.sort((left, right) => right.modifiedTime - left.modifiedTime || left.path.localeCompare(right.path));
 
-	// The active session occupies a slot: it is retained either way, so the cap
-	// has to count it or a vault at the limit would keep one more than asked.
-	const activeIsPresent = options.sessions.some((session) => session.path === options.activePath);
-	const keep = Math.max(limit - (activeIsPresent ? 1 : 0), 0);
+	// A live session occupies a slot: it is retained either way, so the cap has
+	// to count every one of them or a vault at the limit would keep more than
+	// asked. Only ones actually present in the listing count — a live session in
+	// a folder the policy no longer points at is outside this cap entirely.
+	const protectedPresent = options.sessions.filter((session) => protectedPaths.has(session.path)).length;
+	const keep = Math.max(limit - protectedPresent, 0);
 	return candidates.slice(keep);
 }
 

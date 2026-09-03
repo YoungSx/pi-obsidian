@@ -337,6 +337,31 @@ describe("ObsidianSessionManager retention", () => {
 		expect(manager.getActiveSessionPath()).toBe(newest);
 	});
 
+	it("keeps a claimed session alive across a switch and an eviction sweep", async () => {
+		const adapter = new MemoryAdapter();
+		const manager = new ObsidianSessionManager(
+			adapter as unknown as DataAdapter,
+			mutablePolicy(VAULT_SESSION_DIR, 1),
+			"obsidian-vault:Test",
+		);
+
+		// A runtime claims its session before focus moves on: the claim — not
+		// focus — is what spares it when the next chat triggers a sweep.
+		const background = await createStampedSession(manager, FUTURE_MS);
+		manager.retainSession(background);
+		const focused = await createStampedSession(manager, FUTURE_MS + 1_000);
+
+		expect(manager.isLoaded(background)).toBe(true);
+		expect(manager.getActiveSessionPath()).toBe(focused);
+		expect(adapter.trashed).toEqual([]);
+
+		// Once the runtime releases it, the chat is an ordinary leftover: at a cap
+		// of 1 with only the new chat protected, both of them go.
+		manager.releaseSession(background);
+		await createStampedSession(manager, FUTURE_MS + 2_000);
+		expect([...adapter.trashed].sort()).toEqual([background, focused].sort());
+	});
+
 	it("keeps every chat when the cap is unlimited", async () => {
 		const adapter = new MemoryAdapter();
 		const manager = new ObsidianSessionManager(

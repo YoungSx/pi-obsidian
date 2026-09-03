@@ -71,13 +71,47 @@ export interface SessionSettings {
 
 type PiSession = Session<JsonlSessionMetadata>;
 
+/**
+ * One hydrated session: pi's live `Session` over its JSONL file, plus the
+ * metadata it was opened from, cached so header reads do not have to await.
+ *
+ * Hydration is the plugin's only claim on the file. pi's `repo.open` is
+ * uncached — a second `Session` over the same path would replay the log into
+ * its own memory and then race the first one's writes, silently violating the
+ * sequence/id invariants — so exactly one entry per path must ever exist here,
+ * and eviction (`selectSessionsToEvict`) treats every key as untrashable.
+ */
+interface HydratedSession {
+	session: PiSession;
+	metadata: JsonlSessionMetadata;
+}
+
 /** Piem's product-facing wrapper around pi's durable JSONL session repository. */
 export class ObsidianSessionManager {
 	private readonly fs: ObsidianSessionFileSystem;
 	private readonly policy: SessionPolicy;
 	private readonly cwd: string;
-	private session: PiSession | null = null;
-	private sessionMetadata: JsonlSessionMetadata | null = null;
+	/**
+	 * Every session the plugin currently holds live, keyed by file path.
+	 *
+	 * Loading a session hydrates it here; switching focus only moves
+	 * {@link activePath} — the previously active session stays hydrated so a
+	 * background runtime keeps a valid handle. {@link loadSession} never
+	 * re-opens a key of this map, and nothing in it outlives its file: eviction
+	 * goes through {@link deleteSession}, which drops the entry with the file.
+	 */
+	private readonly hydrated = new Map<string, HydratedSession>();
+	/**
+	 * Paths a long-lived consumer (a session runtime) has claimed with
+	 * {@link retainSession}. Claims are the multi-session half of "live": the
+	 * focused session is protected by being focused and a claimed one by its
+	 * claim, while a merely hydrated one is protected by neither — a chat left
+	 * behind by an ordinary single-session switch stays evictable, which is what
+	 * today's retention contract has always promised.
+	 */
+	private readonly claimed = new Set<string>();
+	/** Which hydrated session the legacy single-session API surface reads. */
+	private activePath: string | null = null;
 
 	constructor(adapter: DataAdapter, location: string | SessionPolicy, cwd: string) {
 		this.fs = new ObsidianSessionFileSystem(adapter);
@@ -95,8 +129,10 @@ export class ObsidianSessionManager {
 
 	async createSession(defaults: SessionDefaults): Promise<ActiveSessionInfo> {
 		const sessionDir = this.resolveSessionDir();
-		this.session = await this.repo(sessionDir).create({ cwd: this.cwd });
-		this.sessionMetadata = await this.session.getMetadata();
+		const session = await this.repo(sessionDir).create({ cwd: this.cwd });
+		const metadata = await session.getMetadata();
+		this.hydrated.set(metadata.path, { session, metadata });
+		this.activePath = metadata.path;
 		await this.appendModelChange(defaults.provider, defaults.modelId);
 		await this.appendThinkingLevelChange(defaults.thinkingLevel ?? DEFAULT_THINKING_LEVEL);
 		await this.evictSurplusSessions(sessionDir);
@@ -113,15 +149,33 @@ export class ObsidianSessionManager {
 		return this.createSession(defaults);
 	}
 
+	/**
+	 * Opens the stored session at `path` and makes it the one the single-session
+	 * surface (everything without an explicit path) reads.
+	 *
+	 * Idempotent per path by contract: when the session is already hydrated its
+	 * live instance is reused and only the focus moves. `repo.open` is uncached
+	 * and returns a fresh `Session` every call, and two instances over one file
+	 * would desync — so re-opening an already-loaded session is forbidden, not
+	 * merely wasteful. Nothing is closed on the way in, either: the previously
+	 * active session stays hydrated for whichever background runtime holds it.
+	 */
 	async loadSession(path: string): Promise<ActiveSessionInfo> {
 		const target = normalizeFolderPath(path, { allowPluginInternals: true });
+		const alreadyLive = this.hydrated.get(target);
+		if (alreadyLive) {
+			this.activePath = target;
+			return this.summarize(alreadyLive.metadata, alreadyLive.session);
+		}
 		const metadata = await this.findMetadata(target);
 		if (!metadata) {
 			throw new Error(`Session not found: ${target}`);
 		}
-		this.session = await this.repo(this.resolveSessionDir()).open(metadata);
-		this.sessionMetadata = await this.session.getMetadata();
-		return this.getActiveSessionInfo();
+		const session = await this.repo(this.resolveSessionDir()).open(metadata);
+		const liveMetadata = await session.getMetadata();
+		this.hydrated.set(liveMetadata.path, { session, metadata: liveMetadata });
+		this.activePath = liveMetadata.path;
+		return this.summarize(liveMetadata, session);
 	}
 
 	async deleteSession(path: string): Promise<void> {
@@ -130,9 +184,15 @@ export class ObsidianSessionManager {
 		if (!result.ok) {
 			throw result.error;
 		}
-		if (this.sessionMetadata?.path === target) {
-			this.session = null;
-			this.sessionMetadata = null;
+		// Dropping the entry is what hands the file back to the disk: the next
+		// load of this path opens a fresh instance rather than a session whose
+		// underlying log is gone. Only the focus moves when it pointed here —
+		// deleting a background session must not blank the one on screen. The
+		// claim goes with the file: nothing survives to claim a trashed log.
+		this.hydrated.delete(target);
+		this.claimed.delete(target);
+		if (this.activePath === target) {
+			this.activePath = null;
 		}
 	}
 
@@ -230,17 +290,29 @@ export class ObsidianSessionManager {
 	}
 
 	async appendMessage(message: AgentMessage, lane = "main"): Promise<string> {
+		return this.appendMessageFor(this.requireActivePath(), message, lane);
+	}
+
+	async appendMessageFor(path: string, message: AgentMessage, lane = "main"): Promise<string> {
 		const persisted = JSON.parse(JSON.stringify(message)) as AgentMessage;
-		return this.getSession().view(lane).appendMessage(persisted);
+		return this.getSessionFor(path).view(lane).appendMessage(persisted);
 	}
 
 	async appendModelChange(provider: string, modelId: string, lane = "main"): Promise<string> {
-		const session = this.getSession();
+		return this.appendModelChangeFor(this.requireActivePath(), provider, modelId, lane);
+	}
+
+	async appendModelChangeFor(path: string, provider: string, modelId: string, lane = "main"): Promise<string> {
+		const session = this.getSessionFor(path);
 		return (await session.appendEntry({ type: "model_change", id: session.idGenerator.next(), provider, modelId }, lane)).id;
 	}
 
 	async appendThinkingLevelChange(thinkingLevel: ThinkingLevel, lane = "main"): Promise<string> {
-		const session = this.getSession();
+		return this.appendThinkingLevelChangeFor(this.requireActivePath(), thinkingLevel, lane);
+	}
+
+	async appendThinkingLevelChangeFor(path: string, thinkingLevel: ThinkingLevel, lane = "main"): Promise<string> {
+		const session = this.getSessionFor(path);
 		return (await session.appendEntry({ type: "thinking_level_change", id: session.idGenerator.next(), thinkingLevel }, lane)).id;
 	}
 
@@ -269,7 +341,11 @@ export class ObsidianSessionManager {
 	}
 
 	async appendCompaction(result: CompactResult, lane = "main"): Promise<string> {
-		const session = this.getSession();
+		return this.appendCompactionFor(this.requireActivePath(), result, lane);
+	}
+
+	async appendCompactionFor(path: string, result: CompactResult, lane = "main"): Promise<string> {
+		const session = this.getSessionFor(path);
 		// Agent messages may carry optional fields as explicit `undefined`; pi's
 		// durable payload contract rejects those even though JSON.stringify would
 		// silently omit them. Normalize to the wire shape before appending.
@@ -294,7 +370,11 @@ export class ObsidianSessionManager {
 	 * on the dead branch. `fromId` names the leaf the abandoned branch ended on.
 	 */
 	async appendBranchSummary(result: BranchSummaryResult, fromId: string, lane = "main"): Promise<string> {
-		const session = this.getSession();
+		return this.appendBranchSummaryFor(this.requireActivePath(), result, fromId, lane);
+	}
+
+	async appendBranchSummaryFor(path: string, result: BranchSummaryResult, fromId: string, lane = "main"): Promise<string> {
+		const session = this.getSessionFor(path);
 		const entry = {
 			type: "branch_summary" as const,
 			id: session.idGenerator.next(),
@@ -307,7 +387,12 @@ export class ObsidianSessionManager {
 	}
 
 	async appendSessionInfo(name: string | undefined): Promise<string> {
-		const session = this.getSession();
+		return this.appendSessionInfoFor(this.requireActivePath(), name);
+	}
+
+	/** Renames the session at `path`. A rename is a fact in the log, not a path change — the map key stands. */
+	async appendSessionInfoFor(path: string, name: string | undefined): Promise<string> {
+		const session = this.getSessionFor(path);
 		await session.setName(name);
 		return (await session.getMetadata()).id;
 	}
@@ -339,7 +424,11 @@ export class ObsidianSessionManager {
 	 * decides whether a run may start with its ledger entry missing.
 	 */
 	async beginRunOperation(originalPrompt: AgentMessage[], lane = "main"): Promise<string> {
-		const session = this.getSession();
+		return this.beginRunOperationFor(this.requireActivePath(), originalPrompt, lane);
+	}
+
+	async beginRunOperationFor(path: string, originalPrompt: AgentMessage[], lane = "main"): Promise<string> {
+		const session = this.getSessionFor(path);
 		// The ledger stores the prompt, and the prompt can carry image bytes.
 		// The same placeholder treatment {@link appendMessage} applies keeps
 		// both writers to one rule: no base64 ever reaches the session log.
@@ -371,7 +460,17 @@ export class ObsidianSessionManager {
 		error?: { code: string; message: string },
 		lane = "main",
 	): Promise<void> {
-		const session = this.getSession();
+		return this.endRunOperationFor(this.requireActivePath(), runId, outcome, error, lane);
+	}
+
+	async endRunOperationFor(
+		path: string,
+		runId: string,
+		outcome: OperationFinishedRecord["outcome"],
+		error?: { code: string; message: string },
+		lane = "main",
+	): Promise<void> {
+		const session = this.getSessionFor(path);
 		await session.appendRecord({
 			type: "operation_finished",
 			id: session.idGenerator.next(),
@@ -390,7 +489,11 @@ export class ObsidianSessionManager {
 	 * one, so recovery must close these before anything new can start there.
 	 */
 	async findOpenRunOperations(lane = "main"): Promise<OperationStartedRecord[]> {
-		return this.getSession().findOpenOperations(lane);
+		return this.findOpenRunOperationsFor(this.requireActivePath(), lane);
+	}
+
+	async findOpenRunOperationsFor(path: string, lane = "main"): Promise<OperationStartedRecord[]> {
+		return this.getSessionFor(path).findOpenOperations(lane);
 	}
 
 	/**
@@ -402,10 +505,14 @@ export class ObsidianSessionManager {
 	 * lane permanently unable to open a run.
 	 */
 	async findAllOpenRunOperations(): Promise<Map<string, OperationStartedRecord[]>> {
-		const lanes = await this.getAllLanes();
+		return this.findAllOpenRunOperationsFor(this.requireActivePath());
+	}
+
+	async findAllOpenRunOperationsFor(path: string): Promise<Map<string, OperationStartedRecord[]>> {
+		const session = this.getSessionFor(path);
 		const open = new Map<string, OperationStartedRecord[]>();
-		for (const { lane } of lanes) {
-			const orphans = await this.findOpenRunOperations(lane);
+		for (const { lane } of await session.getLanes()) {
+			const orphans = await session.findOpenOperations(lane);
 			if (orphans.length > 0) {
 				open.set(lane, orphans);
 			}
@@ -414,7 +521,11 @@ export class ObsidianSessionManager {
 	}
 
 	async buildSessionContext(lane = "main"): Promise<SessionContext> {
-		const entries = await this.getSession().view(lane).findEntriesOnBranch({ order: "oldestFirst" });
+		return this.buildSessionContextFor(this.requireActivePath(), lane);
+	}
+
+	async buildSessionContextFor(path: string, lane = "main"): Promise<SessionContext> {
+		const entries = await this.getSessionFor(path).view(lane).findEntriesOnBranch({ order: "oldestFirst" });
 		const piContext = buildPiSessionContext(entries);
 		const contextEntries = buildContextEntries(entries);
 		const messages: AgentMessage[] = [];
@@ -441,16 +552,65 @@ export class ObsidianSessionManager {
 		await session.moveLane(lane, entry.parentId);
 	}
 
-	/** The live pi session opened or created by the repository. */
+	/** The live pi session currently focused — {@link loadSession} or {@link createSession} put it there. */
 	getSession(): PiSession {
-		if (!this.session) {
+		return this.getSessionFor(this.requireActivePath());
+	}
+
+	/** The live pi session hydrated for `path`. Throws when it was never loaded (or was deleted). */
+	getSessionFor(path: string): PiSession {
+		const live = this.hydrated.get(path);
+		if (!live) {
+			throw new Error(`No session loaded: ${path}`);
+		}
+		return live.session;
+	}
+
+	private requireActivePath(): string {
+		if (!this.activePath) {
 			throw new Error("No active session.");
 		}
-		return this.session;
+		return this.activePath;
+	}
+
+	/** Whether `path` has a live instance. Hydration is not focus: a background session is loaded too. */
+	isLoaded(path: string): boolean {
+		return this.hydrated.has(path);
+	}
+
+	/** Every hydrated path, active or not. Any of them may be targeted by path. */
+	getLoadedPaths(): string[] {
+		return [...this.hydrated.keys()];
+	}
+
+	/**
+	 * Marks `path` as claimed by a long-lived consumer (a session runtime), so a
+	 * later focus switch cannot leave it behind and retention can never trash it.
+	 * Idempotent; the path must already be hydrated.
+	 */
+	retainSession(path: string): void {
+		if (!this.hydrated.has(path)) {
+			throw new Error(`No session loaded: ${path}`);
+		}
+		this.claimed.add(path);
+	}
+
+	/** Drops a {@link retainSession} claim. Retention may then evict the session as usual. */
+	releaseSession(path: string): void {
+		this.claimed.delete(path);
+	}
+
+	/** What retention must spare: the focused session plus every claimed one. */
+	private protectedPaths(): string[] {
+		return this.activePath ? [...this.claimed, this.activePath] : [...this.claimed];
 	}
 
 	async getLastCompaction(lane = "main"): Promise<CompactResult | undefined> {
-		const entry = await this.getSession().view(lane).findEntryOnBranch({ type: "compaction" });
+		return this.getLastCompactionFor(this.requireActivePath(), lane);
+	}
+
+	async getLastCompactionFor(path: string, lane = "main"): Promise<CompactResult | undefined> {
+		const entry = await this.getSessionFor(path).view(lane).findEntryOnBranch({ type: "compaction" });
 		if (!entry || entry.type !== "compaction") {
 			return undefined;
 		}
@@ -464,13 +624,13 @@ export class ObsidianSessionManager {
 	}
 
 	async getActiveSessionInfo(): Promise<ActiveSessionInfo> {
-		const session = this.getSession();
-		const metadata = this.sessionMetadata ?? (await session.getMetadata());
-		return this.summarize(metadata, session);
+		const path = this.requireActivePath();
+		const live = this.hydrated.get(path)!;
+		return this.summarize(live.metadata, live.session);
 	}
 
 	getActiveSessionPath(): string | null {
-		return this.sessionMetadata?.path ?? null;
+		return this.activePath;
 	}
 
 	/**
@@ -483,10 +643,10 @@ export class ObsidianSessionManager {
 	 * correct while the active header is not; this gives that same freshness to
 	 * just the active name without the list's cost.
 	 *
-	 * The throwaway session is deliberately discarded and `this.session` is never
-	 * touched: swapping the live storage object out from under an in-flight append
-	 * or stream would be destructive, and `loadSession()` on the same path is a
-	 * session switch, not a refresh. One consequence is inherited from
+	 * The throwaway session is deliberately discarded and the hydrated registry is
+	 * never touched: swapping the live storage object out from under an in-flight
+	 * append or stream would be destructive, and `loadSession()` on the same path
+	 * is a session switch, not a refresh. One consequence is inherited from
 	 * `listSessions()`, which already opens throwaways concurrently with the live
 	 * session's appends: pi's loader may repair a torn tail it finds, a benign
 	 * self-healing write. Deliberately no `ensureConfiguration` here — it derives
@@ -498,21 +658,26 @@ export class ObsidianSessionManager {
 	 * as cleared exactly like a local one does.
 	 */
 	async readActiveSessionName(): Promise<string | undefined> {
-		if (!this.sessionMetadata) {
+		const path = this.activePath;
+		if (!path) {
 			return undefined;
 		}
-		const fresh = await this.repo(this.resolveSessionDir()).open(this.sessionMetadata);
+		const fresh = await this.repo(this.resolveSessionDir()).open(this.hydrated.get(path)!.metadata);
 		return (await fresh.getName())?.trim() || undefined;
 	}
 
 	async ensureConfiguration(defaults: SessionDefaults, lane = "main"): Promise<void> {
+		return this.ensureConfigurationFor(this.requireActivePath(), defaults, lane);
+	}
+
+	async ensureConfigurationFor(path: string, defaults: SessionDefaults, lane = "main"): Promise<void> {
 		// Model only. The thinking level used to be re-asserted here from global
 		// settings, which made the session's own recorded level decorative; the
 		// level now belongs to the conversation, so the session file wins and
 		// this sync must not overwrite it.
-		const context = await this.buildSessionContext(lane);
+		const context = await this.buildSessionContextFor(path, lane);
 		if (context.model?.provider !== defaults.provider || context.model.modelId !== defaults.modelId) {
-			await this.appendModelChange(defaults.provider, defaults.modelId, lane);
+			await this.appendModelChangeFor(path, defaults.provider, defaults.modelId, lane);
 		}
 	}
 
@@ -579,10 +744,16 @@ export class ObsidianSessionManager {
 		}
 		const metadata = await this.repo(sessionDir).list({ cwd: this.cwd });
 		const sessions = await Promise.all(metadata.map((item) => this.readSessionInfo(item)));
+		// The protected set is focus + claims, not the whole hydration map: a
+		// claimed session is one a runtime may append to at any moment, and
+		// trashing it would strand that runtime's writes against a gone file. A
+		// merely hydrated session — the one an ordinary single-session switch
+		// left behind — is exactly what retention has always been allowed to
+		// evict, and must stay that way.
 		for (const session of selectSessionsToEvict({
 			sessions: sessions.filter((item): item is SessionFileInfo => item !== null),
 			limit,
-			activePath: this.sessionMetadata?.path,
+			protectedPaths: this.protectedPaths(),
 		})) {
 			try {
 				await this.deleteSession(session.path);
