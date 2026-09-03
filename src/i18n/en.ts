@@ -1251,11 +1251,15 @@ export const en = {
 		emptyDetail: "Pick a run to see what it was asked and what it wrote.",
 		back: "Back to the list",
 		/**
-		 * Says outright what the panel does not do, because the absence of a stop
-		 * button is otherwise indistinguishable from a stop button that has not
-		 * loaded yet.
+		 * Draws the line the panel actually holds: stopping is here, talking is
+		 * not. Saying both halves matters — "you can stop" invites the reader who
+		 * wants a circuit breaker, and "but not talk" preempts the reader who
+		 * would otherwise look for a reply box that rule 2 forbids.
 		 */
-		readOnly: "This panel only watches. A subagent cannot be answered or stopped from here.",
+		panelNotice: "You can stop a run from here, but not talk to it — to change its course, tell Piem in the chat.",
+		stopOne: "Stop this run",
+		stopAll: "Stop all",
+		stopAllAria: "Stop every running subagent",
 		status: {
 			running: "working",
 			done: "done",
@@ -1268,6 +1272,7 @@ export const en = {
 		killedByParent: "It stopped because the chat turn stopped.",
 		killedByTeardown: "It stopped because the chat closed.",
 		killedByTool: "Piem stopped it: the answer was no longer needed.",
+		killedByUser: "You stopped it from this panel.",
 		sectionTask: "Task",
 		sectionInstructions: "Standing instructions",
 		sectionConfig: "Setup",
