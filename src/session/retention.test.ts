@@ -38,24 +38,35 @@ describe("selectSessionsToEvict", () => {
 		expect(selectSessionsToEvict({ sessions, limit: UNLIMITED_SESSION_RETENTION })).toEqual([]);
 	});
 
-	it("never evicts the open chat, even if its timestamp says it is the oldest", () => {
+	it("never evicts an open chat, even if its timestamp says it is the oldest", () => {
 		// Recency alone would already spare a just-written session; naming it means
 		// a clock skew or a hand-edited timestamp cannot trash the conversation the
 		// user is looking at.
 		const sessions = [session("active.jsonl", 0), session("b.jsonl", 20), session("c.jsonl", 30)];
 
-		const evicted = selectSessionsToEvict({ sessions, limit: 1, activePath: "active.jsonl" });
+		const evicted = selectSessionsToEvict({ sessions, limit: 1, protectedPaths: ["active.jsonl"] });
 
 		expect(evicted.map((entry) => entry.path)).not.toContain("active.jsonl");
 	});
 
-	it("counts the open chat against the cap, so a limit of N leaves N", () => {
+	it("counts each open chat against the cap, so a limit of N leaves N", () => {
 		const sessions = [session("active.jsonl", 40), session("b.jsonl", 30), session("c.jsonl", 20), session("d.jsonl", 10)];
 
-		const evicted = selectSessionsToEvict({ sessions, limit: 2, activePath: "active.jsonl" });
+		const evicted = selectSessionsToEvict({ sessions, limit: 2, protectedPaths: ["active.jsonl"] });
 
 		expect(sessions.length - evicted.length).toBe(2);
 		expect(evicted.map((entry) => entry.path)).toEqual(["c.jsonl", "d.jsonl"]);
+	});
+
+	it("spares every open chat at once, not just the focused one", () => {
+		// With several chats live (#235) each is a hydrated file a runtime may be
+		// appending to; trashing any of them strands that runtime's writes. Only
+		// the closed ones remain evictable.
+		const sessions = [session("live-a.jsonl", 50), session("live-b.jsonl", 40), session("old.jsonl", 30), session("older.jsonl", 20)];
+
+		const evicted = selectSessionsToEvict({ sessions, limit: 2, protectedPaths: ["live-a.jsonl", "live-b.jsonl"] });
+
+		expect(evicted.map((entry) => entry.path)).toEqual(["old.jsonl", "older.jsonl"]);
 	});
 
 	it("breaks ties on path so two chats written in the same millisecond evict deterministically", () => {
