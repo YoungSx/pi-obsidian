@@ -1873,7 +1873,7 @@ describe("ObsidianAgentService run ledger and recovery", () => {
  * there. These tests pin the split: the abort is filtered out of the banner
  * channel, a genuine failure is not.
  */
-describe("ObsidianAgentService stop-vs-failure banner semantics", () => {
+describe("ObsidianAgentService banner semantics: what the transcript reports, the banner does not", () => {
 	/** A settled assistant turn shaped like the one a provider returns. */
 	function assistantReply(model: Model<Api>, overrides: Partial<AssistantMessage>): AssistantMessage {
 		return {
@@ -1955,41 +1955,63 @@ describe("ObsidianAgentService stop-vs-failure banner semantics", () => {
 		expect(last?.role === "assistant" && last.stopReason).toBe("aborted");
 	});
 
-	it("still raises the banner for a provider failure", async () => {
+	/*
+	 * The banner used to carry this, which #239 reversed. Two reasons, and the
+	 * first is a correctness one: pi clears `state.errorMessage` when the next run
+	 * departs, so the banner's copy of a timeout lasted exactly one turn, while
+	 * `errorMessage` on the message is written to the session log by
+	 * `appendMessage`'s deep clone. Second, the banner cannot say *which* turn
+	 * failed, and the transcript says nothing else.
+	 */
+	it("leaves an anchored provider failure to the transcript", async () => {
 		const service = await runTurnEndingWith((model) =>
-			assistantReply(model, { stopReason: "error", errorMessage: "Upstream refused the request." }),
+			assistantReply(model, { stopReason: "error", errorMessage: "504 Gateway Time-out" }),
 		);
 
-		// The abort filter keys on the two markers agreeing; a failure matches
-		// neither, so nothing about the real error path changes.
+		const snapshot = service.getSnapshot();
+		expect(snapshot.errorMessage).toBeUndefined();
+		// Nor demoted to the quiet channel: one report, under the turn it ended.
+		expect(snapshot.noticeMessage).toBeUndefined();
+		// The markers `describeReplyCutoff` renders from are both still on the turn,
+		// which is what makes the banner's silence a move rather than a loss.
+		const last = snapshot.messages.at(-1);
+		expect(last?.role === "assistant" && last.stopReason).toBe("error");
+		expect(last?.role === "assistant" && last.errorMessage).toBe("504 Gateway Time-out");
+	});
+
+	it("still raises the banner when the turn's own markers do not agree", async () => {
+		/*
+		 * The filter is never a string match on the provider's prose — that varies
+		 * ("Request was aborted", "upstream aborted the connection") and would
+		 * misfile a real failure that merely mentions cancellation. It requires pi's
+		 * two markers to agree: the turn carries one of the two stop reasons the
+		 * transcript renders a notice for, *and* carries this exact text.
+		 *
+		 * So this is the drift case, and it is the whole reason the rule is written
+		 * as an agreement: an error stamped on a turn that claims it ended normally
+		 * would render no cutoff notice, so the banner has to keep it. The failure
+		 * degrades to being shown twice, never to being swallowed.
+		 */
+		const service = await runTurnEndingWith((model) =>
+			assistantReply(model, { stopReason: "stop", errorMessage: "Upstream refused the request." }),
+		);
+
 		expect(service.getSnapshot().errorMessage).toBe("Upstream refused the request.");
 	});
 
-	it("keeps reporting a failure whose wording merely mentions cancellation", async () => {
-		// The filter must not be a string match. Provider prose varies ("Request
-		// was aborted", "The operation was aborted", "upstream aborted the
-		// connection"), and a failure that happens to use the word is still a
-		// failure the user never asked for.
-		const service = await runTurnEndingWith((model) =>
-			assistantReply(model, { stopReason: "error", errorMessage: "Upstream aborted the connection." }),
-		);
-
-		expect(service.getSnapshot().errorMessage).toBe("Upstream aborted the connection.");
-	});
-
-	it("shows the next real failure after a stop, rather than staying silenced", async () => {
-		// The suppression is derived per snapshot from the current run's last
-		// turn, not latched. A failure on the following run must surface.
+	it("derives the silence per snapshot rather than latching it", async () => {
+		// Read from the current run's last turn every time, so one suppressed
+		// report cannot silence the next.
 		const stopped = await runTurnEndingWith(
 			(model) => assistantReply(model, { stopReason: "aborted", errorMessage: "Request was aborted" }),
 			(live) => live.abort(),
 		);
 		expect(stopped.getSnapshot().errorMessage).toBeUndefined();
 
-		const failing = await runTurnEndingWith((model) =>
-			assistantReply(model, { stopReason: "error", errorMessage: "Upstream refused the request." }),
+		const drifted = await runTurnEndingWith((model) =>
+			assistantReply(model, { stopReason: "stop", errorMessage: "Upstream refused the request." }),
 		);
-		expect(failing.getSnapshot().errorMessage).toBe("Upstream refused the request.");
+		expect(drifted.getSnapshot().errorMessage).toBe("Upstream refused the request.");
 	});
 });
 

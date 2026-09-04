@@ -969,6 +969,56 @@ button.piem-chat__context-open {
 	margin: var(--size-4-2) 0 0;
 }
 
+/*
+ * A failed turn: red on the glyph, muted on the words.
+ *
+ * The same division the banner and the trace rows make, for the same reason —
+ * one loud note per row, spent on the child small enough to afford it. Tinting
+ * the sentence too would put `--text-error` on `--background-primary` for a
+ * whole line of `--font-ui-smaller`, which is a contrast measurement this row
+ * does not need to take; and after the third timeout in a session, a red
+ * paragraph is noise while a red glyph is still a landmark.
+ *
+ * `--text-error` on the glyph is the third place the panel says "this failed"
+ * exactly this way, after a failed tool call and a failed subagent.
+ *
+ * Set on the wrapper span, not on the injected `<svg>`: `setIcon` writes an SVG
+ * that strokes with `currentColor`, so `color` here is what reaches the glyph.
+ * That is the same hook `.piem-chat__trace-icon` and `.piem-chat__banner-icon`
+ * use, and the reason `.svg-icon` appears nowhere in this file.
+ */
+.piem-chat__interrupted--failed .piem-chat__interrupted-icon {
+	color: var(--text-error);
+}
+
+/*
+ * The provider's untouched text, behind a disclosure.
+ *
+ * `pre-line` plus `anywhere`, which is the recipe `.piem-chat__banner-text` and
+ * `.piem-subagents__error` already use for this exact content: a provider error
+ * arrives as a `\n`-joined string that collapses into one run-on line without
+ * the first, and carries org ids and URLs no wrap opportunity can break without
+ * the second. Prose, not code — its horizontal extent means nothing, so it
+ * wraps rather than owning a scroll box, and the message column stays the only
+ * thing that scrolls.
+ */
+.piem-chat__cutoff-detail {
+	font-size: var(--font-ui-smaller);
+	margin: var(--size-4-1) 0 0;
+}
+
+.piem-chat__cutoff-detail summary {
+	color: var(--text-muted);
+	cursor: var(--cursor);
+}
+
+.piem-chat__cutoff-raw {
+	color: var(--text-muted);
+	margin: var(--size-4-1) 0 0;
+	overflow-wrap: anywhere;
+	white-space: pre-line;
+}
+
 /* --- message actions --- */
 
 /*

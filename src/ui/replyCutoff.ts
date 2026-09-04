@@ -15,16 +15,27 @@
  * they resolve through one function rather than through a second `if` bolted
  * beside the first. That is what keeps the next reason pi adds (`stopReason` has
  * seven members) from being a third silent case.
+ *
+ * A provider failure was that third silent case for as long as this module
+ * excluded `error` on the grounds that it "already reaches the user through the
+ * banner". It did not, durably: pi clears `state.errorMessage` the moment the
+ * next run departs, so the banner's copy of a timeout survives exactly until
+ * the next turn — while `errorMessage` sits on the assistant message itself and
+ * round-trips to the session log through `appendMessage`'s deep clone. The
+ * reason was in the data and the view threw it away. It is the third kind now
+ * (#239), which also means the transcript reports a failed *turn* the same way
+ * it already reports a failed tool call and the subagent panel a failed child.
  */
 
 import type { AssistantMessage } from "@earendil-works/pi-ai";
 import type { Translator } from "../i18n";
 import type { IconName } from "obsidian";
+import { describeProviderFailure } from "./providerFailure";
 
 /** A reply that ended early, and why. `null` means it ended normally. */
 export interface ReplyCutoff {
 	/** Which cause, so the caller can pick copy and an icon without re-deriving it. */
-	kind: "stopped" | "truncated";
+	kind: "stopped" | "truncated" | "failed";
 	/** Line shown under the message. */
 	notice: string;
 	/**
@@ -36,6 +47,20 @@ export interface ReplyCutoff {
 	 */
 	spoken: string;
 	icon: IconName;
+	/**
+	 * The provider's untouched words, and the label of the disclosure that holds
+	 * them. Present only on `failed`, and always present there: the classified
+	 * sentence above it is a guess made from wording, and this is what makes that
+	 * guess safe to make. One object rather than two optional fields so a caller
+	 * cannot be handed a label with nothing behind it.
+	 */
+	detail?: { label: string; text: string };
+	/**
+	 * Whether offering to send the same turn again makes sense. Only meaningful on
+	 * `failed`; `stopped` and `truncated` are the user's own doing and the model's
+	 * own limit, and the transcript already offers its regenerate control for both.
+	 */
+	retryable?: boolean;
 }
 
 /**
@@ -47,10 +72,17 @@ export interface ReplyCutoff {
  * whose comment notes that truncated arguments can still parse), so the text
  * beside those calls is no more trustworthy and the reader has to be told.
  *
- * Every other reason — `stop`, `toolUse`, `error`, `deferred`, `pending` —
- * returns `null`. A normal end needs no notice, and `error` already reaches the
- * user through the banner, which reads `errorMessage`. `length` is precisely the
- * reason that sets no `errorMessage`, which is how it stayed invisible.
+ * `error` is a provider failure — a timeout, a refusal, a dropped connection.
+ * pi leaves the partial message in place with the provider's text on
+ * `errorMessage`, so this reads that field rather than the panel's volatile
+ * copy of it. Two shapes reach here: a stream that produced words and then died
+ * (the transcript keeps a half sentence that would otherwise look finished —
+ * exactly the defect this module was written to eliminate) and one that
+ * produced none (an assistant turn with no prose, which without a notice is a
+ * silent gap in the log).
+ *
+ * Every other reason — `stop`, `toolUse`, `deferred`, `pending` — returns
+ * `null`: a normal end needs no notice.
  */
 export function describeReplyCutoff(message: AssistantMessage, t: Translator): ReplyCutoff | null {
 	if (message.stopReason === "aborted") {
@@ -67,6 +99,22 @@ export function describeReplyCutoff(message: AssistantMessage, t: Translator): R
 			notice: t.t("chat.replyTruncated"),
 			spoken: t.t("chat.replyTruncatedSpoken"),
 			icon: "scissors",
+		};
+	}
+	if (message.stopReason === "error") {
+		const failure = describeProviderFailure(message.errorMessage ?? "", t);
+		return {
+			kind: "failed",
+			notice: failure.line,
+			spoken: failure.spoken,
+			// The glyph the transcript already uses for a failed tool call, so one
+			// vocabulary covers both failures a turn can contain.
+			icon: "alert-triangle",
+			// Kept even when the provider said nothing: an empty disclosure is the
+			// honest report that there was nothing to disclose, and its absence
+			// would read as "the panel is holding something back".
+			detail: { label: t.t("chat.providerFailure.raw"), text: message.errorMessage ?? "" },
+			retryable: failure.retryable,
 		};
 	}
 	return null;

@@ -32,6 +32,16 @@ interface ReplyActionsProps {
 	 * on an older one it would discard every turn that followed.
 	 */
 	onRetry?: () => void;
+	/**
+	 * Whether this turn ended in a provider failure.
+	 *
+	 * The one case that earns the row without prose. A turn that merely called
+	 * tools and said nothing is a normal end — the agent did the work — and it
+	 * keeps its empty row, because "nothing to copy, nothing to offer" is right
+	 * there. A failure is different: the reply is missing *because* something
+	 * went wrong, and the control that fixes it is the only one that applies.
+	 */
+	failed?: boolean;
 }
 
 /**
@@ -83,9 +93,20 @@ function DurationStamp({ durationMs, startedAt }: { durationMs: number; startedA
  * hover-only controls are unreachable. Keeping the layout box present on every
  * device also means the desktop reveal never reflows the transcript.
  */
-export function ReplyActions({ app, text, durationMs, startedAt, onRetry }: ReplyActionsProps): React.JSX.Element | null {
+export function ReplyActions({ app, text, durationMs, startedAt, onRetry, failed }: ReplyActionsProps): React.JSX.Element | null {
 	const t = useT();
-	if (!text) {
+	/*
+	 * A failed reply with no prose still earns the row.
+	 *
+	 * The guard used to be `if (!text) return null`, which read as "nothing to
+	 * copy, nothing to do" — and was wrong for the one turn that most needs a
+	 * control. A provider failure before the first token leaves an assistant
+	 * message with empty text, so the transcript grew a blank row and the retry
+	 * that would fix it did not exist (#239). The three actions below still need
+	 * text and each is gated on it; only the row's existence stopped depending on
+	 * it, and only for a failure.
+	 */
+	if (!text && !(failed && onRetry)) {
 		return null;
 	}
 
@@ -96,23 +117,27 @@ export function ReplyActions({ app, text, durationMs, startedAt, onRetry }: Repl
 			aria-label={t.t("replyActions.label")}
 			onMouseOver={suppressOwnTooltip}
 		>
-			<IconButton
-				icon="copy"
-				label={t.t("replyActions.copy")}
-				onClick={() => {
-					void copyToClipboard(text).then((copied) => notifyActionResult(copied, t.t("replyActions.couldNotCopy")));
-				}}
-			/>
-			<IconButton
-				icon="text-cursor-input"
-				label={t.t("replyActions.insert")}
-				onClick={() => notifyActionResult(insertAtCursor(app, text), t.t("replyActions.needOpenNoteToInsert"))}
-			/>
-			<IconButton
-				icon="file-plus"
-				label={t.t("replyActions.append")}
-				onClick={() => notifyActionResult(appendToActiveNote(app, text), t.t("replyActions.needOpenNoteToAppend"))}
-			/>
+			{text ? (
+				<>
+					<IconButton
+						icon="copy"
+						label={t.t("replyActions.copy")}
+						onClick={() => {
+							void copyToClipboard(text).then((copied) => notifyActionResult(copied, t.t("replyActions.couldNotCopy")));
+						}}
+					/>
+					<IconButton
+						icon="text-cursor-input"
+						label={t.t("replyActions.insert")}
+						onClick={() => notifyActionResult(insertAtCursor(app, text), t.t("replyActions.needOpenNoteToInsert"))}
+					/>
+					<IconButton
+						icon="file-plus"
+						label={t.t("replyActions.append")}
+						onClick={() => notifyActionResult(appendToActiveNote(app, text), t.t("replyActions.needOpenNoteToAppend"))}
+					/>
+				</>
+			) : null}
 			{/*
 			 * `refresh-cw`, not `rotate-ccw`: the counter-clockwise arrow is the
 			 * universal undo glyph, and this action is the one control in the row
