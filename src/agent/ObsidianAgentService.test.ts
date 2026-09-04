@@ -2270,6 +2270,68 @@ describe("exporting a session as a note", () => {
 	// entry before the first message lands, so a transcript always has one.
 });
 
+describe("recording a reply's duration", () => {
+	/** The message entries of a session log, in order. */
+	async function loggedMessages(adapter: DataAdapter, sessionPath: string): Promise<AssistantMessage[]> {
+		const entries = (await adapter.read(sessionPath))
+			.split("\n")
+			.filter((line) => line.trim() !== "")
+			.map((line) => JSON.parse(line) as { type?: string; message?: AssistantMessage });
+		return entries.filter((entry) => entry.type === "message").map((entry) => entry.message!) as AssistantMessage[];
+	}
+
+	it("stamps each settled reply with the gap from its own start, in the log", async () => {
+		// The fake stream answers immediately, so `Date.now()` at `message_end`
+		// is only a fraction past the message's own timestamp — the honest
+		// shape of the measurement, even though it is too short to ever be
+		// shown. The claim under test is that the field exists on disk at all:
+		// the UI reads it back from the JSONL, so writing it there is the
+		// feature.
+		const adapter = new MemoryAdapter();
+		const service = createService(adapter);
+		await service.sendPrompt("How long did that take?");
+
+		const sessionPath = service.getSnapshot().session?.path ?? "";
+		const messages = await loggedMessages(adapter, sessionPath);
+		const replies = messages.filter((message) => message.role === "assistant");
+		expect(replies).toHaveLength(1);
+		const durationMs = (replies[0] as { durationMs?: number }).durationMs;
+		expect(typeof durationMs).toBe("number");
+		expect(durationMs).toBeGreaterThanOrEqual(0);
+	});
+
+	it("leaves user messages unstamped, including pi's injected steering prompts", async () => {
+		const adapter = new MemoryAdapter();
+		const service = createService(adapter);
+		await service.sendPrompt("Just a question");
+
+		const sessionPath = service.getSnapshot().session?.path ?? "";
+		const messages = await loggedMessages(adapter, sessionPath);
+		for (const message of messages) {
+			if (message.role !== "assistant") {
+				expect(message).not.toHaveProperty("durationMs");
+			}
+		}
+	});
+
+	it("survives a reload, so a reopened session still knows how long it took", async () => {
+		// The stamp rides the message through `sanitizeMessageForLog` and the
+		// manager's deep clone; the point of putting it on the message itself
+		// rather than a side table is exactly this read-back.
+		const adapter = new MemoryAdapter();
+		const service = createService(adapter);
+		await service.sendPrompt("First ask");
+		const sessionPath = service.getSnapshot().session?.path ?? "";
+
+		const revived = createService(adapter);
+		await revived.openSession(sessionPath);
+
+		const replies = revived.getSnapshot().messages.filter((message) => message.role === "assistant");
+		expect(replies).toHaveLength(1);
+		expect(typeof (replies[0] as { durationMs?: number }).durationMs).toBe("number");
+	});
+});
+
 describe("switching the active model", () => {
 	it("offers the configured models to the panel, named rather than as ids", () => {
 		const { service, settings } = createServiceWithSettings();
