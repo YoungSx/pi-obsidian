@@ -89,6 +89,7 @@ export function ChatHeader({
 				searchSessions: onSearchSessions,
 			},
 			t,
+			snapshot.sessionRunStates,
 		);
 	};
 	/**

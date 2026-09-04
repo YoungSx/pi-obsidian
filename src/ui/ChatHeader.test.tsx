@@ -304,6 +304,7 @@ function snapshot(overrides: Partial<ChatSnapshot> = {}): ChatSnapshot {
 		thinkingLevels: ["off", "low", "high"],
 		modelChoices: [],
 		sessionRevision: 0,
+		sessionRunStates: [],
 		usage: usageTotals(),
 		contextFill: fill(),
 		isCompacting: false,

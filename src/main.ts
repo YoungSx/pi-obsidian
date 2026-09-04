@@ -554,6 +554,7 @@ export default class PiemPlugin extends Plugin {
 				searchSessions: (text, options) => service.searchSessions(text, options),
 			},
 			t,
+			service.getSessionRunStates(),
 		);
 	}
 

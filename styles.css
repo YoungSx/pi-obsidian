@@ -3292,6 +3292,54 @@ button.piem-chat__latest--asking {
 	overflow: hidden;
 }
 
+/*
+ * Per-session run-state dot in the history picker (issue #235).
+ *
+ * A quiet session is the norm, so idle paints nothing. Running is a filled
+ * green dot with a slow pulse — alive, not urgent. Waiting-for-input is hollow
+ * amber, the same shape with the centre emptied: "needs you" without the alarm
+ * of red. Error is filled red. Only the shared value line's first child, so the
+ * class that other pickers render through keeps its layout.
+ */
+.piem-session-run-dot {
+	display: inline-block;
+	width: 8px;
+	height: 8px;
+	margin-right: 6px;
+	border-radius: 50%;
+	box-sizing: border-box;
+	flex-shrink: 0;
+	vertical-align: middle;
+}
+
+.piem-session-run-dot--running {
+	background: var(--text-success);
+}
+
+.piem-session-run-dot--waiting-input {
+	border: 2px solid var(--text-warning);
+}
+
+.piem-session-run-dot--error {
+	background: var(--text-error);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+	.piem-session-run-dot--running {
+		animation: pi-session-run-pulse 2s ease-in-out infinite;
+	}
+}
+
+@keyframes pi-session-run-pulse {
+	0%,
+	100% {
+		opacity: 1;
+	}
+	50% {
+		opacity: 0.4;
+	}
+}
+
 /* --- brand icon (src/brandIcon.ts) --- */
 
 /*

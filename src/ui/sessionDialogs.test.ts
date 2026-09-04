@@ -229,3 +229,50 @@ describe("openSessionPicker", () => {
 		expect(aborts).toEqual(["embeddings"]);
 	});
 });
+
+describe("openSessionPicker run-state dots", () => {
+	function openWithStates(states: ReadonlyArray<{ path: string; state: "idle" | "running" | "waiting-input" | "error" }>): SuggestModalHandle {
+		resetSuggestModals();
+		openSessionPicker(
+			app,
+			SESSIONS,
+			{
+				onOpen: () => undefined,
+				onDelete: () => undefined,
+			},
+			t,
+			states,
+		);
+		return lastSuggestModal()!;
+	}
+
+	function dot(picker: SuggestModalHandle, state: string): HTMLElement | null {
+		return picker.resultContainerEl.querySelector<HTMLElement>(`.piem-session-run-dot--${state}`);
+	}
+
+	it("marks a busy session with a labelled dot and leaves idle rows clean", async () => {
+		const picker = openWithStates([
+			{ path: "a.jsonl", state: "running" },
+			{ path: "b.jsonl", state: "idle" },
+		]);
+		await picker.rerender();
+
+		expect(dot(picker, "running")).not.toBeNull();
+		expect(dot(picker, "running")?.getAttribute("aria-label")).toBe(t.t("session.runStateRunning"));
+		expect(dot(picker, "waiting-input")).toBeNull();
+		expect(dot(picker, "error")).toBeNull();
+		// Idle paints nothing: the row keeps its plain title only.
+		expect(dot(picker, "idle")).toBeNull();
+	});
+
+	it("shows the alert states a paused or failed session wears", async () => {
+		const picker = openWithStates([
+			{ path: "a.jsonl", state: "waiting-input" },
+			{ path: "b.jsonl", state: "error" },
+		]);
+		await picker.rerender();
+
+		expect(dot(picker, "waiting-input")?.getAttribute("aria-label")).toBe(t.t("session.runStateWaitingInput"));
+		expect(dot(picker, "error")?.getAttribute("aria-label")).toBe(t.t("session.runStateError"));
+	});
+});
