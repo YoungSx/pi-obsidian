@@ -586,6 +586,15 @@ button.piem-chat__context-open {
 	border: 1px solid var(--background-modifier-border);
 	border-radius: var(--radius-s);
 	display: flex;
+	/*
+	 * Wraps, because at 300px the row cannot hold all four children on one line.
+	 * Measured in Blink: icon 16 + action 108 + dismiss 32 + three 8px gaps left the
+	 * text column **60px wide**, which pushed a 68-character sentence past its own
+	 * height cap and gave it an inner scrollbar inside a 60px column. Wrapping puts
+	 * the action and the ✕ on a second line instead and hands the sentence the full
+	 * width, which is the reading a narrow panel wants anyway.
+	 */
+	flex-wrap: wrap;
 	flex-shrink: 0;
 	gap: var(--size-4-2);
 	padding: var(--size-4-2);
@@ -605,15 +614,28 @@ button.piem-chat__context-open {
  * smaller`, so both themes miss WCAG AA's 4.5:1 for text, and dark also misses
  * the 3:1 graphical floor for the glyph.
  *
- * So the fill goes and the red moves to where it can be seen. `--text-error`
- * on `--background-secondary-alt` measures 4.77:1 dark and 3.52:1 light, both
- * clear of 3:1, while the words fall back to Obsidian's own body pair. The
- * border stays red and now genuinely contrasts with what it borders, which is
- * what the old comment claimed it did. Same lesson as #236 one layer up: red
- * as a *fill* costs the row its legibility and buys nothing the glyph cannot
- * say — and it is the treatment the transcript already uses for a failed tool
- * call and the subagent panel for a failed child, so the panel now reports a
- * failure one way wherever it reports one.
+ * So the fill goes and the red moves to where it can be seen. Measured in Blink
+ * against the same `app.css`, with `--background-secondary-alt` resolving to
+ * #363636 dark / #fcfcfc light:
+ *
+ *   glyph and border `--text-error` vs fill   3.50:1 dark   4.10:1 light  (3:1)
+ *   text `--text-normal` vs fill              8.64:1 dark  15.51:1 light  (4.5:1)
+ *
+ * Both clear their floors, and the words are now on Obsidian's own body pair
+ * rather than on red — 2.47 → 8.64 dark, 3.78 → 15.51 light. The border stays
+ * red and now genuinely contrasts with what it borders (1.00 → 3.50/4.10),
+ * which is what the old comment claimed it did.
+ *
+ * Note which theme is stronger: light, for the red. An earlier draft of this
+ * comment published 4.77:1 dark / 3.52:1 light, which was computed against
+ * #1f1f1f and #ebebeb — neither of which is `--background-secondary-alt` in
+ * either theme. The direction was wrong as well as the values.
+ *
+ * Same lesson as #236 one layer up: red as a *fill* costs the row its
+ * legibility and buys nothing the glyph cannot say — and it is the treatment
+ * the transcript already uses for a failed tool call and the subagent panel for
+ * a failed child, so the panel now reports a failure one way wherever it
+ * reports one.
  *
  * `--recovery` is in this list because it previously had no rule of its own:
  * the crash-recovery offer rendered on the bare `.piem-chat__banner`, with no
@@ -650,15 +672,29 @@ button.piem-chat__context-open {
 .piem-chat__banner-text {
 	flex: 1 1 auto;
 	font-size: var(--font-ui-smaller);
-	min-width: 0;
+	/*
+	 * A floor rather than `min-width: 0`, which is what let the column be squeezed
+	 * to 60px before anything wrapped. Roughly twenty characters: below that a
+	 * sentence stops being readable as a sentence, and the container's `flex-wrap`
+	 * takes over and moves the accessories down instead.
+	 */
+	min-width: 20ch;
 	overflow-wrap: anywhere;
 	/* Skill diagnostics arrive as multi-line strings joined with `\n`; without
 	 * this they collapse into one unreadable run-on sentence. */
 	white-space: pre-line;
-	/* Cap at roughly six lines. A provider error dump otherwise grows without
-	 * bound and pushes the whole conversation out of a sidebar pane. */
-	max-height: 9em;
-	overflow-y: auto;
+	/*
+	 * No height cap, and none needed any more. The old `max-height: 9em` with its
+	 * own `overflow-y: auto` existed because a provider error dump "otherwise grows
+	 * without bound and pushes the whole conversation out of a sidebar pane" — and
+	 * provider dumps do not reach this surface at all now: they report themselves in
+	 * the transcript, at the turn they belong to (#239). What is left here is four
+	 * authored sentences.
+	 *
+	 * Deleting it also removes a WCAG 2.1.1 failure it had created: a scroll
+	 * container with no `tabindex` is unreachable by keyboard, so a sighted keyboard
+	 * user could not read past the sixth line of anything that hit the cap.
+	 */
 }
 
 /* Action where the old copy printed a settings path in prose. */
@@ -986,6 +1022,15 @@ button.piem-chat__context-open {
  * that strokes with `currentColor`, so `color` here is what reaches the glyph.
  * That is the same hook `.piem-chat__trace-icon` and `.piem-chat__banner-icon`
  * use, and the reason `.svg-icon` appears nowhere in this file.
+ *
+ * Measured on the backdrop this row actually has. The panel opens through
+ * `getRightLeaf`, and Obsidian paints a sidebar leaf `--background-secondary`
+ * (`--background-primary` is for `.mod-root` leaves); the assistant bubble paints
+ * nothing, so the row sits on the leaf. Glyph 4.38:1 dark / 3.89:1 light there,
+ * 4.83 / 4.20 in a main-area tab — every case clear of 3:1. The words stay
+ * `--text-muted`, which is `--color-base-70` and measures 7.22:1 dark / 6.19:1
+ * light at 12px: `--text-faint` is the token that would have been marginal, and
+ * this row does not use it.
  */
 .piem-chat__interrupted--failed .piem-chat__interrupted-icon {
 	color: var(--text-error);
@@ -2908,7 +2953,14 @@ button.piem-chat__latest--asking {
 	 * reader's next step lives inside this target — so 32px in the thumb zone is
 	 * exactly the gap the coarse block exists to close.
 	 */
-	.piem-chat__banner-action {
+	.piem-chat__banner-action,
+	/*
+	 * "Copy it out" on an unsaved reply. A bare <button> like the one above, so the
+	 * icon-button selector never reached it — leaving a 30px target beside a
+	 * warning about words that are about to be lost, while every sibling control in
+	 * the panel grew to 48px. Height only, for the same reason: it carries a label.
+	 */
+	.piem-chat__interrupted-action {
 		min-height: var(--size-4-12);
 	}
 
