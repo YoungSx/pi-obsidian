@@ -52,8 +52,14 @@ describe("createCollapsibleSection", () => {
 		createCollapsibleSection(host, { label: "Context tidying", description: "Advanced." });
 
 		const summary = host.querySelector("summary");
-		expect(summary?.textContent).toBe("Context tidyingAdvanced.");
-		expect(summary?.getAttribute("aria-label")).toBe("Context tidying. Advanced.");
+		const labelSpan = summary?.querySelector(".piem-settings-advanced__label");
+		const hintSpan = summary?.querySelector(".piem-settings-advanced__hint");
+		// `aria-labelledby`/`aria-describedby` rather than `aria-label`: on desktop
+		// every `aria-label` is a native hover tooltip, and this one would restate
+		// the two visible spans verbatim on every mouseover.
+		expect(summary?.getAttribute("aria-labelledby")).toBe(labelSpan?.id);
+		expect(summary?.getAttribute("aria-describedby")).toBe(hintSpan?.id);
+		expect(labelSpan?.id).not.toBe("");
 	});
 
 	it("leaves the name to the label alone when there is no hint to run into", () => {
@@ -62,5 +68,19 @@ describe("createCollapsibleSection", () => {
 		createCollapsibleSection(host, { label: "Context tidying" });
 
 		expect(host.querySelector("summary")?.getAttribute("aria-label")).toBeNull();
+		expect(host.querySelector("summary")?.getAttribute("aria-labelledby")).toBeNull();
+	});
+
+	it("gives repeated sections distinct ids, since aria-labelledby resolves document-wide", () => {
+		const first = createCollapsibleSection(document.createElement("div"), { label: "A", description: "hint" });
+		const second = createCollapsibleSection(document.createElement("div"), { label: "B", description: "hint" });
+
+		const firstName = first.previousElementSibling?.getAttribute("aria-labelledby");
+		// The body div's only sibling is the summary; resolve both sections' names
+		// through their own summaries so the two labels cannot alias each other.
+		const firstSummary = first.parentElement?.querySelector("summary");
+		const secondSummary = second.parentElement?.querySelector("summary");
+		expect(firstSummary?.getAttribute("aria-labelledby")).toBe(firstName);
+		expect(secondSummary?.getAttribute("aria-labelledby")).not.toBe(firstSummary?.getAttribute("aria-labelledby"));
 	});
 });
