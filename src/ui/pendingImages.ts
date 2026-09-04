@@ -46,6 +46,10 @@ export function toImageContents(images: readonly PendingImage[]): ImageContent[]
 	return images.map((image) => ({ type: "image", data: image.data, mimeType: image.mimeType }));
 }
 
-function newPendingImageId(): string {
+/**
+ * Ids a restaged image needs too: an edit's rewrite restages the original
+ * turn's pictures (ChatApp), so the generator is shared rather than private.
+ */
+export function newPendingImageId(): string {
 	return window.crypto?.randomUUID?.() ?? Math.random().toString(16).slice(2);
 }

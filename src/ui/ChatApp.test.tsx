@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, setSystemTime } from "bun:test";
+import type { ImageContent } from "@earendil-works/pi-ai";
 import type { App, Component } from "obsidian";
 import { flushRender, installDom } from "../testUtils/dom";
 import { installObsidianStub, lastMenu, resetMenus } from "../testUtils/obsidianStub";
@@ -144,10 +145,10 @@ class FakeAgentService {
 	 * declines it the same way it declines `sendPrompt`, reusing the constructor
 	 * switch rather than a second knob for one behaviour.
 	 */
-	readonly editResends: Array<{ index: number; prompt: string }> = [];
+	readonly editResends: Array<{ index: number; prompt: string; images: ImageContent[] }> = [];
 
-	async editAndResend(index: number, prompt: string): Promise<boolean> {
-		this.editResends.push({ index, prompt });
+	async editAndResend(index: number, prompt: string, images: ImageContent[] = []): Promise<boolean> {
+		this.editResends.push({ index, prompt, images });
 		return !this.failSends;
 	}
 	/** Recorded so a test can prove the compare action reached the service. */
@@ -1002,7 +1003,7 @@ describe("ChatApp edit and resend", () => {
 		sendButton(host).click();
 		await flushRender();
 
-		expect(service.editResends).toEqual([{ index: 0, prompt: "Which notes mention pi?" }]);
+		expect(service.editResends).toEqual([{ index: 0, prompt: "Which notes mention pi?", images: [] }]);
 		expect(service.sentPrompts).toEqual([]);
 	});
 
@@ -1046,6 +1047,76 @@ describe("ChatApp edit and resend", () => {
 
 		expect(composer(host).value).toBe("Half a thought set aside.");
 		expect(host.querySelector(".piem-chat__editing")).toBeNull();
+	});
+
+	/**
+	 * The answered pair, but the question went out with a picture. Content is a
+	 * real part array, the only shape `handleEditMessage` can restage from.
+	 */
+	const answeredWithImage: Partial<ChatSnapshot> = {
+		isConfigured: true,
+		messages: [
+			{
+				...userQuestion("What is in this picture?"),
+				content: [
+					{ type: "text", text: "What is in this picture?" },
+					{ type: "image", mimeType: "image/png", data: "aGVsbG8=" },
+				],
+			},
+			assistantReply("A very small diagram.") as ChatSnapshot["messages"][number],
+		] as ChatSnapshot["messages"],
+	};
+
+	it("restages the original turn's images into the composer when the edit is armed", async () => {
+		const { host } = await mountChat({ snapshot: answeredWithImage });
+
+		editButton(host).click();
+		await flushRender();
+
+		// The rewrite is visible and editable, same as its words: the composer
+		// is the one place the user can still unstage one before resending.
+		expect(host.querySelectorAll(".piem-chat__pending-image")).toHaveLength(1);
+	});
+
+	it("sends the restaged images through editAndResend, not sendPrompt", async () => {
+		const { host, service } = await mountChat({ snapshot: answeredWithImage });
+
+		editButton(host).click();
+		await flushRender();
+		await typeDraft(composer(host), "And this one?");
+		sendButton(host).click();
+		await flushRender();
+
+		expect(service.editResends).toEqual([
+			{ index: 0, prompt: "And this one?", images: [{ type: "image", mimeType: "image/png", data: "aGVsbG8=" }] },
+		]);
+		expect(service.sentPrompts).toEqual([]);
+	});
+
+	it("cancelling the edit discards the restaged images and restores the stage the edit displaced", async () => {
+		const { host } = await mountChat({ snapshot: answeredWithImage });
+
+		// Stage a fresh picture first, so the cancel has a displaced stage to
+		// bring back — distinct from the restaged original the edit owns.
+		const png = new File([new Uint8Array([0x89, 0x50])], "note.png", { type: "image/png" });
+		const paste = new domWindow.Event("paste", { bubbles: true, cancelable: true });
+		Object.defineProperty(paste, "clipboardData", { value: { files: [png] } });
+		composer(host).dispatchEvent(paste);
+		await flushRender();
+		expect(host.querySelectorAll(".piem-chat__pending-image")).toHaveLength(1);
+
+		editButton(host).click();
+		await flushRender();
+		// Still one: the displaced stage was swapped out for the restage, not
+		// merged — the composer shows exactly what the resend will carry.
+		expect(host.querySelectorAll(".piem-chat__pending-image")).toHaveLength(1);
+
+		const cancel = host.querySelector<HTMLButtonElement>('[aria-label="Cancel edit"]');
+		cancel?.click();
+		await flushRender();
+
+		expect(composer(host).value).toBe("");
+		expect(host.querySelectorAll(".piem-chat__pending-image")).toHaveLength(1);
 	});
 
 	it("disarms silently when the transcript moves under the armed index, instead of rewriting a stranger's turn", async () => {
