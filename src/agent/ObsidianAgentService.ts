@@ -2545,7 +2545,26 @@ export class ObsidianAgentService {
 			this.notify();
 			return;
 		}
+		await this.reconfigureRuntime(rt);
+	}
+
+	/**
+	 * Reconfigures one runtime's live agent to match the current settings.
+	 *
+	 * The body {@link refreshConfiguration} used to carry, extracted so the
+	 * operation can address a runtime directly: a deferred mid-run change (issue
+	 * #252) applies when the run settles, and the runtime that settles may be one
+	 * the panel is not showing — a background session left mid-stream — which the
+	 * focused-only `current()` lookup could never name. Everything the settings
+	 * path needs lives here unchanged: the model assignment, the thinking-level
+	 * clamp with its session-log entry, the tool rebuild, the skill reload, and
+	 * the configuration rows the session file records.
+	 */
+	private async reconfigureRuntime(rt: SessionRuntime): Promise<void> {
 		const agent = rt.agent;
+		if (!agent || !this.sessionManager.isLoaded(rt.sessionPath)) {
+			return;
+		}
 		const defaults = this.getSessionDefaults();
 		const model = getSelectedModel(this.getSettings());
 		agent.state.model = model;
