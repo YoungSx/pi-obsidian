@@ -4,6 +4,7 @@ import { IconButton, ObsidianIcon } from "./ObsidianIcon";
 import { isSendShortcut, resolveSendShortcut, sendShortcutAria, type SendShortcut } from "./keyboard";
 import { sendButtonTitle, sendShortcutLabel } from "./chatStatus";
 import { useT } from "./TranslatorContext";
+import { suppressOwnTooltip } from "./tooltipSuppression";
 import { useAutosize } from "./useAutosize";
 import { CommandMenu, type CommandEntry } from "./CommandMenu";
 import type { PendingImage } from "./pendingImages";
@@ -370,7 +371,11 @@ export function ChatComposer({
 					 * went in, the agent has not reached them yet. Cancel is per chip —
 					 * a queue of three is three decisions, not one.
 					 */
-					<ul className="piem-chat__queue" aria-label={t.t("chat.queueLabel")}>
+					<ul
+						className="piem-chat__queue"
+						aria-label={t.t("chat.queueLabel")}
+						onMouseOver={suppressOwnTooltip}
+					>
 						{queuedPrompts.map((queued) => (
 							<li key={queued.id} className="piem-chat__queue-item" role="listitem">
 								<span className="piem-chat__queue-text">
@@ -429,6 +434,7 @@ export function ChatComposer({
 					onDragOver={handleDragOver}
 					placeholder={t.t("chat.placeholder")}
 					aria-label={t.t("chat.composerAria")}
+					onMouseOver={suppressOwnTooltip}
 					aria-keyshortcuts={sendShortcutAria(shortcut)}
 					/*
 					 * The ARIA combobox half of the command menu. The draft is where

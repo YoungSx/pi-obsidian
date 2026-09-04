@@ -5,6 +5,7 @@ import { ObsidianIcon } from "./ObsidianIcon";
 import { usePointerDownOutside } from "./usePointerDownOutside";
 import { statusText, timingLine } from "./inspectorCopy";
 import { useT } from "./TranslatorContext";
+import { suppressOwnTooltip } from "./tooltipSuppression";
 
 /** How long the popover stays open after the pointer leaves, in ms. */
 const CLOSE_DELAY_MS = 150;
@@ -129,14 +130,6 @@ export function SubagentEntryIcon({ snapshots, onOpen }: SubagentEntryIconProps)
 			ref={wrapperRef}
 			onPointerEnter={openOnHover}
 			onPointerLeave={closeOnLeave}
-			/*
-			 * Swallows the one-line tooltip Obsidian hangs off every `aria-label` on
-			 * hover: the popover already says more than it would, and on a pointer
-			 * device both would open at once. The accessible name survives — this
-			 * stops the event reaching Obsidian's delegated listener, it never
-			 * touches the attribute.
-			 */
-			onMouseOver={(event) => event.stopPropagation()}
 			// Keyboard focus pins the popover: there is no pointer to leave, and
 			// without it the rows inside would be unreachable by Tab.
 			onFocus={() => setOpenedBy((current) => current ?? "focus")}
@@ -167,6 +160,15 @@ export function SubagentEntryIcon({ snapshots, onOpen }: SubagentEntryIconProps)
 				aria-expanded={isOpen}
 				aria-controls={popoverId}
 				aria-label={label}
+				/*
+				 * Swallows the tooltip Obsidian hangs off this label on hover: the
+				 * popover already says more than it would, and on a pointer device
+				 * both would open at once. The accessible name survives — the event
+				 * stops here, the attribute is never touched. The handler sits on the
+				 * button, not the wrapper, so the rows' own tooltips inside the
+				 * popover still reach Obsidian.
+				 */
+				onMouseOver={suppressOwnTooltip}
 				onClick={() => {
 					// Close before navigating: the panel is about to take over, and a
 					// popover left hanging in the composer would outlive its own subject.
@@ -185,13 +187,19 @@ export function SubagentEntryIcon({ snapshots, onOpen }: SubagentEntryIconProps)
 				</span>
 			</button>
 			{isOpen ? (
-				<div id={popoverId} className="piem-chat__subagents-popover" role="group" aria-label={t.t("subagents.popoverAria")}>
+				<div
+					id={popoverId}
+					className="piem-chat__subagents-popover"
+					role="group"
+					aria-label={t.t("subagents.popoverAria")}
+					onMouseOver={suppressOwnTooltip}
+				>
 					{snapshots.map((snapshot) => (
 						<button
 							key={snapshot.id}
 							type="button"
 							className="piem-chat__subagents-item"
-							aria-label={t.t("subagents.openDetail", { role: snapshot.role, status: statusText(snapshot.status, t) })}
+							aria-label={t.t("subagents.openDetail", { task: snapshot.task })}
 							onClick={() => {
 								closeNow();
 								onOpen(snapshot.id);

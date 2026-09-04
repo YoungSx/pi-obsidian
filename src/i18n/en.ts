@@ -150,8 +150,10 @@ export const en = {
 		 * implementation detail they never have to hold.
 		 */
 		compareFromHere: "Compare two ways",
-		/** The lane switcher's accessible name. */
+		/** The lane switcher button's accessible name and tooltip. */
 		lanesLabel: "Comparison branches",
+		/** The switcher group's name, distinct from the button's so one hover does not print the same tooltip twice. */
+		lanesGroupAria: "Comparison branches",
 		/** The original conversation, always the first option in the switcher. */
 		laneMain: "Original",
 		/** Comparison branches, numbered in creation order: "Option A", "Option B". */
@@ -188,7 +190,6 @@ export const en = {
 		thoughtItThrough: "Thought it through",
 		/** The thinking row while the model is still producing it; settled, it reads "Thought it through". */
 		thinkingNow: "Thinking…",
-		compactedAria: "Compacted history",
 		earlierSummarized: "Earlier history was summarized to fit the context window.",
 		imagePlaceholder: "[image: {mimeType}]",
 		/** Shown as a banner when the active model lacks image capability. */
@@ -233,7 +234,6 @@ export const en = {
 		rowLabelSummary: "Summary",
 		headerAria: "Current chat",
 		actionsAria: "Chat actions",
-		statusAria: "Chat status",
 		tokensSuffix: "tokens",
 		contextAria: "Context window use",
 		contextValueText: "{estimated}{tokens} of {window} {unit} used, {percent} percent, {state}",
@@ -1327,8 +1327,8 @@ export const en = {
 		entryRunning: "{count} subagent(s) working. Open the subagent panel.",
 		entrySettled: "{count} subagent(s) in this chat. Open the subagent panel.",
 		popoverAria: "Subagents in this chat",
-		/** One popover row: opens the panel already showing that run. */
-		openDetail: "Open {role}: {status}",
+		/** One popover row: opens the panel already showing that run. Task first — a reader scanning rows remembers what they asked, and "scout" describes several of them. */
+		openDetail: "{task} — open run",
 		listAria: "Subagents, oldest first",
 		empty: "No subagents yet.",
 		emptyHint: "When Piem hands a task to a subagent, the run shows up here: what it was asked, what it reported, and every step in between.",

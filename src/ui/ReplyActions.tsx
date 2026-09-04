@@ -4,6 +4,7 @@ import { setTooltip } from "obsidian";
 import { IconButton } from "./ObsidianIcon";
 import { appendToActiveNote, copyToClipboard, insertAtCursor, notifyActionResult } from "./messageActions";
 import { useT } from "./TranslatorContext";
+import { suppressOwnTooltip } from "./tooltipSuppression";
 import { formatClock, formatReplyDuration } from "./replyDuration";
 
 interface ReplyActionsProps {
@@ -89,7 +90,12 @@ export function ReplyActions({ app, text, durationMs, startedAt, onRetry }: Repl
 	}
 
 	return (
-		<div className="piem-chat__message-actions" role="group" aria-label={t.t("replyActions.label")}>
+		<div
+			className="piem-chat__message-actions"
+			role="group"
+			aria-label={t.t("replyActions.label")}
+			onMouseOver={suppressOwnTooltip}
+		>
 			<IconButton
 				icon="copy"
 				label={t.t("replyActions.copy")}

@@ -3,6 +3,7 @@ import type { RefObject } from "react";
 import { prepareFuzzySearch, sortSearchResults } from "obsidian";
 import type { SearchResult } from "obsidian";
 import { useT } from "./TranslatorContext";
+import { suppressOwnTooltip } from "./tooltipSuppression";
 import { isComposing } from "./keyboard";
 
 /** A `/name`-command entry surfaced for autocomplete. */
@@ -232,7 +233,14 @@ export function CommandMenu({ commands, query, menuId, onActiveChange, onSelect,
 	}
 
 	return (
-		<ul ref={listRef} id={menuId} className="piem-chat__command-menu" role="listbox" aria-label={t.t("chat.commandMenuAria")}>
+		<ul
+			ref={listRef}
+			id={menuId}
+			className="piem-chat__command-menu"
+			role="listbox"
+			aria-label={t.t("chat.commandMenuAria")}
+			onMouseOver={suppressOwnTooltip}
+		>
 			{matches.map((match, index) => (
 				<li
 					key={`${match.kind}:${match.name}`}

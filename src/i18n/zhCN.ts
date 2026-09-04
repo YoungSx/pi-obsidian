@@ -91,6 +91,8 @@ export const zhCN: DeepPartial<EnCopy> = {
 		editingNotice: "正在编辑上一条提问——发送后将替换这条回复。",
 		compareFromHere: "对比两种走向",
 		lanesLabel: "对比分支",
+		/** 分组名与按钮名分开，同一把悬停才不会打印两行一模一样的 tooltip。 */
+		lanesGroupAria: "对比分支",
 		laneMain: "原对话",
 		laneOption: "方案 {label}",
 		laneChoose: "就用这条",
@@ -106,7 +108,6 @@ export const zhCN: DeepPartial<EnCopy> = {
 		thoughtItThrough: "思考了一下",
 		/** 思考行仍在流式生成时；落定后读「思考了一下」。 */
 		thinkingNow: "正在思考…",
-		compactedAria: "已总结的历史",
 		earlierSummarized: "较早的历史已被总结，以适应上下文窗口。",
 		imagePlaceholder: "[图片：{mimeType}]",
 		imagesNotSupported: "{model} 不支持图片。请更换模型或移除图片。",
@@ -142,7 +143,6 @@ export const zhCN: DeepPartial<EnCopy> = {
 		rowLabelSummary: "总结",
 		headerAria: "当前对话",
 		actionsAria: "对话操作",
-		statusAria: "对话状态",
 		tokensSuffix: "token",
 		contextAria: "上下文窗口占用",
 		contextValueText: "已使用 {estimated}{tokens} / {window} {unit}，{percent}%，{state}",
@@ -828,7 +828,7 @@ export const zhCN: DeepPartial<EnCopy> = {
 		entryRunning: "{count} 个子代理正在干活。打开子代理面板。",
 		entrySettled: "此对话共 {count} 个子代理。打开子代理面板。",
 		popoverAria: "此对话的子代理",
-		openDetail: "打开 {role}：{status}",
+		openDetail: "{task}——查看运行",
 		listAria: "子代理，最早的在前",
 		empty: "还没有子代理。",
 		emptyHint: "当 Piem 把一件事交给子代理去做，这里会出现那次运行：它接到什么、报回什么，以及中间的每一步。",

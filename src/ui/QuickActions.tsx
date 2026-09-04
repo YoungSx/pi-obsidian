@@ -1,6 +1,7 @@
 import React from "react";
 import type { QuickAction } from "./quickActionSuggestions";
 import { useT } from "./TranslatorContext";
+import { suppressOwnTooltip } from "./tooltipSuppression";
 
 interface QuickActionsProps {
 	/** The suggested prompts to offer; an empty row renders nothing. */
@@ -27,7 +28,12 @@ export function QuickActions({ actions, onSelect }: QuickActionsProps): React.JS
 	}
 
 	return (
-		<div className="piem-chat__quick-actions" role="group" aria-label={t.t("quickActions.label")}>
+		<div
+			className="piem-chat__quick-actions"
+			role="group"
+			aria-label={t.t("quickActions.label")}
+			onMouseOver={suppressOwnTooltip}
+		>
 			{actions.map((action) => (
 				<button
 					key={action.id}

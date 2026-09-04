@@ -81,10 +81,12 @@ describe("ContextRow", () => {
 		const host = await renderRow({ refs: [{ kind: "active", path: "Projects/2026/Q3/weekly-0827.md", isPinned: false }] });
 
 		// A real vault path has no chance in a 300px sidebar, but the folder is the
-		// one thing a screen reader user cannot recover from context.
+		// one thing a screen reader user cannot recover from context. The path
+		// rides the accessible name only: a `title` beside it stacked a second
+		// tooltip on top of Obsidian's on every hover.
 		expect(host.querySelector(".piem-chat__context-chip-label")?.textContent).toBe("weekly-0827");
 		const open = host.querySelector(".piem-chat__context-open");
-		expect(open?.getAttribute("title")).toBe("Projects/2026/Q3/weekly-0827.md");
+		expect(open?.getAttribute("title")).toBeNull();
 		expect(open?.getAttribute("aria-label")).toBe("Open Projects/2026/Q3/weekly-0827.md, followed automatically");
 	});
 

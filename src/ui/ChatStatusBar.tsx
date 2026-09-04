@@ -82,10 +82,10 @@ export function ChatStatusBar({ isInitializing, isCompacting, isRewinding, showA
 	const isQuiet = !status && !progress;
 
 	return (
-		<div
-			className={`piem-chat__statusbar${isQuiet ? " piem-chat__visually-hidden" : ""}`}
-			aria-label={t.t("chat.statusAria")}
-		>
+		// No `aria-label`: a name on a role-less div is a phantom — a screen reader
+		// never reads it as part of anything, and Obsidian desktop would only turn
+		// it into a hover tooltip on a strip the pointer user already sees.
+		<div className={`piem-chat__statusbar${isQuiet ? " piem-chat__visually-hidden" : ""}`}>
 			{/*
 			 * The live region is the wrapper, not the text, so it stays mounted across
 			 * state changes. A region that unmounts when the panel goes idle is one a

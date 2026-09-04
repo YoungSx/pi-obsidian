@@ -3,6 +3,7 @@ import { formatCost, formatTokens } from "../agent/usage";
 import type { ContextFill, UsageTotals } from "../agent/usage";
 import { IconButton } from "./ObsidianIcon";
 import { usePointerDownOutside } from "./usePointerDownOutside";
+import { suppressOwnTooltip } from "./tooltipSuppression";
 import {
 	contextCacheLine,
 	contextGaugeName,
@@ -206,16 +207,6 @@ export function ContextGauge({
 			ref={wrapperRef}
 			onPointerEnter={openOnHover}
 			onPointerLeave={closeOnLeave}
-			/*
-			 * Swallows the one-line tooltip Obsidian hangs off every `aria-label`
-			 * on hover. The popover already carries the full readout — same numbers,
-			 * plus the level, the caveat and the tidy action — and on a pointer
-			 * device both would open at once, the tooltip crowding the panel it
-			 * duplicates. The accessible name survives: this stops the event from
-			 * reaching Obsidian's delegated listener, it never touches the
-			 * attribute.
-			 */
-			onMouseOver={(event) => event.stopPropagation()}
 			// Keyboard focus pins, like a press: there is no pointer to leave, so a
 			// hover-style open would have nothing to close it.
 			onFocus={() => setOpenedBy("press")}
@@ -246,6 +237,17 @@ export function ContextGauge({
 				aria-expanded={isOpen}
 				aria-controls={popoverId}
 				aria-label={contextGaugeName(fill, t)}
+				/*
+				 * Swallows the tooltip Obsidian hangs off this label on hover. The
+				 * popover already carries the full readout — same numbers, plus the
+				 * level, the caveat and the tidy action — and on a pointer device
+				 * both would open at once, the tooltip crowding the panel it
+				 * duplicates. The accessible name survives: the event stops here,
+				 * the attribute is never touched. The handler sits on the button,
+				 * not the wrapper, so the tidy button's deliberate disabled-reason
+				 * tooltip inside the popover still reaches Obsidian.
+				 */
+				onMouseOver={suppressOwnTooltip}
 				onClick={togglePress}
 			>
 				{/*
@@ -315,7 +317,15 @@ function ContextPopover({
 	const reasoningNote = detailsVisible ? contextReasoningNote(usage, t) : undefined;
 
 	return (
-		<div id={id} className="piem-chat__context-popover" role="group" aria-label={t.t("chat.contextAria")}>
+		// The popover's own label is for the screen reader's grouping; hovering its
+		// padding should not surface it as a tooltip beside the readout it names.
+		<div
+			id={id}
+			className="piem-chat__context-popover"
+			role="group"
+			aria-label={t.t("chat.contextAria")}
+			onMouseOver={suppressOwnTooltip}
+		>
 			<span className="piem-chat__context-value">
 				{contextTokenSummary(fill)} <span aria-hidden="true">·</span> {contextPercent(fill)}%
 			</span>

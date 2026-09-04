@@ -3,6 +3,7 @@ import type { AskUserAnswer, AskUserQuestion } from "../tools/askUserQuestion";
 import { AskUserForm } from "./AskUserForm";
 import { ObsidianIcon } from "./ObsidianIcon";
 import { useT } from "./TranslatorContext";
+import { suppressOwnTooltip } from "./tooltipSuppression";
 
 /**
  * The agent's question, as an entry in the transcript.
@@ -73,6 +74,7 @@ export function AskUserCard({ questions, queued = 0, onAnswer, onDismiss }: AskU
 			className="piem-ask-card piem-ask-card--pending"
 			aria-label={t.t("askUser.cardLabel")}
 			tabIndex={-1}
+			onMouseOver={suppressOwnTooltip}
 		>
 			{/*
 			 * Live, and polite. A blocking question is not an error, so it does not
@@ -114,7 +116,11 @@ export interface AskUserReceiptProps {
 export function AskUserReceipt({ answers, dismissed }: AskUserReceiptProps): React.JSX.Element {
 	const t = useT();
 	return (
-		<section className={`piem-ask-card piem-ask-card--${dismissed ? "dismissed" : "answered"}`} aria-label={t.t("askUser.cardLabel")}>
+		<section
+			className={`piem-ask-card piem-ask-card--${dismissed ? "dismissed" : "answered"}`}
+			aria-label={t.t("askUser.cardLabel")}
+			onMouseOver={suppressOwnTooltip}
+		>
 			<div className="piem-ask-card__state">
 				<ObsidianIcon name={dismissed ? "circle-slash" : "check"} className="piem-ask-card__state-icon" />
 				<span className="piem-ask-card__state-text">{t.t(dismissed ? "askUser.dismissed" : "askUser.answered")}</span>

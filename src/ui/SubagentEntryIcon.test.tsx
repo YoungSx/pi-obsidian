@@ -242,11 +242,13 @@ describe("SubagentEntryIcon popover", () => {
 		expect(popover(host)?.id).toBe(controls);
 	});
 
-	it("names each item by role and status, not by opaque id", async () => {
+	it("names each item by its task, not by opaque id", async () => {
 		const host = await renderIcon([snapshot({ id: "s1", role: "scout", status: "running" })]);
 		await pointerOver(host.querySelector(".piem-chat__subagents")!, "mouse");
 
-		expect(items(host)[0]?.getAttribute("aria-label")).toBe("Open scout: working");
+		// Task first: a reader scanning rows remembers what they asked, and the
+		// role describes several of them while the task describes one.
+		expect(items(host)[0]?.getAttribute("aria-label")).toBe("Summarize the vault — open run");
 	});
 
 	it("carries the status word beside each item, not colour alone", async () => {

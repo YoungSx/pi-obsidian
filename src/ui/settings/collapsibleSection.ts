@@ -22,6 +22,8 @@ export interface CollapsibleSectionOptions {
 	open?: boolean;
 }
 
+let sectionSeq = 0;
+
 /**
  * Renders the group and returns the element its rows go into.
  *
@@ -34,14 +36,20 @@ export function createCollapsibleSection(containerEl: HTMLElement, options: Coll
 	details.open = options.open ?? false;
 
 	const summary = details.createEl("summary", { cls: "piem-settings-advanced__summary" });
-	summary.createSpan({ cls: "piem-settings-advanced__label", text: options.label });
+	const labelSpan = summary.createSpan({ cls: "piem-settings-advanced__label", text: options.label });
 	if (options.description) {
-		summary.createSpan({ cls: "piem-settings-advanced__hint", text: options.description });
+		const hintSpan = summary.createSpan({ cls: "piem-settings-advanced__hint", text: options.description });
 		// The label and the hint are separate elements laid out with `gap`, which
 		// is visual space only: a screen reader concatenates their text and would
-		// announce "Context tidyingAdvanced." as one word. `aria-label` gives the
-		// disclosure one properly separated name instead.
-		summary.setAttribute("aria-label", `${options.label}. ${options.description}`);
+		// announce "Context tidyingAdvanced." as one word. `aria-labelledby` and
+		// `aria-describedby` give the disclosure a properly separated name and
+		// description without an `aria-label` — which on desktop would surface
+		// verbatim as a hover tooltip restating the two visible spans.
+		const sectionId = `piem-settings-advanced-${++sectionSeq}`;
+		labelSpan.setAttribute("id", `${sectionId}-label`);
+		hintSpan.setAttribute("id", `${sectionId}-hint`);
+		summary.setAttribute("aria-labelledby", `${sectionId}-label`);
+		summary.setAttribute("aria-describedby", `${sectionId}-hint`);
 	}
 
 	return details.createDiv({ cls: "piem-settings-advanced__body" });
