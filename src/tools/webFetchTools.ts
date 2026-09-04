@@ -1,6 +1,6 @@
 import type { AgentTool, AgentToolResult } from "@earendil-works/pi-agent-core";
 import { Type } from "typebox";
-import { createFetchForTransport, type NetworkTransport } from "../net/obsidianFetch";
+import { createObsidianRequestUrlFetch } from "../net/obsidianFetch";
 import { throwIfAborted } from "./toolResult";
 import { truncateToolOutput } from "../vault/truncate";
 
@@ -9,14 +9,18 @@ import { truncateToolOutput } from "../vault/truncate";
  *
  * The vault tools (read/write/edit/grep/…) never leave the vault. This is the
  * one that does, so it earns every guardrail AGENTS.md asks of a network call:
- * off by default, disclosed in its own description, and riding the same
- * transport the user picked for provider requests — never a second, hidden
- * channel.
+ * disclosed in its own description, output capped, and moving every byte
+ * through the one transport layer — no second, hidden channel.
  *
- * The transport is resolved once when the tool set is built (per turn, in
- * {@link createObsidianTools}), so a `requestUrl`↔`fetch` change in settings
- * takes effect on the next turn without the tool holding a stale fetch. The
- * body is returned as text and capped by {@link truncateToolOutput}, the same
+ * The transport is pinned to `requestUrl`, deliberately not the user's
+ * `networkTransport` setting. That setting buys streaming for model requests —
+ * tokens appearing as they arrive — and this tool reads its response in one
+ * gulp, so `fetch`'s streaming buys nothing here. What `fetch` would add is
+ * CORS: the model can ask for any URL, and ordinary web pages send no CORS
+ * headers, so on the `fetch` transport most of the web would be unreachable
+ * from this tool. Skill imports and the models.dev catalog make the same call.
+ *
+ * The body is returned as text and capped by {@link truncateToolOutput}, the same
  * byte budget every other tool result honours — a multi-megabyte endpoint
  * cannot fill the model's context window through this tool any more than a
  * large note can through read.
@@ -24,7 +28,7 @@ import { truncateToolOutput } from "../vault/truncate";
  * The `signal` from the agent loop is forwarded so a stop press aborts an
  * in-flight request. `requestUrl` has no native cancellation; the race in
  * {@link createObsidianRequestUrlFetch} rejects on abort, which is what makes
- * stop actually stop on that transport.
+ * stop actually stop.
  */
 const WebFetchParameters = Type.Object({
 	url: Type.String({
@@ -47,8 +51,8 @@ const WebFetchParameters = Type.Object({
 	),
 });
 
-export function createWebFetchTool(transport: NetworkTransport): AgentTool<typeof WebFetchParameters> {
-	const fetchFn = createFetchForTransport(transport);
+export function createWebFetchTool(): AgentTool<typeof WebFetchParameters> {
+	const fetchFn = createObsidianRequestUrlFetch();
 	return {
 		name: "web_fetch",
 		label: "Fetch a URL",

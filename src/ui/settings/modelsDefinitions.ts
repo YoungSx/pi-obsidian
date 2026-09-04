@@ -290,7 +290,9 @@ function openModelModal(host: SettingsPanelHost, model?: ModelConfig): void {
 		test: (draft) => testDraftModel(host, draft),
 		listModels: (provider, signal) => listingCacheFor(settings.networkTransport).ensure(provider, signal),
 		knownListings: () => listingCacheFor(settings.networkTransport).known(),
-		fetchModelsDev: (signal) => fetchModelsDevIndex({ fetch: createFetchForTransport(settings.networkTransport), signal }),
+		// The catalog request is pinned to `requestUrl` inside modelsDev; passing
+		// the transport in here would silently override that decision.
+		fetchModelsDev: (signal) => fetchModelsDevIndex({ signal }),
 		onSubmit: async (saved) => {
 			if (model) replaceById(settings.models, saved);
 			else {

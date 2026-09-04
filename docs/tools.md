@@ -55,9 +55,11 @@ do in June" becomes answerable.
 
 ## Web
 
-`web_fetch` — the only outbound tool, always present. It rides the same network
-transport you chose for provider requests, so egress stays inspectable in one
-place.
+`web_fetch` — the only outbound tool, always present. It always rides the
+`requestUrl` transport, the same one-layer egress every other network call in
+Piem uses, so egress stays inspectable in one place — and it reaches ordinary
+web pages, which the `fetch` transport's CORS rules would block. The
+`requestUrl`-vs-`fetch` setting affects token streaming only.
 
 ## Skills
 

@@ -91,9 +91,12 @@ obfuscated payload.
 
 **Network requests.** Roughly twenty call sites, all through one transport layer:
 model provider streams, the connection test, the models.dev catalog suggestion,
-remote MCP servers, and the `web_fetch` tool. The transport honors your
-`requestUrl`-vs-`fetch` choice, so egress is inspectable in one place rather
-than scattered across the codebase.
+remote MCP servers, skill imports, and the `web_fetch` tool. Your
+`requestUrl`-vs-`fetch` choice steers the requests where streaming matters —
+model streams and the connection test; the catalog, skill imports, and
+`web_fetch` always ride `requestUrl`, because they fetch whole responses and
+must reach hosts that send no CORS headers. Egress stays inspectable in one
+place rather than scattered across the codebase.
 
 ## Reporting something
 
