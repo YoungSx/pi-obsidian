@@ -151,6 +151,53 @@ describe("ChatBanner", () => {
 		expect(dismissed).toBe(1);
 	});
 
+	/*
+	 * The defect this pins: `polite` was `errorMessage ? null : (...)`, so any
+	 * failure blanked the whole quiet channel — and with it the panel's only two
+	 * recovery controls. A provider refusal over a context that had grown too long
+	 * hid `Tidy up`, which is the fix for it; a failure after a crashed run hid
+	 * `Continue`. Reaching the button meant first dismissing the description of
+	 * the problem it solved.
+	 */
+	it("keeps the tidy offer reachable while reporting a failure, since the offer is the cure", async () => {
+		const host = await renderBanner({
+			errorMessage: "This conversation is too long for the model.",
+			contextWall: { onTidy: () => undefined, onDismiss: () => undefined },
+			onDismiss: () => undefined,
+		});
+
+		expect(host.querySelector(".piem-chat__banner--error")).not.toBeNull();
+		const wall = host.querySelector(".piem-chat__banner--wall");
+		expect(wall).not.toBeNull();
+		expect(wall?.querySelector(".piem-chat__banner-action")?.textContent).toBe("Tidy up");
+	});
+
+	it("keeps the continue offer reachable while reporting a failure", async () => {
+		const host = await renderBanner({
+			errorMessage: "Request failed.",
+			recoveryOffer: { onResume: () => undefined, onDismiss: () => undefined },
+			onDismiss: () => undefined,
+		});
+
+		expect(host.querySelector(".piem-chat__banner--error")).not.toBeNull();
+		expect(host.querySelector(".piem-chat__banner--recovery")).not.toBeNull();
+	});
+
+	it("still silences an outcome under a failure, which is two reports and one slot", async () => {
+		// Unchanged, and the reason is unchanged: "nothing to compact yet" is not a
+		// cure for anything, so it can wait for the failure to be read.
+		const host = await renderBanner({
+			errorMessage: "Request failed.",
+			noticeMessage: "Nothing to compact yet.",
+			contextWall: { onTidy: () => undefined, onDismiss: () => undefined },
+			onDismiss: () => undefined,
+		});
+
+		expect(host.querySelector(".piem-chat__banner--notice")).toBeNull();
+		// And the offer takes the freed slot rather than nothing taking it.
+		expect(host.querySelector(".piem-chat__banner--wall")).not.toBeNull();
+	});
+
 	it("an outcome outranks the standing wall offer, since both speak politely", async () => {
 		const host = await renderBanner({
 			noticeMessage: "Nothing to compact yet.",

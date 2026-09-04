@@ -70,9 +70,12 @@ interface ChatBannerProps {
  * All three are dismissible. The banner previously had no close control at all,
  * so a stale message stayed until the next turn overwrote it.
  *
- * At most one banner renders. Priority is urgency: a failure, then an outcome
- * the user just caused, then the interrupted-reply offer, then the standing
- * context-wall offer — an offer can wait; an error cannot.
+ * At most one *report* renders, and at most one standing offer beside it. Among
+ * the reports, a failure outranks an outcome the user just caused; among the
+ * offers, the interrupted-reply offer outranks the context wall. What a failure
+ * no longer does is hide the offers: those carry the panel's only two recovery
+ * controls, and one of them is frequently the cure for the failure being
+ * reported.
  */
 export function ChatBanner({
 	errorMessage,
@@ -111,11 +114,26 @@ export function ChatBanner({
 			<IconButton icon="x" label={t.t("chat.dismissMessage")} onClick={recoveryOffer.onDismiss} className="piem-chat__banner-dismiss" />
 		</div>
 	) : null;
-	// An outcome outranks the standing offers: both live on the polite channel,
-	// and an offer is still true after the outcome has been read. Between the
-	// offers, the recovery outranks the wall — the reply behind it is one the
-	// user already asked for, and the wall's tidy can wait a turn.
-	const polite = errorMessage ? null : (notice ?? recovery ?? wall);
+	/*
+	 * An outcome outranks the standing offers: both live on the polite channel,
+	 * and an offer is still true after the outcome has been read. Between the
+	 * offers, the recovery outranks the wall — the reply behind it is one the user
+	 * already asked for, and the wall's tidy can wait a turn.
+	 *
+	 * A failure silences the outcome and nothing else. It used to silence the
+	 * offers too, which meant the banner could withhold the remedy for the very
+	 * thing it was reporting: a provider refusal for a context that had grown too
+	 * long hid `Tidy up`, and a failure after a crashed run hid `Continue`. The
+	 * only way to reach the button was to dismiss the description of the problem
+	 * it solved. "An offer can wait; an error cannot" is sound for two reports
+	 * competing for one slot — it is not sound for a report and its own cure.
+	 *
+	 * Two rows is what that costs, and only in the state that earns it: a standing
+	 * blocker plus a standing lever. Affordable now that every turn-scoped failure
+	 * reports itself in the transcript (#239) instead of arriving here as an
+	 * unbounded provider dump.
+	 */
+	const polite = (errorMessage ? null : notice) ?? recovery ?? wall;
 
 	return (
 		<>
