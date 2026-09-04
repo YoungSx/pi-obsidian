@@ -460,6 +460,19 @@ export function ChatApp({ service, inputController, component, draftStore, onOpe
 			return;
 		}
 		const images = toImageContents(pendingImages);
+		// The service resolves `false` and banners its own failures, so these
+		// awaits "cannot" reject — but each one is also the moment the draft has
+		// already been spent. A residual rejection would strand the send silently
+		// (words gone, image cards hanging, no banner), so the catch hands the
+		// text back before rethrowing for diagnosis.
+		const guardedSend = async (send: () => Promise<boolean>): Promise<boolean> => {
+			try {
+				return await send();
+			} catch (error) {
+				setInput(prompt);
+				throw error;
+			}
+		};
 		if (activeEdit) {
 			// An edit cannot apply mid-run — it rewinds the transcript another
 			// run is reading — and arming one is blocked while streaming, so a
@@ -473,7 +486,7 @@ export function ChatApp({ service, inputController, component, draftStore, onOpe
 			// draft lingering through it reads as "nothing happened"), and a refusal
 			// hands the text back with the edit still armed.
 			clearDraft();
-			const sent = await service.editAndResend(activeEdit.index, prompt, images);
+			const sent = await guardedSend(() => service.editAndResend(activeEdit.index, prompt, images));
 			if (sent) {
 				setEditArmed(null);
 				setPendingImages([]);
@@ -491,7 +504,7 @@ export function ChatApp({ service, inputController, component, draftStore, onOpe
 			return;
 		}
 		clearDraft();
-		const sent = await service.sendPrompt(prompt, images);
+		const sent = await guardedSend(() => service.sendPrompt(prompt, images));
 		if (sent) {
 			// A successful send consumed the staged images; clear the thumbnails.
 			setPendingImages([]);
