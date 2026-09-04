@@ -2637,16 +2637,34 @@ button.piem-chat__latest--asking {
 /*
  * The remove button sits over the thumbnail's corner so each staged image is
  * its own target — no reliance on a hover state a touch device cannot produce.
+ * Resting at reduced opacity keeps the ✕ from shouting over the preview it
+ * belongs to; it is still clearly clickable (the card backdrop carries it),
+ * and on touch the hover state below simply never fires — 0.6 is the touch
+ * device's resting *and* only state, which is the reachable one.
  */
 .piem-chat__pending-image-remove {
 	background: var(--background-primary);
 	border: 1px solid var(--background-modifier-border);
 	border-radius: var(--radius-s);
 	box-shadow: var(--shadow-s);
+	opacity: 0.6;
 	padding: 0;
 	position: absolute;
 	right: calc(var(--size-4-2) * -0.5);
 	top: calc(var(--size-4-2) * -0.5);
+}
+
+.piem-chat__pending-image-remove:focus-visible {
+	opacity: 1;
+}
+
+/* Gated like every other hover reveal in this sheet: a touch tap leaves
+ * `:hover` latched on the tapped element until the next tap lands elsewhere,
+ * so an ungated rule would leave the ✕ pinned at full strength. */
+@media (hover: hover) {
+	.piem-chat__pending-image-remove:hover {
+		opacity: 1;
+	}
 }
 
 /*
