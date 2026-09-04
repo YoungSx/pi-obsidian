@@ -1006,37 +1006,6 @@ button.piem-chat__context-open {
 }
 
 /*
- * A failed turn: red on the glyph, muted on the words.
- *
- * The same division the banner and the trace rows make, for the same reason —
- * one loud note per row, spent on the child small enough to afford it. Tinting
- * the sentence too would put `--text-error` on `--background-primary` for a
- * whole line of `--font-ui-smaller`, which is a contrast measurement this row
- * does not need to take; and after the third timeout in a session, a red
- * paragraph is noise while a red glyph is still a landmark.
- *
- * `--text-error` on the glyph is the third place the panel says "this failed"
- * exactly this way, after a failed tool call and a failed subagent.
- *
- * Set on the wrapper span, not on the injected `<svg>`: `setIcon` writes an SVG
- * that strokes with `currentColor`, so `color` here is what reaches the glyph.
- * That is the same hook `.piem-chat__trace-icon` and `.piem-chat__banner-icon`
- * use, and the reason `.svg-icon` appears nowhere in this file.
- *
- * Measured on the backdrop this row actually has. The panel opens through
- * `getRightLeaf`, and Obsidian paints a sidebar leaf `--background-secondary`
- * (`--background-primary` is for `.mod-root` leaves); the assistant bubble paints
- * nothing, so the row sits on the leaf. Glyph 4.38:1 dark / 3.89:1 light there,
- * 4.83 / 4.20 in a main-area tab — every case clear of 3:1. The words stay
- * `--text-muted`, which is `--color-base-70` and measures 7.22:1 dark / 6.19:1
- * light at 12px: `--text-faint` is the token that would have been marginal, and
- * this row does not use it.
- */
-.piem-chat__interrupted--failed .piem-chat__interrupted-icon {
-	color: var(--text-error);
-}
-
-/*
  * A message the session log did not take, and the button that rescues it.
  *
  * Muted like the rest of the row and deliberately not red: the red glyph is
@@ -1055,7 +1024,70 @@ button.piem-chat__context-open {
 }
 
 /*
- * The provider's untouched text, behind a disclosure.
+ * A failed turn is a trace row now: the classified sentence is the row's name,
+ * the provider's untouched text is what the row opens onto.
+ *
+ * The old shape was a notice paragraph with a second, unstyled disclosure below
+ * it — a sibling rather than a child only because `<details>` is not phrasing
+ * content — and the stray "what the provider said" row read as a repeat of the
+ * report above it. One pill, same vocabulary as a failed tool call.
+ *
+ * Red on the glyph, muted on the words — the same division the banner and the
+ * other trace rows make, for the same reason. One loud note per row, spent on
+ * the child small enough to afford it. Tinting the sentence too would put
+ * `--text-error` on the leaf backdrop for a whole line of `--font-ui-smaller`;
+ * after the third timeout in a session, a red paragraph is noise while a red
+ * glyph is still a landmark. This is the third place the panel says "this
+ * failed" exactly this way, after a failed tool call and a failed subagent.
+ *
+ * Set on the wrapper span, not on the injected `<svg>`: `setIcon` writes an SVG
+ * that strokes with `currentColor`, so `color` here is what reaches the glyph.
+ * That is the same hook `.piem-chat__banner-icon` uses, and the reason
+ * `.svg-icon` appears nowhere in this file.
+ *
+ * Measured on the backdrop this row actually has. The panel opens through
+ * `getRightLeaf`, and Obsidian paints a sidebar leaf `--background-secondary`
+ * (`--background-primary` is for `.mod-root` leaves); the assistant bubble paints
+ * nothing, so the row sits on the leaf. Glyph 4.38:1 dark / 3.89:1 light there,
+ * 4.83 / 4.20 in a main-area tab — every case clear of 3:1. The words stay
+ * `--text-muted`, which is `--color-base-70` and measures 7.22:1 dark / 6.19:1
+ * light at 12px: `--text-faint` is the token that would have been marginal, and
+ * this row does not use it.
+ */
+/*
+ * The pill renders in the bubble, not in `.piem-chat__message-content`, so the
+ * trace spacing that rule owns does not reach it — and the base `.piem-chat__trace`
+ * carries none by design, its container owning the spacing. The bubble is block
+ * flow like the content is, so the pill inherits the job the paragraph it
+ * replaced also carried: its own 4px above, the same distance the stopped and
+ * truncated lines beside it breathe.
+ */
+.piem-chat__trace--failed {
+	margin: var(--size-4-2) 0 0;
+}
+
+.piem-chat__trace--failed .piem-chat__trace-icon {
+	color: var(--text-error);
+}
+
+.piem-chat__trace--failed .piem-chat__trace-name {
+	font-family: var(--font-interface);
+	white-space: normal;
+	/*
+	 * The name is a sentence, not an identifier, and sentences wrap — a long
+	 * refusal cannot be cut off behind an ellipsis, because unlike a tool id it
+	 * is the report itself, not a pointer to one.
+	 */
+	flex-shrink: 1;
+	min-width: 0;
+}
+
+.piem-chat__trace--failed .piem-chat__trace-body {
+	padding-bottom: 0;
+}
+
+/*
+ * The provider's untouched text, inside the failed pill.
  *
  * `pre-line` plus `anywhere`, which is the recipe `.piem-chat__banner-text` and
  * `.piem-subagents__error` already use for this exact content: a provider error
@@ -1065,19 +1097,9 @@ button.piem-chat__context-open {
  * wraps rather than owning a scroll box, and the message column stays the only
  * thing that scrolls.
  */
-.piem-chat__cutoff-detail {
-	font-size: var(--font-ui-smaller);
-	margin: var(--size-4-1) 0 0;
-}
-
-.piem-chat__cutoff-detail summary {
-	color: var(--text-muted);
-	cursor: var(--cursor);
-}
-
 .piem-chat__cutoff-raw {
 	color: var(--text-muted);
-	margin: var(--size-4-1) 0 0;
+	margin: 0;
 	overflow-wrap: anywhere;
 	white-space: pre-line;
 }

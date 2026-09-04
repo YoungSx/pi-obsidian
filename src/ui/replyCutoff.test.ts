@@ -74,18 +74,19 @@ describe("describeReplyCutoff", () => {
 		// reachable: a family guessed wrong then costs a headline, not a fact.
 		const cutoff = describeReplyCutoff(reply("error", "429 quota exhausted, check billing"), en);
 
-		expect(cutoff?.detail?.text).toBe("429 quota exhausted, check billing");
-		expect(cutoff?.detail?.label).toBe("What the provider said");
+		expect(cutoff?.raw).toBe("429 quota exhausted, check billing");
 	});
 
 	it("still reports a failure the provider described with nothing at all", () => {
-		// The empty disclosure is the honest report that there was nothing to
-		// disclose; omitting it would read as the panel holding something back.
+		// `raw` is present even when empty, so the renderer can tell "the provider
+		// said nothing" from "not a failure". The pill renders flat in that case —
+		// a disclosure that opens onto nothing would be the one dishonesty here,
+		// and the `unknown` sentence already carries the news itself.
 		const cutoff = describeReplyCutoff(reply("error"), en);
 
 		expect(cutoff?.kind).toBe("failed");
 		expect(cutoff?.notice).toBe("The provider did not answer, and did not say why.");
-		expect(cutoff?.detail).toEqual({ label: "What the provider said", text: "" });
+		expect(cutoff?.raw).toBe("");
 	});
 
 	it("translates every notice", () => {

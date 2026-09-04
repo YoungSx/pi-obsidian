@@ -48,13 +48,14 @@ export interface ReplyCutoff {
 	spoken: string;
 	icon: IconName;
 	/**
-	 * The provider's untouched words, and the label of the disclosure that holds
-	 * them. Present only on `failed`, and always present there: the classified
-	 * sentence above it is a guess made from wording, and this is what makes that
-	 * guess safe to make. One object rather than two optional fields so a caller
-	 * cannot be handed a label with nothing behind it.
+	 * The provider's untouched words. Present only on `failed`, and always
+	 * present there, empty string included: the classified sentence is a guess
+	 * made from wording, and the raw text is what makes that guess safe to make.
+	 * Whether an empty string earns a disclosure is the renderer's call — the
+	 * failed pill renders flat when there is nothing behind it, the same rule the
+	 * tool-call rows follow.
 	 */
-	detail?: { label: string; text: string };
+	raw?: string;
 }
 
 /**
@@ -114,10 +115,10 @@ export function describeReplyCutoff(message: AssistantMessage, t: Translator): R
 			// The glyph the transcript already uses for a failed tool call, so one
 			// vocabulary covers both failures a turn can contain.
 			icon: "alert-triangle",
-			// Kept even when the provider said nothing: an empty disclosure is the
-			// honest report that there was nothing to disclose, and its absence
-			// would read as "the panel is holding something back".
-			detail: { label: t.t("chat.providerFailure.raw"), text: message.errorMessage ?? "" },
+			// Kept even when the provider said nothing: an empty raw text is the
+			// honest report that there was nothing to disclose, and dropping the
+			// field would read as "the panel is holding something back".
+			raw: message.errorMessage ?? "",
 		};
 	}
 	return null;
