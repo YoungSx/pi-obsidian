@@ -589,6 +589,12 @@ export const en = {
 		searchNoResults: "No chat matches that yet.",
 		/** Sits under a row whose match came from the transcript rather than the title. */
 		searchMatchCount: "{count} matching messages",
+		/** Status dot in the history picker: the session has a turn in flight (issue #235). */
+		runStateRunning: "Running",
+		/** Status dot: the session paused for an answer or a queued prompt. */
+		runStateWaitingInput: "Waiting for input",
+		/** Status dot: the session's last turn ended in an error. */
+		runStateError: "Error",
 		renameChat: "Rename chat",
 		deleteChat: "Delete chat",
 		cancel: "Cancel",

@@ -208,6 +208,15 @@ export interface ChatSnapshot {
 	 * alone would go stale.
 	 */
 	sessionRevision: number;
+	/**
+	 * One entry per session the service holds a runtime for (issue #235), so UI
+	 * that lists sessions — the history picker — can mark which ones are mid-run
+	 * without asking the service again. Every runtime's agent events already end
+	 * in {@link ObsidianAgentService.notify}, so this stays live for sessions
+	 * running in the background; idle sessions list too, but a reader that wants
+	 * to keep rows clean simply ignores that state.
+	 */
+	sessionRunStates: ReadonlyArray<{ path: string; state: SessionRunState }>;
 	usage: UsageTotals;
 	/**
 	 * How much of the model's context window the conversation occupies. The
@@ -2531,6 +2540,7 @@ export class ObsidianAgentService {
 			activeModelId: settings.activeModelId,
 			session: this.sessionInfo ?? undefined,
 			sessionRevision: rt?.sessionRevision ?? this.sessionRevision,
+			sessionRunStates: this.getSessionRunStates(),
 			usage: sumUsage(messages, rt?.overheadUsage ?? []),
 			contextFill: measureContextFill(messages, contextWindow, this.resolveCompaction(contextWindow)),
 			isCompacting: rt?.isCompacting ?? false,

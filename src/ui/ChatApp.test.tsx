@@ -1224,6 +1224,7 @@ function baseSnapshot(): ChatSnapshot {
 		// tests do not read it.
 		session: sessionInfo(),
 		sessionRevision: 0,
+		sessionRunStates: [],
 		sendShortcut: DEFAULT_SETTINGS.sendShortcut,
 		usage: { tokens: 0, cost: 0, requests: 0 },
 		contextFill: null,

@@ -1,5 +1,6 @@
 import { Modal, Setting, SuggestModal, type App } from "obsidian";
 import type { ActiveSessionInfo } from "../session/ObsidianSessionManager";
+import type { SessionRunState } from "../agent/SessionRuntime";
 import type { SessionSearchResult } from "../session/sessionSearch";
 import type { Translator } from "../i18n";
 import { mergeSearchRows, titleMatches, type SessionRow } from "./sessionSearchRows";
@@ -32,8 +33,31 @@ export function describeSession(session: ActiveSessionInfo, t: Translator): stri
 	return `${summary} · ${new Date(session.updatedAt).toLocaleString()}`;
 }
 
-export function openSessionPicker(app: App, sessions: ActiveSessionInfo[], actions: SessionPickerActions, t: Translator): void {
-	new SessionPickerModal(app, sessions, actions, t).open();
+export function openSessionPicker(
+	app: App,
+	sessions: ActiveSessionInfo[],
+	actions: SessionPickerActions,
+	t: Translator,
+	runStates?: ReadonlyArray<{ path: string; state: SessionRunState }>,
+): void {
+	new SessionPickerModal(app, sessions, actions, t, runStates).open();
+}
+
+/**
+ * Copy key for a session's run state, absent for `idle`: a quiet session is the
+ * norm, so its row stays clean rather than wearing a badge that says so.
+ */
+function runStateKey(state: SessionRunState): "session.runStateRunning" | "session.runStateWaitingInput" | "session.runStateError" | undefined {
+	switch (state) {
+		case "running":
+			return "session.runStateRunning";
+		case "waiting-input":
+			return "session.runStateWaitingInput";
+		case "error":
+			return "session.runStateError";
+		default:
+			return undefined;
+	}
 }
 
 export function openSessionRename(app: App, session: ActiveSessionInfo, onSubmit: (name: string) => void, t: Translator): void {
@@ -61,17 +85,26 @@ class SessionPickerModal extends SuggestModal<SessionRow> {
 	private readonly sessions: ActiveSessionInfo[];
 	private readonly actions: SessionPickerActions;
 	private readonly t: Translator;
+	/** Run state per session path (issue #235); rows without one render clean. */
+	private readonly runStates: ReadonlyMap<string, SessionRunState>;
 	/** Content hits per query, so a settled query never rescans the vault. */
 	private readonly cache = new Map<string, SessionSearchResult[]>();
 	private pending: AbortController | undefined;
 	/** The query the open scan belongs to; a later keystroke discards its result. */
 	private scanning: string | undefined;
 
-	constructor(app: App, sessions: ActiveSessionInfo[], actions: SessionPickerActions, t: Translator) {
+	constructor(
+		app: App,
+		sessions: ActiveSessionInfo[],
+		actions: SessionPickerActions,
+		t: Translator,
+		runStates?: ReadonlyArray<{ path: string; state: SessionRunState }>,
+	) {
 		super(app);
 		this.sessions = sessions;
 		this.actions = actions;
 		this.t = t;
+		this.runStates = new Map((runStates ?? []).map((entry) => [entry.path, entry.state]));
 		this.setPlaceholder(t.t(actions.searchSessions ? "session.searchContentPlaceholder" : "session.searchPlaceholder"));
 		this.emptyStateText = t.t("session.searchNoResults");
 		this.setInstructions([
@@ -95,7 +128,19 @@ class SessionPickerModal extends SuggestModal<SessionRow> {
 	}
 
 	renderSuggestion(row: SessionRow, el: HTMLElement): void {
-		el.createDiv({ cls: "piem-suggestion-value", text: sessionTitle(row.session, this.t) });
+		const state = this.runStates.get(row.session.path);
+		const key = state ? runStateKey(state) : undefined;
+		const label = key ? this.t.t(key) : undefined;
+		// The dot is a child of the value line so the shared `.piem-suggestion-value`
+		// layout stays untouched — other pickers render through the same class.
+		const value = el.createDiv({ cls: "piem-suggestion-value" });
+		if (state && label) {
+			value.createSpan({
+				cls: `piem-session-run-dot piem-session-run-dot--${state}`,
+				attr: { role: "img", "aria-label": label, title: label },
+			});
+		}
+		value.createSpan({ text: sessionTitle(row.session, this.t) });
 		const meta = new Date(row.session.updatedAt).toLocaleString();
 		el.createDiv({
 			cls: "piem-suggestion-description",
