@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 import type { Component } from "obsidian";
+import type { ImageContent } from "@earendil-works/pi-ai";
 import type { ChatSnapshot, ObsidianAgentService } from "../agent/ObsidianAgentService";
 import type { SuggestionScope } from "../agent/quickActionSuggestionRequest";
 import type { QuickAction } from "./quickActionSuggestions";
@@ -29,7 +30,7 @@ import { canOpenPluginSettings, openPluginSettings } from "./pluginSettings";
 import { getT } from "../i18n";
 import { TranslatorProvider } from "./TranslatorContext";
 import { useSessionDraft } from "./useSessionDraft";
-import { fileToPendingImage, toImageContents, type PendingImage } from "./pendingImages";
+import { fileToPendingImage, newPendingImageId, toImageContents, type PendingImage } from "./pendingImages";
 import type { AskUserBroker, AskUserRequest } from "../tools/askUserBroker";
 
 interface ChatAppProps {
@@ -104,6 +105,8 @@ export function ChatApp({ service, inputController, component, draftStore, onOpe
 		index: number;
 		original: string;
 		draftBefore: string;
+		/** The stage as the user left it before arming; cancel restores it. */
+		imagesBefore: PendingImage[];
 	} | null>(null);
 	/**
 	 * The model-generated quick actions for whichever placement asked last, tagged
@@ -432,15 +435,35 @@ export function ChatApp({ service, inputController, component, draftStore, onOpe
 			if (!original) {
 				return;
 			}
-			setEditArmed({ sessionId: snapshot.session?.id, index, original, draftBefore: inputRef.current });
+			// The original turn's images restage alongside its words: a rewrite
+			// that silently dropped the pictures would answer a different
+			// question than the one asked. The stage is overwritten rather than
+			// merged so the armed edit shows exactly what the resend will carry —
+			// and the composer is the one place the user can still unstage one.
+			const previous = snapshot.messages[index];
+			const priorImages =
+				previous && previous.role === "user" && Array.isArray(previous.content)
+					? previous.content
+							.filter((part): part is ImageContent => part.type === "image")
+							.map((part) => ({ id: newPendingImageId(), mimeType: part.mimeType, data: part.data }))
+					: [];
+			setEditArmed({
+				sessionId: snapshot.session?.id,
+				index,
+				original,
+				draftBefore: inputRef.current,
+				imagesBefore: pendingImages,
+			});
 			setInput(original);
+			setPendingImages(priorImages);
 		},
-		[snapshot.messages, snapshot.session?.id, setInput],
+		[snapshot.messages, snapshot.session?.id, setInput, pendingImages],
 	);
 
 	const handleCancelEdit = useCallback((): void => {
 		setEditArmed(null);
 		setInput(editArmed?.draftBefore ?? "");
+		setPendingImages(editArmed?.imagesBefore ?? []);
 	}, [editArmed, setInput]);
 
 	const visibleMessages = useMemo(() => {
