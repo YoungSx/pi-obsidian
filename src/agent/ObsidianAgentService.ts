@@ -1,4 +1,4 @@
-import { type App, parseLinktext, TFile } from "obsidian";
+import { type App, Notice, parseLinktext, TFile } from "obsidian";
 import { clampThinkingLevel, getSupportedThinkingLevels, type ImageContent, type Usage } from "@earendil-works/pi-ai";
 import {
 	Agent,
@@ -1932,7 +1932,7 @@ export class ObsidianAgentService {
 		try {
 			lanes = await this.createComparisonLanes(rt, entryId);
 		} catch (error) {
-			this.setError(rt, error instanceof Error ? error.message : String(error));
+			this.toast("chat.compareFailed", error);
 			return false;
 		}
 		await this.adoptLane(rt, lanes[0]);
@@ -2002,7 +2002,7 @@ export class ObsidianAgentService {
 				}
 			}
 		} catch (error) {
-			this.setError(rt, error instanceof Error ? error.message : String(error));
+			this.toast("chat.laneChoiceFailed", error);
 			return false;
 		}
 		await this.adoptLane(rt, "main");
@@ -2144,10 +2144,10 @@ export class ObsidianAgentService {
 		try {
 			info = await this.sessionManager.loadSession(path);
 		} catch (error) {
-			// The banner is the focused session's failure slot: the user pressed a
-			// control on the conversation they are looking at, so the reason the
-			// switch failed must show where they can read it.
-			this.setError(this.runtimeForFocused(), error instanceof Error ? error.message : String(error));
+			// A toast, not the banner: the transcript on screen is still the one it
+			// was a moment ago, and a red bar over a healthy conversation says the
+			// damage is there rather than in the chat that would not open.
+			this.toast("chat.sessionOpenFailed", error);
 			return;
 		}
 
@@ -2289,9 +2289,9 @@ export class ObsidianAgentService {
 			await this.app.vault.create(path, content);
 			return path;
 		} catch (error) {
-			if (rt) {
-				this.appendNotice(rt, t.t("chat.exportFailed", { error: error instanceof Error ? error.message : String(error) }));
-			}
+			// The same channel `ReplyActions` already uses for a failed vault write
+			// (`notifyActionResult`), for the same class of failure.
+			this.toast("chat.exportFailed", error);
 			return null;
 		}
 	}
@@ -2364,7 +2364,7 @@ export class ObsidianAgentService {
 		try {
 			await this.sessionManager.deleteSession(path);
 		} catch (error) {
-			this.setError(this.runtimeForFocused(), error instanceof Error ? error.message : String(error));
+			this.toast("chat.sessionDeleteFailed", error);
 			return;
 		}
 		// Only after the trash succeeded: a refused delete must leave the session
@@ -3757,6 +3757,25 @@ export class ObsidianAgentService {
 		rt.noticeMessage = undefined;
 		rt.dismissedAgentError = undefined;
 		this.notify();
+	}
+
+	/**
+	 * Reports the outcome of a control the reader just pressed.
+	 *
+	 * The third channel, and the rule that picks between the three: a message that
+	 * belongs to one *turn* goes in the transcript (`replyCutoff.ts`), one that
+	 * describes a standing state of the *panel* goes in the banner, and one that is
+	 * the outcome of a *command* goes here. A command outcome touches nothing in
+	 * the conversation — the transcript on screen is still the one it was — so
+	 * pinning it above that conversation misattributes the damage, and it has no
+	 * reason to outlive the moment it is read.
+	 *
+	 * `new Notice` rather than a channel of this panel's own: it is what Obsidian
+	 * users already expect from a command that failed, and what `ReplyActions`
+	 * already uses for the analogous vault-write failure.
+	 */
+	private toast(key: Parameters<Translator["t"]>[0], cause: unknown): void {
+		new Notice(this.t().t(key, { error: cause instanceof Error ? cause.message : String(cause) }));
 	}
 
 	/** Reports a non-failure outcome without raising the error banner's alert. */
