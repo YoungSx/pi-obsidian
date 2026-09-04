@@ -523,4 +523,50 @@ describe("ObsidianAgentService multi-session concurrency (issue #235)", () => {
 		expect(stateOfAfter(pathB)).toBe("idle");
 
 	});
+
+	it("a retention sweep spares the background session whose run is in flight", async () => {
+		const { streamFn, entered, aborted } = multiSessionStreamFn();
+		const adapter = new MemoryAdapter();
+		const dataAdapter = asDataAdapter(adapter);
+		const settings = defaultTestSettings();
+		// Cap of 2: the third create fires a sweep whose keep count is
+		// limit − protected (the focused chat and the claimed mid-run chat) = 0,
+		// so every unprotected chat goes — the test names the victim instead of
+		// hoping one falls out.
+		const sessionManager = new ObsidianSessionManager(dataAdapter, {
+			sessionDir: () => SESSION_DIR,
+			retentionLimit: () => 2,
+		}, "obsidian-vault:Test");
+		const service = new ObsidianAgentService(createFakeApp(dataAdapter), () => settings, sessionManager, {
+			streamFn,
+			loadUserSkills: NO_USER_SKILLS,
+		});
+
+		// A holds a turn and then a hanging run; B is the idle leftover; C is the
+		// fresh chat whose create fires the sweep. The focused chat and the
+		// claimed mid-run chat each hold a slot, so B is what goes — and if the
+		// claim were missing, A would go with it, mid-run.
+		await service.sendPrompt("seed-a");
+		const pathA = service.getSnapshot().session?.path;
+		expect(pathA).toBeDefined();
+		await service.newSession();
+		const pathB = service.getSnapshot().session?.path;
+		expect(pathB).toBeDefined();
+		await service.openSession(pathA!);
+		await startHang(service, HANG_A, entered);
+		await service.openSession(pathB!);
+		// B is the blank sheet, so the create must be forced past that guard.
+		await service.newSession({ force: true });
+
+		// The sweep really ran: the idle leftover left disk.
+		expect(adapter.filePaths()).not.toContain(pathB);
+		// The claim spared the mid-run chat's file…
+		expect(adapter.filePaths()).toContain(pathA!);
+		// …and its run never noticed any of it.
+		await settleTick();
+		expect(aborted.get(HANG_A)).toBe(false);
+		expect(entered.get(HANG_A)).toBe(true);
+
+		await stopRun(service, pathA!);
+	});
 });

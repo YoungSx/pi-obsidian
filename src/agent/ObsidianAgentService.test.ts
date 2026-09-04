@@ -818,12 +818,14 @@ describe("ObsidianAgentService", () => {
 		});
 		await service.initialize();
 		const handle = service as unknown as {
-			handleAgentEvent: (event: unknown) => Promise<void>;
+			handleAgentEvent: (rt: unknown, event: unknown) => Promise<void>;
+			runtimeForFocused: () => unknown;
 			agent: { state: { pendingToolCalls: ReadonlySet<string> } };
 		};
+		const focusedRuntime = handle.runtimeForFocused();
 
-		await handle.handleAgentEvent({ type: "tool_execution_start", toolCallId: "toolu_streaming", toolName: "grep", args: {} });
-		await handle.handleAgentEvent({
+		await handle.handleAgentEvent(focusedRuntime, { type: "tool_execution_start", toolCallId: "toolu_streaming", toolName: "grep", args: {} });
+		await handle.handleAgentEvent(focusedRuntime, {
 			type: "tool_execution_update",
 			toolCallId: "toolu_streaming",
 			toolName: "grep",
@@ -840,7 +842,7 @@ describe("ObsidianAgentService", () => {
 		expect(service.getSnapshot().pendingToolCalls).toEqual([{ name: "grep", progress: "42 files scanned" }]);
 
 		// The progress must not outlive the call that produced it.
-		await handle.handleAgentEvent({ type: "tool_execution_end", toolCallId: "toolu_streaming", toolName: "grep", result: {}, isError: false });
+		await handle.handleAgentEvent(focusedRuntime, { type: "tool_execution_end", toolCallId: "toolu_streaming", toolName: "grep", result: {}, isError: false });
 		(handle.agent.state as { pendingToolCalls: ReadonlySet<string> }).pendingToolCalls = new Set();
 		expect(service.getSnapshot().pendingToolCalls).toEqual([]);
 	});
