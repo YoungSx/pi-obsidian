@@ -962,11 +962,28 @@ export class ObsidianAgentService {
 	 * already threw the original turn away.
 	 */
 	private async deliverPrompt(prompt: string, images: ImageContent[] = []): Promise<boolean> {
-		const trimmedPrompt = prompt;
-		// The whole send belongs to one session: capture its runtime up front so
-		// a switch mid-resolution cannot retarget the ledger, the queue, or the
-		// frozen context.
+		// Error boundary for the whole send. The composer clears its draft before
+		// awaiting, so a rejection here would strand the send — words spent, and
+		// staged image cards left hanging over an empty composer (issue #253).
+		// The run's failures already resolve in band (pi's `prompt` never
+		// rejects; the `catch` below banners the rest), but the prelude — the
+		// configuration refresh, the vault reads — used to sit outside that
+		// guard and could reject the call outright. Everything below now
+		// resolves `false` and lands on the banner; nothing escapes.
 		const rt = this.runtimeForFocused();
+		try {
+			return await this.resolveAndDeliver(rt, prompt, images);
+		} catch (error) {
+			this.setError(rt, error instanceof Error ? error.message : String(error));
+			return false;
+		}
+	}
+
+	private async resolveAndDeliver(rt: SessionRuntime, prompt: string, images: ImageContent[] = []): Promise<boolean> {
+		const trimmedPrompt = prompt;
+		// The runtime was captured by the boundary above, before any await: a
+		// switch mid-resolution cannot retarget the ledger, the queue, or the
+		// frozen context.
 		const agent = rt.agent;
 		if (!agent) {
 			return false;
@@ -3902,8 +3919,24 @@ export class ObsidianAgentService {
 		this.notify();
 	}
 
+	/**
+	 * Publishes the post-run state and refreshes the session summary.
+	 *
+	 * Best-effort by design, and the guard lives here rather than at each call
+	 * site because every one of those sites has already finished its real work:
+	 * a run was delivered, aborted, or compacted. A settle-time failure —
+	 * `refreshSessionInfo` reading a broken session file, say — must not reject
+	 * the operation that succeeded, or the composer hands words back for a
+	 * message that already went out (issue #253's shadow path: `sent` flipped
+	 * to a rejection after the run completed). The failure is logged, the panel
+	 * still settles, and the summary simply stays stale until the next refresh.
+	 */
 	private async notifySettledState(rt: SessionRuntime): Promise<void> {
-		await this.refreshSessionInfo(rt);
+		try {
+			await this.refreshSessionInfo(rt);
+		} catch (error) {
+			this.log.error("Failed to refresh session info after settling a run", () => ({ error: String(error) }));
+		}
 		this.notify();
 	}
 
