@@ -144,7 +144,7 @@ describe("describeModelDeletion", () => {
 	it("names the successor when the active model is the one going", () => {
 		const target = model("m1", "p1");
 		const state = lists({ models: [target, model("m2", "p1")], activeModelId: "m1" });
-		expect(describeModelDeletion(state, target, en)[1]).toBe("It is the active model, so m2 takes over when it goes.");
+		expect(describeModelDeletion(state, target, en)[1]).toBe("It is the default model, so m2 takes over when it goes.");
 	});
 
 	it("says nothing replaces it when the active model is the only one", () => {
