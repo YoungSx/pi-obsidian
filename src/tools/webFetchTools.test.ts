@@ -14,11 +14,11 @@ beforeEach(() => {
 });
 
 /** Shapes a stub `requestUrl` response the way Obsidian's real one does. */
-function requestUrlResponse(body: string, status = 200): unknown {
+function requestUrlResponse(body: string, status = 200, headers?: Record<string, string>): unknown {
 	return {
 		status,
 		statusText: "",
-		headers: { "content-type": "text/plain" },
+		headers: headers ?? { "content-type": "text/plain" },
 		arrayBuffer: new TextEncoder().encode(body).buffer,
 	};
 }
@@ -98,18 +98,28 @@ describe("web_fetch", () => {
 		expect(requestUrlMock).toHaveBeenCalledTimes(0);
 	});
 
-	it("flags the detail when the body exceeds the truncation budget", async () => {
+	it("flags the detail and hands over the Range escape hatch when the body exceeds the truncation budget", async () => {
 		// A body well past the default byte cap so truncation is certain, and the
 		// truncated flag in details flips — the content itself is capped by the
-		// shared budget every tool result honours.
+		// shared budget every tool result honours. The notice must teach the
+		// recovery move (page with Range) and surface the server's own size when
+		// it can, so the model knows what remains rather than that it ended.
 		const oversized = "x".repeat(300_000);
-		requestUrlMock.mockImplementation(async () => requestUrlResponse(oversized, 200));
+		requestUrlMock.mockImplementation(async () =>
+			requestUrlResponse(oversized, 200, {
+				"content-type": "text/plain",
+				"content-length": String(oversized.length),
+			}),
+		);
 
 		const tool = createWebFetchTool();
 		const result = await tool.execute("call", { url: "https://example.com/big" });
 
 		expect(result.details).toMatchObject({ truncated: true });
-		expect(textOf(result)).toContain("[Output truncated");
+		const text = textOf(result);
+		expect(text).toContain("[Output truncated");
+		expect(text).toContain("Full body: 300000 bytes.");
+		expect(text).toContain("Re-request with a 'Range: bytes=65536-' header to read further.");
 	});
 });
 

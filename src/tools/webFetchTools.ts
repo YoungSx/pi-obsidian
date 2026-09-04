@@ -2,7 +2,7 @@ import type { AgentTool, AgentToolResult } from "@earendil-works/pi-agent-core";
 import { Type } from "typebox";
 import { createObsidianRequestUrlFetch } from "../net/obsidianFetch";
 import { throwIfAborted } from "./toolResult";
-import { truncateToolOutput } from "../vault/truncate";
+import { truncateToolOutputDetailed } from "../vault/truncate";
 
 /**
  * Agent-facing HTTP request tool.
@@ -20,10 +20,15 @@ import { truncateToolOutput } from "../vault/truncate";
  * headers, so on the `fetch` transport most of the web would be unreachable
  * from this tool. Skill imports and the models.dev catalog make the same call.
  *
- * The body is returned as text and capped by {@link truncateToolOutput}, the same
- * byte budget every other tool result honours — a multi-megabyte endpoint
- * cannot fill the model's context window through this tool any more than a
- * large note can through read.
+ * The body is returned as text and capped by {@link truncateToolOutputDetailed},
+ * the same byte budget every other tool result honours — a multi-megabyte
+ * endpoint cannot fill the model's context window through this tool any more
+ * than a large note can through read. What the cap cannot bound is the
+ * *download*: `requestUrl` buffers the entire body before anything is
+ * observable, so the model is taught — in the description, and again wherever a
+ * truncation lands — to page large resources with HTTP Range headers instead of
+ * gulping them whole. A server that ignores Range takes the one-gulp hit; that
+ * is the transport's structural price, disclosed rather than defended.
  *
  * The `signal` from the agent loop is forwarded so a stop press aborts an
  * in-flight request. `requestUrl` has no native cancellation; the race in
@@ -66,7 +71,12 @@ export function createWebFetchTool(): AgentTool<typeof WebFetchParameters> {
 		description:
 			"Make an HTTP request to an external URL and return the response body as text. " +
 			"This sends data to a server outside the vault and Obsidian. " +
-			"Use it only when a task genuinely needs information that is not in the vault.",
+			"Use it only when a task genuinely needs information that is not in the vault. " +
+			"Only the first 50KB of the body is shown; for anything large or of unknown size, " +
+			"pass a Range header (e.g. 'Range: bytes=0-65535') to fetch a window at a time — " +
+			"a 206 response means the server honours ranges, and 'Content-Range: bytes 0-65535/TOTAL' " +
+			"tells you how much remains to page through. Without Range, a large body is fully " +
+			"downloaded before the visible cap is applied, which wastes memory on multi-megabyte endpoints.",
 		parameters: WebFetchParameters,
 		execute: async (_toolCallId, params, signal) => {
 			throwIfAborted(signal);
@@ -86,18 +96,27 @@ export function createWebFetchTool(): AgentTool<typeof WebFetchParameters> {
 			throwIfAborted(signal);
 			// The status line leads so a non-2xx body is read as the server's own
 			// explanation rather than an unexplained blob of error text.
-			const output = `HTTP ${response.status} ${response.statusText}\n${text}`;
-			// Truncate once and derive the flag from whether it changed, rather than
-			// routing through textResult — which would encode the body a second time
-			// to ask the same question.
-			const capped = truncateToolOutput(output);
+			let output = `HTTP ${response.status} ${response.statusText}\n${text}`;
+			// Truncate once and derive the flag from the structured result, rather
+			// than routing through textResult — which would encode the body a second
+			// time to ask the same question.
+			const capped = truncateToolOutputDetailed(output);
+			// When the cap bites, hand over the escape hatch instead of leaving the
+			// model to conclude the page simply ended. Content-Length is best-effort:
+			// chunked responses omit it, and the header map may have dropped it on a
+			// malformed sibling entry.
+			if (capped.truncated) {
+				const total = response.headers.get("content-length");
+				const sizing = total ? ` Full body: ${total} bytes.` : "";
+				output = `${capped.text}\n[Body truncated at 50KB.${sizing} Re-request with a 'Range: bytes=65536-' header to read further.]`;
+			}
 			const result: AgentToolResult<Record<string, unknown>> = {
-				content: [{ type: "text", text: capped }],
+				content: [{ type: "text", text: output }],
 				details: {
 					url: params.url,
 					method,
 					status: response.status,
-					truncated: capped !== output,
+					truncated: capped.truncated,
 				},
 			};
 			return result;
