@@ -5,6 +5,7 @@ import { VIEW_TYPE_PIEM_CHAT } from "../constants";
 import { BRAND_ICON_ID } from "../brandIcon";
 import type { ObsidianAgentService } from "../agent/ObsidianAgentService";
 import { ChatApp } from "./ChatApp";
+import { PanelErrorBoundary } from "./PanelErrorBoundary";
 import { ChatInputController } from "./ChatInputController";
 import { resolveWorkingNotePath, watchActiveNote } from "./activeNoteWatch";
 import { watchSessionFile } from "./sessionFileWatch";
@@ -146,15 +147,27 @@ export class PiemChatView extends ItemView {
 		this.contentEl.empty();
 		this.contentEl.addClass("piem-chat-view");
 		this.root = createRoot(this.contentEl);
+		// One bad throw anywhere in the tree would otherwise unmount the root and
+		// leave a blank panel for the rest of the Obsidian session. The boundary
+		// turns that into a message plus a remount; what it caught goes to the
+		// plugin log, because the console alone is invisible to most users.
 		this.root.render(
-			<ChatApp
-				service={this.service}
-				inputController={this.inputController}
-				component={this}
-				draftStore={this.draftStore}
-				onOpenSubagents={this.openSubagents}
-				askUserBroker={this.askUserBroker}
-			/>,
+			<PanelErrorBoundary
+				// The fallback renders outside ChatApp's provider, so it re-asks the
+				// snapshot instead of the context — same per-call resolution the rest
+				// of the view's copy uses.
+				getLanguage={() => this.service.getSnapshot().language}
+				onError={(error) => console.error("piem: chat panel render failed", error)}
+			>
+				<ChatApp
+					service={this.service}
+					inputController={this.inputController}
+					component={this}
+					draftStore={this.draftStore}
+					onOpenSubagents={this.openSubagents}
+					askUserBroker={this.askUserBroker}
+				/>
+			</PanelErrorBoundary>,
 		);
 	}
 

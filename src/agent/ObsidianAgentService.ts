@@ -2482,6 +2482,11 @@ export class ObsidianAgentService {
 		}
 		if (wasActive) {
 			this.currentPath = null;
+			// Drop the dead session's info with it: the window between here and the
+			// replacement adopting (openSession or the forced newSession below) can
+			// notify, and a snapshot whose `session` names a just-deleted file is a
+			// lie every consumer would have to defend against.
+			this.sessionInfo = null;
 		}
 		const replacement = (await this.sessionManager.listSessions())[0];
 		if (wasActive && replacement) {

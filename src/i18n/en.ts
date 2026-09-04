@@ -15,6 +15,8 @@ export const en = {
 	/** Chat panel tab title shown in the workspace tab strip. */
 	view: {
 		tabTitle: "Piem chat",
+		panelCrashed: "The chat panel hit an unexpected error.",
+		panelCrashedRetry: "Retry",
 	},
 
 	/** Commands, the ribbon icon, and the workspace menu. */
