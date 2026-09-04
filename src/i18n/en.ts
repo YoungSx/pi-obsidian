@@ -185,6 +185,37 @@ export const en = {
 		replyTruncated: "This reply hit the model's length limit and stopped early.",
 		/** Appended to spoken text, so it continues the sentence in lower case. */
 		replyTruncatedSpoken: "this reply hit the model's length limit and stopped early.",
+		/**
+		 * Why a turn ended in a provider failure, one family per sentence.
+		 *
+		 * Named by what the reader should do next rather than by protocol shape:
+		 * `rateLimit` and `quota` are separate sentences because waiting fixes one
+		 * and only paying fixes the other. `unknown` is the honest fallback, and it
+		 * matters — the provider's own words sit under every one of these, so a
+		 * misread family costs a vague headline, never a fact.
+		 */
+		providerFailure: {
+			auth: "The provider rejected the key. Check it in settings, then ask again.",
+			authSpoken: "the provider rejected the key.",
+			quota: "This account is out of credit with the provider. Top it up, then ask again.",
+			quotaSpoken: "this account is out of credit with the provider.",
+			contextLength: "This conversation is too long for the model. Tidy up earlier messages, then ask again.",
+			contextLengthSpoken: "this conversation is too long for the model.",
+			refused: "The provider declined to answer this one. Rewording it usually helps.",
+			refusedSpoken: "the provider declined to answer this one.",
+			rateLimit: "The provider is rate-limiting or busy. Give it a moment, then try again.",
+			rateLimitSpoken: "the provider is rate-limiting or busy.",
+			timeout: "The provider did not answer in time.",
+			timeoutSpoken: "the provider did not answer in time.",
+			offline: "Piem could not reach the provider. Check the connection, then try again.",
+			offlineSpoken: "Piem could not reach the provider.",
+			serverError: "The provider hit an error of its own. Trying again often works.",
+			serverErrorSpoken: "the provider hit an error of its own.",
+			unknown: "The provider did not answer, and did not say why.",
+			unknownSpoken: "the provider did not answer, and did not say why.",
+			/** Summary of the disclosure holding the provider's untouched text. */
+			raw: "What the provider said",
+		},
 		you: "You",
 		agent: "Piem",
 		thoughtItThrough: "Thought it through",
