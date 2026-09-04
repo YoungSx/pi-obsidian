@@ -787,7 +787,7 @@ export const en = {
 		 */
 		sendShortcut: "Send message with",
 
-		statusActiveModel: "Active model",
+		statusActiveModel: "Default model",
 		providersHeading: "Providers",
 		providersDesc: "Endpoints requests can go to. A provider holds a base URL, a wire protocol, and one key.",
 		addProvider: "Add provider",
@@ -799,7 +799,7 @@ export const en = {
 		modelsDescNoProviders: "Add a provider first — a model needs an endpoint to be served from.",
 		addModel: "Add model",
 		noModels: "No models yet.",
-		activeModelHeading: "Active model",
+		activeModelHeading: "Default model",
 		activeModelDesc: "Every request goes out on this one.",
 		/**
 		 * Shown when the vault names a builtin model this trimmed build dropped.
@@ -878,7 +878,7 @@ export const en = {
 			"The agent can request external URLs when a task needs a page. Those requests, and any data in them, leave the vault and Obsidian; the transport above decides how they travel.",
 		whatLeavesVault: "What leaves this vault",
 		whatLeavesVaultDesc:
-			"Prompts, vault content read by tools, and tool results are sent to the provider serving the active model. Nothing is sent anywhere else.",
+			"Prompts, vault content read by tools, and tool results are sent to the provider serving the default model. Nothing is sent anywhere else.",
 		chatLogsInVault:
 			"Chat logs are files in your vault, so they sync and back up with your notes. They hold the conversation and whatever note text was read while answering it.",
 		apiKeysHeading: "API keys",
@@ -1235,7 +1235,7 @@ export const en = {
 		providerOneModel: "The model served by it is removed too: {names}.",
 		providerManyModels: "The {count} models served by it are removed too: {names}.",
 		modelProviderStays: "The provider and its key stay, so other models keep working.",
-		modelWasActive: "It is the active model, so {model} takes over when it goes.",
+		modelWasActive: "It is the default model, so {model} takes over when it goes.",
 		modelWasLast: "It is the only model, and nothing takes its place — add another before your next message.",
 		skillFiles: "The skill's files move to the trash and stop being available to the agent.",
 		mcpServer: "Its tools stop being offered to the agent. Any keychain entry its token was bound to is left in place.",
