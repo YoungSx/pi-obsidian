@@ -55,12 +55,6 @@ export interface ReplyCutoff {
 	 * cannot be handed a label with nothing behind it.
 	 */
 	detail?: { label: string; text: string };
-	/**
-	 * Whether offering to send the same turn again makes sense. Only meaningful on
-	 * `failed`; `stopped` and `truncated` are the user's own doing and the model's
-	 * own limit, and the transcript already offers its regenerate control for both.
-	 */
-	retryable?: boolean;
 }
 
 /**
@@ -102,6 +96,16 @@ export function describeReplyCutoff(message: AssistantMessage, t: Translator): R
 		};
 	}
 	if (message.stopReason === "error") {
+		/*
+		 * `describeProviderFailure` also reports whether a retry could work, and
+		 * that deliberately stops here: the transcript's regenerate control stays
+		 * available on a failed turn either way. Gating a control on a family
+		 * inferred from provider wording would be the mistake this codebase avoids
+		 * everywhere else — and the reader has the better information anyway, since
+		 * after fixing a key in settings "ask again" is exactly what they want and a
+		 * hidden button would mean retyping the question. The guidance lives in the
+		 * sentence, which is where a soft signal belongs.
+		 */
 		const failure = describeProviderFailure(message.errorMessage ?? "", t);
 		return {
 			kind: "failed",
@@ -114,7 +118,6 @@ export function describeReplyCutoff(message: AssistantMessage, t: Translator): R
 			// honest report that there was nothing to disclose, and its absence
 			// would read as "the panel is holding something back".
 			detail: { label: t.t("chat.providerFailure.raw"), text: message.errorMessage ?? "" },
-			retryable: failure.retryable,
 		};
 	}
 	return null;
