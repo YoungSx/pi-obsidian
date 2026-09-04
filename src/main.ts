@@ -184,8 +184,10 @@ export default class PiemPlugin extends Plugin {
 			askUserBroker,
 			// The chat panel's model switcher writes `activeModelId`; this is what
 			// makes that write survive a reload, and it reconfigures the running
-			// agent on the way back.
-			persistSettings: () => this.saveSettings(),
+			// agent on the way back. A mid-run write (issue #252) passes
+			// `reconfigure: false` — `data.json` still goes to disk at once, but
+			// the deferred flush owns the agent reconfigure.
+			persistSettings: (options) => this.saveSettings(options),
 			// MCP tools join the vault tools on every build or reconfigure; the
 			// manager owns connecting and skips servers whose config is unchanged.
 			getExternalTools: async () => {
@@ -425,10 +427,17 @@ export default class PiemPlugin extends Plugin {
 	 * blanked — the entry is the durable home, and `data.json` keeps only the
 	 * reference. Inline credentials (empty `secretRef`, the manual tier) keep
 	 * their value, because there the plaintext is the storage.
+	 *
+	 * `reconfigure: false` (the mid-run write path, issue #252) skips the live
+	 * reconfigure — the run in flight keeps the model it started on, and the
+	 * deferred flush applies the change once it lands — while `data.json` still
+	 * writes through, so a reload cannot resurrect the old choice.
 	 */
-	async saveSettings(): Promise<void> {
+	async saveSettings(options?: { reconfigure?: boolean }): Promise<void> {
 		await this.saveData(persistedSettings(this.settings));
-		await this.agentService?.refreshConfiguration();
+		if (options?.reconfigure !== false) {
+			await this.agentService?.refreshConfiguration();
+		}
 		// The panel re-renders from the snapshot on its own, but the tab title is
 		// drawn by Obsidian outside React, so a language change needs this nudge.
 		this.findChatView()?.refreshHeader();

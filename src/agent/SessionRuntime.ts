@@ -1,4 +1,4 @@
-import { type Agent } from "@earendil-works/pi-agent-core";
+import { type Agent, type ThinkingLevel } from "@earendil-works/pi-agent-core";
 import { type Usage } from "@earendil-works/pi-ai";
 import { type ActiveSessionInfo, type SessionLane } from "../session/ObsidianSessionManager";
 import { type CompactResult } from "./compaction";
@@ -179,6 +179,15 @@ export class SessionRuntime {
 	midRunCompactions = 0;
 	/** Prevents two retries from racing while the branch pointer is being persisted. */
 	retryInFlight = false;
+
+	/**
+	 * Configuration the user chose mid-run, held until the run lands (issue
+	 * #252). Model id is the `ModelConfig.id`, not the wire id — two configs
+	 * may share one wire id, and only the config id names the settings row to
+	 * resolve. Fields merge by spread, so a second mid-run choice of the same
+	 * kind overwrites the first: last write wins.
+	 */
+	pendingConfiguration: { modelId?: string; thinkingLevel?: ThinkingLevel } | null = null;
 
 	// --- per-conversation context refs (split from the global `activePath`) ---
 
