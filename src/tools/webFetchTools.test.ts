@@ -33,7 +33,7 @@ describe("web_fetch", () => {
 	it("performs a GET and returns the status line followed by the body", async () => {
 		requestUrlMock.mockImplementation(async () => requestUrlResponse("hello world", 200));
 
-		const tool = createWebFetchTool("requestUrl");
+		const tool = createWebFetchTool();
 		const result = await tool.execute("call", { url: "https://example.com" });
 
 		expect(textOf(result)).toBe("HTTP 200 \nhello world");
@@ -47,7 +47,7 @@ describe("web_fetch", () => {
 			return requestUrlResponse("{}", 201);
 		});
 
-		const tool = createWebFetchTool("requestUrl");
+		const tool = createWebFetchTool();
 		await tool.execute("call", {
 			url: "https://api.example.com",
 			method: "post",
@@ -71,7 +71,7 @@ describe("web_fetch", () => {
 	it("surfaces a non-2xx body rather than throwing", async () => {
 		requestUrlMock.mockImplementation(async () => requestUrlResponse("not found", 404));
 
-		const tool = createWebFetchTool("requestUrl");
+		const tool = createWebFetchTool();
 		const result = await tool.execute("call", { url: "https://example.com/missing" });
 
 		// The status line leads so the model reads 404 as the server's verdict, not
@@ -86,7 +86,7 @@ describe("web_fetch", () => {
 
 		requestUrlMock.mockImplementation(async () => requestUrlResponse("late", 200));
 
-		const tool = createWebFetchTool("requestUrl");
+		const tool = createWebFetchTool();
 		const error = await tool
 			.execute("call", { url: "https://example.com" }, controller.signal)
 			.then(() => null, (reason: unknown) => reason);
@@ -105,7 +105,7 @@ describe("web_fetch", () => {
 		const oversized = "x".repeat(300_000);
 		requestUrlMock.mockImplementation(async () => requestUrlResponse(oversized, 200));
 
-		const tool = createWebFetchTool("requestUrl");
+		const tool = createWebFetchTool();
 		const result = await tool.execute("call", { url: "https://example.com/big" });
 
 		expect(result.details).toMatchObject({ truncated: true });
@@ -113,28 +113,28 @@ describe("web_fetch", () => {
 	});
 });
 
-describe("web_fetch transport routing", () => {
-	it("rides the fetch transport when selected, bypassing requestUrl", async () => {
+describe("web_fetch transport pinning", () => {
+	it("rides requestUrl even when a platform fetch is available", async () => {
 		const fetchMock = mock((_input: unknown, _init?: unknown) =>
 			Promise.resolve(
 				new Response("streamed", { status: 200, headers: { "content-type": "text/plain" } }),
 			),
 		);
-		// Stubbed on `window`, which is the path the fetch transport takes.
+		// Stubbed on `window`, which is the path the fetch transport would take.
 		const restore = stubWindowFetch(fetchMock);
 		try {
 			requestUrlMock.mockImplementation(async () => requestUrlResponse("buffered", 200));
 
-			const tool = createWebFetchTool("fetch");
+			const tool = createWebFetchTool();
 			const result = await tool.execute("call", { url: "https://example.com" });
 
-			// The transport the user picked decides the channel: fetch goes out on
-			// the platform fetch, requestUrl is never consulted.
-			expect(fetchMock).toHaveBeenCalledTimes(1);
-			expect(requestUrlMock).toHaveBeenCalledTimes(0);
-			// Both transports leave statusText blank (Bun's Response does not infer
-			// "OK"), so the line reads "HTTP 200 " — the body is what the model reads.
-			expect(textOf(result)).toBe("HTTP 200 \nstreamed");
+			// The pin is the point: the model can ask for any URL, and ordinary hosts
+			// send no CORS headers — on the `fetch` transport most of the web would be
+			// unreachable from here, while streaming buys a one-gulp body nothing.
+			// The user's networkTransport choice must not move this tool.
+			expect(requestUrlMock).toHaveBeenCalledTimes(1);
+			expect(fetchMock).toHaveBeenCalledTimes(0);
+			expect(textOf(result)).toBe("HTTP 200 \nbuffered");
 		} finally {
 			restore();
 		}

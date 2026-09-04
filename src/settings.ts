@@ -36,7 +36,7 @@ import { SkillManager } from "./skills/skillManager";
 import { userSkillsSupported } from "./skills/userSkills";
 import { normalizeUserSkillsDir } from "./skills/userSkillsDir";
 import { VaultExecutionEnv } from "./vault/VaultExecutionEnv";
-import { createFetchForTransport } from "./net/obsidianFetch";
+import { createObsidianRequestUrlFetch } from "./net/obsidianFetch";
 
 export interface PiemSettings {
 	/**
@@ -615,12 +615,12 @@ export class PiemSettingTab extends PluginSettingTab {
 			missingBuiltinModel: () => findMissingBuiltinModel(this.plugin.settings),
 			manifest: { version: this.plugin.manifest.version },
 			skills: (() => {
-				// Built fresh per call, not cached on the tab: the manager carries the
-				// network transport, which the user can change while the panel is
-				// open, and an import must travel the way the next chat request will.
-				// The manager is stateless over the vault, so nothing is lost between
-				// calls.
-				const manager = () => new SkillManager(createFetchForTransport(this.plugin.settings.networkTransport), new VaultExecutionEnv(this.app));
+				// Built fresh per call, not cached on the tab: the manager is stateless
+				// over the vault, so nothing is lost between calls. Its fetch is pinned
+				// to `requestUrl` — an import fetches whatever URL the user pasted, and
+				// on the `fetch` transport ordinary hosts (no CORS headers) would be
+				// unreachable. Imports never stream, so `requestUrl` costs nothing.
+				const manager = () => new SkillManager(createObsidianRequestUrlFetch(), new VaultExecutionEnv(this.app));
 				return {
 					list: () => manager().listSkills(),
 					fetchSource: (url) => manager().fetchSource(url),

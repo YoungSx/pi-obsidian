@@ -113,7 +113,7 @@ export function createObsidianTools(
 		 * thing it needs from this layer is somewhere to put the question.
 		 */
 		...(deps.askUserBroker ? [createAskUserTool(app, deps.askUserBroker)] : []),
-		createWebFetchTool(settings.networkTransport),
+		createWebFetchTool(),
 	];
 	if (deps.getSkills) {
 		tools.push(createReadSkillTool(deps.getSkills));
