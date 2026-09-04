@@ -1020,6 +1020,32 @@ button.piem-chat__context-open {
 }
 
 /*
+ * The reply's duration stamp, pinned to the row's right end.
+ *
+ * Deliberately outside both reveal rules above: the buttons hide until hover
+ * because an action offered before it is wanted is noise, but a duration is
+ * information — the answer to a question the reader only starts to wonder once
+ * a reply has been slow — so it stays faintly visible on every device. The
+ * hover gate matters for a second reason: on touch, a rule like the desktop
+ * reveal latches open after the first tap, and a stamp that flickers open would
+ * be worse than one that never moved. `margin-left: auto` is the pin; `auto`
+ * rather than fixed spacing keeps the stamp clear of the buttons however many
+ * of them a given reply has (a regenerable one has four, an older one three).
+ *
+ * Muted, not faint, per the ramp note at the top of this file: at meta size
+ * `--text-faint` drops below the contrast a reader needs. `tabular-nums` keeps
+ * `9s` from shifting against `10s` as replies settle around it.
+ */
+.piem-chat__reply-duration {
+	color: var(--text-muted);
+	flex-shrink: 0;
+	font-size: var(--font-ui-smaller);
+	font-variant-numeric: tabular-nums;
+	margin-left: auto;
+	user-select: none;
+}
+
+/*
  * The edit action on the user's own turn. It reuses the reply actions' row and
  * its variables wholesale; only the justification differs, because the user
  * bubble is the right-aligned one and an action under it reads as belonging to
