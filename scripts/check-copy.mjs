@@ -70,13 +70,24 @@ const COPY_ATTRIBUTES = new Set([
  * JSX attribute, and `new Notice(...)` is the equivalent of rendering text.
  * `setAttribute` is absent on purpose: its literals are `role`, `tabindex`, and
  * `aria-selected`, none of which are copy.
+ *
+ * `setError`/`setNotice`/`appendNotice` are this project's own, and they were the
+ * gate's blind spot: the panel's banner is the loudest copy surface in the plugin
+ * and the only one nothing here was watching. Two English sentences reached a
+ * Chinese UI through them and this check reported the tree clean. They are not
+ * one of the "routed past it through a helper" escapes the header concedes — a
+ * literal written directly into a call that renders it is exactly what this list
+ * exists for; nobody had told the list about these three.
  */
 const COPY_SETTERS = new Set([
+	"appendNotice",
 	"setButtonText",
 	"setDesc",
 	"setDescription",
+	"setError",
 	"setHeading",
 	"setName",
+	"setNotice",
 	"setPlaceholder",
 	"setTitle",
 	"setTooltip",

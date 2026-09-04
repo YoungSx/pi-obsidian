@@ -1533,7 +1533,12 @@ export class ObsidianAgentService {
 			try {
 				summaryMessage = await this.summarizeAbandonedBranch(rt, entryId);
 			} catch (error) {
-				this.setError(rt, error instanceof Error ? error.message : String(error));
+				// Quiet, and it does not stop the retry: the rewind is unconditional
+				// because the retry is what the user asked for, so all that is lost is
+				// the note about the fork being left behind.
+				this.setNotice(
+					this.t().t("chat.branchSummaryFailed", { error: error instanceof Error ? error.message : String(error) }),
+				);
 				return false;
 			}
 			if (rt.agent !== agent) {
@@ -1618,7 +1623,7 @@ export class ObsidianAgentService {
 
 			if (!result.ok) {
 				if (!controller.signal.aborted) {
-					this.setError(rt, `Could not summarize the abandoned branch: ${result.error.message}`);
+					this.setNotice(this.t().t("chat.branchSummaryFailed", { error: result.error.message }));
 				}
 				return null;
 			}
@@ -3500,7 +3505,15 @@ export class ObsidianAgentService {
 			if (signal.aborted) {
 				return false;
 			}
-			this.setError(rt, `Could not compact the conversation: ${outcome.message}`);
+			/*
+			 * Quiet, not assertive. A compaction that fails does not stop the panel:
+			 * the automatic path runs between turns and the next turn still departs,
+			 * and the manual path is a command whose outcome the user is already
+			 * watching for. There is also nothing to anchor it to — compaction sits
+			 * between two turns rather than inside one — so the notice channel is
+			 * where it belongs rather than the transcript.
+			 */
+			this.setNotice(this.t().t("chat.compactionFailed", { error: outcome.message }));
 			return false;
 		}
 		if (outcome.status === "skipped") {
