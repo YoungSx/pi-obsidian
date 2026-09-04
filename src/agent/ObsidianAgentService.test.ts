@@ -2272,7 +2272,7 @@ describe("exporting a session as a note", () => {
 
 describe("recording a reply's duration", () => {
 	/** The message entries of a session log, in order. */
-	async function loggedMessages(adapter: DataAdapter, sessionPath: string): Promise<AssistantMessage[]> {
+	async function loggedMessages(adapter: MemoryAdapter, sessionPath: string): Promise<AssistantMessage[]> {
 		const entries = (await adapter.read(sessionPath))
 			.split("\n")
 			.filter((line) => line.trim() !== "")
