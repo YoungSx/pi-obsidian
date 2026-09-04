@@ -739,6 +739,164 @@ describe("MessageList streaming marks", () => {
 	});
 });
 
+describe("MessageList consecutive-tool folding", () => {
+	it("folds a run of calls and results into one row, holding the rows it replaced", async () => {
+		const host = renderMessages([
+			userMessage("what links here?"),
+			assistantToolCalls("read", "grep"),
+			toolResultFor("read"),
+			toolResultFor("grep"),
+			assistantMessage("Two notes link here."),
+		]);
+		await flushRender();
+
+		const fold = host.querySelector("details.piem-chat__trace--fold");
+		expect(fold).not.toBeNull();
+		expect(foldSummaries(host)).toEqual(["Read a note and ran a search"]);
+		// Closed, like every other trace row in the mode that folds at all.
+		expect(fold?.hasAttribute("open")).toBe(false);
+		// A sentence, so it is set in the interface font rather than the id face.
+		const name = fold?.querySelector(".piem-chat__trace-name");
+		expect(name?.classList.contains("piem-chat__trace-name--label")).toBe(true);
+		// All four rows moved inside, and none was left behind in the transcript.
+		expect(fold?.querySelectorAll(".piem-chat__trace-body > .piem-chat__trace")).toHaveLength(4);
+		const stranded = Array.from(host.querySelectorAll(".piem-chat__trace")).filter(
+			(row) => !row.classList.contains("piem-chat__trace--fold") && row.closest(".piem-chat__trace--fold") === null,
+		);
+		expect(stranded).toHaveLength(0);
+	});
+
+	it("leaves a lone call unfolded, since its own row names the note it touched", async () => {
+		// "Read a note — Daily/2026-08-27.md" says more than "read a note" behind a click.
+		const host = renderMessages([assistantToolCall("read", { path: "Daily/2026-08-27.md" }), toolResultFor("read")]);
+		await flushRender();
+
+		expect(host.querySelector(".piem-chat__trace--fold")).toBeNull();
+		expect(host.querySelector(".piem-chat__trace-detail")?.textContent).toBe("Daily/2026-08-27.md");
+	});
+
+	it("stops a fold at the sentence between two runs, so prose is never inside one", async () => {
+		const host = renderMessages([
+			assistantToolCalls("read", "read"),
+			toolResultFor("read"),
+			toolResultFor("read"),
+			assistantMessage("Now the links."),
+			assistantToolCalls("grep", "grep"),
+			toolResultFor("grep"),
+			toolResultFor("grep"),
+		]);
+		await flushRender();
+
+		expect(foldSummaries(host)).toEqual(["Read 2 notes", "Ran 2 searches"]);
+		// The transcript row itself is what a fold must never contain: nothing the
+		// model said can end up behind a disclosure it did not have before.
+		expect(host.querySelector(".piem-chat__trace--fold article")).toBeNull();
+	});
+
+	it("draws no empty card for a turn whose every call went into a fold anchored above it", async () => {
+		const host = renderMessages([
+			assistantToolCall("read", { path: "A.md" }),
+			toolResultFor("read"),
+			assistantToolCall("grep", { pattern: "linked" }),
+			toolResultFor("grep"),
+		]);
+		await flushRender();
+
+		// The summary stands where the run began — inside the turn that opened it —
+		// and the second turn, left with nothing to draw, draws nothing.
+		expect(host.querySelectorAll("article.piem-chat__message--assistant")).toHaveLength(1);
+		expect(host.querySelector("article.piem-chat__message--assistant > .piem-chat__bubble .piem-chat__trace--fold")).not.toBeNull();
+	});
+
+	it("draws the summary in a result's own slot when the run begins with one", async () => {
+		// The failure breaks the run, so the traffic after it starts on the result of
+		// the call that was still in flight when it broke.
+		const host = renderMessages([
+			assistantToolCalls("read", "grep"),
+			errorResultFor("read"),
+			toolResultFor("grep"),
+			assistantToolCalls("read", "read"),
+			toolResultFor("read"),
+		]);
+		await flushRender();
+
+		expect(foldSummaries(host)).toEqual(["Read a note and ran a search", "Read 2 notes"]);
+		const second = host.querySelectorAll("details.piem-chat__trace--fold")[1];
+		// Its first member is the stray result, drawn in the slot the summary took over.
+		expect(second?.querySelector(".piem-chat__trace-body > .piem-chat__trace")?.classList.contains("piem-chat__trace--result")).toBe(true);
+	});
+
+	it("keeps a failure in the transcript rather than inside a fold", async () => {
+		const host = renderMessages([
+			assistantToolCalls("read", "grep"),
+			errorResultFor("read"),
+			toolResultFor("grep"),
+			assistantToolCalls("read", "read"),
+			toolResultFor("read"),
+		]);
+		await flushRender();
+
+		const failure = host.querySelector(".piem-chat__trace--error");
+		expect(failure?.querySelector(".piem-chat__trace-detail")?.textContent).toBe("File not found.");
+		expect(failure?.closest(".piem-chat__trace--fold")).toBeNull();
+	});
+
+	it("keeps the answered question in the stream instead of inside the fold", async () => {
+		const host = renderMessages([
+			assistantToolCalls("read", "read"),
+			toolResultFor("read"),
+			askResult({ dismissed: false, answers: [{ question: "Where?", header: "Where to file", selected: ["Inbox"] }] }),
+			toolResultFor("read"),
+		]);
+		await flushRender();
+
+		const receipt = host.querySelector(".piem-ask-card--answered");
+		expect(receipt).not.toBeNull();
+		expect(receipt?.closest(".piem-chat__trace--fold")).toBeNull();
+	});
+
+	it("leaves the call still running outside the fold, spinning", async () => {
+		const host = renderMessages(
+			[
+				assistantToolCalls("read", "grep"),
+				toolResultFor("read"),
+				toolResultFor("grep"),
+				assistantToolCall("write", { path: "Note.md" }),
+			],
+			{ isStreaming: true },
+		);
+		await flushRender();
+
+		const fold = host.querySelector(".piem-chat__trace--fold");
+		expect(fold?.classList.contains("piem-chat__trace--live")).toBe(false);
+		const live = host.querySelector(".piem-chat__trace--live");
+		expect(live?.querySelector(".piem-chat__trace-name")?.textContent).toBe("Wrote a note");
+		expect(live?.closest(".piem-chat__trace--fold")).toBeNull();
+	});
+
+	it("keeps the summary in the reader's words while the rows inside it keep the raw ids", async () => {
+		const host = renderMessages([assistantToolCalls("read", "grep"), toolResultFor("read"), toolResultFor("grep")], {
+			showAgentDetails: true,
+		});
+		await flushRender();
+
+		expect(foldSummaries(host)).toEqual(["Read a note and ran a search"]);
+		const inner = Array.from(host.querySelectorAll(".piem-chat__trace-body > .piem-chat__trace .piem-chat__trace-name"));
+		expect(inner.map((node) => node.textContent)).toEqual(["read", "grep", "read", "grep"]);
+	});
+
+	it("folds nothing in the two modes chosen to open machine traffic", async () => {
+		for (const traceExpand of ["highValue", "expanded"] as const) {
+			const host = renderMessages([assistantToolCalls("read", "grep"), toolResultFor("read"), toolResultFor("grep")], { traceExpand });
+			await flushRender();
+
+			expect(host.querySelector(".piem-chat__trace--fold")).toBeNull();
+			expect(host.querySelectorAll(".piem-chat__trace")).toHaveLength(4);
+			host.remove();
+		}
+	});
+});
+
 describe("MessageList tool-result diff", () => {
 	it("collapses a diff-bearing result under the default mode, which is the issue's all-collapsed transcript", async () => {
 		const host = renderMessages([toolResult({ diff: " 1 unchanged\n+2 added\n-3 removed" })]);
@@ -997,6 +1155,35 @@ function toolResult(details: Record<string, unknown>): ToolResultMessage {
 		isError: false,
 		timestamp: Date.now(),
 	};
+}
+
+/** An assistant turn whose whole content is back-to-back tool calls. */
+function assistantToolCalls(...names: string[]): AssistantMessage {
+	return {
+		...assistantBase(),
+		content: names.map((name, index): AssistantMessage["content"][number] => ({
+			type: "toolCall",
+			id: `call-${index}`,
+			name,
+			arguments: { path: `${name}.md` },
+		})),
+	};
+}
+
+/** A settled result for `toolName`, on the shape {@link toolResult} already produces. */
+function toolResultFor(toolName: string): ToolResultMessage {
+	return { ...toolResult({}), toolName };
+}
+
+function errorResultFor(toolName: string): ToolResultMessage {
+	return { ...toolResultFor(toolName), isError: true, content: [{ type: "text", text: "File not found." }] };
+}
+
+/** The summary line of every folded run, in transcript order. */
+function foldSummaries(host: HTMLElement): (string | null)[] {
+	return Array.from(host.querySelectorAll(".piem-chat__trace--fold > .piem-chat__trace-summary > .piem-chat__trace-name")).map(
+		(node) => node.textContent,
+	);
 }
 
 function compactionSummary(text: string): AgentMessage {

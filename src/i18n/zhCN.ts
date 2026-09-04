@@ -366,6 +366,25 @@ export const zhCN: DeepPartial<EnCopy> = {
 		failed: "失败",
 	},
 
+	traceFold: {
+		writeOne: "改动了 1 条笔记",
+		writeMany: "改动了 {count} 条笔记",
+		webOne: "抓取了 1 个网页",
+		webMany: "抓取了 {count} 个网页",
+		subagentOne: "调度了 1 个子代理",
+		subagentMany: "调度了 {count} 个子代理",
+		readOne: "读取了 1 条笔记",
+		readMany: "读取了 {count} 条笔记",
+		searchOne: "搜索了 1 次",
+		searchMany: "搜索了 {count} 次",
+		otherOne: "使用了 1 个工具",
+		otherMany: "使用了 {count} 个工具",
+		otherAlsoOne: "使用了 1 个其他工具",
+		otherAlsoMany: "使用了 {count} 个其他工具",
+		also: "{first}并{second}",
+		list: "{first}，{rest}",
+	},
+
 	settings: {
 		// 四个页签。原来的「历史」「日志」各只有两三行，撑不起一个页签，
 		// 于是并进回答同一问题的那一页：聊天存储属于它存的对话，
@@ -426,7 +445,8 @@ export const zhCN: DeepPartial<EnCopy> = {
 		showAgentDetailsDesc: "在对话面板中显示 token 数、花费和原始工具参数。",
 		// 选项按「读者看到的对话」措辞，不按机器行为：例外项由打开的 diff 行自己解释。
 		traceExpand: "工具动态展开方式",
-		traceExpandDesc: "对话流中思考、工具调用与结果默认展开多少。任何一行之后仍可手动开合。",
+		traceExpandDesc:
+			"对话流中思考、工具调用与结果默认展开多少。任何一行之后仍可手动开合。选「全部折叠」时，连续的工具调用还会再收成一行，并写明这一串做了什么。",
 		traceExpandCollapsed: "全部折叠",
 		traceExpandHighValue: "高价值行展开",
 		traceExpandExpanded: "全部展开",
