@@ -383,11 +383,28 @@ function isReportedInTranscript(agent: Agent | null, agentError: string): boolea
 	if (!messages) {
 		return false;
 	}
-	const lastAssistant = [...messages].reverse().find((message) => message.role === "assistant");
+	const lastAssistant = lastAssistantTurn(messages);
 	if (lastAssistant?.role !== "assistant" || lastAssistant.errorMessage !== agentError) {
 		return false;
 	}
 	return lastAssistant.stopReason === "aborted" || lastAssistant.stopReason === "error";
+}
+
+/**
+ * The transcript's last assistant turn, or `undefined` before the first one.
+ *
+ * Walks from the end rather than copying and reversing: the transcript grows
+ * per token during a run, and both readers of this — the error filter and the
+ * dispatch-failure guard — run on snapshots taken at failure time.
+ */
+function lastAssistantTurn(messages: readonly AgentMessage[]): AgentMessage | undefined {
+	for (let index = messages.length - 1; index >= 0; index--) {
+		const message = messages[index];
+		if (message?.role === "assistant") {
+			return message;
+		}
+	}
+	return undefined;
 }
 
 function extractUserText(message: AgentMessage | undefined): string {
@@ -1051,7 +1068,14 @@ export class ObsidianAgentService {
 		}
 
 		let sent = false;
+		// The failed-turn shadow the dispatch-failure guard tests against; see
+		// {@link reportDispatchFailure}. Declared out here because the catch
+		// cannot see try-scoped locals, and captured as the first statement of
+		// the block because everything in it — the snapshot notify, the
+		// compaction — can throw before the run departs.
+		let tailBefore: AgentMessage | undefined;
 		try {
+			tailBefore = lastAssistantTurn(agent.state.messages);
 			rt.activeRunContext = this.contextRefList(rt);
 			this.notify();
 			await this.compactContextIfNeeded(rt, agent);
@@ -1086,7 +1110,7 @@ export class ObsidianAgentService {
 			// tail.
 			rt.resumableLanes.delete(rt.activeLane);
 		} catch (error) {
-			this.reportDispatchFailure(rt, error);
+			this.reportDispatchFailure(rt, error, tailBefore);
 		} finally {
 			rt.activeRunContext = null;
 			await this.notifySettledState(rt);
@@ -1166,7 +1190,12 @@ export class ObsidianAgentService {
 			return;
 		}
 		const stranded = rt.promptQueue.drain();
+		let tailBefore: AgentMessage | undefined;
 		try {
+			// Captured as the first statement of the block, before the notify
+			// and the compaction can throw, for the same reason
+			// {@link reportDispatchFailure} explains.
+			tailBefore = lastAssistantTurn(agent.state.messages);
 			rt.activeRunContext = this.contextRefList(rt);
 			this.notify();
 			await this.compactContextIfNeeded(rt, agent);
@@ -1180,7 +1209,7 @@ export class ObsidianAgentService {
 			// Back onto the chips, oldest first: the words are still the
 			// user's, and hiding them behind an error banner loses them.
 			rt.promptQueue.restore(stranded);
-			this.reportDispatchFailure(rt, error);
+			this.reportDispatchFailure(rt, error, tailBefore);
 		} finally {
 			rt.activeRunContext = null;
 			await this.notifySettledState(rt);
@@ -1203,7 +1232,12 @@ export class ObsidianAgentService {
 		if (!agent || agent.state.isStreaming) {
 			return;
 		}
+		let tailBefore: AgentMessage | undefined;
 		try {
+			// Captured as the first statement of the block, before the notify
+			// and the compaction can throw, for the same reason
+			// {@link reportDispatchFailure} explains.
+			tailBefore = lastAssistantTurn(agent.state.messages);
 			rt.activeRunContext = this.contextRefList(rt);
 			this.notify();
 			await this.compactContextIfNeeded(rt, agent);
@@ -1213,7 +1247,7 @@ export class ObsidianAgentService {
 			await this.beginRunOperation(rt, last ? [last] : []);
 			await agent.continue();
 		} catch (error) {
-			this.reportDispatchFailure(rt, error);
+			this.reportDispatchFailure(rt, error, tailBefore);
 		} finally {
 			rt.activeRunContext = null;
 			await this.notifySettledState(rt);
@@ -3797,26 +3831,38 @@ export class ObsidianAgentService {
 	/**
 	 * Records a dispatch failure in the banner, unless the transcript has it.
 	 *
-	 * pi rethrows out of `prompt()`/`continue()` *after* stamping the partial
-	 * assistant turn with `stopReason: "error"`, so the three catches around a
-	 * departing run see the same failure the transcript is already annotating. Left
-	 * alone, that reported one timeout twice — once under the reply, once pinned
-	 * above the conversation — which is the duplication #239 exists to end.
+	 * A run that dies mid-request ends with pi stamping a failed assistant turn
+	 * onto the transcript; the same failure already sits under that turn via
+	 * `describeReplyCutoff`. Reporting it here as well pinned one timeout twice —
+	 * once under the reply, once above the conversation — which is the duplication
+	 * #239 exists to end.
 	 *
-	 * The test is the tail of the transcript rather than a text comparison: the
-	 * thrown error and the text pi stamped need not be the same string, and what
-	 * matters is whether *this run's* failure is visible where it happened. A throw
-	 * that leaves no failed assistant turn behind — the credential gate, a broken
-	 * session log, anything before the run departs — has nowhere to be seen and
-	 * still reaches the banner.
+	 * The guard is two gates, both of which must hold before the banner stays
+	 * quiet. The identity gate asks whether the failed tail *grew during this
+	 * dispatch*: `tailBefore` is the last assistant turn captured as the first
+	 * statement inside each dispatch's `try` — before the notify and the
+	 * compaction, both of which can throw — so a tail that was already failed
+	 * before the block began (the previous turn's timeout, still on screen)
+	 * cannot shadow a throw raised before anything new was appended. The text
+	 * gate then asks whether the tail reports *this failure*: when the throw is
+	 * pi re-stamping an error a failed turn already carries, compaction may have
+	 * rebuilt the tail as a fresh object in between, and identity alone would
+	 * then swallow the old turn's report as if it were new. Both gates are read
+	 * off `state.messages`; a throw that leaves no failed assistant turn behind
+	 * has nowhere else to be seen and always reaches the banner.
 	 */
-	private reportDispatchFailure(rt: SessionRuntime, error: unknown): void {
-		const messages = rt.agent?.state.messages;
-		const lastAssistant = messages ? [...messages].reverse().find((message) => message.role === "assistant") : undefined;
-		if (lastAssistant?.role === "assistant" && lastAssistant.stopReason === "error") {
+	private reportDispatchFailure(rt: SessionRuntime, error: unknown, tailBefore: AgentMessage | undefined): void {
+		const message = error instanceof Error ? error.message : String(error);
+		const lastAssistant = lastAssistantTurn(rt.agent?.state.messages ?? []);
+		if (
+			lastAssistant?.role === "assistant" &&
+			lastAssistant.stopReason === "error" &&
+			lastAssistant !== tailBefore &&
+			lastAssistant.errorMessage === message
+		) {
 			return;
 		}
-		rt.panelError = { message: error instanceof Error ? error.message : String(error), opensSettings: false };
+		rt.panelError = { message, opensSettings: false };
 	}
 
 	private setError(rt: SessionRuntime, message: string, opensSettings = false): void {
