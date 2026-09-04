@@ -16,6 +16,10 @@ import type { Translator } from "../i18n";
 import { IconButton, ObsidianIcon } from "./ObsidianIcon";
 import { countDiffLines, describePendingTool, describeTool, isToolIdentifier, summarizeToolPayload, summarizeToolResult } from "./traceSummary";
 import { DEFAULT_TRACE_EXPAND, traceOpensByDefault, type TraceExpandSetting } from "./traceExpand";
+import { AskUserCard, AskUserReceipt } from "./AskUserCard";
+import { ASK_USER_TOOL, askUserOutcome } from "./askUserRecord";
+import type { AskUserAnswer } from "../tools/askUserQuestion";
+import type { AskUserRequest } from "../tools/askUserBroker";
 
 export interface MessageListProps {
 	messages: AgentMessage[];
@@ -118,6 +122,19 @@ export interface MessageListProps {
 	 * suggested them.
 	 */
 	suggestedActions?: QuickAction[];
+	/**
+	 * The question `ask_user` is waiting on, when the panel is the surface for it.
+	 *
+	 * It renders at the tail rather than in `messages` because it is not a
+	 * transcript entry yet: nothing has been decided, and the record only exists
+	 * once the tool returns. The broker escalates to a dialog instead when the
+	 * panel is not on screen, in which case this stays absent.
+	 */
+	pendingQuestion?: AskUserRequest | null;
+	/** Further questions behind {@link pendingQuestion}; the card names the count. */
+	queuedQuestions?: number;
+	onAnswerQuestion?: (id: string, answers: AskUserAnswer[]) => void;
+	onDismissQuestion?: (id: string) => void;
 }
 
 /**
@@ -301,6 +318,10 @@ export function MessageList({
 	isCompacting = false,
 	onQuickAction,
 	suggestedActions = [],
+	pendingQuestion = null,
+	queuedQuestions = 0,
+	onAnswerQuestion,
+	onDismissQuestion,
 }: MessageListProps): React.JSX.Element {
 	const t = useT();
 	const context: MessageContext = { app, component, sourcePath, showAgentDetails, traceExpand, t };
@@ -343,7 +364,10 @@ export function MessageList({
 			transcript.scrollTop = transcript.scrollHeight;
 		});
 		return () => window.cancelAnimationFrame(frame);
-	}, [messages, pendingToolCalls, isStreaming]);
+		// The pending question joins the dependency list for the same reason the
+		// running tools do: it changes the transcript's height, and a question that
+		// arrived below the fold is a question the reader never answers.
+	}, [messages, pendingToolCalls, isStreaming, pendingQuestion]);
 
 	const updateFollowState = (): void => {
 		const transcript = transcriptRef.current;
@@ -435,6 +459,23 @@ export function MessageList({
 						/>
 					))
 				)}
+				{/*
+				 * The question sits at the tail, below the last thing said and above the
+				 * running-tools line — which is where the turn actually is: the tool that
+				 * asked is one of the calls that line is reporting, and it is blocked on
+				 * this. Inside the scroller rather than docked over the composer, because
+				 * "in the stream" is the whole point: it scrolls with the conversation and
+				 * the record that replaces it lands in the same place.
+				 */}
+				{pendingQuestion && onAnswerQuestion && onDismissQuestion ? (
+					<AskUserCard
+						key={pendingQuestion.id}
+						questions={pendingQuestion.questions}
+						queued={queuedQuestions}
+						onAnswer={(answers) => onAnswerQuestion(pendingQuestion.id, answers)}
+						onDismiss={() => onDismissQuestion(pendingQuestion.id)}
+					/>
+				) : null}
 				{pendingToolCalls.length > 0 ? (
 					// No aria-label: it would replace the row's own text as the
 					// accessible name, and the running tool names — the part worth
@@ -452,9 +493,21 @@ export function MessageList({
 				) : null}
 			</main>
 			{!isAtLatest ? (
-				<button type="button" className="piem-chat__latest" onClick={scrollToLatest}>
-					<ObsidianIcon name="arrow-down" />
-					{t.t("chat.latest")}
+				/*
+				 * Names the question when one is waiting.
+				 *
+				 * The card can be scrolled away from — that is the cost of putting it in
+				 * the stream instead of pinning it over the composer — and "Latest" does
+				 * not tell the reader that the conversation is blocked on something down
+				 * there. Same button, same gesture, one accurate label.
+				 */
+				<button
+					type="button"
+					className={`piem-chat__latest${pendingQuestion ? " piem-chat__latest--asking" : ""}`}
+					onClick={scrollToLatest}
+				>
+					<ObsidianIcon name={pendingQuestion ? "circle-help" : "arrow-down"} />
+					{t.t(pendingQuestion ? "chat.latestQuestion" : "chat.latest")}
 				</button>
 			) : null}
 			{/*
@@ -661,6 +714,16 @@ function MessageRow({ message, isStreaming, renderContext, onRetry, onEdit, onCo
 		return <HarnessTrace message={message} context={renderContext} />;
 	}
 	const cutoff = replyCutoff(message, renderContext.t);
+	/*
+	 * An assistant turn that is nothing but the `ask_user` call has nothing left to
+	 * draw once that call is suppressed. Rendering it anyway left an empty bubble
+	 * above the question card — and, worse, a copy/insert actions row offering to
+	 * copy no text at all. A stop notice still earns the row, because that is
+	 * content of its own.
+	 */
+	if (message.role === "assistant" && !cutoff && isOnlyAskUserCall(message, renderContext.showAgentDetails)) {
+		return null;
+	}
 	return (
 		/*
 		 * No role banner. A two-party conversation in a 300px sidebar identifies its
@@ -716,6 +779,19 @@ function MessageRow({ message, isStreaming, renderContext, onRetry, onEdit, onCo
 				) : null}
 			</article>
 	);
+}
+
+/**
+ * Whether every block in this turn is an `ask_user` call the transcript hides.
+ *
+ * Non-empty check first: a message with no content at all is not "only the
+ * question", and `every` on an empty array would call it that.
+ */
+function isOnlyAskUserCall(message: AssistantMessage, showAgentDetails: boolean): boolean {
+	if (showAgentDetails || message.content.length === 0) {
+		return false;
+	}
+	return message.content.every((content) => content.type === "toolCall" && content.name === ASK_USER_TOOL);
 }
 
 /**
@@ -840,6 +916,19 @@ function renderAssistantMessage(message: AssistantMessage, args: RenderArgs): Re
 			);
 		}
 		const showDetails = args.renderContext.showAgentDetails;
+		/*
+		 * `ask_user` draws no call row.
+		 *
+		 * The question is rendered in full at the tail while it is open, and as a
+		 * receipt once it is answered, so a trace row naming the same call would put
+		 * one question in the transcript twice — the second time as machine traffic,
+		 * which is the vocabulary this whole change moves it out of. Under
+		 * `showAgentDetails` the row comes back, because that mode exists to show the
+		 * raw payload behind every call and this one has arguments worth reading.
+		 */
+		if (content.name === ASK_USER_TOOL && !showDetails) {
+			return null;
+		}
 		// Same live vocabulary as the thinking row: a call still running spins
 		// instead of sitting on the settled wrench, so "the turn is working"
 		// reads one way everywhere machine traffic appears.
@@ -936,6 +1025,22 @@ function Trace({ icon, name, detail, className, nameIsIdentifier = false, body, 
  * nested inside an always-expanded result block.
  */
 function ToolResultTrace({ message, context }: { message: ToolResultMessage; context: MessageContext }): React.JSX.Element {
+	/*
+	 * The one tool result that is not machine traffic.
+	 *
+	 * Everything else in this row is something the agent did and the reader may
+	 * want to audit; an `ask_user` result is something the *reader* decided, and
+	 * folding a decision behind a disclosure summary buries the most human entry in
+	 * the transcript. It renders open, as a record. An unreadable payload — an
+	 * older session file, a hand edit — falls through to the ordinary row rather
+	 * than to an empty one.
+	 */
+	if (message.toolName === ASK_USER_TOOL && !message.isError) {
+		const outcome = askUserOutcome(message.details);
+		if (outcome) {
+			return <AskUserReceipt answers={outcome.answers} dismissed={outcome.dismissed} />;
+		}
+	}
 	const diff = extractDiff(message.details);
 	const classes = ["piem-chat__trace", "piem-chat__trace--result", message.isError ? "piem-chat__trace--error" : null].filter(Boolean).join(" ");
 	const detail = diff ? formatDiffCounts(diff) : summarizeToolResult(message, context.t);

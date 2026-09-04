@@ -210,6 +210,61 @@ rows.push(messageRow("assistant", "plain-prose", plainBlock("prose", `Reading ${
 rows.push(traceRow("result", "long-output", LONG_PATH, `${LONG_PATH}\n${LONG_TOKEN}`));
 rows.push(traceRow("harness", "wide-columns", LONG_PATH, `col_a\tcol_b\n${LONG_PATH}\t1`));
 rows.push(traceRow("call", "flat", LONG_PATH, ""));
+/*
+ * The question card, both lives.
+ *
+ * It is a new construct in this column and the only interactive one: an option label
+ * and its description are model-written text, so they are exactly the kind of content
+ * that arrives unbreakable. A row that pushed the column open instead of wrapping
+ * would drag the whole transcript sideways, which is the invariant this page holds.
+ * The pathological label and the long path are the cases `pre-wrap` and `word-wrap`
+ * silently fail on.
+ */
+rows.push(`<section class="piem-ask-card piem-ask-card--pending" data-case="ask-card/pending" aria-label="Question from Piem" tabindex="-1">
+	<div class="piem-ask-card__state" role="status">
+		<span class="piem-icon piem-ask-card__state-icon"></span>
+		<span class="piem-ask-card__state-text">Piem needs your call</span>
+	</div>
+	<div class="piem-ask">
+		<div class="piem-ask-question">
+			<div class="piem-ask-question-text" id="ask-q0">Which of these should the merged note keep? ${LONG_TOKEN}</div>
+			<div class="piem-ask-options" role="group" aria-labelledby="ask-q0" aria-label="What to keep" data-select="one">
+				<button type="button" class="piem-ask-option" aria-pressed="false">
+					<span class="piem-ask-option-marker" aria-hidden="true"></span>
+					<span class="piem-ask-option-body">
+						<span class="piem-ask-option-label">${LONG_PATH}</span>
+						<span class="piem-ask-option-description">${LONG_TOKEN}</span>
+					</span>
+				</button>
+				<button type="button" class="piem-ask-option" aria-pressed="true">
+					<span class="piem-ask-option-marker" aria-hidden="true"></span>
+					<span class="piem-ask-option-body"><span class="piem-ask-option-label">Keep both</span></span>
+				</button>
+				<label class="piem-ask-other-row">
+					<span class="piem-ask-option-marker" aria-hidden="true"></span>
+					<input type="text" class="piem-ask-other" placeholder="Something else…" aria-label="Your own answer for: What to keep">
+				</label>
+			</div>
+		</div>
+		<div class="piem-ask-footer">
+			<span class="piem-ask-remaining"></span>
+			<button type="button" class="piem-ask-dismiss">Let Piem decide</button>
+			<button type="button" class="piem-ask-confirm mod-cta" disabled>Confirm</button>
+		</div>
+	</div>
+</section>`);
+rows.push(`<section class="piem-ask-card piem-ask-card--answered" data-case="ask-card/answered" aria-label="Question from Piem">
+	<div class="piem-ask-card__state">
+		<span class="piem-icon piem-ask-card__state-icon"></span>
+		<span class="piem-ask-card__state-text">You answered</span>
+	</div>
+	<dl class="piem-ask-card__record">
+		<div class="piem-ask-card__pair">
+			<dt class="piem-ask-card__question">Which of these should the merged note keep? ${LONG_TOKEN}</dt>
+			<dd class="piem-ask-card__answer"><span class="piem-ask-card__picked">${LONG_PATH}</span></dd>
+		</div>
+	</dl>
+</section>`);
 // The compaction divider, whose `max-height` already made it a scroller.
 rows.push(`<section class="piem-chat__compaction" data-case="compaction/long">
 	<div class="piem-chat__compaction-heading">Earlier turns were summarized</div>
@@ -252,6 +307,14 @@ body { background: #111; color: var(--text-normal); font-family: var(--font-inte
 /* The leaf, as app.css builds it: a fixed-width containment and stacking box. */
 .harness-leaf { background: var(--background-secondary); contain: strict; isolation: isolate; height: 620px; }
 .view-content { height: 100%; width: 100%; }
+/*
+ * Obsidian's own form-control rule, reproduced so the element-qualified resets in
+ * styles.css have the thing they exist to outrank. The question card's rows are
+ * buttons, and without this the page would measure a layout the plugin never
+ * produces — and would pass while the reset was broken. No backticks in this
+ * comment: it lives inside the page template literal and one would close it.
+ */
+button:not(.clickable-icon) { background: var(--interactive-normal, #2a2a2a); border: none; color: var(--text-normal); font-family: inherit; font-size: var(--font-ui-small); height: 30px; padding: 0 12px; text-align: center; white-space: nowrap; }
 ${rules}
 </style></head><body>
 ${panel("300px sidebar", 300)}

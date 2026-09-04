@@ -910,6 +910,83 @@ describe("MessageList quick actions", () => {
 	});
 });
 
+/**
+ * The transcript's side of issue #237: an `ask_user` exchange is not machine traffic.
+ * It renders as a card while it is open and as a record once it is not, and the trace
+ * rows that would otherwise say the same thing twice are suppressed.
+ */
+describe("MessageList ask_user", () => {
+	it("draws no trace row for the call, so the question is not in the transcript twice", async () => {
+		const host = renderMessages([assistantToolCall("ask_user", { questions: [] })]);
+		await flushRender();
+
+		expect(host.querySelector(".piem-chat__trace")).toBeNull();
+		// And no empty bubble where the turn was: an assistant message whose only
+		// content was that call has nothing left to draw, and rendering it anyway left
+		// a copy/insert actions row offering to copy no text at all.
+		expect(host.querySelector(".piem-chat__message--assistant")).toBeNull();
+	});
+
+	it("keeps the raw call visible under agent details, which exist to show payloads", async () => {
+		const host = renderMessages([assistantToolCall("ask_user", { questions: [] })], { showAgentDetails: true });
+		await flushRender();
+
+		expect(host.querySelector(".piem-chat__trace")).not.toBeNull();
+	});
+
+	it("renders the answer as a record rather than a collapsed row", async () => {
+		const host = renderMessages([askResult({ dismissed: false, answers: [{ question: "Where?", header: "Where to file", selected: ["Inbox"] }] })]);
+		await flushRender();
+
+		expect(host.querySelector(".piem-ask-card--answered")).not.toBeNull();
+		expect(host.querySelector(".piem-ask-card__picked")?.textContent).toBe("Inbox");
+		// Not behind a disclosure: everything else mechanical folds away, and a decision
+		// the reader made is the least mechanical thing in the transcript.
+		expect(host.querySelector("details")).toBeNull();
+	});
+
+	it("records a handed-back decision as its own outcome", async () => {
+		const host = renderMessages([askResult({ dismissed: true })]);
+		await flushRender();
+
+		expect(host.querySelector(".piem-ask-card--dismissed")).not.toBeNull();
+	});
+
+	it("falls back to the ordinary row for a payload it cannot read", async () => {
+		// An older session file, a hand edit, a sync from another build. An empty receipt
+		// would be worse than the collapsed row this has always had.
+		const host = renderMessages([askResult({ answers: "Inbox" })]);
+		await flushRender();
+
+		expect(host.querySelector(".piem-ask-card")).toBeNull();
+		expect(host.querySelector(".piem-chat__trace--result")).not.toBeNull();
+	});
+
+	it("renders the pending question at the tail, and only with somewhere to send it", async () => {
+		const request = { id: "ask-0", shell: "panel" as const, questions: [{ question: "Where?", header: "Where to file", options: [{ label: "Inbox" }, { label: "Archive" }] }] };
+
+		const unwired = renderMessages([userMessage("Tidy up")], { pendingQuestion: request });
+		await flushRender();
+		// No answer handler means nothing could receive a click; a card that cannot
+		// settle its own question is worse than none.
+		expect(unwired.querySelector(".piem-ask-card")).toBeNull();
+
+		const host = renderMessages([userMessage("Tidy up")], {
+			pendingQuestion: request,
+			onAnswerQuestion: () => undefined,
+			onDismissQuestion: () => undefined,
+		});
+		await flushRender();
+
+		expect(host.querySelector(".piem-ask-card--pending")).not.toBeNull();
+	});
+});
+
+/** An `ask_user` result carrying `details` as the transcript will read them back. */
+function askResult(details: Record<string, unknown>): ToolResultMessage {
+	return { ...toolResult(details), toolName: "ask_user", content: [{ type: "text", text: "The user answered:\nWhere to file: Inbox" }] };
+}
+
 function toolResult(details: Record<string, unknown>): ToolResultMessage {
 	return {
 		role: "toolResult",

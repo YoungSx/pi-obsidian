@@ -30,6 +30,7 @@ import { getT } from "../i18n";
 import { TranslatorProvider } from "./TranslatorContext";
 import { useSessionDraft } from "./useSessionDraft";
 import { fileToPendingImage, toImageContents, type PendingImage } from "./pendingImages";
+import type { AskUserBroker, AskUserRequest } from "../tools/askUserBroker";
 
 interface ChatAppProps {
 	service: ObsidianAgentService;
@@ -50,9 +51,18 @@ interface ChatAppProps {
 	 * an icon that led nowhere would be worse than none.
 	 */
 	onOpenSubagents?: (subagentId?: string) => void;
+	/**
+	 * Where `ask_user` parks a question the transcript is meant to answer.
+	 *
+	 * The same object the tool pushes into and the escalation modal settles, so
+	 * this panel is one of three parties to it rather than the owner. Absent — a
+	 * test mounting the panel without the plugin — simply means no question ever
+	 * appears, which is the honest state when nothing can ask one.
+	 */
+	askUserBroker?: AskUserBroker;
 }
 
-export function ChatApp({ service, inputController, component, draftStore, onOpenSubagents }: ChatAppProps): React.JSX.Element {
+export function ChatApp({ service, inputController, component, draftStore, onOpenSubagents, askUserBroker }: ChatAppProps): React.JSX.Element {
 	const [snapshot, setSnapshot] = useState<ChatSnapshot>(() => service.getSnapshot());
 	// Keyed by session *and* lane: an A/B comparison has two writable branches at
 	// once, and a half-written question for one side must not surface in the
@@ -139,6 +149,7 @@ export function ChatApp({ service, inputController, component, draftStore, onOpe
 	// never flips presence, yet changes what the chips should be about.
 	const activeNotePath = snapshot.contextRefs.find((ref) => ref.kind === "active")?.path ?? null;
 	const hasActiveNote = activeNotePath !== null;
+	const [ask, setAsk] = useState<{ request: AskUserRequest | null; queued: number }>({ request: null, queued: 0 });
 
 	useEffect(() => {
 		const unsubscribe = service.subscribe(setSnapshot);
@@ -167,6 +178,25 @@ export function ChatApp({ service, inputController, component, draftStore, onOpe
 		resnapshot();
 		return registry.subscribe(resnapshot);
 	}, [service]);
+
+	/*
+	 * The broker's own subscription, for the same reason the registry needs one:
+	 * a question is pushed from inside a tool call, which moves nothing the chat
+	 * snapshot reports.
+	 *
+	 * The queued count is read at the same moment as the head so the two cannot
+	 * disagree — a card saying "1 more waiting" beside a head that had already
+	 * advanced would be a lie assembled from two reads.
+	 */
+	useEffect(() => {
+		if (!askUserBroker) {
+			return;
+		}
+		const resnapshot = (): void =>
+			setAsk({ request: askUserBroker.getPending(), queued: askUserBroker.getQueuedCount() });
+		resnapshot();
+		return askUserBroker.subscribe(resnapshot);
+	}, [askUserBroker]);
 
 	useEffect(() => {
 		let cancelled = false;
@@ -632,6 +662,10 @@ export function ChatApp({ service, inputController, component, draftStore, onOpe
 					isCompacting={snapshot.isCompacting}
 					onQuickAction={handleQuickAction}
 					suggestedActions={suggestedActions}
+					pendingQuestion={ask.request}
+					queuedQuestions={ask.queued}
+					onAnswerQuestion={askUserBroker ? (id, answers) => askUserBroker.answer(id, answers) : undefined}
+					onDismissQuestion={askUserBroker ? (id) => askUserBroker.dismiss(id) : undefined}
 				/>
 
 				{/*

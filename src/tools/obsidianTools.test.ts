@@ -10,6 +10,7 @@ const { TFile: TFileClass, TFolder: TFolderClass } = await import("obsidian");
 const { createObsidianTools } = await import("./obsidianTools");
 const { createVaultHarnessContext } = await import("../vault/harnessAdapter");
 const { DEFAULT_SETTINGS } = await import("../settings");
+const { AskUserBroker } = await import("./askUserBroker");
 
 /** Stock settings, riding the requestUrl transport the network stub expects. */
 function defaultSettings() {
@@ -187,6 +188,19 @@ describe("tool registration", () => {
 		expect(tools(app).map((tool) => tool.name)).toContain("web_fetch");
 	});
 
+	it("leaves ask_user out when it has nowhere to put a question", () => {
+		const app = createTaskApp([]);
+
+		const names = createObsidianTools(app, createVaultHarnessContext(app).env, defaultSettings()).map((tool) => tool.name);
+
+		// Deliberate, not an oversight. `ask_user` blocks its own turn until a
+		// surface answers it, so an agent built without a broker would hang on the
+		// first question rather than fail; omitting the tool makes the model route
+		// the question into the transcript in prose instead.
+		expect(names).not.toContain("ask_user");
+		expect(names).toContain("notify");
+	});
+
 	it("marks exactly the pure reads parallel and everything else sequential", () => {
 		// pi's loop runs a batch concurrently unless one of its tools is pinned
 		// sequential (`ObsidianAgentService` now sets `toolExecution: "parallel"`),
@@ -198,7 +212,10 @@ describe("tool registration", () => {
 		// what these marks do lives in `parallelExecution.test.ts`.
 		const app = createTaskApp([]);
 		// The skills getter is what brings `read_skill` into the list at all.
-		const registered = createObsidianTools(app, createVaultHarnessContext(app).env, defaultSettings(), () => []);
+		const registered = createObsidianTools(app, createVaultHarnessContext(app).env, defaultSettings(), {
+			getSkills: () => [],
+			askUserBroker: new AskUserBroker(),
+		});
 
 		const unmarked = registered.filter((tool) => tool.executionMode === undefined).map((tool) => tool.name);
 		expect(unmarked).toEqual([]);
@@ -311,7 +328,14 @@ function getTaskTool(app: App, name: string) {
 	return tool;
 }
 
-/** Builds tools bound to a fresh vault env for one test. */
+/**
+ * Builds tools bound to a fresh vault env for one test.
+ *
+ * The broker is supplied because `ask_user` is only registered when it has
+ * somewhere to put a question — a tool with no surface would block its own turn
+ * forever. The omission is asserted on its own below rather than left implied by
+ * the shape of this helper.
+ */
 function tools(app: App, settings = defaultSettings()) {
-	return createObsidianTools(app, createVaultHarnessContext(app).env, settings);
+	return createObsidianTools(app, createVaultHarnessContext(app).env, settings, { askUserBroker: new AskUserBroker() });
 }

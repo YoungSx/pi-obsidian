@@ -106,6 +106,12 @@ export const en = {
 		replying: "Piem is replying…",
 		replyingAria: "Piem is replying",
 		latest: "Latest",
+		/**
+		 * The same jump button, when the conversation is blocked on a question that
+		 * has been scrolled past. "Latest" would be true and useless: it does not
+		 * say that something down there is waiting on the reader.
+		 */
+		latestQuestion: "A question is waiting",
 		openingChatAria: "Opening chat",
 		connectModel: "Connect a model to start",
 		needsApiKey: "Piem needs an API key before it can answer.",
@@ -519,10 +525,42 @@ export const en = {
 		truncated: "The selected text was long; only its beginning was quoted.",
 	},
 
-	/** The agent's structured question dialog, behind the ask_user tool. */
+	/** The agent's structured question, behind the ask_user tool. */
 	askUser: {
-		/** Title of the modal frame; the questions themselves come from the model. */
+		/**
+		 * Title of the escalated dialog. Only the dialog has a title bar: in the
+		 * transcript the card's state line does this job, and it says more.
+		 */
 		title: "Piem asks",
+		/**
+		 * Accessible name of the question card and of the record it leaves behind.
+		 * Both are landmarks in the transcript — a region a screen reader can jump
+		 * to — and a region without a name is one nobody can find.
+		 */
+		cardLabel: "Question from Piem",
+		/** The card's state line while the conversation is blocked on one question. */
+		waiting: "Piem needs your call",
+		/** The same line for several questions, so the reader knows the size of the ask. */
+		waitingMany: "Piem needs your call on {count} things",
+		/**
+		 * Another question is already queued behind this one — a subagent and its
+		 * parent both asking. Said out loud, because a second card appearing from
+		 * nowhere after the first is answered reads as a glitch.
+		 */
+		queued: "{count} more after this",
+		/** The record's state line once the user has answered. */
+		answered: "You answered",
+		/** The record's state line once the user handed the decision back. */
+		dismissed: "You left it to Piem",
+		/**
+		 * The way out, named for its consequence rather than its mechanism.
+		 *
+		 * The tool's result tells the model to "make the most reasonable choice
+		 * yourself and say that you did", so that — not "Cancel", and not a close
+		 * box — is what this button does. In the transcript it is also the *only*
+		 * way out: a card in the stream has no Esc and no frame to close.
+		 */
+		delegate: "Let Piem decide",
 		/** Confirms an answer once every question has one. */
 		confirm: "Confirm",
 		/** Placeholder of the free-text row at the end of the option list. */

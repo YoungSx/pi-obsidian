@@ -2,9 +2,9 @@ import { Notice, type App } from "obsidian";
 import type { AgentTool } from "@earendil-works/pi-agent-core";
 import { Type } from "typebox";
 import { VIEW_TYPE_PIEM_CHAT } from "../constants";
-import type { Translator } from "../i18n";
 import { textResult, throwIfAborted } from "./toolResult";
-import { AskUserModal, type AskUserAnswer, type AskUserQuestion } from "./askUserModal";
+import type { AskUserBroker } from "./askUserBroker";
+import type { AskUserQuestion } from "./askUserQuestion";
 
 /**
  * Tools through which the agent reaches the user directly, rather than the
@@ -16,6 +16,11 @@ import { AskUserModal, type AskUserAnswer, type AskUserQuestion } from "./askUse
  * the transcript can go unseen for the whole run, and a question asked in prose
  * on a phone costs the user a keyboard round-trip to answer. These tools put
  * the agent's side of that exchange where the user actually is.
+ *
+ * `ask_user` no longer owns how it looks. It hands the question to an
+ * {@link AskUserBroker} and waits; the broker puts it in the chat transcript, or
+ * escalates to a dialog when the panel is not on screen. What stays here is the
+ * one judgement that is the tool's own: whether there is anybody to ask at all.
  */
 
 const NotifyParameters = Type.Object({
@@ -80,36 +85,46 @@ export function createNotifyTool(app: App): AgentTool<typeof NotifyParameters> {
 	};
 }
 
-export function createAskUserTool(app: App, t: Translator): AgentTool<typeof AskUserParameters> {
+export function createAskUserTool(app: App, broker: AskUserBroker): AgentTool<typeof AskUserParameters> {
 	return {
 		name: "ask_user",
 		label: "Ask user",
-		// The modal blocks the whole turn — no other tool call in the batch can
-		// make progress while the user is looking at it, and a second modal
-		// stacking on top of the first would be unreadable.
+		// One question at a time per agent: a second call in the same batch could
+		// not make progress while the first is on screen, and the broker would
+		// queue it behind the first anyway. The pin says so at the tool level so
+		// pi never starts the second call in the first place.
 		executionMode: "sequential",
 		description:
-			"Ask the user a structured choice question in a dialog with clickable options, instead of guessing. Use it when a decision materially changes what you do next, the context does not settle it, and a wrong guess costs real work — which note to file into, which of two conflicting instructions to follow. Do not use it for information already in the conversation, to confirm something you could just do, or as a substitute for answering. Options are rendered as-is, so write them as the concrete choices; the user can always dismiss or type their own answer. Ask at most once per turn: ask everything you need in one call, then act on the answers.",
+			"Ask the user a structured choice question with clickable options, shown in the chat panel where they can still see their notes while answering, instead of guessing. Use it when a decision materially changes what you do next, the context does not settle it, and a wrong guess costs real work — which note to file into, which of two conflicting instructions to follow. Do not use it for information already in the conversation, to confirm something you could just do, or as a substitute for answering. Options are rendered as-is, so write them as the concrete choices; the user can always hand the decision back or type their own answer. Ask at most once per turn: ask everything you need in one call, then act on the answers.",
 		parameters: AskUserParameters,
 		execute: async (_toolCallId, params, signal) => {
 			throwIfAborted(signal);
 
-			// The modal renders globally, but the run keeps going after the user
-			// has moved on: an agent answering a background prompt would throw a
-			// dialog over whatever the user is doing. When the chat panel is not
-			// even open there is no one to ask — refuse and let the model put the
-			// question in the transcript, where it at least survives.
+			/*
+			 * A three-step ladder, and this is its first rung.
+			 *
+			 * No chat panel at all means the user is not using Piem right now — a
+			 * background run finishing while they work elsewhere in the vault. There
+			 * is nobody to ask, and neither surface is the right answer: a card would
+			 * go into a transcript nothing is rendering, and a dialog thrown over
+			 * whatever they are doing is the rudeness this tool was built to avoid.
+			 * Refusing sends the question back to the model, which puts it in the
+			 * transcript in prose, where it at least survives to be read later.
+			 *
+			 * The other two rungs are the broker's: a panel that is on screen gets the
+			 * question in its stream, and a panel that exists but is collapsed or
+			 * buried in a background tab gets the dialog.
+			 */
 			if (app.workspace.getLeavesOfType(VIEW_TYPE_PIEM_CHAT).length === 0) {
 				throw new Error(
-					"The chat panel is not open, so no question dialog can be shown. Ask your question in the chat instead and let the user reply there.",
+					"The chat panel is not open, so there is no one to show a question to. Ask your question in the chat instead and let the user reply there.",
 				);
 			}
 
-			const questions = params.questions as readonly AskUserQuestion[];
-			const answers = await promptUser(app, questions, t, signal);
+			const answers = await broker.ask(params.questions as readonly AskUserQuestion[], signal);
 			if (answers === null) {
 				return textResult(
-					"The user dismissed the question without answering. Do not re-ask the same thing; make the most reasonable choice yourself and say that you did.",
+					"The user handed the decision back without answering. Do not re-ask the same thing; make the most reasonable choice yourself and say that you did.",
 					{ dismissed: true },
 				);
 			}
@@ -118,33 +133,4 @@ export function createAskUserTool(app: App, t: Translator): AgentTool<typeof Ask
 			return textResult(`The user answered:\n${lines.join("\n")}`, { dismissed: false, answers });
 		},
 	};
-}
-
-/**
- * Opens the modal and waits for the user. The abort signal is the escape hatch
- * for a stopped run: without it the modal would sit on screen after the agent
- * was interrupted, and the tool promise would never settle.
- */
-function promptUser(
-	app: App,
-	questions: readonly AskUserQuestion[],
-	t: Translator,
-	signal: AbortSignal | undefined,
-): Promise<AskUserAnswer[] | null> {
-	return new Promise<AskUserAnswer[] | null>((resolve, reject) => {
-		const modal = new AskUserModal(app, questions, t, resolve);
-		if (signal) {
-			const onAbort = () => {
-				// Reject before close: close() fires onClose, whose settle would win
-				// the race and mask the abort as a dismissal.
-				reject(new Error("Operation aborted"));
-				modal.close();
-			};
-			// Removed once the user has answered, so a later abort of the same
-			// signal (the agent being stopped after this tool returned) cannot
-			// reject a promise that nobody is awaiting anymore.
-			signal.addEventListener("abort", onAbort, { once: true });
-		}
-		modal.open();
-	});
 }
