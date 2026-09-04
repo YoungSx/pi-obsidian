@@ -692,7 +692,7 @@ export const zhCN: DeepPartial<EnCopy> = {
 	target: {
 		customEndpoint: "自定义端点（{modelId}）",
 		needsKeyToSend: "{target} 需要先在插件设置中填写 API 密钥，才能发送提示词。",
-		needsKeyToCompact: "{target} 需要先在插件设置中填写 API 密钥，才能整理上下文。",
+		needsKeyToCompact: "{target} 需要先在插件设置中填写 API 密钥，才能整理较早的消息。",
 	},
 
 	confirmDelete: {

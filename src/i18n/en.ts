@@ -1184,7 +1184,8 @@ export const en = {
 	target: {
 		customEndpoint: "The custom endpoint ({modelId})",
 		needsKeyToSend: "{target} needs an API key in plugin settings before sending a prompt.",
-		needsKeyToCompact: "{target} needs an API key in plugin settings before compacting.",
+		/** "Tidying up" rather than "compacting": the panel's own word for this everywhere the reader can see it. */
+		needsKeyToCompact: "{target} needs an API key in plugin settings before tidying up earlier messages.",
 	},
 
 	/** Delete-confirmation dialog. */
