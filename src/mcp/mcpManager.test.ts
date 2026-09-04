@@ -490,4 +490,50 @@ describe("McpManager", () => {
 		expect(postCount).toBe(afterFirst);
 		await rotated.dispose();
 	});
+
+	it("re-handshakes when the transport changes even though url and token did not", async () => {
+		// The client rides the transport it was born on. Skipping the reconnect on a
+		// transport switch would leave calls on the old transport — which is how a
+		// server unreachable over `fetch` (CORS) could look "fine" after being
+		// tested on requestUrl and switched back: the cache never re-checked.
+		const server = serverFixture({ name: "x", url: "https://x.example.com", token: "t" });
+		let postCount = 0;
+		let currentTransport: "requestUrl" | "fetch" = "requestUrl";
+		const manager = new McpManager(
+			() => [server],
+			() => currentTransport,
+			STUB_PLUGIN_VERSION,
+			() => async (url, init) => {
+				if ((init?.method ?? "GET").toUpperCase() === "GET") {
+					return new Response(null, { status: 405 });
+				}
+				postCount++;
+				const body = typeof init?.body === "string" ? init.body : "";
+				if (body.includes('"method":"initialize"')) {
+					return handshakeResponses("session-1")[0]!;
+				}
+				if (body.includes("notifications/initialized")) {
+					return new Response(null, { status: 202 });
+				}
+				return new Response(JSON.stringify({ jsonrpc: "2.0", id: 1, result: { tools: [] } }), {
+					status: 200,
+					headers: { "content-type": "application/json" },
+				});
+			},
+		);
+
+		await manager.connect();
+		const afterFirst = postCount;
+
+		// Same url+token, transport flipped: a reconnect, not the skip.
+		currentTransport = "fetch";
+		await manager.connect();
+		expect(postCount).toBeGreaterThan(afterFirst);
+
+		// And once settled on the new transport, the skip works there too.
+		const afterSecond = postCount;
+		await manager.connect();
+		expect(postCount).toBe(afterSecond);
+		await manager.dispose();
+	});
 });
