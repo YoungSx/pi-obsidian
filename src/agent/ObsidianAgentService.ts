@@ -1768,9 +1768,17 @@ export class ObsidianAgentService {
 			return undefined;
 		}
 		const settings = this.getSettings();
+		// The focused runtime if there is one, and "no prior answer" when there is
+		// not. This is read synchronously from a render effect, and the window
+		// between deleting the active session and its replacement being adopted
+		// has no focused runtime at all — `runtimeForFocused` threw there, which
+		// unmounted the entire panel from inside React's commit phase. A cache
+		// read is also a pure query: minting a runtime as a side effect of it
+		// would be wrong even if nothing threw.
+		const rt = this.current();
 		return this.suggestionCache.get({
 			language: resolveLanguage(this.app.vault as LanguageHost, settings.language),
-			notePath: this.contextRefList(this.runtimeForFocused()).find((ref) => ref.kind === "active")?.path ?? null,
+			notePath: this.contextRefList(rt).find((ref) => ref.kind === "active")?.path ?? null,
 		});
 	}
 
@@ -1792,8 +1800,12 @@ export class ObsidianAgentService {
 	 */
 	async suggestQuickActions(scope: SuggestionScope): Promise<QuickAction[] | null> {
 		const settings = this.getSettings();
-		const rt = this.runtimeForFocused();
-		if (!this.hasApiKey() || !rt.agent || rt.agent.state.isStreaming || rt.isCompacting || rt.retryInFlight) {
+		// No focused runtime is one more "nothing to show", not an error: the
+		// catch below promises the UI that this method never throws, and a throw
+		// from above the `try` escaped that promise — as an unhandled rejection
+		// here, and as a torn-down panel through the synchronous peek beside it.
+		const rt = this.current();
+		if (!rt || !this.hasApiKey() || !rt.agent || rt.agent.state.isStreaming || rt.isCompacting || rt.retryInFlight) {
 			return null;
 		}
 		const subject =
