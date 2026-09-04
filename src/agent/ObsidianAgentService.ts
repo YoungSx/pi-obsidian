@@ -484,10 +484,16 @@ export interface ObsidianAgentServiceOptions {
 	 * a switch reaches the running conversation through exactly the path a
 	 * settings-tab change already takes.
 	 *
+	 * Pass `{ reconfigure: false }` to persist without the reconfigure. This is
+	 * the mid-run write (issue #252): the switcher records the choice while a
+	 * run is answering, and the live agent's model and tools must not move until
+	 * the run settles — the flush applies it. The persistence itself is never
+	 * deferred; a reload from here on already names the new model.
+	 *
 	 * Omitted falls back to reconfiguring in memory alone, which is what a test
 	 * holding the settings object directly wants.
 	 */
-	persistSettings?: () => Promise<void>;
+	persistSettings?: (options?: { reconfigure?: boolean }) => Promise<void>;
 	/**
 	 * Gathers agent tools beyond the built-in vault ones — MCP servers today.
 	 *
@@ -512,7 +518,7 @@ export class ObsidianAgentService {
 	private readonly streamFn: StreamFn | undefined;
 	private readonly loadUserSkillsFn: (customDir?: string) => Promise<UserSkillsLoad>;
 	/** See {@link ObsidianAgentServiceOptions.persistSettings}. */
-	private readonly persistSettings: () => Promise<void>;
+	private readonly persistSettings: (options?: { reconfigure?: boolean }) => Promise<void>;
 	/** See {@link ObsidianAgentServiceOptions.getExternalTools}. */
 	private readonly getExternalToolsFn: () => Promise<AgentTool[]>;
 	private readonly listeners = new Set<SnapshotListener>();
@@ -662,7 +668,7 @@ export class ObsidianAgentService {
 		this.streamFn = options.streamFn;
 		this.askUserBroker = options.askUserBroker;
 		this.loadUserSkillsFn = options.loadUserSkills ?? loadUserSkills;
-		this.persistSettings = options.persistSettings ?? (() => this.refreshConfiguration());
+		this.persistSettings = options.persistSettings ?? ((options?: { reconfigure?: boolean }) => (options?.reconfigure === false ? Promise.resolve() : this.refreshConfiguration()));
 		this.getExternalToolsFn = options.getExternalTools ?? (async () => []);
 		this.log = (options.logger ?? NOOP_LOGGER).child("agent");
 		this.env = new VaultExecutionEnv(app);
@@ -814,6 +820,10 @@ export class ObsidianAgentService {
 
 	/** Drops the runtime for a deleted session, cancelling whatever it holds. */
 	private removeRuntime(runtime: SessionRuntime): void {
+		// A pending mid-run choice must not outlive the session: the flush only
+		// fires while the runtime exists, but clearing here keeps the invariant
+		// explicit — a deleted session never applies anything.
+		runtime.pendingConfiguration = null;
 		runtime.dispose();
 		this.runtimes.delete(runtime.sessionPath);
 		this.sessionManager.releaseSession(runtime.sessionPath);
@@ -1202,6 +1212,13 @@ export class ObsidianAgentService {
 		if (!agent || agent.state.isStreaming) {
 			return;
 		}
+		// A pending mid-run change applies before the queued words leave: pi
+		// builds the request from `agent.state`, so dispatching first would put
+		// the whole queue on the old model and defer the flush a second time.
+		// `agent_end` schedules this dispatch off `waitForIdle()`, which can run
+		// ahead of `sendPrompt`'s finally — the take-then-apply flush makes the
+		// double call harmless instead of ordering the callers.
+		await this.flushPendingConfiguration(rt);
 		const lastAssistant = [...runMessages].reverse().find((message) => message.role === "assistant");
 		if (lastAssistant?.stopReason === "error") {
 			return;
@@ -2498,8 +2515,18 @@ export class ObsidianAgentService {
 	 * service, and a chat-panel control that reached for the plugin object would
 	 * be a second route to the same setting. Persistence is delegated — see
 	 * {@link ObsidianAgentServiceOptions.persistSettings} — which also carries the
-	 * reconfigure, so a switch mid-conversation lands on `agent.state.model` and
-	 * is appended to the session log like any other configuration change.
+	 * reconfigure, so a switch lands on `agent.state.model` and is appended to
+	 * the session log like any other configuration change.
+	 *
+	 * Mid-run (issue #252) the switch is allowed but deferred: the setting is
+	 * written through immediately — `data.json` and the live snapshot agree at
+	 * once, and a crash or reload picks the new model up — while the run in
+	 * flight keeps the model it started on, so its remaining turns do not move
+	 * onto a different endpoint halfway through. The choice waits in
+	 * {@link SessionRuntime.pendingConfiguration} and
+	 * {@link flushPendingConfiguration} applies it when the run settles. A
+	 * second mid-run choice of either kind overwrites the first: last write
+	 * wins, which is what the user last clicked.
 	 *
 	 * An id that names no configured model is ignored rather than stored. A
 	 * dangling `activeModelId` does not fail loudly: {@link getSelectedModel}
@@ -2512,6 +2539,13 @@ export class ObsidianAgentService {
 			return;
 		}
 		settings.activeModelId = modelId;
+		const rt = this.current();
+		if (rt && this.isBusy(rt)) {
+			rt.pendingConfiguration = { ...rt.pendingConfiguration, modelId };
+			await this.persistSettings({ reconfigure: false });
+			this.notify();
+			return;
+		}
 		await this.persistSettings();
 	}
 
@@ -2520,11 +2554,27 @@ export class ObsidianAgentService {
 	 * global one. The change is recorded in the session file so a reload or
 	 * another window replays it, exactly like a model change. A no-op when the
 	 * level is already set (the selector's job) or there is no live agent.
+	 *
+	 * Mid-run (issue #252) the change is allowed but deferred, like
+	 * {@link setActiveModel}: the pending level rides
+	 * {@link SessionRuntime.pendingConfiguration} and
+	 * {@link flushPendingConfiguration} applies it when the run settles, with
+	 * {@link reconfigureRuntime} doing the clamp against the model then in force
+	 * and the session-log append — the only writer, so no double entry and no
+	 * unclamped value recorded. Accepted edge: choosing a level mid-run and then
+	 * starting a *new* session before the run lands means the new session
+	 * inherits the old recorded level, since the pending choice has not been
+	 * appended anywhere yet.
 	 */
 	async setThinkingLevel(level: ThinkingLevel): Promise<void> {
 		const rt = this.current();
 		const agent = rt?.agent;
 		if (!rt || !agent || agent.state.thinkingLevel === level) {
+			return;
+		}
+		if (this.isBusy(rt)) {
+			rt.pendingConfiguration = { ...rt.pendingConfiguration, thinkingLevel: level };
+			this.notify();
 			return;
 		}
 		agent.state.thinkingLevel = level;
@@ -2597,6 +2647,56 @@ export class ObsidianAgentService {
 		await this.sessionManager.ensureConfigurationFor(rt.sessionPath, defaults, rt.activeLane);
 		await this.refreshSessionInfo(rt);
 		this.notify();
+	}
+
+	/**
+	 * Whether anything this runtime owns is in flight. Five flags, not one: a
+	 * between-turns compaction is a real LLM call, a retry's branch summary is
+	 * another, and `rt.compaction` is the single-flight promise those checks
+	 * resolve through. Every mid-run deferral and every flush guard reads this
+	 * one predicate, so the definition of "busy" lives in exactly one place.
+	 */
+	private isBusy(rt: SessionRuntime): boolean {
+		const agent = rt.agent;
+		return Boolean(agent?.state.isStreaming || rt.isCompacting || rt.retryInFlight || rt.branchSummaryController || rt.compaction);
+	}
+
+	/**
+	 * Applies a change the user made mid-run, once the run has landed (issue
+	 * #252).
+	 *
+	 * Everything typed during the run — the run itself, its steers — stays on
+	 * the model it began on; the change lands for the dispatch that follows.
+	 * `take-then-apply` is the whole concurrency story: the pending record is
+	 * cleared before any await, so the two call sites ({@link
+	 * notifySettledState} and {@link dispatchQueuedPrompts}, which can both fire
+	 * for the same settle) cannot double-apply, and a change made between the
+	 * take and the reconfigure simply becomes the next pending record.
+	 *
+	 * The level is written onto the agent state *before*
+	 * {@link reconfigureRuntime} runs: the reconfigure's existing clamp reads
+	 * `agent.state.thinkingLevel` against the model now in force, so an
+	 * unsupported level for the pending model is clamped and logged there —
+	 * one writer for the session file, not two.
+	 *
+	 * Refuses while still busy rather than throwing: the flush runs from settle
+	 * paths, and a run that lands into another compaction (mid-run compact
+	 * scheduled at turn end) must leave the change pending for the next settle,
+	 * not fail the settle.
+	 */
+	private async flushPendingConfiguration(rt: SessionRuntime): Promise<void> {
+		if (!rt.pendingConfiguration) {
+			return;
+		}
+		if (!rt.agent || this.isBusy(rt)) {
+			return;
+		}
+		const pending = rt.pendingConfiguration;
+		rt.pendingConfiguration = null;
+		if (pending.thinkingLevel !== undefined && rt.agent.state.thinkingLevel !== pending.thinkingLevel) {
+			rt.agent.state.thinkingLevel = pending.thinkingLevel;
+		}
+		await this.reconfigureRuntime(rt);
 	}
 
 	dispose(): void {
@@ -3951,6 +4051,19 @@ export class ObsidianAgentService {
 	 * still settles, and the summary simply stays stale until the next refresh.
 	 */
 	private async notifySettledState(rt: SessionRuntime): Promise<void> {
+		// First, not last: the flush's own notify rides the reconfigure, and a
+		// change applied after this call's notify would leave the panel showing
+		// the pre-flush snapshot until the next unrelated event.
+		//
+		// Both halves carry #253's settle contract: every caller has already
+		// finished its real work, so a failure here must not reject the
+		// operation that succeeded. A failed flush has already spent the hold
+		// (take-then-apply); the next idle-path reconfigure is the self-heal.
+		try {
+			await this.flushPendingConfiguration(rt);
+		} catch (error) {
+			this.log.error("Failed to apply the pending configuration after settling a run", () => ({ error: String(error) }));
+		}
 		try {
 			await this.refreshSessionInfo(rt);
 		} catch (error) {
