@@ -798,7 +798,7 @@ describe("ObsidianAgentService", () => {
 		// a send during streaming is queued, so only compaction or this rewind can
 		// reach the refusal at all.
 		expect(sent).toBe(false);
-		expect(refusal).toContain("resending your earlier message");
+		expect(refusal).toContain("resending your message");
 		const after = service.getSnapshot().messages;
 		expect(JSON.stringify(after)).toContain("Which notes mention pi?");
 		expect(JSON.stringify(after)).not.toContain("A brand new question");

@@ -116,6 +116,26 @@ describe("describeProviderFailure", () => {
 		}
 	});
 
+	/*
+	 * The spoken form is the *whole* sentence, lower-cased at the front — the shape
+	 * `youStoppedSpoken` and `replyTruncatedSpoken` already use. An earlier cut
+	 * truncated it to the diagnosis and dropped the remedy, so a screen-reader user
+	 * heard what went wrong and never what to do about it. This pins the pair
+	 * together in both languages, since a translator editing one is the way the two
+	 * drift apart.
+	 */
+	it("keeps the remedy in the spoken form, in both languages", () => {
+		for (const lang of ["en", "zh-cn"] as const) {
+			const translator = getT(lang);
+			for (const [message] of CASES) {
+				const { line, spoken } = describeProviderFailure(message, translator);
+				const tail = (text: string): string => text.slice(1);
+
+				expect(tail(spoken)).toBe(tail(line));
+			}
+		}
+	});
+
 	it("speaks Chinese when the panel does", () => {
 		const zh = describeProviderFailure("504 Gateway Time-out", getT("zh-cn"));
 

@@ -91,7 +91,7 @@ describe("describeReplyCutoff", () => {
 	it("translates every notice", () => {
 		expect(describeReplyCutoff(reply("aborted"), zh)?.notice).toBe("你已停止这条回复。");
 		expect(describeReplyCutoff(reply("length"), zh)?.notice).toBe("这条回复达到模型的长度上限，提前结束了。");
-		expect(describeReplyCutoff(reply("error", "504 Gateway Time-out"), zh)?.notice).toBe("供应商没在规定时间内回话。");
+		expect(describeReplyCutoff(reply("error", "504 Gateway Time-out"), zh)?.notice).toBe("供应商迟迟没有回话。");
 	});
 
 	it("phrases the spoken form to continue a sentence, not to open one", () => {
