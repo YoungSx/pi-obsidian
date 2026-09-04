@@ -262,6 +262,49 @@ describe("MessageList message chrome", () => {
 });
 
 /**
+ * Image content in the live transcript (issue #253).
+ *
+ * The persisted log swaps image blocks for placeholder text, but the agent's
+ * in-memory state keeps the bytes, so a sent picture can be drawn as itself
+ * for the rest of the session. A reloaded session has only the placeholder —
+ * and no image block at all — so the fallback there costs nothing here.
+ */
+describe("MessageList image content", () => {
+	beforeEach(() => {
+		createRootSync = createRootImpl;
+	});
+
+	afterEach(() => {
+		document.body.replaceChildren();
+	});
+
+	it("draws a sent image as the picture, not a mime-type note", async () => {
+		const image = userMessage("look at this");
+		image.content = [
+			{ type: "text", text: "look at this" },
+			{ type: "image", mimeType: "image/png", data: "aGVsbG8=" },
+		];
+		const host = renderMessages([image]);
+		await flushRender();
+
+		const img = host.querySelector<HTMLImageElement>(".piem-chat__image");
+		expect(img?.src).toBe("data:image/png;base64,aGVsbG8=");
+		expect(img?.alt).toContain("image/png");
+		expect(host.textContent).not.toContain("[image: image/png]");
+	});
+
+	it("keeps the placeholder when a block has no bytes to draw", async () => {
+		const image = userMessage("look");
+		image.content = [{ type: "image", mimeType: "image/png", data: "" }];
+		const host = renderMessages([image]);
+		await flushRender();
+
+		expect(host.querySelector(".piem-chat__image")).toBeNull();
+		expect(host.textContent).toContain("[image: image/png]");
+	});
+});
+
+/**
  * The gap between sending and the first token.
  *
  * Reported as "it ignored me": the prompt lands, the transcript ends on the

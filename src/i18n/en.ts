@@ -310,6 +310,7 @@ export const en = {
 		exportFailed: "Could not save the chat as a note: {error}",
 		/** alt text for a staged image thumbnail. */
 		imageThumbAlt: "Image attached: {mimeType}",
+		imageAlt: "Image: {mimeType}",
 		/** aria-label for the button removing the Nth staged image (1-based). */
 		removeImage: "Remove image {index}",
 		/** Notice when a ![[...]] embed could not be read from the vault. */

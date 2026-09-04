@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from "react";
 import type { AgentMessage, CompactionSummaryMessage } from "@earendil-works/pi-agent-core";
 import type { PendingToolCall } from "../agent/ObsidianAgentService";
-import type { AssistantMessage, ToolCall, ToolResultMessage, UserMessage } from "@earendil-works/pi-ai";
+import type { AssistantMessage, ImageContent, ToolCall, ToolResultMessage, UserMessage } from "@earendil-works/pi-ai";
 import type { App, Component, IconName } from "obsidian";
 import type { TextBlockKind } from "./markdownPolicy";
 import { MarkdownText } from "./MarkdownText";
@@ -1044,6 +1044,24 @@ function renderMessageContent(message: UserMessage | AssistantMessage, args: Ren
 	return renderAssistantMessage(message, args);
 }
 
+/**
+ * Draws an image content block as the picture it is.
+ *
+ * The live agent state keeps the bytes the sender handed over — only the
+ * persisted log swaps them for placeholder text (`sanitizeMessageForLog`),
+ * so a reloaded session has no image block to draw and falls back to that
+ * text line with nothing extra here. The data URI is the same shape the
+ * composer's staged thumbnails use; one renderer serves every role that can
+ * carry image blocks, so a tool returning a screenshot reads the same way a
+ * user-pasted one does.
+ */
+function ImageBlock({ content, t }: { content: ImageContent; t: Translator }): React.JSX.Element {
+	if (!content.data) {
+		return <div>{t.t("chat.imagePlaceholder", { mimeType: content.mimeType })}</div>;
+	}
+	return <img alt={t.t("chat.imageAlt", { mimeType: content.mimeType })} className="piem-chat__image" src={`data:${content.mimeType};base64,${content.data}`} />;
+}
+
 interface TextBlockProps {
 	text: string;
 	kind: TextBlockKind;
@@ -1069,7 +1087,7 @@ function renderUserMessage(message: UserMessage, args: RenderArgs): React.ReactN
 		if (content.type === "text") {
 			return <Block key={index} text={content.text} kind="user" isStreaming={args.isStreaming} context={args.renderContext} />;
 		}
-		return <div key={index}>{args.renderContext.t.t("chat.imagePlaceholder", { mimeType: content.mimeType })}</div>;
+		return <ImageBlock key={index} content={content} t={args.renderContext.t} />;
 	});
 }
 
@@ -1280,7 +1298,7 @@ function ToolResultTrace({ message, context }: { message: ToolResultMessage; con
 					if (content.type === "text") {
 						return <Block key={index} text={content.text} kind="toolResult" isStreaming={false} context={context} />;
 					}
-					return <div key={index}>{context.t.t("chat.imagePlaceholder", { mimeType: content.mimeType })}</div>;
+					return <ImageBlock key={index} content={content} t={context.t} />;
 				})}
 				{diff ? <Block text={`\`\`\`diff\n${diff}\n\`\`\``} kind="assistant" isStreaming={false} context={context} /> : null}
 			</div>
@@ -1381,7 +1399,7 @@ function renderHarnessBody(message: AgentMessage, context: MessageContext): Reac
 			if (content.type === "text") {
 				return <Block key={index} text={content.text} kind="harness" isStreaming={false} context={context} />;
 			}
-			return <div key={index}>{context.t.t("chat.imagePlaceholder", { mimeType: content.mimeType })}</div>;
+			return <ImageBlock key={index} content={content} t={context.t} />;
 		});
 	}
 	return null;

@@ -2668,6 +2668,20 @@ button.piem-chat__latest--asking {
 }
 
 /*
+ * Image content drawn from the live transcript — a pasted send, or a tool
+ * result carrying a screenshot. Capped so a full-resolution paste cannot
+ * shove the reply off-screen, and framed like every other picture in the
+ * panel (thumbnails, preview shims) so it reads as content, not chrome.
+ */
+.piem-chat__image {
+	border: 1px solid var(--background-modifier-border);
+	border-radius: var(--radius-s);
+	max-height: 12rem;
+	max-width: min(100%, 24rem);
+	object-fit: contain;
+}
+
+/*
  * Queued mid-run sends, between the composer's notice rows and the textarea.
  * One chip per waiting message, oldest first, each with its own retract
  * button — a queue of three is three decisions, not one. Muted text keeps the

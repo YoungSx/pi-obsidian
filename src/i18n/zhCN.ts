@@ -166,6 +166,7 @@ export const zhCN: DeepPartial<EnCopy> = {
 		/** 导出笔记写入失败时的通知。 */
 		exportFailed: "没能把对话存为笔记：{error}",
 		imageThumbAlt: "已附图片：{mimeType}",
+		imageAlt: "图片：{mimeType}",
 		removeImage: "移除图片 {index}",
 		imageNotFound: "在 vault 中找不到 {path}，未发送。",
 		rowLabelSystem: "系统",
