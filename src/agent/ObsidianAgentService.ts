@@ -724,10 +724,12 @@ export class ObsidianAgentService {
 	 * The runtime for `path`, created on first touch.
 	 *
 	 * Creation is what makes a session "known" to the service: a background
-	 * session is hydrated here — including its claim on the manager, so the
-	 * retention sweep cannot trash a conversation the panel is mid-run in — and
-	 * its interrupted runs are settled exactly once, at that first touch, not
-	 * again on every focus.
+	 * session is hydrated here, and its interrupted runs are settled exactly
+	 * once, at that first touch, not again on every focus. The claim that spares
+	 * a mid-run background chat from a retention sweep is taken per run by
+	 * {@link beginRunOperation} and handed back by {@link endRunOperation} —
+	 * claiming at creation instead would pin every chat the panel ever touched,
+	 * which would gut retention.
 	 */
 	private runtimeFor(path: string): SessionRuntime {
 		const existing = this.runtimes.get(path);
@@ -736,10 +738,6 @@ export class ObsidianAgentService {
 		}
 		const runtime = new SessionRuntime(path);
 		this.runtimes.set(path, runtime);
-		const activePath = this.sessionManager.getActiveSessionPath();
-		if (path !== activePath && this.sessionManager.isLoaded(path)) {
-			this.sessionManager.retainSession(path);
-		}
 		this.settleInterruptedRunsFor(runtime).catch((error) => {
 			this.log.error("Failed to settle interrupted runs", () => ({
 				path,
@@ -1197,6 +1195,15 @@ export class ObsidianAgentService {
 	private async beginRunOperation(rt: SessionRuntime, originalPrompt: readonly AgentMessage[]): Promise<void> {
 		const lane = rt.activeLane;
 		rt.activeRunLedger = undefined;
+		// Claimed for the run's whole life: a sweep that fires while this session
+		// is in the background (a new chat, a create elsewhere) must not trash the
+		// file the run is appending to. Released when the run settles. The loaded
+		// check is belt-and-braces — a session reachable here is hydrated — but a
+		// missed claim degrades to the old evictable contract, while a throw here
+		// would surface as a failed prompt.
+		if (this.sessionManager.isLoaded(rt.sessionPath)) {
+			this.sessionManager.retainSession(rt.sessionPath);
+		}
 		try {
 			rt.activeRunLedger = { runId: await this.sessionManager.beginRunOperationFor(rt.sessionPath, [...originalPrompt], lane), lane };
 		} catch (error) {
@@ -1219,7 +1226,17 @@ export class ObsidianAgentService {
 	private async endRunOperation(rt: SessionRuntime, outcome: "completed" | "aborted" | "failed", error?: { code: string; message: string }): Promise<void> {
 		const ledger = rt.activeRunLedger;
 		rt.activeRunLedger = undefined;
+		// Released before the ledger close: the run is over either way, and a
+		// close that fails below (a session deleted mid-run has no file to write
+		// to) must not leave a claim pinned on a chat that no longer exists.
+		this.sessionManager.releaseSession(rt.sessionPath);
 		if (!ledger) {
+			return;
+		}
+		if (!this.sessionManager.isLoaded(rt.sessionPath)) {
+			// The session was deleted while the run was winding down: deleteSession
+			// aborts the run and drops the file, so there is no ledger entry left to
+			// close — writing one can only fail and log noise nobody can act on.
 			return;
 		}
 		try {
@@ -3110,18 +3127,6 @@ export class ObsidianAgentService {
 	}
 
 	private async handleAgentEvent(rt: SessionRuntime, event: AgentEvent): Promise<void> {
-		// Legacy single-argument seam: tests call `handleAgentEvent(event)`, so
-		// the first parameter carries the event and the focused runtime is
-		// implied. Route that call at the focused runtime.
-		if (!event) {
-			const legacyEvent = rt as unknown as AgentEvent;
-			const focused = this.current();
-			if (!legacyEvent || !focused) {
-				return;
-			}
-			rt = focused;
-			event = legacyEvent;
-		}
 		if (event.type === "tool_execution_start") {
 			rt.pendingToolNames.set(event.toolCallId, event.toolName);
 			rt.pendingToolStarts.set(event.toolCallId, Date.now());
