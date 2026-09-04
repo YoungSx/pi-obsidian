@@ -61,7 +61,9 @@ describe("MessageList compaction divider", () => {
 
 		const divider = host.querySelector("section.piem-chat__compaction");
 		expect(divider).not.toBeNull();
-		expect(divider?.getAttribute("aria-label")).toBe("Compacted history");
+		// The visible heading is the divider's name; an `aria-label` would only
+		// resurface as a native hover tooltip restating it.
+		expect(divider?.getAttribute("aria-label")).toBeNull();
 		expect(divider?.querySelector(".piem-chat__compaction-heading")?.textContent).toContain("summarized");
 		expect(divider?.textContent).toContain("Summary of everything earlier");
 		// Not modelled as a normal message card.

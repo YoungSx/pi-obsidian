@@ -188,7 +188,6 @@ export const en = {
 		thoughtItThrough: "Thought it through",
 		/** The thinking row while the model is still producing it; settled, it reads "Thought it through". */
 		thinkingNow: "Thinking…",
-		compactedAria: "Compacted history",
 		earlierSummarized: "Earlier history was summarized to fit the context window.",
 		imagePlaceholder: "[image: {mimeType}]",
 		/** Shown as a banner when the active model lacks image capability. */

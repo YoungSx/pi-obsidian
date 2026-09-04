@@ -13,6 +13,7 @@ import { describeReplyCutoff, type ReplyCutoff } from "./replyCutoff";
 import { durationBadgeVisible, isFinalReply, replyDurationMs } from "./replyDuration";
 import { useT } from "./TranslatorContext";
 import type { Translator } from "../i18n";
+import { suppressOwnTooltip } from "./tooltipSuppression";
 import { IconButton, ObsidianIcon } from "./ObsidianIcon";
 import { countDiffLines, describePendingTool, describeTool, isToolIdentifier, summarizeToolPayload, summarizeToolResult } from "./traceSummary";
 import { DEFAULT_TRACE_EXPAND, traceOpensByDefault, type TraceExpandSetting } from "./traceExpand";
@@ -327,6 +328,7 @@ function PendingReply(): React.JSX.Element {
 			className="piem-chat__message piem-chat__message--assistant piem-chat__message--pending"
 			aria-label={t.t("chat.replyingAria")}
 			aria-busy={true}
+			onMouseOver={suppressOwnTooltip}
 		>
 			<span className="piem-chat__typing" aria-hidden="true">
 				<span className="piem-chat__typing-dot" />
@@ -468,6 +470,7 @@ export function MessageList({
 				aria-busy={isStreaming || isInitializing}
 				tabIndex={0}
 				onScroll={updateFollowState}
+				onMouseOver={suppressOwnTooltip}
 			>
 				{messages.length === 0 ? (
 					<EmptyState
@@ -799,6 +802,13 @@ function MessageRow({ index, message, isStreaming, renderContext, onRetry, onEdi
 				className={`piem-chat__message piem-chat__message--${message.role}`}
 				aria-busy={isStreaming}
 				aria-label={renderContext.t.t(message.role === "user" ? "chat.you" : "chat.agent")}
+				/*
+				 * The label is for the screen reader's turn map, not the pointer: the
+				 * role is already the first thing the bubble shows, so Obsidian's
+				 * native tooltip would restate the visible text on every message,
+				 * every turn. Message actions below keep their own tooltips.
+				 */
+				onMouseOver={suppressOwnTooltip}
 			>
 				<div className="piem-chat__bubble">
 					<div className="piem-chat__message-content">{renderMessageContent(message, { index, isStreaming, renderContext })}</div>
@@ -883,7 +893,10 @@ function replyCutoff(message: UserMessage | AssistantMessage, t: Translator): Re
 function CompactionDivider({ message, renderContext }: { message: CompactionSummaryMessage; renderContext: MessageContext }): React.JSX.Element {
 	const t = useT();
 	return (
-		<section aria-label={t.t("chat.compactedAria")} className="piem-chat__compaction">
+		// No `aria-label`: the heading inside is the section's name and the first
+		// thing read aloud anyway, and a label here would only surface as a native
+		// tooltip restating that heading on hover.
+		<section className="piem-chat__compaction">
 			<div className="piem-chat__compaction-heading">{t.t("chat.earlierSummarized")}</div>
 			<Block text={message.summary} kind="summary" isStreaming={false} context={renderContext} />
 		</section>
