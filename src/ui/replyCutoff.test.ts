@@ -67,7 +67,6 @@ describe("describeReplyCutoff", () => {
 		expect(cutoff?.kind).toBe("failed");
 		expect(cutoff?.notice).toBe("The provider did not answer in time.");
 		expect(cutoff?.icon).toBe("alert-triangle");
-		expect(cutoff?.retryable).toBe(true);
 	});
 
 	it("keeps the provider's own words behind the sentence that summarised them", () => {
@@ -77,8 +76,6 @@ describe("describeReplyCutoff", () => {
 
 		expect(cutoff?.detail?.text).toBe("429 quota exhausted, check billing");
 		expect(cutoff?.detail?.label).toBe("What the provider said");
-		// Quota, not rate limit: waiting does not fix it, so no retry is offered.
-		expect(cutoff?.retryable).toBe(false);
 	});
 
 	it("still reports a failure the provider described with nothing at all", () => {

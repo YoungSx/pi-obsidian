@@ -1086,7 +1086,7 @@ export class ObsidianAgentService {
 			// tail.
 			rt.resumableLanes.delete(rt.activeLane);
 		} catch (error) {
-			rt.panelError = { message: error instanceof Error ? error.message : String(error), opensSettings: false };
+			this.reportDispatchFailure(rt, error);
 		} finally {
 			rt.activeRunContext = null;
 			await this.notifySettledState(rt);
@@ -1180,7 +1180,7 @@ export class ObsidianAgentService {
 			// Back onto the chips, oldest first: the words are still the
 			// user's, and hiding them behind an error banner loses them.
 			rt.promptQueue.restore(stranded);
-			rt.panelError = { message: error instanceof Error ? error.message : String(error), opensSettings: false };
+			this.reportDispatchFailure(rt, error);
 		} finally {
 			rt.activeRunContext = null;
 			await this.notifySettledState(rt);
@@ -1213,7 +1213,7 @@ export class ObsidianAgentService {
 			await this.beginRunOperation(rt, last ? [last] : []);
 			await agent.continue();
 		} catch (error) {
-			rt.panelError = { message: error instanceof Error ? error.message : String(error), opensSettings: false };
+			this.reportDispatchFailure(rt, error);
 		} finally {
 			rt.activeRunContext = null;
 			await this.notifySettledState(rt);
@@ -3792,6 +3792,31 @@ export class ObsidianAgentService {
 			return undefined;
 		}
 		return isReportedInTranscript(agent, agentError) ? undefined : agentError;
+	}
+
+	/**
+	 * Records a dispatch failure in the banner, unless the transcript has it.
+	 *
+	 * pi rethrows out of `prompt()`/`continue()` *after* stamping the partial
+	 * assistant turn with `stopReason: "error"`, so the three catches around a
+	 * departing run see the same failure the transcript is already annotating. Left
+	 * alone, that reported one timeout twice — once under the reply, once pinned
+	 * above the conversation — which is the duplication #239 exists to end.
+	 *
+	 * The test is the tail of the transcript rather than a text comparison: the
+	 * thrown error and the text pi stamped need not be the same string, and what
+	 * matters is whether *this run's* failure is visible where it happened. A throw
+	 * that leaves no failed assistant turn behind — the credential gate, a broken
+	 * session log, anything before the run departs — has nowhere to be seen and
+	 * still reaches the banner.
+	 */
+	private reportDispatchFailure(rt: SessionRuntime, error: unknown): void {
+		const messages = rt.agent?.state.messages;
+		const lastAssistant = messages ? [...messages].reverse().find((message) => message.role === "assistant") : undefined;
+		if (lastAssistant?.role === "assistant" && lastAssistant.stopReason === "error") {
+			return;
+		}
+		rt.panelError = { message: error instanceof Error ? error.message : String(error), opensSettings: false };
 	}
 
 	private setError(rt: SessionRuntime, message: string, opensSettings = false): void {

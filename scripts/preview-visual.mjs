@@ -324,8 +324,8 @@ async function settle(done, tries = 20) {
  * mount effect owns initialization — drives it with `drive`, then hands back
  * the panel element.
  */
-async function mountChat({ streamFn, drive, askUserBroker }) {
-	const { service, sessionManager } = makeService({ streamFn });
+async function mountChat({ streamFn, settings, drive, askUserBroker }) {
+	const { service, sessionManager } = makeService({ streamFn, settings });
 	const host = document.createElement("div");
 	document.body.appendChild(host);
 	const root = reactDomClient.createRoot(host);
@@ -475,9 +475,44 @@ SCENARIOS["chat-streaming"] = async () => {
 	return { element, cleanup };
 };
 
+/*
+ * A provider failure, which now reads in the flow rather than in the banner
+ * (#239). The wait is on the transcript's own tail — an assistant turn stamped
+ * `stopReason: "error"` — because that is where the report lives; waiting on
+ * `errorMessage` would wait for a banner that no longer rises for this.
+ */
 SCENARIOS["chat-error"] = async () => {
 	const { element, cleanup } = await mountChat({
 		streamFn: failingStreamFn("DeepSeek request failed: 401 invalid API key"),
+		drive: async (service) => {
+			await service.sendPrompt("Hello");
+			await settle(() => {
+				const last = service.getSnapshot().messages.at(-1);
+				return last?.role === "assistant" && last.stopReason === "error";
+			});
+		},
+	});
+	return { element, cleanup };
+};
+
+/*
+ * What the banner is *for* after the triage: a standing state that stops the
+ * panel working until the reader changes something. The key gate is the
+ * archetype, and it is the one failure whose recovery is the settings tab.
+ */
+SCENARIOS["chat-blocked"] = async () => {
+	const { element, cleanup } = await mountChat({
+		/*
+		 * Every key removed — on the active provider *and* in the per-provider map,
+		 * because `getConfiguredApiKey` reads the configured provider first. This is
+		 * the one standing state whose recovery is the settings tab, and therefore
+		 * the one failure that earns the banner's shortcut.
+		 */
+		settings: {
+			...makeSettings(),
+			providers: PROVIDERS.map((provider) => ({ ...provider, apiKey: "", secretRef: "" })),
+			providerApiKeys: {},
+		},
 		drive: async (service) => {
 			await service.sendPrompt("Hello");
 			await settle(() => service.getSnapshot().errorMessage !== undefined);
