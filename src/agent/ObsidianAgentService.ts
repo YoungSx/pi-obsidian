@@ -851,13 +851,21 @@ export class ObsidianAgentService {
 		if (!agent) {
 			return false;
 		}
-		// A send that arrives while the agent is already answering is not
-		// refused: it becomes a steered message (see `enqueueSteer`).
-		// Compaction and the rewind still hold the turn exclusively — those
-		// are states a steered message cannot join.
+		/*
+		 * A send that arrives while the agent is already answering is not refused:
+		 * it becomes a steered message (see `enqueueSteer`). Compaction and the
+		 * rewind still hold the turn exclusively — those are states a steered
+		 * message cannot join.
+		 *
+		 * Quiet, and named. This raised a red assertive alert reading "The agent is
+		 * already responding.", which is false for both states that produce it: a
+		 * send during streaming is queued, not refused, so the only way to reach
+		 * this line is compaction or a rewind. Two states, two sentences, using the
+		 * words the status bar is showing at that same moment.
+		 */
 		const rt = this.runtimeForFocused();
 		if (rt.isCompacting || rt.retryInFlight) {
-			this.setError(rt, this.t().t("chat.agentBusy"));
+			this.setNotice(rt, this.t().t(rt.isCompacting ? "chat.busyTidying" : "chat.busyResending"));
 			return false;
 		}
 		return await this.deliverPrompt(trimmedPrompt, images);
@@ -895,8 +903,11 @@ export class ObsidianAgentService {
 		if (images.length === 0 || modelSupportsImages(getSelectedModel(this.getSettings()))) {
 			return true;
 		}
-		const t = this.t();
-		this.setError(rt, t.t("chat.imagesNotSupported", { model: describeModelTarget(this.getSettings(), t) }));
+		// The same sentence the staging-time gate shows, on the same channel. It
+		// used to be red here and grey there, differing only in *when* the model was
+		// switched — one fact cannot mean two levels of alarm, and nothing is lost
+		// either way: both text and images stay with the user.
+		this.notifyImagesBlocked();
 		return false;
 	}
 
@@ -3651,7 +3662,10 @@ export class ObsidianAgentService {
 		for (const path of paths) {
 			const file = this.app.vault.getFileByPath(path) ?? this.resolveLinkpathDest(path, sourcePath);
 			if (!file) {
-				this.setNotice(rt, t.t("chat.imageNotFound", { path }));
+				// `appendNotice`, not `setNotice`: this runs once per embed, and
+				// assigning meant three missing images reported as one — the last.
+				this.appendNotice(t.t("chat.imageNotFound", { path }));
+				this.appendNotice(rt, t.t("chat.imageNotFound", { path }));
 				continue;
 			}
 			try {
@@ -3662,7 +3676,8 @@ export class ObsidianAgentService {
 				// folder differently and the file is what the bytes came from.
 				images.push({ type: "image", data: arrayBufferToBase64(buffer), mimeType: mimeTypeForPath(file.path) });
 			} catch {
-				this.setNotice(rt, t.t("chat.imageNotFound", { path }));
+				this.appendNotice(t.t("chat.imageNotFound", { path }));
+				this.appendNotice(rt, t.t("chat.imageNotFound", { path }));
 			}
 		}
 		return images;

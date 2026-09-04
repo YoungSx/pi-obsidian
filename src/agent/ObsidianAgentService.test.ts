@@ -713,7 +713,10 @@ describe("ObsidianAgentService", () => {
 
 		expect(sent).toBe(false);
 		expect(service.getSnapshot().messages).toEqual(before);
-		expect(service.getSnapshot().errorMessage).toContain("does not accept images");
+		// One sentence, one channel: this used to be red at send time and grey at
+		// staging time for the same fact.
+		expect(service.getSnapshot().errorMessage).toBeUndefined();
+		expect(service.getSnapshot().noticeMessage).toContain("does not accept images");
 	});
 
 	it("reports the rewind window on the snapshot while the branch summary runs", async () => {
@@ -775,14 +778,17 @@ describe("ObsidianAgentService", () => {
 		// Grab the refusal before releasing the summary: the edit's own send
 		// clears the banner when it runs, so the busy report is transient by
 		// design — visible to the user during the window, gone once the turn lands.
-		const refusal = service.getSnapshot().errorMessage;
+		const refusal = service.getSnapshot().noticeMessage;
 		release?.();
 		expect(await resend).toBe(true);
 
 		// The refusal is reported the way a busy send always is, and the edit's
-		// own turn still went through with nothing appended above it.
+		// own turn still went through with nothing appended above it. It names the
+		// state that actually holds the turn: "already responding" was false here —
+		// a send during streaming is queued, so only compaction or this rewind can
+		// reach the refusal at all.
 		expect(sent).toBe(false);
-		expect(refusal).toContain("already responding");
+		expect(refusal).toContain("resending your earlier message");
 		const after = service.getSnapshot().messages;
 		expect(JSON.stringify(after)).toContain("Which notes mention pi?");
 		expect(JSON.stringify(after)).not.toContain("A brand new question");
@@ -1878,6 +1884,24 @@ describe("ObsidianAgentService run ledger and recovery", () => {
  * there. These tests pin the split: the abort is filtered out of the banner
  * channel, a genuine failure is not.
  */
+describe("ObsidianAgentService reports every missing embed, not just the last", () => {
+	/*
+	 * `readVaultImages` loops over the embeds and reported each miss with
+	 * `setNotice`, which *assigns* — so three broken `![[…]]` references named one
+	 * path. `appendNotice` is the accumulating sibling, and it already existed for
+	 * exactly this.
+	 */
+	it("names each embed it could not read", async () => {
+		const service = createService();
+
+		await service.sendPrompt("look at ![[missing-one.png]] and ![[missing-two.png]]");
+
+		const notice = service.getSnapshot().noticeMessage ?? "";
+		expect(notice).toContain("missing-one.png");
+		expect(notice).toContain("missing-two.png");
+	});
+});
+
 describe("ObsidianAgentService banner semantics: what the transcript reports, the banner does not", () => {
 	/** A settled assistant turn shaped like the one a provider returns. */
 	function assistantReply(model: Model<Api>, overrides: Partial<AssistantMessage>): AssistantMessage {
@@ -2045,8 +2069,11 @@ describe("ObsidianAgentService multimodal send", () => {
 		expect(sent).toBe(false);
 		// The run never reached the provider.
 		expect(contexts).toHaveLength(0);
-		// The banner names the model and tells the user how to recover.
-		expect(service.getSnapshot().errorMessage).toContain("does not accept images");
+		// The banner names the model and tells the user how to recover — politely,
+		// since nothing failed and nothing was lost: the model just cannot take what
+		// was offered, and both text and images stay with the user.
+		expect(service.getSnapshot().noticeMessage).toContain("does not accept images");
+		expect(service.getSnapshot().errorMessage).toBeUndefined();
 	});
 
 	it("sends staged images alongside text to a multimodal model", async () => {

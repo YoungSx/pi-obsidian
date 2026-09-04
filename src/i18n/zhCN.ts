@@ -126,6 +126,8 @@ export const zhCN: DeepPartial<EnCopy> = {
 		},
 			branchSummaryFailed: "重试已经发出去了，只是没能为被替换掉的分支生成摘要：{error}",
 			compactionFailed: "整理较早的消息失败：{error}",
+			busyTidying: "Piem 正在整理较早的消息。过一会儿再发这条。",
+			busyResending: "Piem 正在重发你之前那条消息。过一会儿再发这条。",
 		you: "你",
 		agent: "Piem",
 		thoughtItThrough: "思考了一下",
@@ -135,7 +137,6 @@ export const zhCN: DeepPartial<EnCopy> = {
 		imagePlaceholder: "[图片：{mimeType}]",
 		imagesNotSupported: "{model} 不支持图片。请更换模型或移除图片。",
 		/** 压缩或重写正占用回合时又收到一次发送；编辑器的控件让这只会是罕见的竞态。 */
-		agentBusy: "Piem 已经在回复中了。",
 		/** 排队区标题（aria）。回复进行中发出的消息先在这里等待。 */
 		queueLabel: "等待插话",
 		/** 排队 chip 上的图片数量后缀。 */

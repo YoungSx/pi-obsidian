@@ -228,6 +228,13 @@ export const en = {
 			branchSummaryFailed: "The retry went through, but Piem could not summarize the branch it replaced: {error}",
 			/** Uses the panel's own word for compaction, which is "tidy up" everywhere else. */
 			compactionFailed: "Could not tidy up earlier messages: {error}",
+			/**
+			 * The two states that hold the turn exclusively, named rather than
+			 * paraphrased. Both reuse the status bar's own words for what is
+			 * happening, because it is saying them on screen at the same moment.
+			 */
+			busyTidying: "Piem is tidying up earlier messages. Send this again in a moment.",
+			busyResending: "Piem is resending your earlier message. Send this again in a moment.",
 		you: "You",
 		agent: "Piem",
 		thoughtItThrough: "Thought it through",
@@ -238,7 +245,6 @@ export const en = {
 		/** Shown as a banner when the active model lacks image capability. */
 		imagesNotSupported: "{model} does not accept images. Switch models or remove the image.",
 		/** Banner error when a send lands while a compaction or rewind holds the turn; the composer's controls make it a rare race. */
-		agentBusy: "The agent is already responding.",
 		/** Queue region label (aria). Messages sent mid-reply wait here. */
 		queueLabel: "Waiting to be read",
 		/** Image count suffix on a queued chip. */
