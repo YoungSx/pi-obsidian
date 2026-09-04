@@ -592,25 +592,53 @@ button.piem-chat__context-open {
 }
 
 /*
- * `--background-modifier-error` is a solid red, and `--text-error` on it is red
- * on red — #236's left half of the row was the icon's invisible slot, 44px of
- * blank. The border carries the alarm so the row keeps one loud note; text and
- * icon share `--text-normal` and stay legible on the red.
+ * Every variant sits on the same neutral ground; the *icon* carries the state.
+ *
+ * The fill used to be `--background-modifier-error`, on the reasoning that the
+ * border carried the alarm while text and icon stayed `--text-normal` and so
+ * remained "legible on the red". Measured against a real `app.css`, none of
+ * that held. Stock Obsidian resolves `--background-modifier-error` and
+ * `--text-error` to the *same* `--color-red`, so the border was the colour of
+ * its own fill — 1.00:1 — and the mechanism the old comment described was a
+ * no-op. On that fill `--text-normal` measures 2.47:1 dark (#fb464c on
+ * #dadada) and 3.78:1 light (#e93147 on #222222): this row is `--font-ui-
+ * smaller`, so both themes miss WCAG AA's 4.5:1 for text, and dark also misses
+ * the 3:1 graphical floor for the glyph.
+ *
+ * So the fill goes and the red moves to where it can be seen. `--text-error`
+ * on `--background-secondary-alt` measures 4.77:1 dark and 3.52:1 light, both
+ * clear of 3:1, while the words fall back to Obsidian's own body pair. The
+ * border stays red and now genuinely contrasts with what it borders, which is
+ * what the old comment claimed it did. Same lesson as #236 one layer up: red
+ * as a *fill* costs the row its legibility and buys nothing the glyph cannot
+ * say — and it is the treatment the transcript already uses for a failed tool
+ * call and the subagent panel for a failed child, so the panel now reports a
+ * failure one way wherever it reports one.
+ *
+ * `--recovery` is in this list because it previously had no rule of its own:
+ * the crash-recovery offer rendered on the bare `.piem-chat__banner`, with no
+ * background while its two sibling offers had one.
  */
-.piem-chat__banner--error {
-	background: var(--background-modifier-error);
-	border-color: var(--text-error);
-	color: var(--text-normal);
-}
-
+.piem-chat__banner--error,
 .piem-chat__banner--notice,
-.piem-chat__banner--wall {
+.piem-chat__banner--wall,
+.piem-chat__banner--recovery {
 	background: var(--background-secondary-alt);
 	color: var(--text-normal);
 }
 
+.piem-chat__banner--error {
+	border-color: var(--text-error);
+}
+
+/* The one loud note, and the only one the row needs. */
+.piem-chat__banner--error .piem-chat__banner-icon {
+	color: var(--text-error);
+}
+
 .piem-chat__banner--notice .piem-chat__banner-icon,
-.piem-chat__banner--wall .piem-chat__banner-icon {
+.piem-chat__banner--wall .piem-chat__banner-icon,
+.piem-chat__banner--recovery .piem-chat__banner-icon {
 	color: var(--text-muted);
 }
 
