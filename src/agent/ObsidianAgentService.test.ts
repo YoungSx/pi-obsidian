@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import { installObsidianStub, requestUrlMock } from "../testUtils/obsidianStub";
+import { installObsidianStub, requestUrlMock, resetNotices, shownNotices } from "../testUtils/obsidianStub";
 import type { App, DataAdapter, ListedFiles, Stat, TFile, TFolder } from "obsidian";
 import type { Api, AssistantMessage, Context, Model, SimpleStreamOptions } from "@earendil-works/pi-ai";
 import { createAssistantMessageEventStream } from "@earendil-works/pi-ai";
@@ -549,10 +549,20 @@ describe("ObsidianAgentService", () => {
 		await service.sendPrompt("Only conversation");
 		const onlySession = service.getSnapshot().session;
 
+		resetNotices();
 		await service.deleteSession(onlySession?.path ?? "");
 
 		const snapshot = service.getSnapshot();
-		expect(snapshot.errorMessage).toBe("Trash is unavailable.");
+		/*
+		 * A toast, not the banner. Deleting a chat is a command whose failure
+		 * touches nothing in the conversation — the transcript below is still the
+		 * one it was — so a red bar pinned above it would say the damage is there.
+		 * The sentence names what did not happen and carries the reason.
+		 */
+		expect(snapshot.errorMessage).toBeUndefined();
+		expect(shownNotices.map((notice) => notice.message)).toEqual([
+			"Could not delete that chat: Trash is unavailable.",
+		]);
 		expect(snapshot.session?.id).toBe(onlySession?.id);
 		expect(JSON.stringify(snapshot.messages)).toContain("Only conversation");
 	});
@@ -924,13 +934,17 @@ describe("ObsidianAgentService", () => {
 		expect(await service.retryFrom(0)).toBe(false);
 	});
 
-	it("surfaces an error instead of throwing when a session cannot be opened", async () => {
+	it("reports a chat it could not open without throwing, or blaming the one on screen", async () => {
 		const service = createService();
 		await service.initialize();
 
+		resetNotices();
 		await service.openSession(`${SESSION_DIR}/missing.jsonl`);
 
-		expect(service.getSnapshot().errorMessage).toBeTruthy();
+		// The panel still holds the previous conversation, intact; the failure
+		// belongs to the control that was pressed, so it goes to the toast.
+		expect(service.getSnapshot().errorMessage).toBeUndefined();
+		expect(shownNotices.map((notice) => notice.message).join("")).toContain("Could not open that chat:");
 	});
 
 	it("starts without skills rather than failing when the skill layer throws", async () => {

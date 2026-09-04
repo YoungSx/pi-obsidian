@@ -235,6 +235,19 @@ export const en = {
 			 */
 			busyTidying: "Piem is tidying up earlier messages. Send this again in a moment.",
 			busyResending: "Piem is resending your earlier message. Send this again in a moment.",
+			/**
+			 * Outcomes of a control the reader just pressed, on Obsidian's own toast.
+			 *
+			 * These are command outcomes: nothing in the conversation changed, and the
+			 * transcript on screen is still the one it was. A banner over a healthy
+			 * conversation misattributes the damage; a toast appears beside the thing
+			 * that was pressed and leaves. Each names what did not happen instead of
+			 * relaying `error.message` alone.
+			 */
+			compareFailed: "Could not start a comparison from that message: {error}",
+			laneChoiceFailed: "Could not keep that branch: {error}",
+			sessionOpenFailed: "Could not open that chat: {error}",
+			sessionDeleteFailed: "Could not delete that chat: {error}",
 		you: "You",
 		agent: "Piem",
 		thoughtItThrough: "Thought it through",
