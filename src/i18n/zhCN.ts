@@ -11,6 +11,8 @@ import type { DeepPartial, EnCopy } from "./en";
 export const zhCN: DeepPartial<EnCopy> = {
 	view: {
 		tabTitle: "Piem 对话",
+		panelCrashed: "对话面板遇到了意外错误。",
+		panelCrashedRetry: "重试",
 	},
 
 	commands: {
