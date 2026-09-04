@@ -459,6 +459,12 @@ export const en = {
 		couldNotCopy: "Could not copy to the clipboard.",
 		needOpenNoteToInsert: "Open a note to insert this reply.",
 		needOpenNoteToAppend: "Open a note to append this reply.",
+		/**
+		 * The duration stamp's tooltip, not its visible text: on the transcript
+		 * the stamp reads `8s` or `1:24`, which needs no translation, and the
+		 * hover is where the reader asks for the actual instants.
+		 */
+		durationTooltip: "Started {start} · Ended {end}",
 	},
 
 	/**

@@ -10,6 +10,7 @@ import { QuickActions } from "./QuickActions";
 import { ReplyActions } from "./ReplyActions";
 import { emptyScreenQuickActions, type QuickAction } from "./quickActionSuggestions";
 import { describeReplyCutoff, type ReplyCutoff } from "./replyCutoff";
+import { durationBadgeVisible, isFinalReply, replyDurationMs } from "./replyDuration";
 import { useT } from "./TranslatorContext";
 import type { Translator } from "../i18n";
 import { IconButton, ObsidianIcon } from "./ObsidianIcon";
@@ -195,6 +196,31 @@ function editableQuestionIndex(messages: AgentMessage[]): number | null {
 		}
 	}
 	return null;
+}
+
+/**
+ * The duration stamp a reply earns, when it earns one.
+ *
+ * Three gates in sequence. The reply must be a run's final word — an
+ * intermediate call followed by a tool result is machine traffic the trace rows
+ * already narrate ({@link isFinalReply}). It must carry a recorded duration at
+ * all — sessions written before the stamp existed read back without one. And it
+ * must have taken long enough to be worth saying — a reply that lands in under
+ * the threshold answers before the reader has wondered anything.
+ *
+ * `null` for every reply that fails any gate; the row simply renders without a
+ * stamp and nothing about the layout changes.
+ */
+function replyTimingFor(messages: AgentMessage[], index: number): { durationMs: number; startedAt: number } | null {
+	const message = messages[index];
+	if (!message || !isFinalReply(messages, index)) {
+		return null;
+	}
+	const durationMs = replyDurationMs(message);
+	if (durationMs === null || !durationBadgeVisible(durationMs)) {
+		return null;
+	}
+	return { durationMs, startedAt: message.timestamp };
 }
 
 /**
@@ -388,6 +414,7 @@ export function MessageList({
 							message={message}
 							isStreaming={index === activeIndex}
 							renderContext={context}
+							replyTiming={replyTimingFor(messages, index) ?? undefined}
 							onRetry={onRetry && index === regenerateIndex ? () => onRetry(index) : undefined}
 							/*
 							 * The edit hides itself on an unsettled turn too — the resend
@@ -605,6 +632,13 @@ interface MessageRowProps {
 	onEdit?: () => void;
 	/** Forks this question into two comparison branches; same bound as {@link onEdit}. */
 	onCompare?: () => void;
+	/**
+	 * The reply's recorded generation duration and stream start, when the
+	 * transcript should spend a stamp on it. Resolved upstream — only the final
+	 * reply of a run, only past the visibility gate — so this row renders
+	 * without re-deriving the transcript's shape.
+	 */
+	replyTiming?: { durationMs: number; startedAt: number };
 }
 
 /**
@@ -614,7 +648,7 @@ interface MessageRowProps {
  * calls, tool results, harness output, compaction summaries — renders flat, so
  * a card never contains another bordered box.
  */
-function MessageRow({ message, isStreaming, renderContext, onRetry, onEdit, onCompare }: MessageRowProps): React.JSX.Element | null {
+function MessageRow({ message, isStreaming, renderContext, onRetry, onEdit, onCompare, replyTiming }: MessageRowProps): React.JSX.Element | null {
 	// The summary fronts a compacted transcript; it reads as a divider ("history
 	// above this was summarized"), not as one more message bubble.
 	if (message.role === "compactionSummary") {
@@ -657,7 +691,13 @@ function MessageRow({ message, isStreaming, renderContext, onRetry, onEdit, onCo
 					) : null}
 				</div>
 				{message.role === "assistant" && !isStreaming ? (
-					<ReplyActions app={renderContext.app} text={assistantText(message)} onRetry={onRetry} />
+					<ReplyActions
+						app={renderContext.app}
+						text={assistantText(message)}
+						durationMs={replyTiming?.durationMs}
+						startedAt={replyTiming?.startedAt}
+						onRetry={onRetry}
+					/>
 				) : null}
 				{message.role === "user" && (onEdit || onCompare) ? (
 					/*

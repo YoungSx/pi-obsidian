@@ -4,7 +4,7 @@ import type { App, Component } from "obsidian";
 import type { AssistantMessage, ToolResultMessage, UserMessage } from "@earendil-works/pi-ai";
 import type { createRoot } from "react-dom/client";
 import { flushRender, installDom } from "../testUtils/dom";
-import { installObsidianStub, markdownRenderMock } from "../testUtils/obsidianStub";
+import { installObsidianStub, markdownRenderMock, setTooltipMock } from "../testUtils/obsidianStub";
 
 installObsidianStub();
 const document = installDom();
@@ -424,6 +424,74 @@ describe("MessageList reply actions", () => {
 		await flushRender();
 
 		expect(host.querySelectorAll('[aria-label="Regenerate reply"]')).toHaveLength(0);
+	});
+});
+
+describe("MessageList reply duration stamp", () => {
+	it("stamps a slow reply with its duration at the actions row's right end", async () => {
+		// A settled reply that took 84 seconds. The stamp text is the only
+		// user-facing claim here; the tooltip is asserted separately below.
+		const host = renderMessages([
+			userMessage("q"),
+			assistantMessage("the answer", { timestamp: 1_000, durationMs: 84_000 } as Partial<AssistantMessage>),
+		]);
+		await flushRender();
+
+		const stamp = host.querySelector(".piem-chat__reply-duration");
+		expect(stamp?.textContent).toBe("1:24");
+	});
+
+	it("keeps the stamp off fast replies, which answer before the reader wonders", async () => {
+		const host = renderMessages([
+			userMessage("q"),
+			assistantMessage("the answer", { timestamp: 1_000, durationMs: 4_999 } as Partial<AssistantMessage>),
+		]);
+		await flushRender();
+
+		expect(host.querySelector(".piem-chat__reply-duration")).toBeNull();
+	});
+
+	it("keeps the stamp off replies with no recorded duration, so old sessions render unchanged", async () => {
+		const host = renderMessages([userMessage("q"), assistantMessage("the answer")]);
+		await flushRender();
+
+		expect(host.querySelector(".piem-chat__reply-duration")).toBeNull();
+	});
+
+	it("keeps the stamp off mid-run calls, which the trace rows already narrate", async () => {
+		// The first call ended in a tool execution; the tool result follows it in
+		// the transcript, and only the reply that actually answers gets a stamp.
+		const host = renderMessages([
+			userMessage("q"),
+			assistantMessage("", { timestamp: 1_000, durationMs: 30_000 } as Partial<AssistantMessage>),
+			toolResult({ ok: true }),
+			assistantMessage("the answer", { timestamp: 40_000, durationMs: 30_000 } as Partial<AssistantMessage>),
+		]);
+		await flushRender();
+
+		const stamps = Array.from(host.querySelectorAll(".piem-chat__reply-duration"));
+		expect(stamps).toHaveLength(1);
+		expect(stamps[0]?.textContent).toBe("30s");
+	});
+
+	it("states the exact instants on hover through Obsidian's tooltip", async () => {
+		// Built with the local `Date` constructor so the expected instants are
+		// the wall clock on any test machine, UTC offset irrelevant.
+		const startedAt = new Date(2026, 8, 3, 6, 32, 8).getTime();
+		// Earlier tests in this file mounted icon buttons, whose tooltips are
+		// still on the mock; this test only claims the stamp's own call.
+		setTooltipMock.mockClear();
+		const host = renderMessages([userMessage("q"), assistantMessage("the answer", { timestamp: startedAt, durationMs: 84_000 } as Partial<AssistantMessage>)]);
+		await flushRender();
+
+		// The stub records `setTooltip` calls; the start is derived from the
+		// message's own timestamp and the end from start plus duration, so the
+		// instants the reader hovers for are the real ones, not reformatted
+		// duration text.
+		const calls = setTooltipMock.mock.calls as unknown as [element: HTMLElement, tooltip: string][];
+		const stampTooltip = calls.filter(([element]) => element?.className === "piem-chat__reply-duration");
+		expect(stampTooltip).toHaveLength(1);
+		expect(stampTooltip[0]?.[1]).toBe("Started 06:32:08 · Ended 06:33:32");
 	});
 });
 

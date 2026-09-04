@@ -1,13 +1,28 @@
-import React from "react";
+import React, { useEffect, useRef } from "react";
 import type { App } from "obsidian";
+import { setTooltip } from "obsidian";
 import { IconButton } from "./ObsidianIcon";
 import { appendToActiveNote, copyToClipboard, insertAtCursor, notifyActionResult } from "./messageActions";
 import { useT } from "./TranslatorContext";
+import { formatClock, formatReplyDuration } from "./replyDuration";
 
 interface ReplyActionsProps {
 	app: App;
 	/** Prose the reply said, already stripped of thinking and tool calls. */
 	text: string;
+	/**
+	 * How long the reply took to generate, when the reply took long enough to
+	 * say. Already resolved by the caller against every gate — only the final
+	 * reply of a run, only past the visibility threshold — so the row renders
+	 * whatever it is given.
+	 */
+	durationMs?: number;
+	/**
+	 * The wall-clock moment the reply's stream began, for the hover tooltip.
+	 * Supplied whenever `durationMs` is; without a start there is no instant to
+	 * state.
+	 */
+	startedAt?: number;
 	/**
 	 * Regenerates this reply.
 	 *
@@ -16,6 +31,42 @@ interface ReplyActionsProps {
 	 * on an older one it would discard every turn that followed.
 	 */
 	onRetry?: () => void;
+}
+
+/**
+ * The stamp of how long a reply took, at the actions row's right end.
+ *
+ * A separate element, not one of the `IconButton`s, on purpose: the buttons
+ * hide until hover on desktop — they are actions, and an action offered before
+ * it is wanted is noise. The duration is *information*, the answer to a question
+ * the reader only thinks to ask after a slow reply, so it stays faintly visible
+ * on every device. Right end rather than left keeps it out of the buttons'
+ * reading order, and the muted meta size keeps it a whisper under the reply.
+ */
+function DurationStamp({ durationMs, startedAt }: { durationMs: number; startedAt: number }): React.JSX.Element {
+	const t = useT();
+	const ref = useRef<HTMLSpanElement | null>(null);
+	const tooltip = t.t("replyActions.durationTooltip", {
+		start: formatClock(startedAt),
+		end: formatClock(startedAt + durationMs),
+	});
+
+	useEffect(() => {
+		const element = ref.current;
+		if (!element) {
+			return;
+		}
+		setTooltip(element, tooltip);
+		// The tooltip text is stable per render — the start instant and duration
+		// never change after settle — so `tooltip` alone drives the effect, the
+		// same single-dependency shape `IconButton` uses for its label.
+	}, [tooltip]);
+
+	return (
+		<span ref={ref} className="piem-chat__reply-duration">
+			{formatReplyDuration(durationMs)}
+		</span>
+	);
 }
 
 /**
@@ -31,7 +82,7 @@ interface ReplyActionsProps {
  * hover-only controls are unreachable. Keeping the layout box present on every
  * device also means the desktop reveal never reflows the transcript.
  */
-export function ReplyActions({ app, text, onRetry }: ReplyActionsProps): React.JSX.Element | null {
+export function ReplyActions({ app, text, durationMs, startedAt, onRetry }: ReplyActionsProps): React.JSX.Element | null {
 	const t = useT();
 	if (!text) {
 		return null;
@@ -62,6 +113,7 @@ export function ReplyActions({ app, text, onRetry }: ReplyActionsProps): React.J
 			 * that cannot be undone.
 			 */}
 			{onRetry ? <IconButton icon="refresh-cw" label={t.t("replyActions.regenerate")} onClick={onRetry} /> : null}
+			{durationMs !== undefined && startedAt !== undefined ? <DurationStamp durationMs={durationMs} startedAt={startedAt} /> : null}
 		</div>
 	);
 }

@@ -262,6 +262,7 @@ export const zhCN: DeepPartial<EnCopy> = {
 		couldNotCopy: "无法复制到剪贴板。",
 		needOpenNoteToInsert: "打开一个笔记以插入此回复。",
 		needOpenNoteToAppend: "打开一个笔记以追加此回复。",
+		durationTooltip: "开始 {start} · 结束 {end}",
 	},
 
 	quickActions: {
