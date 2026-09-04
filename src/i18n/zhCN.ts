@@ -447,7 +447,7 @@ export const zhCN: DeepPartial<EnCopy> = {
 		// 不用记住它在哪个页签。
 		sendShortcut: "发送消息用",
 
-		statusActiveModel: "当前模型",
+		statusActiveModel: "默认模型",
 		providersHeading: "提供方",
 		providersDesc: "请求可以发送到的端点。一个提供方包含基础 URL、请求协议和一把密钥。",
 		addProvider: "添加提供方",
@@ -459,7 +459,7 @@ export const zhCN: DeepPartial<EnCopy> = {
 		modelsDescNoProviders: "请先添加提供方——模型需要一个端点来提供服务。",
 		addModel: "添加模型",
 		noModels: "还没有模型。",
-		activeModelHeading: "当前模型",
+		activeModelHeading: "默认模型",
 		activeModelDesc: "所有请求都会从这个模型发出。",
 		missingBuiltinModel:
 			"此版本不再内置 {provider}/{modelId}，请求将改为发往 {replacement}。若要继续使用，请在下方将其添加为提供方和模型。",
@@ -506,7 +506,7 @@ export const zhCN: DeepPartial<EnCopy> = {
 			"任务需要网页时，代理可以请求外部 URL。这些请求及其中的数据会离开笔记库和 Obsidian；上方的传输方式决定它们如何发出。",
 		whatLeavesVault: "什么会离开笔记库",
 		whatLeavesVaultDesc:
-			"提示词、工具读取的笔记库内容以及工具结果，会发送给服务于当前模型的提供方。不会发送到任何其他地方。",
+			"提示词、工具读取的笔记库内容以及工具结果，会发送给服务于默认模型的提供方。不会发送到任何其他地方。",
 		chatLogsInVault:
 			"聊天记录是笔记库里的文件，会随你的笔记一起同步和备份。它们包含对话内容，以及回答过程中读取的笔记原文。",
 		apiKeysHeading: "API 密钥",
@@ -720,7 +720,7 @@ export const zhCN: DeepPartial<EnCopy> = {
 		providerOneModel: "由它提供服务的模型也会被移除：{names}。",
 		providerManyModels: "由它提供服务的 {count} 个模型也会被移除：{names}。",
 		modelProviderStays: "提供方及其密钥会保留，其他模型仍可正常使用。",
-		modelWasActive: "它是当前模型，移除后由 {model} 接替。",
+		modelWasActive: "它是默认模型，移除后由 {model} 接替。",
 		modelWasLast: "它是唯一的模型，移除后没有继任——请先添加另一个再发消息。",
 		skillFiles: "技能的文件会移入回收站，并不再对代理可用。",
 		mcpServer: "它的工具不再提供给代理。其令牌绑定的钥匙串条目会保留不动。",
