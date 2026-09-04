@@ -183,6 +183,25 @@ describe("ChatBanner", () => {
 		expect(host.querySelector(".piem-chat__banner--recovery")).not.toBeNull();
 	});
 
+	/*
+	 * The notice is *hidden* under a failure, not destroyed. `setError` used to
+	 * clear `noticeMessage` on the service side as well, which meant a report the
+	 * user had not read yet — the `/name` conflict notice, say — was gone for good
+	 * if a credential gate fired moments later. With the render-time suppression
+	 * here, clearing it there was both redundant and lossy.
+	 */
+	it("shows the notice again once the failure is dismissed", async () => {
+		const withError = await renderBanner({
+			errorMessage: "Request failed.",
+			noticeMessage: "Nothing to tidy up yet.",
+			onDismiss: () => undefined,
+		});
+		expect(withError.querySelector(".piem-chat__banner--notice")).toBeNull();
+
+		const withoutError = await renderBanner({ noticeMessage: "Nothing to tidy up yet.", onDismiss: () => undefined });
+		expect(withoutError.querySelector(".piem-chat__banner--notice")).not.toBeNull();
+	});
+
 	it("still silences an outcome under a failure, which is two reports and one slot", async () => {
 		// Unchanged, and the reason is unchanged: "nothing to compact yet" is not a
 		// cure for anything, so it can wait for the failure to be read.

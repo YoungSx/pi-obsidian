@@ -3796,7 +3796,6 @@ export class ObsidianAgentService {
 
 	private setError(rt: SessionRuntime, message: string, opensSettings = false): void {
 		rt.panelError = { message, opensSettings };
-		rt.noticeMessage = undefined;
 		rt.dismissedAgentError = undefined;
 		this.notify();
 	}
