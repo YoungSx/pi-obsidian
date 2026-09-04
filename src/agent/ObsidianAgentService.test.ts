@@ -3,8 +3,9 @@ import { installObsidianStub, requestUrlMock, resetNotices, shownNotices } from 
 import type { App, DataAdapter, ListedFiles, Stat, TFile, TFolder } from "obsidian";
 import type { Api, AssistantMessage, Context, Model, SimpleStreamOptions } from "@earendil-works/pi-ai";
 import { createAssistantMessageEventStream } from "@earendil-works/pi-ai";
-import type { AgentMessage, OperationStartedRecord, StreamFn } from "@earendil-works/pi-agent-core";
+import type { AgentMessage, OperationStartedRecord, StreamFn, ThinkingLevel } from "@earendil-works/pi-agent-core";
 import type { PromptQueue } from "./promptQueue";
+import type { SessionRuntime } from "./SessionRuntime";
 import { ObsidianSessionManager } from "../session/ObsidianSessionManager";
 import { DEFAULT_SESSION_RETENTION } from "../session/retention";
 import { DEFAULT_SESSION_DIR } from "../session/sessionDir";
@@ -2606,6 +2607,303 @@ function configureTwoModels(settings: PiemSettings): void {
 	settings.activeModelId = "m1";
 }
 
+/**
+ * A mid-run change is held, not refused (issue #252): the settings half writes
+ * through at once and the live-agent half lands when the run settles. These
+ * tests pin the whole deferred-apply contract — the hold, the single flush, the
+ * clamp against the pending model, and the edges (departed runtime, abort,
+ * delete) that the flush has to survive.
+ */
+describe("mid-run model and thinking changes (issue #252)", () => {
+	/**
+	 * A streamFn that records the model of every request and hangs the first one
+	 * until released — the stand-in for a run in flight while the user
+	 * reconfigures underneath it.
+	 */
+	function createRecordingGatedStreamFn() {
+		const requestedModels: string[] = [];
+		let requestCount = 0;
+		let gate: ReturnType<typeof createAssistantMessageEventStream> | undefined;
+		let gateModel: Model<Api> | undefined;
+		const streamFn: StreamFn = (model, _context, _options) => {
+			requestedModels.push(model.id);
+			requestCount += 1;
+			if (requestCount === 1) {
+				gate = createAssistantMessageEventStream();
+				gateModel = model;
+				return gate;
+			}
+			return scriptedTextStream(model, "Second reply");
+		};
+		return {
+			streamFn,
+			requestedModels,
+			waitForFirstRequest: () => waitFor(() => requestCount === 1),
+			// Same shape `scriptedTextStream` builds; the model is only known once
+			// the request arrives, so the reply is assembled at release time.
+			release: () => {
+				const model = gateModel;
+				const target = gate;
+				if (!model || !target) {
+					throw new Error("release before the first request");
+				}
+				const message: AssistantMessage = {
+					role: "assistant",
+					content: [{ type: "text", text: "First reply" }],
+					api: model.api,
+					provider: model.provider,
+					model: model.id,
+					usage: {
+						input: 1_000,
+						output: 10,
+						cacheRead: 0,
+						cacheWrite: 0,
+						totalTokens: 1_010,
+						cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+					},
+					timestamp: Date.now(),
+					stopReason: "stop",
+				};
+				target.push({ type: "done", reason: "stop", message });
+				target.end(message);
+			},
+		};
+	}
+
+	/** A runtime's live state, for assertions the focused snapshot cannot make. */
+	function peekRuntime(service: ObsidianAgentServiceType, path: string): SessionRuntime | undefined {
+		return (service as unknown as { runtimes: Map<string, SessionRuntime> }).runtimes.get(path);
+	}
+
+	/** Records which runtime each reconfigure lands on, shadowing the private method. */
+	function spyReconfigures(service: ObsidianAgentServiceType): string[] {
+		const paths: string[] = [];
+		const target = service as unknown as { reconfigureRuntime: (rt: SessionRuntime) => Promise<void> };
+		const original = target.reconfigureRuntime.bind(service);
+		target.reconfigureRuntime = async (rt) => {
+			paths.push(rt.sessionPath);
+			await original(rt);
+		};
+		return paths;
+	}
+
+	it("defers a mid-run switch: the setting writes through, the run keeps its model", async () => {
+		const gated = createRecordingGatedStreamFn();
+		const { service, settings } = createServiceWithSettings(new MemoryAdapter(), { streamFn: gated.streamFn });
+		configureTwoModels(settings);
+
+		const run = service.sendPrompt("First question");
+		await gated.waitForFirstRequest();
+
+		await service.setActiveModel("m2");
+
+		expect(settings.activeModelId).toBe("m2");
+		// `modelId` is settings-derived and has moved on; `runningModelId` is what
+		// the live agent sends with, and the run in flight keeps what it began on.
+		expect(service.getSnapshot().modelId).toBe("llama-4-maverick");
+		expect(service.getSnapshot().runningModelId).toBe("qwen-plus");
+		expect(peekRuntime(service, service.getActiveSessionPath() ?? "")?.pendingConfiguration).toEqual({ modelId: "m2" });
+
+		gated.release();
+		await run;
+	});
+
+	it("persists a mid-run switch with the reconfigure skipped, and an idle one with it intact", async () => {
+		// The skip is the whole trick: without it the host's `saveSettings` would
+		// swap the live agent's model out from under the streaming request.
+		const persisted: Array<{ reconfigure?: boolean } | undefined> = [];
+		const gated = createRecordingGatedStreamFn();
+		const { service, settings } = createServiceWithSettings(new MemoryAdapter(), {
+			streamFn: gated.streamFn,
+			persistSettings: async (options) => {
+				persisted.push(options);
+			},
+		});
+		configureTwoModels(settings);
+
+		await service.setActiveModel("m2");
+		expect(persisted).toEqual([undefined]);
+
+		const run = service.sendPrompt("First question");
+		await gated.waitForFirstRequest();
+		await service.setActiveModel("m1");
+		expect(persisted).toEqual([undefined, { reconfigure: false }]);
+		expect(peekRuntime(service, service.getActiveSessionPath() ?? "")?.agent?.state.model.id).toBe("llama-4-maverick");
+
+		gated.release();
+		await run;
+	});
+
+	it("applies the pending switch exactly once when the run lands", async () => {
+		// A queued steer puts both flush callers on the path: the `agent_end`
+		// dispatch and the send's own settle. Take-then-apply is what keeps the
+		// second one from doing the work a second time.
+		const gated = createRecordingGatedStreamFn();
+		const { service, settings } = createServiceWithSettings(new MemoryAdapter(), { streamFn: gated.streamFn });
+		configureTwoModels(settings);
+
+		const run = service.sendPrompt("First question");
+		await gated.waitForFirstRequest();
+		// Installed after the first request: a fresh send reconfigures on the way
+		// out, and that pass is not the deferred-apply under test.
+		const reconfigures = spyReconfigures(service);
+		await service.setActiveModel("m2");
+		expect(await service.sendPrompt("Now answer on the new one")).toBe(true);
+
+		gated.release();
+		await run;
+		await waitFor(() => gated.requestedModels.length >= 2);
+
+		expect(reconfigures).toHaveLength(1);
+		const rt = peekRuntime(service, service.getActiveSessionPath() ?? "");
+		expect(rt?.pendingConfiguration).toBeNull();
+		expect(rt?.agent?.state.model.id).toBe("llama-4-maverick");
+		expect(service.getSnapshot().runningModelId).toBe("llama-4-maverick");
+		// The steered follow-up is where the deferral pays off for steers pi
+		// rescues after the run: they leave on the model the user asked for.
+		expect(gated.requestedModels[0]).toBe("qwen-plus");
+		expect(gated.requestedModels[1]).toBe("qwen-plus");
+		// pi's steering mode ("all") injects queued steers synchronously at the
+		// turn boundary — before this service's `agent_end` handlers and its
+		// settle-time flush run — so the injected follow-up still goes out on
+		// the model the run began on. The flush's win here is the applied state
+		// asserted above; a follow-up a *later* run rescues
+		// (resumeQueuedPrompts) is the one that lands on the new model.
+	});
+
+	it("lets the last mid-run choice win when the user changes their mind twice", async () => {
+		const gated = createRecordingGatedStreamFn();
+		const { service, settings } = createServiceWithSettings(new MemoryAdapter(), { streamFn: gated.streamFn });
+		configureTwoModels(settings);
+
+		const run = service.sendPrompt("First question");
+		await gated.waitForFirstRequest();
+		const reconfigures = spyReconfigures(service);
+
+		await service.setActiveModel("m2");
+		await service.setActiveModel("m1");
+
+		expect(peekRuntime(service, service.getActiveSessionPath() ?? "")?.pendingConfiguration).toEqual({ modelId: "m1" });
+
+		gated.release();
+		await run;
+		await waitFor(() => reconfigures.length >= 1);
+
+		// One flush, and it lands on the second choice: m1, not the m2 picked first.
+		expect(reconfigures).toHaveLength(1);
+		const rt = peekRuntime(service, service.getActiveSessionPath() ?? "");
+		expect(rt?.pendingConfiguration).toBeNull();
+		expect(rt?.agent?.state.model.id).toBe("qwen-plus");
+	});
+
+	it("clamps a pending thinking level to the model it lands on, and logs the clamped value once", async () => {
+		// Neither model reasons, so "high" can only ever apply as "off" — the
+		// point is that the clamp reads the pending model at flush time and that
+		// the session log records what was actually applied, not what was asked.
+		const gated = createRecordingGatedStreamFn();
+		const { service, settings } = createServiceWithSettings(new MemoryAdapter(), { streamFn: gated.streamFn });
+		configureTwoModels(settings);
+
+		const run = service.sendPrompt("First question");
+		await gated.waitForFirstRequest();
+
+		await service.setThinkingLevel("high");
+		await service.setActiveModel("m2");
+
+		const manager = (service as unknown as { sessionManager: ObsidianSessionManager }).sessionManager;
+		const appended: string[] = [];
+		const originalAppend = manager.appendThinkingLevelChangeFor.bind(manager);
+		(
+			manager as unknown as { appendThinkingLevelChangeFor: typeof manager.appendThinkingLevelChangeFor }
+		).appendThinkingLevelChangeFor = async (path: string, level: ThinkingLevel, lane?: string) => {
+			appended.push(level);
+			return originalAppend(path, level, lane);
+		};
+
+		gated.release();
+		await run;
+		await waitFor(() => appended.length >= 1);
+
+		const rt = peekRuntime(service, service.getActiveSessionPath() ?? "");
+		expect(rt?.agent?.state.thinkingLevel).toBe("off");
+		expect(appended).toEqual(["off"]);
+		expect(rt?.pendingConfiguration).toBeNull();
+	});
+
+	it("reconfigures a departed runtime when its background run lands", async () => {
+		const gated = createRecordingGatedStreamFn();
+		const { service, settings } = createServiceWithSettings(new MemoryAdapter(), { streamFn: gated.streamFn });
+		configureTwoModels(settings);
+
+		const run = service.sendPrompt("First question");
+		await gated.waitForFirstRequest();
+		const departed = service.getActiveSessionPath() ?? "";
+		await service.setActiveModel("m2");
+
+		// The panel moves on; the run in flight keeps its runtime and its run.
+		await service.newSession();
+		expect(service.getActiveSessionPath()).not.toBe(departed);
+
+		const reconfigures = spyReconfigures(service);
+		const beforeRelease = reconfigures.length;
+		gated.release();
+		await run;
+		await waitFor(() => reconfigures.length > beforeRelease);
+
+		// The flush targets the session that is still finishing, not the one on
+		// screen — and the new session's setup is the only other work in the log.
+		expect(reconfigures.slice(beforeRelease)).toEqual([departed]);
+		const rt = peekRuntime(service, departed);
+		expect(rt?.agent?.state.model.id).toBe("llama-4-maverick");
+		expect(rt?.pendingConfiguration).toBeNull();
+	});
+
+	it("still applies a pending change after the user aborts the run", async () => {
+		const gated = createRecordingGatedStreamFn();
+		const { service, settings } = createServiceWithSettings(new MemoryAdapter(), { streamFn: gated.streamFn });
+		configureTwoModels(settings);
+
+		const run = service.sendPrompt("First question");
+		await gated.waitForFirstRequest();
+		await service.setActiveModel("m2");
+
+		// Abort only signals; a gated stream that ignores its signal never
+		// settles, so the reply has to flow for the run to actually end.
+		gated.release();
+		service.abort();
+		await run;
+		await waitFor(() => !peekRuntime(service, service.getActiveSessionPath() ?? "")?.pendingConfiguration);
+
+		const rt = peekRuntime(service, service.getActiveSessionPath() ?? "");
+		expect(rt?.agent?.state.model.id).toBe("llama-4-maverick");
+		expect(service.getSnapshot().runningModelId).toBe("llama-4-maverick");
+	});
+
+	it("drops a deleted session's pending change without touching anything", async () => {
+		const gated = createRecordingGatedStreamFn();
+		const { service, settings } = createServiceWithSettings(new MemoryAdapter(), { streamFn: gated.streamFn });
+		configureTwoModels(settings);
+
+		const run = service.sendPrompt("First question");
+		await gated.waitForFirstRequest();
+		const doomed = service.getActiveSessionPath() ?? "";
+		await service.setActiveModel("m2");
+
+		// `removeRuntime` clears the hold before the settle closure reaches the
+		// flush, so the flush must find nothing to do — and throw nothing.
+		const reconfigures = spyReconfigures(service);
+		await service.deleteSession(doomed);
+		await new Promise((resolve) => setTimeout(resolve, 20));
+
+		expect(reconfigures).toEqual([]);
+		expect(service.getActiveSessionPath()).not.toBe(doomed);
+		// The focused session is now the replacement, whose agent was built from
+		// settings *after* the mid-run switch — already on the new model.
+		expect(service.getSnapshot().runningModelId).toBe("llama-4-maverick");
+		expect(peekRuntime(service, doomed)).toBeUndefined();
+	});
+});
+
 describe("language in the snapshot", () => {
 	it("resolves the user's setting so the panel never re-resolves it", () => {
 		const { service, settings } = createServiceWithSettings();
@@ -3159,7 +3457,7 @@ function createServiceWithSettings(
 		vaultFiles?: Record<string, string>;
 		loadUserSkills?: typeof NO_USER_SKILLS;
 		/** Stands in for the plugin's `saveSettings`; omitted reconfigures in memory. */
-		persistSettings?: () => Promise<void>;
+		persistSettings?: (options?: { reconfigure?: boolean }) => Promise<void>;
 	} = {},
 ): { service: ObsidianAgentServiceType; settings: PiemSettings } {
 	const adapter = asDataAdapter(memoryAdapter);
