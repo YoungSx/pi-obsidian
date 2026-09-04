@@ -761,7 +761,15 @@ describe("focus rings survive their scroll container (issue #219)", () => {
 	 * from inside a plugin — but it must never be *narrower* than the rings this
 	 * file draws itself.
 	 */
-	for (const selector of [".piem-settings-modal", ".piem-ask"]) {
+	/*
+	 * `.piem-ask-modal .piem-ask`, not `.piem-ask`. The question form renders in two
+	 * frames now, and only one of them is a scroll box: in the transcript the
+	 * scroller is `.piem-chat__messages`, which draws its ring inside its own border
+	 * box already, and a second scroller nested inside it would trap the reader's
+	 * wheel over the question they are scrolling past. So the bound — and therefore
+	 * the band — belongs to the dialog alone.
+	 */
+	for (const selector of [".piem-settings-modal", ".piem-ask-modal .piem-ask"]) {
 		it(`reserves the ring's band inside ${selector}, without moving the content box`, () => {
 			const band = reservedBand(selector);
 			expect(band).toBeGreaterThanOrEqual(3);

@@ -21,6 +21,9 @@ import { openSessionDeleteConfirm, openSessionPicker } from "./ui/sessionDialogs
 import { BRAND_ICON_ID, registerBrandIcon } from "./brandIcon";
 import { registerVendorIcons } from "./net/vendorIcons";
 import { getT, resolveLanguage, type LanguageHost, type Translator } from "./i18n";
+import { AskUserBroker } from "./tools/askUserBroker";
+import { AskUserModal } from "./ui/AskUserModal";
+import { isChatPanelVisible } from "./ui/panelVisibility";
 
 export default class PiemPlugin extends Plugin {
 	// Fresh defaults until `onload` loads persisted data; `normalizeSettings` deep-copies
@@ -41,6 +44,24 @@ export default class PiemPlugin extends Plugin {
 	 */
 	private log: LoggerLike = NOOP_LOGGER;
 	private draftStore: DraftStore | null = null;
+	/**
+	 * The one `ask_user` queue, shared by three parties: the tool pushes questions
+	 * into it, the chat panel renders the head, and {@link AskUserModal} answers it
+	 * when the panel is not on screen. Built here because this is the only place
+	 * that can see all three — the composition root.
+	 *
+	 * Held for teardown too: an unload while a question is open leaves a promise
+	 * nobody would ever settle, and {@link AskUserBroker.clear} reports the one
+	 * outcome the tool already knows how to handle.
+	 */
+	private askUserBroker: AskUserBroker | null = null;
+	/**
+	 * Escalated dialogs by request id, so one settled elsewhere can be taken off
+	 * the screen. A map rather than a single slot because the broker serializes
+	 * questions but not the frames: a retract can arrive for a request whose modal
+	 * is already gone, and a stale entry must not close a newer one.
+	 */
+	private readonly openAskModals = new Map<string, AskUserModal>();
 	/**
 	 * Held so the settings tab can report on the chat folder.
 	 *
@@ -122,8 +143,45 @@ export default class PiemPlugin extends Plugin {
 		// without reloading the plugin.
 		const sessionManager = ObsidianSessionManager.forPlugin(this.app, this, () => this.settings);
 		this.sessionManager = sessionManager;
+		/*
+		 * The escalation ladder, wired here and nowhere else.
+		 *
+		 * `isPanelVisible` is what decides between the two surfaces, and it asks
+		 * about the screen rather than about the workspace's bookkeeping — a leaf
+		 * collapsed into a sidebar or parked behind another tab is open and unread.
+		 * `escalate` opens the dialog, `retract` takes it back off the screen when
+		 * something else settled the question first: an abort, or the run being
+		 * stopped while the dialog was still up.
+		 *
+		 * The language is resolved per question rather than captured, so a switch in
+		 * the Appearance tab reaches the next dialog without a reload — the same
+		 * reason the tool used to resolve it per tool-set build.
+		 */
+		const askUserBroker = new AskUserBroker({
+			isPanelVisible: () => isChatPanelVisible(this.app),
+			escalate: (request) => {
+				const modal = new AskUserModal(
+					this.app,
+					request.questions,
+					resolveLanguage(this.app.vault as LanguageHost, this.settings.language),
+					(answers) => askUserBroker.answer(request.id, answers),
+					() => askUserBroker.dismiss(request.id),
+				);
+				this.openAskModals.set(request.id, modal);
+				modal.open();
+			},
+			retract: (request) => {
+				const modal = this.openAskModals.get(request.id);
+				this.openAskModals.delete(request.id);
+				// `close` fires the modal's `onClose`, which reports a dismissal the
+				// broker ignores: it has already dropped this request.
+				modal?.close();
+			},
+		});
+		this.askUserBroker = askUserBroker;
 		this.agentService = new ObsidianAgentService(this.app, () => this.settings, sessionManager, {
 			logger: this.requirePluginLogger().logger,
+			askUserBroker,
 			// The chat panel's model switcher writes `activeModelId`; this is what
 			// makes that write survive a reload, and it reconfigures the running
 			// agent on the way back.
@@ -140,8 +198,12 @@ export default class PiemPlugin extends Plugin {
 		this.registerView(
 			VIEW_TYPE_PIEM_CHAT,
 			(leaf) =>
-				new PiemChatView(leaf, this.requireAgentService(), this.draftStore ?? undefined, (subagentId) =>
-					void this.activateSubagentView(subagentId),
+				new PiemChatView(
+					leaf,
+					this.requireAgentService(),
+					this.draftStore ?? undefined,
+					(subagentId) => void this.activateSubagentView(subagentId),
+					askUserBroker,
 				),
 		);
 		this.registerView(VIEW_TYPE_PIEM_LOGS, (leaf) => this.createLogView(leaf));
@@ -293,6 +355,11 @@ export default class PiemPlugin extends Plugin {
 		void this.mcpBridge?.dispose();
 		this.mcpBridge = null;
 		this.sessionManager = null;
+		// Dismiss before dropping: every waiting promise is a tool call that would
+		// never settle, and a dismissal is an outcome the model already handles.
+		this.askUserBroker?.clear();
+		this.askUserBroker = null;
+		this.openAskModals.clear();
 	}
 
 	/** Chat logs stored in the folder now in effect. Zero before the first chat. */

@@ -26,6 +26,7 @@ import { compactIfNeeded, needsCompaction, DEFAULT_COMPACTION_RETRY, type Compac
 import { measureContextFill, sumUsage, type ContextFill, type UsageTotals } from "./usage";
 import { resolveCompactionSettings, type CompactionSettings } from "./compactionSettings";
 import { createObsidianTools } from "../tools/obsidianTools";
+import type { AskUserBroker } from "../tools/askUserBroker";
 import { fetchQuickActionSuggestions, lastAssistantText, type SuggestionScope } from "./quickActionSuggestionRequest";
 import { QuickActionSuggestionCache } from "./quickActionSuggestionCache";
 import type { QuickAction } from "../ui/quickActionSuggestions";
@@ -395,6 +396,15 @@ function firstProgressLine(partialResult: unknown): string | null {
 export interface ObsidianAgentServiceOptions {
 	streamFn?: StreamFn;
 	/**
+	 * Where `ask_user` puts a question, shared with the chat panel that renders it.
+	 *
+	 * Injected rather than built here: the broker has to be the same object the
+	 * panel subscribes to and the escalation modal settles, and only the plugin
+	 * sees all three. Omitted — the default in tests — leaves `ask_user` out of the
+	 * tool set entirely rather than offering a tool that would hang.
+	 */
+	askUserBroker?: AskUserBroker;
+	/**
 	 * User-level skill loader, overridable so tests stay out of the real home
 	 * directory; defaults to {@link loadUserSkills}. Receives the configured
 	 * extra folder, if any.
@@ -699,19 +709,32 @@ export class ObsidianAgentService {
 	 * logged yet, which is distinct from the empty string a clean load produces.
 	 */
 	private loggedDiagnosticsKey: string | undefined;
+	/**
+	 * Where `ask_user` questions go. Undefined in tests, which is what leaves the
+	 * tool out of the set — see {@link ObsidianAgentServiceOptions.askUserBroker}.
+	 */
+	private readonly askUserBroker: AskUserBroker | undefined;
 
 	constructor(app: App, getSettings: () => PiemSettings, sessionManager: ObsidianSessionManager, options: ObsidianAgentServiceOptions = {}) {
 		this.app = app;
 		this.getSettings = getSettings;
 		this.sessionManager = sessionManager;
 		this.streamFn = options.streamFn;
+		this.askUserBroker = options.askUserBroker;
 		this.loadUserSkillsFn = options.loadUserSkills ?? loadUserSkills;
 		this.persistSettings = options.persistSettings ?? (() => this.refreshConfiguration());
 		this.getExternalToolsFn = options.getExternalTools ?? (async () => []);
 		this.log = (options.logger ?? NOOP_LOGGER).child("agent");
 		this.env = new VaultExecutionEnv(app);
 		this.subagentExtension = createSubagentExtension({
-			createVaultTools: () => createObsidianTools(this.app, this.env, this.getSettings(), () => this.skills),
+			createVaultTools: () =>
+				createObsidianTools(this.app, this.env, this.getSettings(), {
+					getSkills: () => this.skills,
+					// A subagent gets the same question surface as its parent: the user
+					// has one attention, and the broker queues so two agents asking at
+					// once produce two cards in turn rather than two dialogs stacked.
+					askUserBroker: this.askUserBroker,
+				}),
 			getModel: () => getSelectedModel(this.getSettings()),
 			getStreamFn: () => this.resolveStreamFn(),
 			// Thinking level is session-owned now; a spawned subagent rides the

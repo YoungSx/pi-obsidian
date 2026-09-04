@@ -11,6 +11,7 @@ import { watchSessionFile } from "./sessionFileWatch";
 import { watchWindowFocus } from "./windowFocusWatch";
 import type { DraftStore } from "../session/DraftStore";
 import { getT } from "../i18n";
+import type { AskUserBroker } from "../tools/askUserBroker";
 
 export class PiemChatView extends ItemView {
 	private readonly service: ObsidianAgentService;
@@ -26,6 +27,12 @@ export class PiemChatView extends ItemView {
 	 * render, which is also the honest state when nothing can open it.
 	 */
 	private readonly openSubagents: ((subagentId?: string) => void) | undefined;
+	/**
+	 * Where `ask_user` parks a question for this transcript to answer. Passed down
+	 * rather than reached for: the broker is shared with the tool set and the
+	 * escalation modal, and only the plugin holds all three.
+	 */
+	private readonly askUserBroker: AskUserBroker | undefined;
 	private root: Root | null = null;
 
 	constructor(
@@ -33,11 +40,13 @@ export class PiemChatView extends ItemView {
 		service: ObsidianAgentService,
 		draftStore?: DraftStore,
 		openSubagents?: (subagentId?: string) => void,
+		askUserBroker?: AskUserBroker,
 	) {
 		super(leaf);
 		this.service = service;
 		this.draftStore = draftStore;
 		this.openSubagents = openSubagents;
+		this.askUserBroker = askUserBroker;
 		this.scope = new Scope(this.app.scope);
 		this.scope.register(["Mod"], "Enter", (event) => {
 			event.preventDefault();
@@ -144,6 +153,7 @@ export class PiemChatView extends ItemView {
 				component={this}
 				draftStore={this.draftStore}
 				onOpenSubagents={this.openSubagents}
+				askUserBroker={this.askUserBroker}
 			/>,
 		);
 	}

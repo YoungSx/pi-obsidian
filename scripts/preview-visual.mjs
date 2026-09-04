@@ -108,6 +108,7 @@ const React = await import("react");
 
 const { ChatApp } = await import("../src/ui/ChatApp.tsx");
 const { ChatInputController } = await import("../src/ui/ChatInputController.ts");
+const { AskUserBroker } = await import("../src/tools/askUserBroker.ts");
 const { ObsidianAgentService } = await import("../src/agent/ObsidianAgentService.ts");
 const { ObsidianSessionManager } = await import("../src/session/ObsidianSessionManager.ts");
 const { DEFAULT_SETTINGS } = await import("../src/settings.ts");
@@ -323,12 +324,14 @@ async function settle(done, tries = 20) {
  * mount effect owns initialization — drives it with `drive`, then hands back
  * the panel element.
  */
-async function mountChat({ streamFn, drive }) {
+async function mountChat({ streamFn, drive, askUserBroker }) {
 	const { service, sessionManager } = makeService({ streamFn });
 	const host = document.createElement("div");
 	document.body.appendChild(host);
 	const root = reactDomClient.createRoot(host);
-	root.render(React.createElement(ChatApp, { service, inputController: new ChatInputController(), component: {} }));
+	root.render(
+		React.createElement(ChatApp, { service, inputController: new ChatInputController(), component: {}, askUserBroker }),
+	);
 	// Cold start: the mount effect initializes the service, which creates the
 	// session and (on the empty screen) asks the model for chips.
 	await settle(() => service.getSnapshot().sessionInfo !== undefined || service.getSnapshot().isConfigured === false);
@@ -341,7 +344,7 @@ async function mountChat({ streamFn, drive }) {
 		document.body.replaceChildren();
 	};
 	if (drive) {
-		await drive(service, sessionManager);
+		await drive(service, sessionManager, askUserBroker);
 	}
 	await flushRender();
 	const element = host.firstElementChild;
@@ -603,6 +606,114 @@ async function mountInspector(snapshots, selectionRequest) {
 		},
 	};
 }
+
+/*
+ * The question card, in the layout a desktop reader meets: one single-select
+ * question, so every row commits on the click and therefore wears no marker and a
+ * trailing arrow instead of one. `matchMedia` in this harness reports a fine
+ * pointer, which is exactly the branch that produces action rows.
+ */
+SCENARIOS["chat-ask"] = async () => {
+	const broker = new AskUserBroker({ isPanelVisible: () => true });
+	const { element, cleanup } = await mountChat({
+		streamFn: scriptedStreamFn([CHIPS_JSON]),
+		askUserBroker: broker,
+		drive: async (service) => {
+			await service.sendPrompt("Tidy up my reading list");
+			await flushRender();
+			void broker.ask([
+				{
+					question: "Two notes hold the same highlights. Which one should survive?",
+					header: "Which note",
+					options: [
+						{ label: "Keep Deep Work.md", description: "The older file, already linked from six other notes." },
+						{ label: "Keep Deep Work (copy).md", description: "The newer file, with two highlights the original lacks." },
+						{ label: "Merge them into a new note", description: "Both sets of highlights, neither original path." },
+					],
+				},
+			]);
+			await settle(() => document.querySelectorAll(".piem-ask-action").length >= 3);
+		},
+	});
+	return { element, cleanup };
+};
+
+/*
+ * The other layout: several questions, one of them multi-select. Nothing here can
+ * commit on a click — one answer is not the batch — so every row carries the marker
+ * whose shape is the rule, and the footer shows the count Confirm is waiting for.
+ */
+SCENARIOS["chat-ask-multi"] = async () => {
+	const broker = new AskUserBroker({ isPanelVisible: () => true });
+	const { element, cleanup } = await mountChat({
+		streamFn: scriptedStreamFn([CHIPS_JSON]),
+		askUserBroker: broker,
+		drive: async (service) => {
+			await service.sendPrompt("Reorganize the reading folder");
+			await flushRender();
+			void broker.ask([
+				{
+					question: "Where should the merged note live?",
+					header: "Where to file",
+					options: [
+						{ label: "Books/", description: "Beside the rest of the reading notes." },
+						{ label: "Inbox/", description: "Left for you to triage later." },
+					],
+				},
+				{
+					question: "What should I carry over from the copy?",
+					header: "What to keep",
+					multiSelect: true,
+					options: [
+						{ label: "Highlights", description: "Every quoted passage, in the order they appear." },
+						{ label: "Frontmatter", description: "Tags, rating, and the finished date." },
+						{ label: "Backlinks", description: "Rewrites the six notes that point at the old path." },
+					],
+				},
+			]);
+			await settle(() => document.querySelectorAll(".piem-ask-option").length >= 5);
+		},
+	});
+	return { element, cleanup };
+};
+
+/*
+ * What the decision leaves behind. Seeded as a settled tool result the same way
+ * `chat-traces` seeds its rows, because this is the shape a reader meets on every
+ * later scroll-back — and the shape that used to be a one-line collapsed trace.
+ */
+SCENARIOS["chat-ask-answered"] = async () => {
+	const { element, cleanup } = await mountChat({
+		streamFn: scriptedStreamFn([CHIPS_JSON]),
+		drive: async (service, sessionManager) => {
+			const info = await sessionManager.createSession({ provider: "p-deepseek", modelId: "m-deepseek-pro" });
+			await sessionManager.appendMessage({ role: "user", content: "Tidy up my reading list", timestamp: Date.now() });
+			await sessionManager.appendMessage({
+				role: "toolResult",
+				toolCallId: "tc_ask",
+				toolName: "ask_user",
+				content: [{ type: "text", text: "The user answered:\nWhich note: Merge them into a new note" }],
+				details: {
+					dismissed: false,
+					answers: [
+						{
+							question: "Two notes hold the same highlights. Which one should survive?",
+							header: "Which note",
+							selected: ["Merge them into a new note"],
+						},
+						{ question: "What should I carry over from the copy?", header: "What to keep", selected: ["Highlights", "Frontmatter"] },
+					],
+				},
+				isError: false,
+				timestamp: Date.now(),
+			});
+			await sessionManager.loadSession(service.getSnapshot().session.path);
+			await service.openSession(info.path);
+			await settle(() => document.querySelectorAll(".piem-ask-card__picked").length >= 3);
+		},
+	});
+	return { element, cleanup };
+};
 
 SCENARIOS["subagent-list"] = async () => mountInspector(INSPECTOR_SNAPSHOTS);
 SCENARIOS["subagent-detail"] = async () => mountInspector(INSPECTOR_SNAPSHOTS, { id: "sub-1", token: 1 });

@@ -8,7 +8,7 @@ import { createActiveNoteTool } from "./noteTools";
 import { createOpenNoteTool, createOpenSidePanelTool } from "./navigationTools";
 import { createGotoLocationTool, createInsertAtCursorTool } from "./editorTools";
 import { createAskUserTool, createNotifyTool } from "./interactionTools";
-import { getT, resolveLanguage, type LanguageHost } from "../i18n";
+import type { AskUserBroker } from "./askUserBroker";
 import { createMoveNoteTool, createTrashNoteTool } from "./organizeTools";
 import { createFindTool, createGrepTool, createLsTool } from "./searchTools";
 import { createListTasksTool, createSummarizeTasksTool } from "./taskTools";
@@ -55,11 +55,29 @@ import type { PiemSettings } from "../settings";
  * same transport the user chose for provider requests, resolved here per build
  * so a transport change in settings is reflected on the next turn.
  */
+/**
+ * The collaborators the tool set needs but cannot reach for itself.
+ *
+ * A bag rather than more positional parameters: both of these are optional, both
+ * are supplied only by the plugin's composition root, and a fifth positional
+ * argument after an optional fourth is a call site nobody can read.
+ */
+export interface ObsidianToolDeps {
+	/** The loaded skill set, for `read_skill`. Omitted leaves the tool out. */
+	getSkills?: () => readonly Skill[];
+	/**
+	 * Where `ask_user` puts its question. Omitted means the tool is left out
+	 * entirely: an agent holding a question tool with no surface to render on
+	 * would block its own turn forever, which is worse than not offering it.
+	 */
+	askUserBroker?: AskUserBroker;
+}
+
 export function createObsidianTools(
 	app: App,
 	env: ExecutionEnv,
 	settings: PiemSettings,
-	getSkills?: () => readonly Skill[],
+	deps: ObsidianToolDeps = {},
 ): AgentTool[] {
 	const tools: AgentTool[] = [
 		// pi's native harness tools ship without an `executionMode`, so the pin
@@ -83,14 +101,22 @@ export function createObsidianTools(
 		createInsertAtCursorTool(app),
 		createGotoLocationTool(app),
 		createNotifyTool(app),
-		// The question dialog is the one tool whose strings reach the user rather
-		// than the model, so it needs the interface language resolved the same way
-		// the rest of the UI does — from the vault host and the language setting.
-		createAskUserTool(app, getT(resolveLanguage(app.vault as LanguageHost, settings.language))),
+		/*
+		 * Spread in place rather than pushed after the array, so the inventory keeps
+		 * its order whether or not a broker was supplied — the list is what the model
+		 * is shown, and a tool that moves depending on the wiring is a diff nobody
+		 * asked for.
+		 *
+		 * `ask_user` used to resolve the interface language here, because it owned a
+		 * dialog and therefore owned user-facing copy. It renders through the panel's
+		 * React tree now, which reads the language from its own context, so the only
+		 * thing it needs from this layer is somewhere to put the question.
+		 */
+		...(deps.askUserBroker ? [createAskUserTool(app, deps.askUserBroker)] : []),
 		createWebFetchTool(settings.networkTransport),
 	];
-	if (getSkills) {
-		tools.push(createReadSkillTool(getSkills));
+	if (deps.getSkills) {
+		tools.push(createReadSkillTool(deps.getSkills));
 	}
 	return tools;
 }

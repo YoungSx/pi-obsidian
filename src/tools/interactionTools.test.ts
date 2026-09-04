@@ -1,22 +1,16 @@
 import { beforeEach, describe, expect, it } from "bun:test";
-import { installDom } from "../testUtils/dom";
 import { installObsidianStub, resetNotices, shownNotices } from "../testUtils/obsidianStub";
 import { VIEW_TYPE_PIEM_CHAT } from "../constants";
 import type { App } from "obsidian";
 
 installObsidianStub();
-installDom();
 
 // Dynamic imports so the mocked module wins over any cached real one.
 const { createNotifyTool, createAskUserTool } = await import("./interactionTools");
-const { AskUserModal, buildAskUserForm } = await import("./askUserModal");
-const { getT } = await import("../i18n");
-
-const t = getT("en");
+const { AskUserBroker } = await import("./askUserBroker");
 
 beforeEach(() => {
 	resetNotices();
-	document.body.replaceChildren();
 });
 
 describe("notify", () => {
@@ -34,27 +28,40 @@ describe("notify", () => {
 	});
 });
 
+/**
+ * The tool's own contract, which is now narrow: decide whether there is anybody
+ * to ask, hand the question to the broker, and turn what comes back into
+ * something the model can act on. How the question *looks* is tested against the
+ * components in `src/ui`, and how it is queued and routed against the broker.
+ */
 describe("ask_user", () => {
-	it("refuses when the chat panel is closed instead of throwing a dialog at nobody", async () => {
-		const appWithNoPanel = app({ chatOpen: false });
+	it("refuses when no chat panel exists instead of asking nobody", async () => {
+		const broker = new AskUserBroker();
 
-		const error = await createAskUserTool(appWithNoPanel, t)
+		const error = await createAskUserTool(app({ chatOpen: false }), broker)
 			.execute("tool-call", { questions: [oneQuestion()] })
 			.then(() => null, asError);
 
-		// The modal renders globally, so without this guard a background run would
-		// pop a blocking dialog over whatever the user is doing.
+		// The first rung of the ladder. No panel at all means the user is not using
+		// Piem right now: a card would land in a transcript nothing is rendering,
+		// and a dialog would be thrown over whatever they are actually doing.
 		expect(error?.message).toContain("The chat panel is not open");
-		expect(document.querySelector(".piem-ask-question")).toBeNull();
+		expect(broker.getPending()).toBeNull();
 	});
 
-	it("answers a single single-select question on click, without needing Confirm", async () => {
-		const pending = createAskUserTool(app(), t).execute("tool-call", { questions: [oneQuestion()] });
+	it("hands the questions to the broker verbatim and formats the answers back", async () => {
+		const broker = new AskUserBroker();
+		const pending = createAskUserTool(app(), broker).execute("tool-call", { questions: [oneQuestion()] });
 
-		const option = options()[0];
-		option?.click();
+		const request = broker.getPending();
+		expect(request?.questions).toEqual([oneQuestion()]);
+		broker.answer(request?.id ?? "", [
+			{ question: "Where should this note go?", header: "Where to file", selected: ["Inbox"] },
+		]);
 
 		const result = (await pending) as Result;
+		// `header: selected` is what the model reads back, which is the whole reason
+		// `header` survived being dropped as a visible line.
 		expect(textOf(result)).toBe("The user answered:\nWhere to file: Inbox");
 		expect(result.details).toMatchObject({
 			dismissed: false,
@@ -62,120 +69,49 @@ describe("ask_user", () => {
 		});
 	});
 
-	it("collects several multi-select picks and submits with Confirm", async () => {
-		const pending = createAskUserTool(app(), t)
-			.execute("tool-call", { questions: [{ ...oneQuestion(), multiSelect: true }] });
+	it("joins several picks into one line per question", async () => {
+		const broker = new AskUserBroker();
+		const pending = createAskUserTool(app(), broker).execute("tool-call", { questions: [oneQuestion()] });
 
-		options()[0]?.click();
-		options()[1]?.click();
+		broker.answer(broker.getPending()?.id ?? "", [
+			{ question: "Where should this note go?", header: "Where to file", selected: ["Inbox", "Archive"] },
+		]);
 
-		const confirm = confirmButton();
-		// Confirm must have been unblocked by the first pick, not only the second.
-		expect(confirm?.disabled).toBe(false);
-		confirm?.click();
+		expect(textOf((await pending) as Result)).toBe("The user answered:\nWhere to file: Inbox, Archive");
+	});
+
+	it("reports a handed-back decision as guidance, not an error", async () => {
+		const broker = new AskUserBroker();
+		const pending = createAskUserTool(app(), broker).execute("tool-call", { questions: [oneQuestion()] });
+
+		broker.dismiss(broker.getPending()?.id ?? "");
 
 		const result = (await pending) as Result;
-		expect(result.details).toMatchObject({ answers: [{ selected: ["Inbox", "Archive"] }] });
+		// Not a throw: the user declining to choose is still information, and the
+		// result tells the model what to do with it — which is also what the card's
+		// "Let Piem decide" button is named after.
+		expect(result.details).toMatchObject({ dismissed: true });
+		expect(textOf(result)).toContain("make the most reasonable choice yourself");
 	});
 
-	it("keeps Confirm disabled until every question has an answer", async () => {
-		const pending = createAskUserTool(app(), t)
-			.execute("tool-call", { questions: [oneQuestion(), { ...oneQuestion(), header: "When" }] });
-
-		// Answering the first question alone must not unlock submission: an
-		// incomplete answer set is not a state the dialog offers.
-		blocks()[0]?.querySelector<HTMLButtonElement>(".piem-ask-option")?.click();
-		expect(confirmButton()?.disabled).toBe(true);
-
-		blocks()[1]?.querySelector<HTMLButtonElement>(".piem-ask-option")?.click();
-		expect(confirmButton()?.disabled).toBe(false);
-		confirmButton()?.click();
-
-		const result = (await pending) as Result;
-		const answers = (result.details as { answers: { header: string }[] }).answers;
-		expect(answers.map((answer) => answer.header)).toEqual(["Where to file", "When"]);
-	});
-
-	it("takes a typed Other answer in place of the clicked option", async () => {
-		// Two questions so submission goes through Confirm: a lone single-select
-		// question answers on the click itself, leaving no turn for the typing.
-		const pending = createAskUserTool(app(), t)
-			.execute("tool-call", { questions: [oneQuestion(), { ...oneQuestion(), header: "When" }] });
-
-		options()[0]?.click();
-		const other = blocks()[0]?.querySelector<HTMLInputElement>(".piem-ask-other");
-		if (other) {
-			other.value = "A brand-new folder";
-			other.dispatchEvent(new domWindow.Event("input"));
-		}
-		blocks()[1]?.querySelector<HTMLButtonElement>(".piem-ask-option")?.click();
-		confirmButton()?.click();
-
-		const result = (await pending) as Result;
-		// The typed text wins over the earlier click, so a stray selection cannot
-		// silently override what the user actually wrote.
-		expect(result.details).toMatchObject({
-			answers: [{ selected: ["A brand-new folder"] }, { selected: ["Inbox"] }],
-		});
-	});
-
-	it("reports a dismissal as a decision, not an error", async () => {
-		let settled: unknown = "not called";
-		const modal = new AskUserModal(app(), [oneQuestion()], t, (answers) => {
-			settled = answers;
-		});
-		modal.onOpen();
-		modal.onClose();
-
-		// The tool turns this null into guidance for the model rather than a throw,
-		// because a dismissal is the user declining to choose — still information.
-		expect(settled).toBeNull();
-	});
-
-	it("does not overwrite a recorded answer when the close that follows Confirm fires onClose", async () => {
-		let settled: unknown = "not called";
-		const modal = new AskUserModal(app(), [oneQuestion()], t, (answers) => {
-			settled = answers;
-		});
-		modal.onOpen();
-		options()[0]?.click();
-		const answered = settled;
-
-		modal.onClose();
-
-		// Confirm finishes and then closes; without the one-shot guard onClose
-		// would turn the recorded answer back into a dismissal.
-		expect(settled).toBe(answered);
-	});
-
-	it("closes the dialog and rejects when the run is aborted", async () => {
+	it("rejects and drops the question when the run is aborted", async () => {
 		const controller = new AbortController();
-		const pending = createAskUserTool(app(), t)
-			.execute("tool-call", { questions: [oneQuestion()] }, controller.signal);
+		const broker = new AskUserBroker();
+		const pending = createAskUserTool(app(), broker).execute(
+			"tool-call",
+			{ questions: [oneQuestion()] },
+			controller.signal,
+		);
 
 		controller.abort();
 
 		const error = await pending.then(() => null, asError);
-		// Without this wiring the modal would sit on screen after the agent was
-		// interrupted, and the tool promise would never settle.
+		// Without this the question would sit on screen after the agent that asked
+		// it was interrupted, and the tool promise would never settle.
 		expect(error?.message).toBe("Operation aborted");
-		expect(document.querySelector(".piem-ask-question")).toBeNull();
+		expect(broker.getPending()).toBeNull();
 	});
 });
-
-describe("buildAskUserForm", () => {
-	it("renders the multi-select hint only for multi-select questions", () => {
-		const container = document.createElement("div");
-		document.body.appendChild(container);
-		buildAskUserForm(container, [oneQuestion(), { ...oneQuestion(), multiSelect: true }], t, () => undefined);
-
-		const hints = document.querySelectorAll(".piem-ask-question-hint");
-		expect(hints.length).toBe(1);
-		expect(hints[0]?.textContent).toBe(t.t("askUser.multiHint"));
-	});
-});
-
-const domWindow = globalThis.window as unknown as { Event: typeof Event };
 
 interface Result {
 	content: { type: string }[];
@@ -199,18 +135,6 @@ function app(options: { chatOpen?: boolean } = {}) {
 		getLeavesOfType: (type: string) => (type === VIEW_TYPE_PIEM_CHAT ? chatLeaves : []),
 	};
 	return { workspace } as unknown as App;
-}
-
-function blocks(): (Node & ParentNode)[] {
-	return Array.from(document.querySelectorAll(".piem-ask-question"));
-}
-
-function options(): HTMLButtonElement[] {
-	return Array.from(document.querySelectorAll<HTMLButtonElement>(".piem-ask-option"));
-}
-
-function confirmButton(): HTMLButtonElement | null {
-	return document.querySelector<HTMLButtonElement>(".piem-ask-confirm");
 }
 
 function textOf(result: Result): string {

@@ -73,6 +73,7 @@ export const zhCN: DeepPartial<EnCopy> = {
 		replying: "Piem 正在回复…",
 		replyingAria: "Piem 正在回复",
 		latest: "最新",
+		latestQuestion: "有个问题等你",
 		openingChatAria: "正在打开对话",
 		connectModel: "连接一个模型以开始",
 		needsApiKey: "Piem 需要 API 密钥才能回答。",
@@ -311,6 +312,13 @@ export const zhCN: DeepPartial<EnCopy> = {
 
 	askUser: {
 		title: "Piem：那我问你, look in my eyes!",
+		cardLabel: "Piem 的提问",
+		waiting: "那我问你",
+		waitingMany: "那我问你 {count} 件事",
+		queued: "后面还排着 {count} 个",
+		answered: "记下了",
+		dismissed: "你让 Piem 自己定",
+		delegate: "让 Piem 自己定",
 		confirm: "确认",
 		other: "自己写一个…",
 		otherLabel: "自己写答案：{header}",
