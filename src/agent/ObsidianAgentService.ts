@@ -182,6 +182,14 @@ export interface ChatSnapshot {
 	provider: string;
 	modelId: string;
 	/**
+	 * The wire id of the model the live agent actually serves requests on, or
+	 * the settings-resolved one before the agent exists. Differs from
+	 * {@link modelId} only while a mid-run switch (issue #252) is waiting for
+	 * the run to land — the gap the switcher's "takes effect after this reply"
+	 * note reports.
+	 */
+	runningModelId: string;
+	/**
 	 * The resolved vendor mark for the active target, or undefined when neither
 	 * its model id nor its endpoint names a vendor this plugin ships a mark for.
 	 *
@@ -196,6 +204,12 @@ export interface ChatSnapshot {
 	 * masquerade as a default while every session carries its own.
 	 */
 	thinkingLevel: ThinkingLevel;
+	/**
+	 * A level chosen mid-run that has not been applied yet (issue #252), or
+	 * undefined when nothing waits. The selector shows it as the intent; the
+	 * live level stays in force until the run lands.
+	 */
+	pendingThinkingLevel?: ThinkingLevel;
 	/**
 	 * Levels the active model accepts, `"off"` included, in escalation order.
 	 *
@@ -2773,10 +2787,15 @@ export class ObsidianAgentService {
 			lanes: rt?.lanes ?? [],
 			provider: model.provider,
 			modelId: model.id,
+			// What the run in flight actually uses. Mid-run the settings already
+			// carry the new choice while the agent keeps its model, and that gap —
+			// not a flag — is what the switcher's pending note keys off.
+			runningModelId: agent?.state.model.id ?? model.id,
 			vendorIcon: vendorIconName(matchVendorForModel(model.id, model.baseUrl)),
 			// The session's own level, not a settings fallback: with no agent yet
 			// there is no conversation either, so "off" is the honest default.
 			thinkingLevel: agent?.state.thinkingLevel ?? "off",
+			pendingThinkingLevel: rt?.pendingConfiguration?.thinkingLevel,
 			thinkingLevels: getSupportedThinkingLevels(model),
 			modelChoices: listModelChoices(settings),
 			activeModelId: settings.activeModelId,

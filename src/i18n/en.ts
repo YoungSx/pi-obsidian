@@ -322,6 +322,12 @@ export const en = {
 		actionsAria: "Chat actions",
 		tokensSuffix: "tokens",
 		contextAria: "Context window use",
+		/**
+		 * Tooltip suffix on a control whose mid-run choice is waiting for the run
+		 * in flight to land (issue #252), e.g. "Switch model · Opus 5 · OpenRouter
+		 * · Takes effect after this reply".
+		 */
+		appliesAfterReply: "Takes effect after this reply",
 		contextValueText: "{estimated}{tokens} of {window} {unit} used, {percent} percent, {state}",
 		contextEstimatedPrefix: "Estimated ",
 		/** Popover line for prompt-cache use: the hit rate plus the cached volume. */

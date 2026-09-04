@@ -27,6 +27,13 @@ export interface ThinkingTarget {
 	 * what keeps the selector out of the bar rather than rendering it disabled.
 	 */
 	thinkingLevels: readonly ThinkingLevel[];
+	/**
+	 * A level chosen mid-run that has not been applied yet (issue #252), or
+	 * undefined when nothing waits. While set, the check and the visible word
+	 * show it — the intent — and the title notes the change lands after the
+	 * reply in flight.
+	 */
+	pendingThinkingLevel?: ThinkingLevel;
 }
 
 /** Whether the selector has anything to offer for the current model. */
@@ -42,14 +49,20 @@ export function hasThinkingChoice(target: ThinkingTarget): boolean {
  * so the verb comes first and the state follows it — the same shape
  * {@link modelSwitcherTitle} uses two controls to the left.
  *
- * The level itself is not routed through the translator: it is a wire keyword
- * (issue #143) — the exact string the session file records and the request
- * sends — so it renders verbatim in every language, the same rule model names
- * follow. The verb is the only part here a translation owns.
+ * The level named is the pending one when a mid-run choice waits — everything
+ * on the control shows the intent — with the note that it lands after the reply
+ * following it. The level itself is not routed through the translator: it is a
+ * wire keyword (issue #143) — the exact string the session file records and the
+ * request sends — so it renders verbatim in every language, the same rule model
+ * names follow. The verb is the only part here a translation owns.
  */
 export function thinkingSelectorTitle(target: ThinkingTarget, t: Translator): string {
-	return t.t("thinkingLevel.buttonTitle", {
+	const title = t.t("thinkingLevel.buttonTitle", {
 		action: t.t("thinkingLevel.switchThinking"),
-		level: target.thinkingLevel,
+		level: target.pendingThinkingLevel ?? target.thinkingLevel,
 	});
+	if (target.pendingThinkingLevel !== undefined) {
+		return `${title} · ${t.t("chat.appliesAfterReply")}`;
+	}
+	return title;
 }

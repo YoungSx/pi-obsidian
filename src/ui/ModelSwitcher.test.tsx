@@ -18,7 +18,6 @@ interface RenderOptions {
 	onSelect?: (modelId: string) => void;
 	/** Omitted means the host cannot reach settings, as on a stubbed App. */
 	onOpenSettings?: () => void;
-	isBusy?: boolean;
 }
 
 async function renderSwitcher(options: RenderOptions = {}): Promise<HTMLElement> {
@@ -31,7 +30,6 @@ async function renderSwitcher(options: RenderOptions = {}): Promise<HTMLElement>
 			target={target(options.target)}
 			onSelect={options.onSelect ?? (() => undefined)}
 			onOpenSettings={options.onOpenSettings}
-			isBusy={options.isBusy ?? false}
 		/>,
 	);
 	await flushRender();
@@ -191,19 +189,25 @@ describe("ModelSwitcher availability", () => {
 		document.body.replaceChildren();
 	});
 
-	it("stays mounted but inert mid-turn, so the send row does not reflow", async () => {
-		// Switching reconfigures the live agent, which would move the remaining
-		// turns of a tool-using run onto another model with nothing in the
-		// transcript to mark the seam.
-		const host = await renderSwitcher({ isBusy: true });
+	it("stays usable mid-turn: a mid-run switch is deferred until the run lands", async () => {
+		// Issue #252: the setting writes through at once, the run keeps its model,
+		// and the service applies the choice when the run settles. Nothing here has
+		// to go inert, so the button never greys out under the user's hands.
+		const host = await renderSwitcher({ target: { runningModelId: "claude-opus-5" } });
 
-		expect(button(host).disabled).toBe(true);
+		expect(button(host).disabled).toBe(false);
 	});
 
-	it("keeps naming the model while it is inert, which is what a reader wants mid-turn", async () => {
-		const host = await renderSwitcher({ isBusy: true });
+	it("notes in the title when the run in flight is still on another model", async () => {
+		const host = await renderSwitcher({ target: { runningModelId: "claude-opus-5" } });
 
-		expect(host.querySelector(".piem-chat__model-switcher-name")?.textContent).toBe("Opus 5");
+		expect(button(host).getAttribute("aria-label")).toBe("Switch model · Opus 5 · OpenRouter · Takes effect after this reply");
+	});
+
+	it("leaves the title alone once the run is on the chosen model", async () => {
+		const host = await renderSwitcher({ target: { runningModelId: "deepseek-v4-pro" } });
+
+		expect(button(host).getAttribute("aria-label")).toBe("Switch model · Opus 5 · OpenRouter");
 	});
 
 	it("disables itself when there is nothing to pick and nowhere to go", async () => {

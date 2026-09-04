@@ -46,6 +46,14 @@ export interface ModelTarget {
 	 * render none rather than a placeholder.
 	 */
 	vendorIcon?: string;
+	/**
+	 * Wire id of the model the live agent is actually serving requests on, when
+	 * the snapshot knows it. Equal to the settings-resolved {@link modelId}
+	 * except while a mid-run switch (issue #252) waits for the run to land —
+	 * that gap, not a flag, is what the title's "takes effect after this reply"
+	 * note reports.
+	 */
+	runningModelId?: string;
 }
 
 /**
@@ -70,12 +78,33 @@ export function activeModelName(target: ModelTarget): string {
  * which is the whole point of moving this out of the header — so the verb comes
  * first and the state follows it, the same shape {@link sendButtonTitle} uses for
  * Send and its chord.
+ *
+ * While a mid-run choice is waiting, the note that it lands after the reply
+ * follows the state. The face already shows the new model — the intent — so the
+ * note is the only place the timing is said.
  */
 export function modelSwitcherTitle(target: ModelTarget, t: Translator): string {
-	return t.t("modelSwitcher.buttonTitle", {
+	const title = t.t("modelSwitcher.buttonTitle", {
 		action: t.t("modelSwitcher.switchModel"),
 		model: describeTarget(target, t),
 	});
+	if (modelSwitchPending(target)) {
+		return `${title} · ${t.t("chat.appliesAfterReply")}`;
+	}
+	return title;
+}
+
+/**
+ * Whether a mid-run model choice is waiting to be applied.
+ *
+ * The gap between the two wire ids is the whole test: settings already name the
+ * new model, the agent keeps the one it started on, and both are the same
+ * namespace — what pi-ai dispatches on. Ids across namespaces would not compare
+ * (a choice id is a config row, a wire id is an api string), which is why the
+ * snapshot resolves both sides itself.
+ */
+function modelSwitchPending(target: ModelTarget): boolean {
+	return target.runningModelId !== undefined && target.runningModelId !== target.modelId;
 }
 
 /**

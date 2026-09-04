@@ -176,6 +176,8 @@ export const zhCN: DeepPartial<EnCopy> = {
 		actionsAria: "对话操作",
 		tokensSuffix: "token",
 		contextAria: "上下文窗口占用",
+		// 回答进行中改动的控件（issue #252），提示要等这条回复落地才生效。
+		appliesAfterReply: "本条回复结束后生效",
 		contextValueText: "已使用 {estimated}{tokens} / {window} {unit}，{percent}%，{state}",
 		contextEstimatedPrefix: "约 ",
 		/** Popover line for prompt-cache use: the hit rate plus the cached volume. */

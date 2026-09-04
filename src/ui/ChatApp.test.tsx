@@ -1284,6 +1284,7 @@ function baseSnapshot(): ChatSnapshot {
 		lanes: [{ lane: "main", leafId: null, retired: false }],
 		provider: DEFAULT_SETTINGS.provider,
 		modelId: DEFAULT_SETTINGS.modelId,
+		runningModelId: DEFAULT_SETTINGS.modelId,
 		thinkingLevel: "off",
 		thinkingLevels: ["off", "low", "high"],
 		modelChoices: [
