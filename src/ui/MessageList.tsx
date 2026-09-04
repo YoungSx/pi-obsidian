@@ -232,6 +232,29 @@ function regenerableIndex(messages: AgentMessage[]): number | null {
 }
 
 /**
+ * Whether the reply at `index` is the last of its turn.
+ *
+ * A turn that calls tools leaves several assistant entries behind — one per
+ * model call — and the actions row is a turn-level affordance: copy/insert
+ * under a mid-turn "let me look" would offer half a process sentence. The walk
+ * forward answers the question at the first entry that can: another reply means
+ * this one is still mid-turn, a question means the turn has closed, and the
+ * end of the transcript closes it too.
+ */
+function closesTurn(messages: AgentMessage[], index: number): boolean {
+	for (let cursor = index + 1; cursor < messages.length; cursor += 1) {
+		const role = messages[cursor]?.role;
+		if (role === "assistant") {
+			return false;
+		}
+		if (role === "user") {
+			return true;
+		}
+	}
+	return true;
+}
+
+/**
  * The one question that may be edited and resent — the newest answered turn.
  *
  * Editing a question rewinds the conversation to just before it, so the same
@@ -501,6 +524,7 @@ export function MessageList({
 							renderContext={context}
 							replyTiming={replyTimingFor(messages, index) ?? undefined}
 							onRetry={onRetry && index === regenerateIndex ? () => onRetry(index) : undefined}
+							turnCloses={message.role === "assistant" ? closesTurn(messages, index) : undefined}
 							/*
 							 * The edit hides itself on an unsettled turn too — the resend
 							 * truncates the transcript, and a turn still streaming (or
@@ -745,6 +769,13 @@ interface MessageRowProps {
 	renderContext: MessageContext;
 	/** Regenerates this reply; supplied only for the newest one. */
 	onRetry?: () => void;
+	/**
+	 * Whether the copy/insert/append row belongs on this reply. A turn with tool
+	 * calls leaves several reply entries; only the last of a turn speaks for it,
+	 * and a mid-turn "let me look" has no prose worth a note action. Absent on a
+	 * streaming row too — that gate lives beside the render.
+	 */
+	turnCloses?: boolean;
 	/** Opens this question in the composer; supplied only for the newest answered one. */
 	onEdit?: () => void;
 	/** Forks this question into two comparison branches; same bound as {@link onEdit}. */
@@ -773,6 +804,7 @@ function MessageRow({
 	isStreaming,
 	renderContext,
 	onRetry,
+	turnCloses,
 	onEdit,
 	onCompare,
 	replyTiming,
@@ -884,7 +916,7 @@ function MessageRow({
 						<UnsavedWarning text={message.role === "assistant" ? assistantText(message) : userText(message)} />
 					) : null}
 				</div>
-				{message.role === "assistant" && !isStreaming ? (
+				{message.role === "assistant" && !isStreaming && turnCloses !== false ? (
 					<ReplyActions
 						app={renderContext.app}
 						text={assistantText(message)}
