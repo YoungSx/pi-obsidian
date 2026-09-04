@@ -2035,20 +2035,93 @@ describe("ObsidianAgentService banner semantics: what the transcript reports, th
 	 * `appendMessage`'s deep clone. Second, the banner cannot say *which* turn
 	 * failed, and the transcript says nothing else.
 	 */
-	it("leaves an anchored provider failure to the transcript", async () => {
-		const service = await runTurnEndingWith((model) =>
-			assistantReply(model, { stopReason: "error", errorMessage: "504 Gateway Time-out" }),
-		);
+	it("keeps the banner quiet when the stream dies on the open, and pi stamps the turn", async () => {
+		/*
+		 * A stream that throws the moment it is opened does not reach the dispatch
+		 * catch: pi's own lifecycle wraps the run, catches the throw, stamps a
+		 * failed assistant turn onto the transcript, and resolves `prompt` — the
+		 * reply cutoff renders the reason under the turn it belongs to. The banner
+		 * reporting it too is the duplication #239 ended, so silence here is the
+		 * contract, over an old failed tail and all.
+		 */
+		// Turn one fails mid-stream and stays on the transcript: the old shadow.
+		let gate: ReturnType<typeof createAssistantMessageEventStream> | undefined;
+		let gateModel: Model<Api> | undefined;
+		let calls = 0;
+		const streamFn: StreamFn = (model) => {
+			calls++;
+			if (calls === 1) {
+				gate = createAssistantMessageEventStream();
+				gateModel = model;
+				return gate;
+			}
+			// The second dispatch dies the moment the run opens the stream.
+			throw new Error("socket hung up before the first byte");
+		};
+		const service = createService(undefined, { streamFn });
+		await service.initialize();
+		const settled = service.sendPrompt("Write me something long");
+		await waitFor(() => gate !== undefined);
+		const failed = assistantReply(gateModel!, {
+			stopReason: "error",
+			errorMessage: "504 Gateway Time-out",
+		});
+		gate!.push({ type: "error", reason: "error", error: failed });
+		gate!.end(failed);
+		await settled;
+		expect(service.getSnapshot().errorMessage).toBeUndefined();
 
-		const snapshot = service.getSnapshot();
-		expect(snapshot.errorMessage).toBeUndefined();
-		// Nor demoted to the quiet channel: one report, under the turn it ended.
-		expect(snapshot.noticeMessage).toBeUndefined();
-		// The markers `describeReplyCutoff` renders from are both still on the turn,
-		// which is what makes the banner's silence a move rather than a loss.
-		const last = snapshot.messages.at(-1);
-		expect(last?.role === "assistant" && last.stopReason).toBe("error");
-		expect(last?.role === "assistant" && last.errorMessage).toBe("504 Gateway Time-out");
+		// Turn two dies on the open: pi stamps the failure onto the transcript…
+		await service.sendPrompt("Try again");
+		expect(service.getSnapshot().errorMessage).toBeUndefined();
+		const stamped = service.getSnapshot().messages.at(-1);
+		expect(stamped?.role === "assistant" && stamped.errorMessage).toBe("socket hung up before the first byte");
+	});
+
+	it("raises the banner for a throw inside the dispatch, before the run departs", async () => {
+		/*
+		 * The stream-open throw above never reaches the dispatch catch, so the
+		 * pre-flight throws that do reach it are the ones inside the try itself:
+		 * the snapshot notify, the compaction. This drives the notify to throw —
+		 * a listener registered against the snapshot dies on its first call — and
+		 * the banner must hear it.
+		 *
+		 * The old guard captured the tail *after* those statements, so a throw
+		 * from them arrived with the capture never taken and the previous turn's
+		 * tail standing in: an old failed tail then swallowed the report, and the
+		 * failure landed nowhere. Capturing first is the fix; the resume path
+		 * reaches the same statements without needing a live stream to get there.
+		 *
+		 * The bomb disarms itself after one call because the catch's own
+		 * settlement notifies again — a second detonation there would escape the
+		 * catch and fail the test for the wrong reason.
+		 */
+		const memory = new MemoryAdapter();
+		const crashed = createService(memory);
+		await crashed.initialize();
+		await crashed.sendPrompt("First question");
+		// The orphan write arms the continue offer the resume acts on.
+		const manager = (crashed as unknown as { sessionManager: ObsidianSessionManager }).sessionManager;
+		await manager.beginRunOperation([
+			{ role: "user", content: [{ type: "text", text: "Second question" }], timestamp: Date.now() },
+		]);
+		await manager.appendMessage({ role: "user", content: [{ type: "text", text: "Second question" }], timestamp: Date.now() });
+
+		const revived = createService(memory);
+		await revived.initialize();
+		let explode = false;
+		revived.subscribe(() => {
+			if (explode) {
+				explode = false;
+				throw new Error("listener died");
+			}
+		});
+		// The immediate callback at subscribe time passed through unexploded;
+		// arming now makes the dispatch's first notify the detonation.
+		explode = true;
+
+		await revived.resumeInterruptedRun();
+		expect(revived.getSnapshot().errorMessage).toBe("listener died");
 	});
 
 	it("still raises the banner when the turn's own markers do not agree", async () => {
