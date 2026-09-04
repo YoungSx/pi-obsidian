@@ -146,6 +146,22 @@ export interface ChatSnapshot {
 	 */
 	noticeMessage?: string;
 	/**
+	 * Messages that are on screen and not on disk, by identity.
+	 *
+	 * The one report in this panel that describes silent, irreversible loss:
+	 * everything else here can be retried, and this one says a reply the reader is
+	 * looking at will be absent after a reload, with no gap where it was. It used
+	 * to ride the dismissible grey notice — ranked below "Nothing to tidy up yet."
+	 * and cleared unconditionally by the next send, so the warning about the reply
+	 * about to be lost was destroyed by the act of continuing the conversation.
+	 *
+	 * Identities rather than a message, so the transcript can mark the *reply it
+	 * names*. `snapshot.messages` hands out the same objects, which is what makes
+	 * the comparison work; `messageEntryIds` already keys on identity for the same
+	 * reason. Empty on every healthy panel, so the array stays tiny.
+	 */
+	unpersistedMessages?: readonly object[];
+	/**
 	 * Whether the active lane's last load found a run the previous process never
 	 * finished, with the user's words still the transcript's tail. The banner
 	 * turns this into the "continue" offer; absent from older snapshots means
@@ -1548,6 +1564,7 @@ export class ObsidianAgentService {
 				// because the retry is what the user asked for, so all that is lost is
 				// the note about the fork being left behind.
 				this.setNotice(
+					rt,
 					this.t().t("chat.branchSummaryFailed", { error: error instanceof Error ? error.message : String(error) }),
 				);
 				return false;
@@ -1634,7 +1651,7 @@ export class ObsidianAgentService {
 
 			if (!result.ok) {
 				if (!controller.signal.aborted) {
-					this.setNotice(this.t().t("chat.branchSummaryFailed", { error: result.error.message }));
+					this.setNotice(rt, this.t().t("chat.branchSummaryFailed", { error: result.error.message }));
 				}
 				return null;
 			}
@@ -2570,6 +2587,7 @@ export class ObsidianAgentService {
 					return progress === undefined ? { name } : { name, progress };
 				})
 				.filter((pending): pending is PendingToolCall => pending !== undefined),
+			unpersistedMessages: [...(rt?.unpersistedMessages ?? [])],
 			errorMessage: rt?.panelError?.message ?? this.visibleAgentError(rt, agent) ?? this.initializationError,
 			errorOpensSettings: rt?.panelError?.opensSettings ?? false,
 			// Mid-run sends, waiting for pi to inject. From the mirror rather
@@ -3201,20 +3219,33 @@ export class ObsidianAgentService {
 				await this.persistMessage(rt, event.message);
 			}
 			if (event.type === "agent_end") {
+				// Every message is attempted even after one fails: the realistic cause
+				// is a log the host cannot write at all, and stopping at the first
+				// would mark one reply while leaving the rest of the run silently
+				// unrecorded. The first failure is rethrown after the sweep so the
+				// ledger still stays open.
+				let failure: Error | undefined;
 				for (const message of event.messages) {
-					await this.persistMessage(rt, message);
+					try {
+						await this.persistMessage(rt, message);
+					} catch (error) {
+						// Normalized on capture rather than at the throw: the original is
+						// kept whenever it is already an `Error`, and a thrown string
+						// still arrives at the outer handler as something with a message.
+						failure ??= error instanceof Error ? error : new Error(String(error));
+					}
+				}
+				if (failure) {
+					throw failure;
 				}
 				await this.settleRunLedger(rt, event.messages);
 			}
 		} catch (error) {
 			const message = error instanceof Error ? error.message : String(error);
-			// A persist failure does not undo the reply — the reader has already
-			// seen it — so a red alert overstates the damage and a grey notice
-			// states it. `appendNotice` keeps an earlier warning alongside rather
-			// than under it.
-			this.appendNotice(rt, this.t().t("chat.persistFailed", { error: message }));
-			// The snapshot field renders once in the panel; the log keeps the
-			// failure even after the user dismisses the notice.
+			// No banner message: {@link persistMessage} has already marked the
+			// replies this is about, and the transcript reports it under each of
+			// them — which is the only place that can say *which* reply is not on
+			// disk, and the only report the next send cannot erase.
 			this.log.error("Failed to persist agent output", () => ({ event: event.type, error: message }));
 		}
 		if (event.type === "agent_end") {
@@ -3524,7 +3555,7 @@ export class ObsidianAgentService {
 			 * between two turns rather than inside one — so the notice channel is
 			 * where it belongs rather than the transcript.
 			 */
-			this.setNotice(this.t().t("chat.compactionFailed", { error: outcome.message }));
+			this.setNotice(rt, this.t().t("chat.compactionFailed", { error: outcome.message }));
 			return false;
 		}
 		if (outcome.status === "skipped") {
@@ -3630,7 +3661,18 @@ export class ObsidianAgentService {
 		// request reads. Sanitize to a deep copy with image blocks replaced by a
 		// text placeholder; dedup still keys on the original object identity.
 		const logged = sanitizeMessageForLog(message);
-		rt.messageEntryIds.set(key, await this.sessionManager.appendMessageFor(rt.sessionPath, logged, rt.activeLane));
+		try {
+			rt.messageEntryIds.set(key, await this.sessionManager.appendMessageFor(rt.sessionPath, logged, rt.activeLane));
+			rt.unpersistedMessages.delete(key);
+		} catch (error) {
+			// Marked here, where the identity is, so the transcript can put the
+			// warning under the reply it is about rather than at the top of the panel
+			// where it cannot say which one. Rethrown so the caller's own handling —
+			// notably the run ledger staying open, which degrades to a spurious
+			// recovery offer rather than to a lost reply — is unchanged.
+			rt.unpersistedMessages.add(key);
+			throw error;
+		}
 	}
 
 	/**
@@ -3664,7 +3706,7 @@ export class ObsidianAgentService {
 			if (!file) {
 				// `appendNotice`, not `setNotice`: this runs once per embed, and
 				// assigning meant three missing images reported as one — the last.
-				this.appendNotice(t.t("chat.imageNotFound", { path }));
+				this.appendNotice(rt, t.t("chat.imageNotFound", { path }));
 				this.appendNotice(rt, t.t("chat.imageNotFound", { path }));
 				continue;
 			}
@@ -3676,7 +3718,7 @@ export class ObsidianAgentService {
 				// folder differently and the file is what the bytes came from.
 				images.push({ type: "image", data: arrayBufferToBase64(buffer), mimeType: mimeTypeForPath(file.path) });
 			} catch {
-				this.appendNotice(t.t("chat.imageNotFound", { path }));
+				this.appendNotice(rt, t.t("chat.imageNotFound", { path }));
 				this.appendNotice(rt, t.t("chat.imageNotFound", { path }));
 			}
 		}

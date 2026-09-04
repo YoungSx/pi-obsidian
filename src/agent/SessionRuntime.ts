@@ -87,6 +87,15 @@ export class SessionRuntime {
 	 * stopping a second append of a run's messages on `agent_end`.
 	 */
 	messageEntryIds = new WeakMap<object, string>();
+	/**
+	 * Messages whose session-log write failed, by identity — the same keys
+	 * {@link messageEntryIds} would have carried. Cleared per message on a later
+	 * successful write, since persistence is reached again for anything still
+	 * missing an entry id. The transcript reads this to put the "not saved"
+	 * warning under the reply it names, rather than reporting the loss at the
+	 * top of the panel where it cannot say which reply.
+	 */
+	readonly unpersistedMessages = new Set<object>();
 
 	// --- tool progress ---
 

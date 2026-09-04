@@ -150,7 +150,8 @@ export const zhCN: DeepPartial<EnCopy> = {
 		/** 回复流式输出期间，回合槽位已是停止档位，这个安静的文字按钮为鼠标用户保留草稿的排队入口；只在有草稿时出现，键盘快捷键不受影响。 */
 		queueDraft: "排队发送",
 		/** 回复已生成但没能写进 vault。读者反正已看到正文，所以这是通知而不是警报。 */
-		persistFailed: "这条回复没能保存进笔记库：{error}",
+		persistFailed: "没能存进笔记库——重新载入后这条回复就没了。",
+		persistFailedCopy: "先复制出来",
 		/** 溢出菜单项：把对话记录写成 vault 里的 Markdown 笔记。 */
 		exportNote: "存为笔记",
 		/** 导出笔记里的角色标题。 */

@@ -5,7 +5,7 @@ import type { AssistantMessage, ToolCall, ToolResultMessage, UserMessage } from 
 import type { App, Component, IconName } from "obsidian";
 import type { TextBlockKind } from "./markdownPolicy";
 import { MarkdownText } from "./MarkdownText";
-import { assistantText } from "./messageActions";
+import { assistantText, copyToClipboard, notifyActionResult, userText } from "./messageActions";
 import { QuickActions } from "./QuickActions";
 import { ReplyActions } from "./ReplyActions";
 import { emptyScreenQuickActions, type QuickAction } from "./quickActionSuggestions";
@@ -44,6 +44,16 @@ export interface MessageListProps {
 	 * case the row shows the name alone exactly as it always has.
 	 */
 	pendingToolCalls: PendingToolCall[];
+	/**
+	 * Messages that are on screen and not on disk, by identity.
+	 *
+	 * Compared by identity against {@link messages}, which is the same array the
+	 * service handed out. The warning has to sit under the reply it names: it is
+	 * the only report in this panel about loss the reader cannot undo, and "this
+	 * reply could not be saved" at the top of the panel left them to work out
+	 * which reply that was.
+	 */
+	unpersistedMessages?: readonly object[];
 	isInitializing?: boolean;
 	isConfigured?: boolean;
 	/**
@@ -343,6 +353,7 @@ export function MessageList({
 	messages,
 	isStreaming,
 	pendingToolCalls,
+	unpersistedMessages,
 	isInitializing = false,
 	isConfigured = true,
 	showAgentDetails = false,
@@ -506,6 +517,7 @@ export function MessageList({
 							onCompare={
 								onCompare && index === editIndex && !isStreaming && !isCompacting ? () => onCompare(index) : undefined
 							}
+							notPersisted={unpersistedMessages?.includes(message)}
 						/>
 					))
 				)}
@@ -744,6 +756,8 @@ interface MessageRowProps {
 	 * without re-deriving the transcript's shape.
 	 */
 	replyTiming?: { durationMs: number; startedAt: number };
+	/** Whether this message failed to reach the session log. */
+	notPersisted?: boolean;
 }
 
 /**
@@ -753,7 +767,17 @@ interface MessageRowProps {
  * calls, tool results, harness output, compaction summaries — renders flat, so
  * a card never contains another bordered box.
  */
-function MessageRow({ index, message, isStreaming, renderContext, onRetry, onEdit, onCompare, replyTiming }: MessageRowProps): React.JSX.Element | null {
+function MessageRow({
+	index,
+	message,
+	isStreaming,
+	renderContext,
+	onRetry,
+	onEdit,
+	onCompare,
+	replyTiming,
+	notPersisted,
+}: MessageRowProps): React.JSX.Element | null {
 	// The summary fronts a compacted transcript; it reads as a divider ("history
 	// above this was summarized"), not as one more message bubble.
 	if (message.role === "compactionSummary") {
@@ -837,6 +861,28 @@ function MessageRow({ index, message, isStreaming, renderContext, onRetry, onEdi
 							) : null}
 						</>
 					) : null}
+					{/*
+					 * The only report in this panel about loss the reader cannot undo, so
+					 * the only one with no dismiss control: the reply is on screen and not
+					 * on disk, and it will be absent after a reload with no gap where it
+					 * was. It used to be a dismissible grey line at the top of the panel,
+					 * ranked below "Nothing to tidy up yet." and cleared by the next send —
+					 * so the warning about the reply about to be lost was destroyed by the
+					 * act of continuing the conversation.
+					 *
+					 * Muted, not red. Position and permanence carry the weight here; the
+					 * red glyph is spent on the failure that has a retry.
+					 *
+					 * It carries its own copy button rather than leaning on the reply
+					 * actions below, which are hover-revealed on desktop: a reader told
+					 * their words are unsaved should not have to discover the control that
+					 * rescues them. The adapter's own error text is not here — it goes to
+					 * the log, and there is nothing in it the reader can act on. What they
+					 * can act on is this button.
+					 */}
+					{notPersisted ? (
+						<UnsavedWarning text={message.role === "assistant" ? assistantText(message) : userText(message)} />
+					) : null}
 				</div>
 				{message.role === "assistant" && !isStreaming ? (
 					<ReplyActions
@@ -891,6 +937,37 @@ function hasNothingToDraw(message: AssistantMessage, index: number, context: Mes
 		return slot !== null && !slot.head;
 	});
 }
+
+/**
+ * The marker on a message the session log did not take.
+ *
+ * Either role can carry it. A reply that never reached disk is the obvious case,
+ * but a *question* that did not is worse — the transcript will reload missing the
+ * words the reader typed, and nothing else in the panel would ever mention it.
+ *
+ * Its own component because it owns an action, and because the copy path wants
+ * the same `notifyActionResult` reporting every other copy control in the panel
+ * uses — one place where "copied" and "could not copy" are worded.
+ */
+function UnsavedWarning({ text }: { text: string }): React.JSX.Element {
+	const t = useT();
+	return (
+		<p className="piem-chat__interrupted piem-chat__interrupted--unsaved">
+			<ObsidianIcon name="file-x" className="piem-chat__interrupted-icon" />
+			{t.t("chat.persistFailed")}
+			{text ? (
+				<button
+					type="button"
+					className="piem-chat__interrupted-action"
+					onClick={() => {
+						void copyToClipboard(text).then((copied) => notifyActionResult(copied, t.t("replyActions.couldNotCopy")));
+					}}
+				>
+					{t.t("chat.persistFailedCopy")}
+				</button>
+			) : null}
+		</p>
+	);}
 
 /**
  * Why an assistant turn stopped early, or `null` when it finished normally.

@@ -638,6 +638,7 @@ export function ChatApp({ service, inputController, component, draftStore, onOpe
 					messages={visibleMessages}
 					isStreaming={snapshot.isStreaming}
 					pendingToolCalls={snapshot.pendingToolCalls}
+					unpersistedMessages={snapshot.unpersistedMessages}
 					isInitializing={isInitializing}
 					isConfigured={snapshot.isConfigured ?? false}
 					showAgentDetails={snapshot.showAgentDetails}

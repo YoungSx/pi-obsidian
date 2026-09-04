@@ -272,7 +272,16 @@ export const en = {
 		 */
 		queueDraft: "Queue draft",
 		/** Notice when a finished reply could not be written to the vault. The reader has the text either way, so this is a notice, not an alert. */
-		persistFailed: "This reply could not be saved to the vault: {error}",
+		/**
+		 * Rendered under the reply it names, and never dismissible.
+		 *
+		 * No `{error}` any more: this now sits beside the reply it is about, so
+		 * "this reply" is unambiguous — and the adapter's own message was the one
+		 * part of it the reader could do nothing with. That goes to the log. What
+		 * they can do is take the words out, which the button beside this does.
+		 */
+		persistFailed: "Not saved to the vault — this reply will be gone after a reload.",
+		persistFailedCopy: "Copy it out",
 		/** Overflow-menu item that writes the transcript into the vault as a Markdown note. */
 		exportNote: "Save as note",
 		/** Role heading in an exported note. */
