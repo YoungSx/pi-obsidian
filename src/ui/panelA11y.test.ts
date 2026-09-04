@@ -217,6 +217,11 @@ describe("the banner reports state with its glyph, not with a fill (WCAG 1.4.3 /
 	 * light. This row is `--font-ui-smaller`, so 4.5:1 is the floor for the words
 	 * and 3:1 for the glyph, and the dark theme missed both.
 	 *
+	 * After the change, measured in Blink against a real `app.css`: glyph and
+	 * border 3.50:1 dark / 4.10:1 light, words 8.64:1 dark / 15.51:1 light. Light
+	 * is the stronger theme for the red, which an earlier draft of the stylesheet
+	 * comment had backwards.
+	 *
 	 * Structural rather than numeric for the reason the file header gives: the
 	 * tokens live in Obsidian's `app.css`, which does not exist here. What is
 	 * assertable is the *shape* — no red fill anywhere on the row, and the red
@@ -230,6 +235,32 @@ describe("the banner reports state with its glyph, not with a fill (WCAG 1.4.3 /
 		expect(shared).toContain("background: var(--background-secondary-alt)");
 		expect(shared).toContain("color: var(--text-normal)");
 		expect(declarations(ruleBody(".piem-chat__banner--error"))).not.toContain("--background-modifier-error");
+	});
+
+	/*
+	 * The height cap and its scrollbar are gone, and both halves of that matter.
+	 * The cap existed for provider error dumps, which do not reach this surface any
+	 * more — they report themselves in the transcript (#239) — and a scroll
+	 * container with no `tabindex` is a WCAG 2.1.1 failure, so a sighted keyboard
+	 * user could not read past its sixth line.
+	 */
+	it("caps neither the height of the row's text nor a reader's access to it", () => {
+		const body = declarations(ruleBody(".piem-chat__banner-text"));
+
+		expect(body).not.toContain("max-height");
+		expect(body).not.toMatch(/overflow(-y)?: auto/);
+	});
+
+	/*
+	 * Measured in Blink at 300px before this: icon 16 + action 108 + dismiss 32 +
+	 * three 8px gaps left the text column 60px wide, which pushed a 68-character
+	 * sentence past the old height cap and gave it an inner scrollbar inside a 60px
+	 * column. The floor plus the container's wrap move the accessories to a second
+	 * line instead.
+	 */
+	it("lets the row wrap rather than squeezing its sentence to nothing", () => {
+		expect(declarations(ruleBody(".piem-chat__banner"))).toContain("flex-wrap: wrap");
+		expect(declarations(ruleBody(".piem-chat__banner-text"))).toContain("min-width: 20ch");
 	});
 
 	it("spends the red on the glyph", () => {
