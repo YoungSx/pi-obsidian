@@ -60,6 +60,7 @@ import { composeSystemPrompt, emptySkillLoadReport, expandSkill, findSkill, load
 import { loadUserSkills, type UserSkillsLoad } from "../skills/userSkills";
 import type { Skill } from "@earendil-works/pi-agent-core";
 import { describeAgentEvent } from "./agentEventLog";
+import { stampReplyEnd } from "../ui/replyDuration";
 import { summarizeToolContent } from "../ui/traceSummary";
 import { NOOP_LOGGER, type LoggerLike } from "../logging/Logger";
 import { getT, resolveLanguage, type Language, type LanguageHost, type Translator } from "../i18n";
@@ -2805,6 +2806,12 @@ export class ObsidianAgentService {
 		this.logAgentEvent(event);
 		try {
 			if (event.type === "message_end") {
+				// Stamp the reply's duration while `Date.now()` still is the settle
+				// moment, before persistence copies the message into the session
+				// log. pi only records when streaming started; this is where the
+				// other end gets measured (#240). User messages pass through
+				// untouched.
+				stampReplyEnd(event.message, Date.now());
 				// First duty: if this is a queued message pi just injected, take
 				// its chip down. Identity matching means a user who queued the
 				// same words twice gets the right one settled. The message
