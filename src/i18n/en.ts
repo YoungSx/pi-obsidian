@@ -150,8 +150,10 @@ export const en = {
 		 * implementation detail they never have to hold.
 		 */
 		compareFromHere: "Compare two ways",
-		/** The lane switcher's accessible name. */
+		/** The lane switcher button's accessible name and tooltip. */
 		lanesLabel: "Comparison branches",
+		/** The switcher group's name, distinct from the button's so one hover does not print the same tooltip twice. */
+		lanesGroupAria: "Comparison branches",
 		/** The original conversation, always the first option in the switcher. */
 		laneMain: "Original",
 		/** Comparison branches, numbered in creation order: "Option A", "Option B". */
@@ -232,7 +234,6 @@ export const en = {
 		rowLabelSummary: "Summary",
 		headerAria: "Current chat",
 		actionsAria: "Chat actions",
-		statusAria: "Chat status",
 		tokensSuffix: "tokens",
 		contextAria: "Context window use",
 		contextValueText: "{estimated}{tokens} of {window} {unit} used, {percent} percent, {state}",

@@ -91,6 +91,8 @@ export const zhCN: DeepPartial<EnCopy> = {
 		editingNotice: "正在编辑上一条提问——发送后将替换这条回复。",
 		compareFromHere: "对比两种走向",
 		lanesLabel: "对比分支",
+		/** 分组名与按钮名分开，同一把悬停才不会打印两行一模一样的 tooltip。 */
+		lanesGroupAria: "对比分支",
 		laneMain: "原对话",
 		laneOption: "方案 {label}",
 		laneChoose: "就用这条",
@@ -141,7 +143,6 @@ export const zhCN: DeepPartial<EnCopy> = {
 		rowLabelSummary: "总结",
 		headerAria: "当前对话",
 		actionsAria: "对话操作",
-		statusAria: "对话状态",
 		tokensSuffix: "token",
 		contextAria: "上下文窗口占用",
 		contextValueText: "已使用 {estimated}{tokens} / {window} {unit}，{percent}%，{state}",

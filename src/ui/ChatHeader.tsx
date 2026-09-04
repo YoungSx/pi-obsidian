@@ -5,8 +5,8 @@ import type { ActiveSessionInfo } from "../session/ObsidianSessionManager";
 import type { SessionSearchResult } from "../session/sessionSearch";
 import { IconButton } from "./ObsidianIcon";
 import { useT } from "./TranslatorContext";
+import { suppressOwnTooltip } from "./tooltipSuppression";
 import {
-	describeSession,
 	openSessionDeleteConfirm,
 	openSessionPicker,
 	openSessionRename,
@@ -161,14 +161,23 @@ export function ChatHeader({
 	};
 
 	return (
-		<header className="piem-chat__header" aria-label={t.t("chat.headerAria")}>
+		// The header's name is for the screen reader's landmarks, not the pointer:
+		// the title it names is printed right beside it, so Obsidian's native
+		// tooltip would restate the visible heading on every stray hover. The
+		// toolbar below suppresses for the same reason its buttons do not.
+		<header className="piem-chat__header" aria-label={t.t("chat.headerAria")} onMouseOver={suppressOwnTooltip}>
 			{/* No wrapper: the title is the whole of the header's identity now that the
 			    model line has moved, and an element holding one child is one more left
-			    edge for a reader's eye to resolve. */}
-			<h2 className="piem-chat__title" title={activeSession ? describeSession(activeSession, t) : undefined}>
-				{sessionTitle(activeSession, t)}
-			</h2>
-			<div className="piem-chat__header-actions" role="toolbar" aria-label={t.t("chat.actionsAria")}>
+			    edge for a reader's eye to resolve. No `title` either — the details it
+			    carried are one menu item away, and a tooltip restating chrome is not
+			    worth a second hover channel. */}
+			<h2 className="piem-chat__title">{sessionTitle(activeSession, t)}</h2>
+			<div
+				className="piem-chat__header-actions"
+				role="toolbar"
+				aria-label={t.t("chat.actionsAria")}
+				onMouseOver={suppressOwnTooltip}
+			>
 				{/*
 				 * Always mounted so the button positions never shift as the vault
 				 * accumulates chats; disabled until there is a second one to pick.

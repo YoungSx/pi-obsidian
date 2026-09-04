@@ -183,8 +183,10 @@ export function AskUserForm({ questions, onAnswer, onDismiss }: AskUserFormProps
 						<div
 							className="piem-ask-options"
 							role="group"
+							/* `aria-labelledby` names the group already; an `aria-label`
+							 * beside it is unreachable — it loses by spec — and on desktop
+							 * would only surface as a second tooltip. */
 							aria-labelledby={questionId}
-							aria-label={question.header}
 							data-select={question.multiSelect === true ? "many" : "one"}
 						>
 							{question.options.map((option, optionIndex) => {

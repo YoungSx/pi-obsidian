@@ -171,7 +171,11 @@ function ContextChip({ contextRef, onOpen, onPin, onUnpin, onStopFollowing }: Co
 			<button
 				type="button"
 				className="piem-chat__context-open"
-				title={contextRef.path}
+				/*
+				 * No `title`: the path already rides the accessible name, and with
+				 * both channels open Obsidian showed the name's tooltip and the
+				 * browser showed the title's, one stacked on the other.
+				 */
 				aria-label={t.t(isActive ? "contextRow.openFollowed" : "contextRow.openPinned", { path: contextRef.path })}
 				onClick={() => onOpen(contextRef.path)}
 			>

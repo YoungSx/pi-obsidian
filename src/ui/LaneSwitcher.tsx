@@ -4,6 +4,7 @@ import type { SessionLane } from "../session/ObsidianSessionManager";
 import { IconButton } from "./ObsidianIcon";
 import { canChooseLane, describeLanes, hasComparison } from "./laneCopy";
 import { useT } from "./TranslatorContext";
+import { suppressOwnTooltip } from "./tooltipSuppression";
 
 interface LaneSwitcherProps {
 	/** Lanes the session offers, retired ones already filtered out. */
@@ -60,7 +61,16 @@ export function LaneSwitcher({ lanes, activeLane, onSwitch, onChoose, isBusy }: 
 	};
 
 	return (
-		<div className="piem-chat__lane-switcher" role="group" aria-label={t.t("chat.lanesLabel")}>
+		// The group and its button get separate names on purpose: one key for both
+		// meant the tooltip Obsidian hangs off the group restated the button's own
+		// tooltip verbatim, one hover, two identical lines. The group's name is for
+		// the screen reader's grouping only, so its tooltip is suppressed.
+		<div
+			className="piem-chat__lane-switcher"
+			role="group"
+			aria-label={t.t("chat.lanesGroupAria")}
+			onMouseOver={suppressOwnTooltip}
+		>
 			<IconButton
 				icon="git-branch"
 				label={t.t("chat.lanesLabel")}

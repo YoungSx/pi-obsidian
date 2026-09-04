@@ -189,7 +189,9 @@ describe("AskUserForm", () => {
 		const heading = one$(".piem-ask-question-text");
 		// `header` earns its keep as the group's accessible name rather than as a
 		// visible line repeating the question in fewer words.
-		expect(group?.getAttribute("aria-label")).toBe("Where to file");
+		// `aria-labelledby` names the group; an `aria-label` beside it would lose
+		// by spec and only resurface as a tooltip.
+		expect(group?.getAttribute("aria-label")).toBeNull();
 		expect(group?.getAttribute("aria-labelledby")).toBe(heading?.id);
 
 		const option = all(".piem-ask-option")[0];
