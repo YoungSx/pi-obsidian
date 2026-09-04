@@ -14,6 +14,7 @@ const document = installDom();
 
 // Dynamic imports so the mocked `obsidian` module wins over any cached real one.
 const { ChatApp } = await import("./ChatApp");
+const { PanelErrorBoundary } = await import("./PanelErrorBoundary");
 const { ChatInputController } = await import("./ChatInputController");
 const { ObsidianAgentService } = await import("../agent/ObsidianAgentService");
 const { ObsidianSessionManager } = await import("../session/ObsidianSessionManager");
@@ -114,14 +115,30 @@ function scriptedStreamFn(replies: string[]): { streamFn: StreamFn; prompts: str
 	return { streamFn, prompts };
 }
 
-/** The smallest in-memory adapter the session manager needs. */
+/**
+ * The smallest in-memory adapter the session manager needs.
+ *
+ * Folders are tracked rather than ignored, and `list` answers by parent rather
+ * than by prefix. Both matter: pi's session repository checks that the session
+ * directory exists before listing it, so an adapter that forgets `mkdir` makes
+ * `listSessions()` answer "no sessions" forever — and a delete would then always
+ * take the mint-a-replacement branch, leaving the adopt-the-replacement branch
+ * this suite is here to guard permanently unvisited.
+ */
 function memoryAdapter(): DataAdapter {
 	const files = new Map<string, string>();
+	const folders = new Set<string>();
+	const parentOf = (path: string): string => path.slice(0, Math.max(0, path.lastIndexOf("/")));
 	return {
 		async exists(path: string): Promise<boolean> {
-			return files.has(path);
+			return files.has(path) || folders.has(path);
 		},
-		async mkdir(): Promise<void> {},
+		async mkdir(path: string): Promise<void> {
+			const parts = path.split("/");
+			for (let depth = 1; depth <= parts.length; depth += 1) {
+				folders.add(parts.slice(0, depth).join("/"));
+			}
+		},
 		async write(path: string, data: string): Promise<void> {
 			files.set(path, data);
 		},
@@ -137,15 +154,18 @@ function memoryAdapter(): DataAdapter {
 		},
 		async stat(path: string) {
 			const content = files.get(path);
-			if (content === undefined) {
-				return null;
+			if (content !== undefined) {
+				return { type: "file" as const, ctime: 1, mtime: 1, size: content.length };
 			}
-			return { type: "file" as const, ctime: 1, mtime: 1, size: content.length };
+			if (folders.has(path)) {
+				return { type: "folder" as const, ctime: 1, mtime: 1, size: 0 };
+			}
+			return null;
 		},
 		async list(path: string) {
 			return {
-				files: [...files.keys()].filter((key) => key.startsWith(path)),
-				folders: [],
+				files: [...files.keys()].filter((key) => parentOf(key) === path),
+				folders: [...folders].filter((key) => parentOf(key) === path),
 			};
 		},
 		async trashSystem(path: string): Promise<boolean> {
@@ -158,24 +178,62 @@ function memoryAdapter(): DataAdapter {
 	} as unknown as DataAdapter;
 }
 
+/**
+ * Wraps an adapter so every call resolves on a later macrotask, the way real
+ * disk I/O does.
+ *
+ * Without this, an awaited service call runs its whole chain of notifies inside
+ * one microtask drain and React commits only the final state — so the panel
+ * never renders the states *between* two disk operations. Those are exactly the
+ * states a delete passes through, and one of them (no focused session, empty
+ * transcript) used to throw out of the empty-screen effect.
+ */
+function yieldingAdapter(inner: DataAdapter): DataAdapter {
+	const target = inner as unknown as Record<string, unknown>;
+	return new Proxy(target, {
+		get(source, property: string) {
+			const original = source[property];
+			if (typeof original !== "function") {
+				return original;
+			}
+			return async (...args: unknown[]): Promise<unknown> => {
+				const result = await (original as (...called: unknown[]) => unknown).apply(source, args);
+				return new Promise((resolve) => setTimeout(() => resolve(result), 0));
+			};
+		},
+	}) as unknown as DataAdapter;
+}
+
 const NO_USER_SKILLS = async (): Promise<UserSkillsLoad> => ({ skills: [], diagnostics: [], searched: [] });
 
 describe("ChatApp × real service (issue #168)", () => {
 	/** Roots mounted by this suite, unmounted in afterEach so listeners die with the test. */
 	const roots: { unmount: () => void }[] = [];
+	/**
+	 * What the panel's boundary caught, if anything.
+	 *
+	 * Production mounts `ChatApp` inside `PanelErrorBoundary`, so a render or
+	 * effect throw shows as the crash message rather than as a blank panel — the
+	 * DOM assertions below cannot tell the two apart on their own. An empty array
+	 * is the stronger claim: nothing threw at all.
+	 */
+	const crashes: unknown[] = [];
 
 	/** The chips row, as the user sees it. */
 	function chips(target: HTMLElement): HTMLButtonElement[] {
 		return Array.from(target.querySelectorAll<HTMLButtonElement>(".piem-chat__quick-action"));
 	}
 
-	async function mountPanel(scripted: { streamFn: StreamFn; prompts: string[] }): Promise<{
+	async function mountPanel(
+		scripted: { streamFn: StreamFn; prompts: string[] },
+		options: { yieldIO?: boolean } = {},
+	): Promise<{
 		service: ObsidianAgentServiceType;
 		prompts: string[];
 		/** Mimics the user switching notes in the Obsidian workspace. */
 		setActiveFile: (path: string | null) => void;
 	}> {
-		const adapter = memoryAdapter();
+		const adapter = options.yieldIO ? yieldingAdapter(memoryAdapter()) : memoryAdapter();
 		// The real view passes a DraftStore; the composer hook behaves
 		// differently with and without one, so the white-screen repro has to
 		// match production rather than the store-less harness.
@@ -229,12 +287,14 @@ describe("ChatApp × real service (issue #168)", () => {
 		// The real panel's cold-start sequence: render (which subscribes), then
 		// the initialize effect — not a hand-awaited `initialize` before mount.
 		root.render(
-			<ChatApp
-				service={service}
-				inputController={new ChatInputController()}
-				component={{} as Component}
-				draftStore={draftStore}
-			/>,
+			<PanelErrorBoundary getLanguage={() => "en"} onError={(error) => crashes.push(error)}>
+				<ChatApp
+					service={service}
+					inputController={new ChatInputController()}
+					component={{} as Component}
+					draftStore={draftStore}
+				/>
+			</PanelErrorBoundary>,
 		);
 		await flushRender();
 		return {
@@ -256,6 +316,7 @@ describe("ChatApp × real service (issue #168)", () => {
 		}
 		await flushRender();
 		document.body.replaceChildren();
+		crashes.length = 0;
 	});
 
 	it("the empty screen asks the model for chips on cold start and replaces the built-ins", async () => {
@@ -354,6 +415,61 @@ describe("ChatApp × real service (issue #168)", () => {
 		await flushRender();
 		expect(document.querySelector(".piem-chat")).not.toBeNull();
 		expect(document.querySelector("textarea")).not.toBeNull();
+	});
+
+	it("deleting the active session renders its in-between states without tearing the panel down", async () => {
+		// The three cases above delete the *only* session, so the service always
+		// mints a replacement, and each one awaits the whole delete — React then
+		// commits one render for the settled result. Neither is what production
+		// does: a vault holds several chats, and disk I/O puts a macrotask between
+		// every notify, so the panel renders the moment where the deleted session
+		// is gone and its replacement has not been adopted yet. That frame — no
+		// focused session, empty transcript, panel configured and idle — is what
+		// the empty-screen suggestion effect fires on, and reading the suggestion
+		// cache through the focused runtime threw there. A throw inside React's
+		// commit phase unmounts the tree: the blank panel first, and after the
+		// boundary landed, the crash message with its retry.
+		const { service } = await mountPanel(scriptedStreamFn([CHIPS_JSON]), { yieldIO: true });
+
+		let settled = false;
+		for (let attempt = 0; attempt < 20 && !settled; attempt += 1) {
+			await flushRender();
+			settled = service.getSnapshot().session !== undefined;
+		}
+		expect(service.getSnapshot().session).toBeDefined();
+		await service.sendPrompt("The chat that survives");
+		await flushRender();
+		const survivor = service.getSnapshot().session?.path ?? "";
+
+		// A second chat, so the delete below has a replacement to adopt rather
+		// than a blank sheet to mint.
+		await service.newSession();
+		for (let attempt = 0; attempt < 10; attempt += 1) {
+			await flushRender();
+		}
+		await service.sendPrompt("The chat being deleted");
+		await flushRender();
+		const doomed = service.getSnapshot().session?.path ?? "";
+		expect(doomed).not.toBe(survivor);
+		expect(await service.listSessions()).toHaveLength(2);
+
+		// Renders interleaved with the delete, not after it: the point is that
+		// every intermediate snapshot reaches the tree.
+		const deletion = service.deleteSession(doomed);
+		for (let attempt = 0; attempt < 40; attempt += 1) {
+			await flushRender();
+		}
+		await deletion;
+		for (let attempt = 0; attempt < 20; attempt += 1) {
+			await flushRender();
+		}
+
+		expect(crashes).toHaveLength(0);
+		expect(document.querySelector(".piem-chat__crashed")).toBeNull();
+		expect(document.querySelector(".piem-chat")).not.toBeNull();
+		expect(document.querySelector("textarea")).not.toBeNull();
+		// And the surviving chat is the one on screen, not a freshly minted blank.
+		expect(service.getSnapshot().session?.path).toBe(survivor);
 	});
 
 	it("switching from note A to note B re-asks the model for empty-screen chips (issue #168)", async () => {
