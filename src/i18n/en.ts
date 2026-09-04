@@ -194,60 +194,76 @@ export const en = {
 		 * matters — the provider's own words sit under every one of these, so a
 		 * misread family costs a vague headline, never a fact.
 		 */
+		/**
+		 * Why a turn ended in a provider failure, one family per sentence.
+		 *
+		 * Named by what the reader should do next rather than by protocol shape:
+		 * `rateLimit` and `quota` are separate sentences because waiting fixes one
+		 * and only paying fixes the other. `unknown` is the honest fallback, and it
+		 * matters — the provider's own words sit under every one of these, so a
+		 * misread family costs a vague headline, never a fact.
+		 *
+		 * Each `*Spoken` is the *whole* sentence with a lower-case opening, matching
+		 * `youStoppedSpoken` and `replyTruncatedSpoken` above. An earlier cut
+		 * truncated them to the diagnosis and dropped the remedy, which meant the
+		 * screen-reader user heard what went wrong and not what to do — the same
+		 * eyes-not-ears split the old 9em banner cap was criticised for, inverted.
+		 */
 		providerFailure: {
 			auth: "The provider rejected the key. Check it in settings, then ask again.",
-			authSpoken: "the provider rejected the key.",
+			authSpoken: "the provider rejected the key. Check it in settings, then ask again.",
 			quota: "This account is out of credit with the provider. Top it up, then ask again.",
-			quotaSpoken: "this account is out of credit with the provider.",
+			quotaSpoken: "this account is out of credit with the provider. Top it up, then ask again.",
 			contextLength: "This conversation is too long for the model. Tidy up earlier messages, then ask again.",
-			contextLengthSpoken: "this conversation is too long for the model.",
+			contextLengthSpoken: "this conversation is too long for the model. Tidy up earlier messages, then ask again.",
 			refused: "The provider declined to answer this one. Rewording it usually helps.",
-			refusedSpoken: "the provider declined to answer this one.",
-			rateLimit: "The provider is rate-limiting or busy. Give it a moment, then try again.",
-			rateLimitSpoken: "the provider is rate-limiting or busy.",
+			refusedSpoken: "the provider declined to answer this one. Rewording it usually helps.",
+			/** "Too busy", not "rate-limiting": the reader here does not read logs. */
+			rateLimit: "The provider is too busy right now. Give it a moment, then try again.",
+			rateLimitSpoken: "the provider is too busy right now. Give it a moment, then try again.",
 			timeout: "The provider did not answer in time.",
 			timeoutSpoken: "the provider did not answer in time.",
 			offline: "Piem could not reach the provider. Check the connection, then try again.",
-			offlineSpoken: "Piem could not reach the provider.",
+			offlineSpoken: "Piem could not reach the provider. Check the connection, then try again.",
 			serverError: "The provider hit an error of its own. Trying again often works.",
-			serverErrorSpoken: "the provider hit an error of its own.",
+			serverErrorSpoken: "the provider hit an error of its own. Trying again often works.",
 			unknown: "The provider did not answer, and did not say why.",
 			unknownSpoken: "the provider did not answer, and did not say why.",
 			/** Summary of the disclosure holding the provider's untouched text. */
 			raw: "What the provider said",
 		},
-			/**
-			 * A failed branch summary, reported outcome-first.
-			 *
-			 * The retry it belongs to has already gone out — `summarizeAbandonedBranch`
-			 * rewinds unconditionally because the retry was the user's actual request —
-			 * so the only loss is a note about the fork that was replaced. That is why
-			 * this rides the quiet channel: an assertive alert over a bookkeeping
-			 * summary was the loudest thing in the panel saying the least.
-			 */
-			branchSummaryFailed: "The retry went through, but Piem could not summarize the branch it replaced: {error}",
-			/** Uses the panel's own word for compaction, which is "tidy up" everywhere else. */
-			compactionFailed: "Could not tidy up earlier messages: {error}",
-			/**
-			 * The two states that hold the turn exclusively, named rather than
-			 * paraphrased. Both reuse the status bar's own words for what is
-			 * happening, because it is saying them on screen at the same moment.
-			 */
-			busyTidying: "Piem is tidying up earlier messages. Send this again in a moment.",
-			busyResending: "Piem is resending your earlier message. Send this again in a moment.",
-			/**
-			 * Outcomes of a control the reader just pressed, on Obsidian's own toast.
-			 *
-			 * These are command outcomes: nothing in the conversation changed, and the
-			 * transcript on screen is still the one it was. A banner over a healthy
-			 * conversation misattributes the damage; a toast appears beside the thing
-			 * that was pressed and leaves. Each names what did not happen instead of
-			 * relaying `error.message` alone.
-			 */
-			compareFailed: "Could not start a comparison from that message: {error}",
-			laneChoiceFailed: "Could not keep that branch: {error}",
-			sessionOpenFailed: "Could not open that chat: {error}",
-			sessionDeleteFailed: "Could not delete that chat: {error}",
+		/**
+		 * A failed branch summary, reported outcome-first.
+		 *
+		 * The retry it belongs to has already gone out — `summarizeAbandonedBranch`
+		 * rewinds unconditionally because the retry was the user's actual request —
+		 * so the only loss is a note about the fork that was replaced. That is why
+		 * this rides the quiet channel: an assertive alert over a bookkeeping
+		 * summary was the loudest thing in the panel saying the least.
+		 */
+		branchSummaryFailed: "The retry went through, but Piem could not summarize the branch it replaced: {error}",
+		/** Uses the panel's own word for compaction, which is "tidy up" everywhere else. */
+		compactionFailed: "Could not tidy up earlier messages: {error}",
+		/**
+		 * The two states that hold the turn exclusively, named rather than
+		 * paraphrased. Both reuse the status bar's own words for what is happening,
+		 * because it is saying them on screen at the same moment.
+		 */
+		busyTidying: "Piem is tidying up earlier messages. Send this again in a moment.",
+		busyResending: "Piem is resending your message. Send this again in a moment.",
+		/**
+		 * Outcomes of a control the reader just pressed, on Obsidian's own toast.
+		 *
+		 * These are command outcomes: nothing in the conversation changed, and the
+		 * transcript on screen is still the one it was. A banner over a healthy
+		 * conversation misattributes the damage; a toast appears beside the thing
+		 * that was pressed and leaves. One shape for all of them — "Could not X" —
+		 * so the channel reads as one channel.
+		 */
+		compareFailed: "Could not start a comparison from that message: {error}",
+		laneChoiceFailed: "Could not keep that branch: {error}",
+		sessionOpenFailed: "Could not open that chat: {error}",
+		sessionDeleteFailed: "Could not delete that chat: {error}",
 		you: "You",
 		agent: "Piem",
 		thoughtItThrough: "Thought it through",
@@ -257,7 +273,6 @@ export const en = {
 		imagePlaceholder: "[image: {mimeType}]",
 		/** Shown as a banner when the active model lacks image capability. */
 		imagesNotSupported: "{model} does not accept images. Switch models or remove the image.",
-		/** Banner error when a send lands while a compaction or rewind holds the turn; the composer's controls make it a rare race. */
 		/** Queue region label (aria). Messages sent mid-reply wait here. */
 		queueLabel: "Waiting to be read",
 		/** Image count suffix on a queued chip. */
@@ -271,7 +286,6 @@ export const en = {
 		 * chord keeps working regardless.
 		 */
 		queueDraft: "Queue draft",
-		/** Notice when a finished reply could not be written to the vault. The reader has the text either way, so this is a notice, not an alert. */
 		/**
 		 * Rendered under the reply it names, and never dismissible.
 		 *
@@ -293,7 +307,7 @@ export const en = {
 		/** Note title fallback when a chat has neither a name nor a first message. */
 		exportUntitled: "Chat",
 		/** Notice when writing the exported note failed. */
-		exportFailed: "Saving the chat as a note failed: {error}",
+		exportFailed: "Could not save the chat as a note: {error}",
 		/** alt text for a staged image thumbnail. */
 		imageThumbAlt: "Image attached: {mimeType}",
 		/** aria-label for the button removing the Nth staged image (1-based). */
