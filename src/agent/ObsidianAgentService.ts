@@ -3487,7 +3487,17 @@ export class ObsidianAgentService {
 					}));
 				});
 		}
-		await this.refreshSessionInfo(rt);
+		// Session info only changes when the session file does: a persisted
+		// message (message_end) or the run's final sweep (agent_end). Gating on
+		// those two is what keeps streaming cheap — a full-delta run used to
+		// re-run `refreshSessionInfo` (a real `adapter.stat` plus a whole-file
+		// entry read) once per streaming chunk, hundreds of disk round-trips
+		// for a summary whose inputs had not changed. `notify` stays
+		// unconditional: the streaming text and tool progress live in the
+		// snapshot, and a delta that never notifies never renders.
+		if (event.type === "message_end" || event.type === "agent_end") {
+			await this.refreshSessionInfo(rt);
+		}
 		this.notify();
 	}
 

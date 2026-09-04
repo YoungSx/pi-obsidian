@@ -4243,3 +4243,87 @@ async function openLedger(adapter: MemoryAdapter, path: string): Promise<Obsidia
 	await manager.loadSession(path);
 	return manager;
 }
+
+/**
+ * A stream that delivers `text` as `chunks` separate `text_delta` events, the
+ * way a real provider streams. `scriptedTextStream` skips straight to `done`,
+ * which is right for every test that does not care how the text arrived — and
+ * exactly wrong for the refresh-cost tests, which need the per-delta event
+ * storm to have something to count.
+ */
+function scriptedDeltaStream(model: Model<Api>, text: string, chunks: number) {
+	const stream = createAssistantMessageEventStream();
+	const message: AssistantMessage = {
+		role: "assistant",
+		content: [{ type: "text", text: "" }],
+		api: model.api,
+		provider: model.provider,
+		model: model.id,
+		usage: {
+			input: 1_000,
+			output: 10,
+			cacheRead: 0,
+			cacheWrite: 0,
+			totalTokens: 1_010,
+			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+		},
+		timestamp: Date.now(),
+		stopReason: "stop",
+	};
+	stream.push({ type: "start", partial: message });
+	stream.push({ type: "text_start", contentIndex: 0, partial: message });
+	const size = Math.ceil(text.length / chunks);
+	for (let index = 0; index < chunks; index += 1) {
+		const delta = text.slice(index * size, (index + 1) * size);
+		message.content = [{ type: "text", text: (message.content[0] as { type: "text"; text: string }).text + delta }];
+		stream.push({ type: "text_delta", contentIndex: 0, delta, partial: message });
+	}
+	message.content = [{ type: "text", text }];
+	stream.push({ type: "done", reason: "stop", message });
+	stream.end(message);
+	return stream;
+}
+
+/** Counts `stat` calls: the real disk round-trips `refreshSessionInfo` pays for. */
+class CountingAdapter extends MemoryAdapter {
+	statCalls = 0;
+	override async stat(path: string): Promise<Stat | null> {
+		this.statCalls += 1;
+		return super.stat(path);
+	}
+}
+
+describe("streaming refresh cost", () => {
+	/**
+	 * Pins the refresh gate: session info may only be re-read when the session
+	 * file changes — at a persisted message (message_end) and at the run's
+	 * settle (agent_end). Before the gate, every streaming chunk re-ran
+	 * `refreshSessionInfo` (a real `adapter.stat` plus a whole-file entry
+	 * read), so a long reply paid hundreds of disk round-trips for a summary
+	 * whose inputs had not changed.
+	 */
+	it("does not re-stat the session file per streaming delta", async () => {
+		const adapter = new CountingAdapter();
+		const chunks = 200;
+		const service = createService(adapter, {
+			streamFn: (model) => scriptedDeltaStream(model, "Long reply, streamed one chunk at a time. ".repeat(2), chunks),
+		});
+		// The startup cost (session creation, configuration) is part of every
+		// run; measure it before the stream so the assertion below says
+		// "streaming added nothing", not "the total is small".
+		await service.initialize();
+		const setupStatCalls = adapter.statCalls;
+
+		await service.sendPrompt("Hello");
+
+		// Streaming rendered, and the settled summary reflects the persisted turn.
+		const snapshot = service.getSnapshot();
+		expect(snapshot.isStreaming).toBe(false);
+		expect(snapshot.session?.messageCount).toBe(2);
+		// Two reads for the one turn: message_end's persist and agent_end's
+		// sweep. A handful of slack for unrelated in-run stats is still orders
+		// of magnitude below the one-per-delta behavior this pins against
+		// (200 chunks would have meant 200+).
+		expect(adapter.statCalls).toBeLessThanOrEqual(setupStatCalls + 8);
+	});
+});
