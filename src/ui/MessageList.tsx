@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from "react";
 import type { AgentMessage, CompactionSummaryMessage } from "@earendil-works/pi-agent-core";
 import type { PendingToolCall } from "../agent/ObsidianAgentService";
-import type { AssistantMessage, ToolResultMessage, UserMessage } from "@earendil-works/pi-ai";
+import type { AssistantMessage, ToolCall, ToolResultMessage, UserMessage } from "@earendil-works/pi-ai";
 import type { App, Component, IconName } from "obsidian";
 import type { TextBlockKind } from "./markdownPolicy";
 import { MarkdownText } from "./MarkdownText";
@@ -18,6 +18,15 @@ import { countDiffLines, describePendingTool, describeTool, isToolIdentifier, su
 import { DEFAULT_TRACE_EXPAND, traceOpensByDefault, type TraceExpandSetting } from "./traceExpand";
 import { AskUserCard, AskUserReceipt } from "./AskUserCard";
 import { ASK_USER_TOOL, askUserOutcome } from "./askUserRecord";
+import {
+	blockIsVisible,
+	describeTraceFold,
+	planTraceFolds,
+	traceFoldSlot,
+	type TraceFoldGroup,
+	type TraceFoldPlan,
+	type TraceRowRef,
+} from "./traceFold";
 import type { AskUserAnswer } from "../tools/askUserQuestion";
 import type { AskUserRequest } from "../tools/askUserBroker";
 
@@ -160,6 +169,28 @@ function streamingIndex(isStreaming: boolean, messages: AgentMessage[]): number 
 }
 
 /**
+ * The one block the model is writing right now, as a row address.
+ *
+ * A streaming message can hold a finished thinking block and a text block
+ * still growing behind it, so "the turn is streaming" alone marks too much:
+ * the thinking row would spin for the whole reply. The provider appends blocks
+ * in order, so exactly the last block can still be growing.
+ *
+ * Stated here as an address, not as a predicate, because two unrelated things
+ * need the same answer — the caret and spinner on the row itself, and the fold
+ * planner's refusal to swallow a call that is still running — and a rule
+ * written twice is a rule that drifts. `null` on a settled transcript, where
+ * no block is live no matter what.
+ */
+function liveRowRef(messages: AgentMessage[], activeIndex: number | null): TraceRowRef | null {
+	const message = activeIndex === null ? undefined : messages[activeIndex];
+	if (activeIndex === null || !message || message.role !== "assistant") {
+		return null;
+	}
+	return { message: activeIndex, block: message.content.length - 1 };
+}
+
+/**
  * The one reply that may be regenerated — the newest assistant turn.
  *
  * Regenerating rewinds the conversation to the question behind the reply, so
@@ -261,9 +292,17 @@ function awaitsFirstToken(messages: AgentMessage[], isStreaming: boolean, toolsR
 	return !latest || latest.role !== "assistant" || !hasVisibleContent(latest);
 }
 
-/** Whether an assistant turn has rendered anything: prose, a thought, or a tool row. */
+/**
+ * Whether an assistant turn has produced anything: prose, a thought, a call.
+ *
+ * Asks {@link blockIsVisible} with agent details forced on, because the
+ * question here is whether the *turn* got going rather than whether this
+ * transcript draws the block. A turn whose one call is `ask_user` has got going
+ * — the question card is on screen — and the typing indicator would otherwise
+ * sit underneath it claiming nothing had happened yet.
+ */
 function hasVisibleContent(message: AssistantMessage): boolean {
-	return message.content.some((content) => (content.type === "text" ? content.text.trim().length > 0 : true));
+	return message.content.some((block) => blockIsVisible(block, true));
 }
 
 /**
@@ -324,8 +363,15 @@ export function MessageList({
 	onDismissQuestion,
 }: MessageListProps): React.JSX.Element {
 	const t = useT();
-	const context: MessageContext = { app, component, sourcePath, showAgentDetails, traceExpand, t };
 	const activeIndex = streamingIndex(isStreaming, messages);
+	/*
+	 * Both of these are derived once per render rather than memoized, matching
+	 * the index walks above and below: the transcript array is a new identity on
+	 * every streamed token, so a memo keyed on it would recompute anyway.
+	 */
+	const liveRow = liveRowRef(messages, activeIndex);
+	const foldPlan = planTraceFolds(messages, { mode: traceExpand, showAgentDetails, liveRow });
+	const context: MessageContext = { app, component, sourcePath, showAgentDetails, traceExpand, foldPlan, liveRow, t };
 	const regenerateIndex = regenerableIndex(messages);
 	const editIndex = editableQuestionIndex(messages);
 	/*
@@ -435,6 +481,7 @@ export function MessageList({
 					messages.map((message, index) => (
 						<MessageRow
 							key={index}
+							index={index}
 							message={message}
 							isStreaming={index === activeIndex}
 							renderContext={context}
@@ -676,6 +723,8 @@ function EmptyState({ isInitializing, isConfigured, onOpenSettings, quickActions
 }
 
 interface MessageRowProps {
+	/** The message's own position in the transcript; the fold plan is keyed on it. */
+	index: number;
 	message: AgentMessage;
 	isStreaming: boolean;
 	renderContext: MessageContext;
@@ -701,13 +750,19 @@ interface MessageRowProps {
  * calls, tool results, harness output, compaction summaries — renders flat, so
  * a card never contains another bordered box.
  */
-function MessageRow({ message, isStreaming, renderContext, onRetry, onEdit, onCompare, replyTiming }: MessageRowProps): React.JSX.Element | null {
+function MessageRow({ index, message, isStreaming, renderContext, onRetry, onEdit, onCompare, replyTiming }: MessageRowProps): React.JSX.Element | null {
 	// The summary fronts a compacted transcript; it reads as a divider ("history
 	// above this was summarized"), not as one more message bubble.
 	if (message.role === "compactionSummary") {
 		return <CompactionDivider message={message} renderContext={renderContext} />;
 	}
 	if (message.role === "toolResult") {
+		const slot = traceFoldSlot(renderContext.foldPlan, index, null);
+		if (slot) {
+			// The run's first row draws the summary where it stood; every later
+			// member draws nothing, because that summary already speaks for it.
+			return slot.head ? <FoldedTrace group={slot.group} context={renderContext} /> : null;
+		}
 		return <ToolResultTrace message={message} context={renderContext} />;
 	}
 	if (message.role !== "user" && message.role !== "assistant") {
@@ -715,13 +770,14 @@ function MessageRow({ message, isStreaming, renderContext, onRetry, onEdit, onCo
 	}
 	const cutoff = replyCutoff(message, renderContext.t);
 	/*
-	 * An assistant turn that is nothing but the `ask_user` call has nothing left to
-	 * draw once that call is suppressed. Rendering it anyway left an empty bubble
-	 * above the question card — and, worse, a copy/insert actions row offering to
-	 * copy no text at all. A stop notice still earns the row, because that is
-	 * content of its own.
+	 * An assistant turn with nothing left to draw draws nothing at all. Rendering
+	 * it anyway left an empty bubble — above the question card, when the turn was
+	 * nothing but the suppressed `ask_user` call, and mid-run once every call the
+	 * turn made went into a fold anchored further up. Worse, in the first case it
+	 * came with a copy/insert actions row offering to copy no text at all. A stop
+	 * notice still earns the row, because that is content of its own.
 	 */
-	if (message.role === "assistant" && !cutoff && isOnlyAskUserCall(message, renderContext.showAgentDetails)) {
+	if (message.role === "assistant" && !cutoff && hasNothingToDraw(message, index, renderContext)) {
 		return null;
 	}
 	return (
@@ -745,7 +801,7 @@ function MessageRow({ message, isStreaming, renderContext, onRetry, onEdit, onCo
 				aria-label={renderContext.t.t(message.role === "user" ? "chat.you" : "chat.agent")}
 			>
 				<div className="piem-chat__bubble">
-					<div className="piem-chat__message-content">{renderMessageContent(message, { isStreaming, renderContext })}</div>
+					<div className="piem-chat__message-content">{renderMessageContent(message, { index, isStreaming, renderContext })}</div>
 					{cutoff ? (
 						<p className="piem-chat__interrupted">
 							<ObsidianIcon name={cutoff.icon} />
@@ -782,16 +838,28 @@ function MessageRow({ message, isStreaming, renderContext, onRetry, onEdit, onCo
 }
 
 /**
- * Whether every block in this turn is an `ask_user` call the transcript hides.
+ * Whether every block in this turn renders nothing.
  *
- * Non-empty check first: a message with no content at all is not "only the
- * question", and `every` on an empty array would call it that.
+ * Two ways a block disappears. It is the `ask_user` call the transcript draws
+ * as a question card instead, which {@link blockIsVisible} answers; or it was
+ * swallowed by a fold whose summary stands somewhere above. A turn made
+ * entirely of either is an empty card, and an empty card is a gap in the
+ * transcript the reader cannot account for.
+ *
+ * Non-empty check first: a message with no content at all is not "nothing left
+ * to draw", and `every` on an empty array would call it that.
  */
-function isOnlyAskUserCall(message: AssistantMessage, showAgentDetails: boolean): boolean {
-	if (showAgentDetails || message.content.length === 0) {
+function hasNothingToDraw(message: AssistantMessage, index: number, context: MessageContext): boolean {
+	if (message.content.length === 0) {
 		return false;
 	}
-	return message.content.every((content) => content.type === "toolCall" && content.name === ASK_USER_TOOL);
+	return message.content.every((block, blockIndex) => {
+		if (!blockIsVisible(block, context.showAgentDetails)) {
+			return true;
+		}
+		const slot = traceFoldSlot(context.foldPlan, index, blockIndex);
+		return slot !== null && !slot.head;
+	});
 }
 
 /**
@@ -822,7 +890,14 @@ function CompactionDivider({ message, renderContext }: { message: CompactionSumm
 	);
 }
 
-type RenderArgs = { isStreaming: boolean; renderContext: MessageContext };
+/**
+ * What the render helpers need besides the message itself.
+ *
+ * `index` is the message's position in the transcript. A content block's fold
+ * address is that index paired with its own, and a block cannot name the
+ * message it came from, so the pair has to be threaded down to the row.
+ */
+type RenderArgs = { index: number; isStreaming: boolean; renderContext: MessageContext };
 
 interface MessageContext {
 	app: App;
@@ -832,6 +907,16 @@ interface MessageContext {
 	showAgentDetails: boolean;
 	/** Mirrors the user setting; the default open state of every trace row. */
 	traceExpand: TraceExpandSetting;
+	/**
+	 * Which runs of tool traffic are folded, and where each fold draws.
+	 *
+	 * Resolved once for the whole transcript rather than per row, because a run
+	 * crosses message boundaries — a call and its result are never in the same
+	 * message — so no single row can work out its own place in one.
+	 */
+	foldPlan: TraceFoldPlan;
+	/** The block the model is writing right now; see {@link liveRowRef}. */
+	liveRow: TraceRowRef | null;
 	/**
 	 * Copy for the render helpers.
 	 *
@@ -879,43 +964,41 @@ function renderUserMessage(message: UserMessage, args: RenderArgs): React.ReactN
 }
 
 /**
- * Whether the block at `index` is the one the model is writing right now.
+ * Whether the block at `blockIndex` of message `index` is the one the model is
+ * writing right now.
  *
- * A streaming message can hold a finished thinking block and a text block still
- * growing behind it, so "the turn is streaming" alone marks too much: the
- * thinking row would spin for the whole reply. The provider appends blocks in
- * order, so exactly the last block can still be growing — everything before it
- * is settled and shows its finished face. False for a settled message, where no
- * block is live no matter what.
+ * A comparison against {@link liveRowRef}'s address rather than a rule of its
+ * own: the fold planner is handed the same address to keep a running call out
+ * of a fold, and the row and the planner disagreeing about which block is live
+ * would show a settled count over a call still in flight.
  */
-function isLiveBlock(message: AssistantMessage, index: number, isStreaming: boolean): boolean {
-	return isStreaming && index === message.content.length - 1;
+function isLiveBlock(context: MessageContext, index: number, blockIndex: number): boolean {
+	return context.liveRow?.message === index && context.liveRow.block === blockIndex;
 }
 
 function renderAssistantMessage(message: AssistantMessage, args: RenderArgs): React.ReactNode {
-	return message.content.map((content, index) => {
+	const context = args.renderContext;
+	return message.content.map((content, blockIndex) => {
+		const live = isLiveBlock(context, args.index, blockIndex);
 		if (content.type === "text") {
 			// The block the model is still writing carries a caret: with no marker,
 			// a streaming reply and a finished one differed only by the actions row
 			// appearing underneath after the fact.
-			const live = isLiveBlock(message, index, args.isStreaming) ? "piem-chat__block--live" : undefined;
-			return <Block key={index} text={content.text} kind="assistant" isStreaming={args.isStreaming} context={args.renderContext} className={live} />;
+			return <Block key={blockIndex} text={content.text} kind="assistant" isStreaming={args.isStreaming} context={context} className={live ? "piem-chat__block--live" : undefined} />;
 		}
 		if (content.type === "thinking") {
-			const live = isLiveBlock(message, index, args.isStreaming);
 			return (
 				<Trace
-					key={index}
+					key={blockIndex}
 					icon={live ? "loader-circle" : "brain"}
-					name={args.renderContext.t.t(live ? "chat.thinkingNow" : "chat.thoughtItThrough")}
+					name={context.t.t(live ? "chat.thinkingNow" : "chat.thoughtItThrough")}
 					className={live ? "piem-chat__trace--thinking piem-chat__trace--live" : "piem-chat__trace--thinking"}
-					open={traceOpensByDefault(args.renderContext.traceExpand, "thinking", false)}
+					open={traceOpensByDefault(context.traceExpand, "thinking", false)}
 				>
-					<Block text={content.thinking} kind="thinking" isStreaming={args.isStreaming} context={args.renderContext} />
+					<Block text={content.thinking} kind="thinking" isStreaming={args.isStreaming} context={context} />
 				</Trace>
 			);
 		}
-		const showDetails = args.renderContext.showAgentDetails;
 		/*
 		 * `ask_user` draws no call row.
 		 *
@@ -925,30 +1008,22 @@ function renderAssistantMessage(message: AssistantMessage, args: RenderArgs): Re
 		 * which is the vocabulary this whole change moves it out of. Under
 		 * `showAgentDetails` the row comes back, because that mode exists to show the
 		 * raw payload behind every call and this one has arguments worth reading.
+		 *
+		 * The rule lives in `traceFold.ts` because the fold planner needs the same
+		 * answer: a call that draws nothing must not interrupt a run either, or a
+		 * suppressed question would split one fold into two.
 		 */
-		if (content.name === ASK_USER_TOOL && !showDetails) {
+		if (!blockIsVisible(content, context.showAgentDetails)) {
 			return null;
 		}
-		// Same live vocabulary as the thinking row: a call still running spins
-		// instead of sitting on the settled wrench, so "the turn is working"
-		// reads one way everywhere machine traffic appears.
-		const live = isLiveBlock(message, index, args.isStreaming);
-		return (
-			<Trace
-				key={index}
-				icon={live ? "loader-circle" : "wrench"}
-				name={describeTool(content.name, showDetails, args.renderContext.t)}
-				nameIsIdentifier={isToolIdentifier(content.name, showDetails)}
-				detail={summarizeToolPayload(content.arguments)}
-				className={live ? "piem-chat__trace--live" : undefined}
-				open={traceOpensByDefault(args.renderContext.traceExpand, "toolCall", false)}
-				// Without the payload there is nothing behind the row to open, so it
-				// renders as a plain line rather than an empty disclosure.
-				body={showDetails ? <pre className="piem-chat__text">{JSON.stringify(content.arguments, null, 2)}</pre> : null}
-			/>
-		);
+		const slot = traceFoldSlot(context.foldPlan, args.index, blockIndex);
+		if (slot) {
+			return slot.head ? <FoldedTrace key={blockIndex} group={slot.group} context={context} /> : null;
+		}
+		return <ToolCallTrace key={blockIndex} call={content} live={live} context={context} />;
 	});
 }
+
 
 interface TraceProps {
 	icon: IconName;
@@ -1018,6 +1093,34 @@ function Trace({ icon, name, detail, className, nameIsIdentifier = false, body, 
 }
 
 /**
+ * One tool call, collapsed.
+ *
+ * A component rather than inline markup because a folded run draws the same
+ * rows inside its body, from calls belonging to messages other than the one
+ * being rendered — so the row cannot be a closure over the turn it came from.
+ *
+ * `live` spins the icon instead of settling on the wrench, so "the turn is
+ * working" reads one way everywhere machine traffic appears. Always false
+ * inside a fold: a running call is never folded.
+ */
+function ToolCallTrace({ call, live, context }: { call: ToolCall; live: boolean; context: MessageContext }): React.JSX.Element {
+	const showDetails = context.showAgentDetails;
+	return (
+		<Trace
+			icon={live ? "loader-circle" : "wrench"}
+			name={describeTool(call.name, showDetails, context.t)}
+			nameIsIdentifier={isToolIdentifier(call.name, showDetails)}
+			detail={summarizeToolPayload(call.arguments)}
+			className={live ? "piem-chat__trace--live" : undefined}
+			open={traceOpensByDefault(context.traceExpand, "toolCall", false)}
+			// Without the payload there is nothing behind the row to open, so it
+			// renders as a plain line rather than an empty disclosure.
+			body={showDetails ? <pre className="piem-chat__text">{JSON.stringify(call.arguments, null, 2)}</pre> : null}
+		/>
+	);
+}
+
+/**
  * A tool result, collapsed.
  *
  * When the tool attached a diff, the summary carries the `+N -M` counts and the
@@ -1072,6 +1175,35 @@ function ToolResultTrace({ message, context }: { message: ToolResultMessage; con
 				{diff ? <Block text={`\`\`\`diff\n${diff}\n\`\`\``} kind="assistant" isStreaming={false} context={context} /> : null}
 			</div>
 		</details>
+	);
+}
+
+/**
+ * A run of consecutive tool traffic, drawn as one row.
+ *
+ * The summary says what the run did by category; the body holds the very rows
+ * it replaced, so the fold costs a click rather than the detail. That is the
+ * whole trade: a turn that read six notes wrote twelve rows of machine traffic
+ * around one paragraph of prose, and none of those rows was individually the
+ * problem.
+ *
+ * Keyed on each row's transcript address rather than the tool call id, which a
+ * session file replayed from another build is not guaranteed to keep unique.
+ */
+function FoldedTrace({ group, context }: { group: TraceFoldGroup; context: MessageContext }): React.JSX.Element {
+	return (
+		<Trace
+			icon="wrench"
+			name={describeTraceFold(group.tallies, context.t)}
+			className="piem-chat__trace--fold"
+			body={group.rows.map((row) =>
+				row.kind === "call" ? (
+					<ToolCallTrace key={`${row.ref.message}:${row.ref.block}`} call={row.call} live={false} context={context} />
+				) : (
+					<ToolResultTrace key={`${row.ref.message}:result`} message={row.result} context={context} />
+				),
+			)}
+		/>
 	);
 }
 

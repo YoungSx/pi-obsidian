@@ -625,6 +625,39 @@ export const en = {
 		failed: "failed",
 	},
 
+	/**
+	 * The one-line summary a folded run of tool calls draws.
+	 *
+	 * Authored mid-sentence and lower-case: `describeTraceFold` joins the phrases
+	 * with the two joiners at the end of this block and puts the finished line in
+	 * sentence case, so each phrase has to read the same first or third in a list.
+	 * No plural rule exists in this layer, hence a pair of keys per category.
+	 */
+	traceFold: {
+		writeOne: "changed a note",
+		writeMany: "changed {count} notes",
+		webOne: "fetched a page",
+		webMany: "fetched {count} pages",
+		subagentOne: "ran a subagent",
+		subagentMany: "ran {count} subagents",
+		readOne: "read a note",
+		readMany: "read {count} notes",
+		searchOne: "ran a search",
+		searchMany: "ran {count} searches",
+		otherOne: "used a tool",
+		otherMany: "used {count} tools",
+		/**
+		 * The same bucket, worded for the company it keeps. Alongside a named
+		 * category, "used 1 tool" invites the reader to wonder whether the notes
+		 * named next to it were somehow not tools.
+		 */
+		otherAlsoOne: "used another tool",
+		otherAlsoMany: "used {count} other tools",
+		/** Joins the final pair; `list` joins every earlier one. */
+		also: "{first} and {second}",
+		list: "{first}, {rest}",
+	},
+
 	/** Settings page. */
 	settings: {
 		// Four tabs. The former History and Logs tabs each held two or three rows
@@ -707,7 +740,8 @@ export const en = {
 		 * when it opens.
 		 */
 		traceExpand: "Open tool activity",
-		traceExpandDesc: "How much of the machine traffic — thinking, tool calls, results — starts open in the transcript. Any row can still be opened or closed by hand.",
+		traceExpandDesc:
+			"How much of the machine traffic — thinking, tool calls, results — starts open in the transcript. Any row can still be opened or closed by hand. With everything collapsed, a run of consecutive tool calls also folds into a single row naming what the run did.",
 		traceExpandCollapsed: "Everything collapsed",
 		traceExpandHighValue: "High-value rows open",
 		traceExpandExpanded: "Everything open",

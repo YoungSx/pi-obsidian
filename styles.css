@@ -1453,6 +1453,34 @@ button.piem-chat__context-open {
 	overflow-y: auto;
 }
 
+/*
+ * The rows a folded run swallowed, stacked inside it.
+ *
+ * A trace row carries no margin of its own — it is spaced by whichever container
+ * holds it — and a fold body is a third such container, neither the messages
+ * column's flex `gap` nor a message's block flow. Same 4px rhythm the rows have
+ * inside a message, with the outer faces stripped the way
+ * `.piem-chat__message-content` strips its own: the body already spends padding
+ * there, and doubling it read as a gap between the summary and the first row it
+ * accounts for.
+ *
+ * No height bound, unlike the result and harness bodies above. Those hold one
+ * tool's output, which can run to thousands of lines; this holds rows that are
+ * each one line until the reader opens them, and a scrollbox around the
+ * transcript's own vocabulary would be a second scroller inside the first.
+ */
+.piem-chat__trace--fold > .piem-chat__trace-body > .piem-chat__trace {
+	margin-block: var(--size-4-1);
+}
+
+.piem-chat__trace--fold > .piem-chat__trace-body > :first-child {
+	margin-block-start: 0;
+}
+
+.piem-chat__trace--fold > .piem-chat__trace-body > :last-child {
+	margin-block-end: 0;
+}
+
 .piem-chat__tool-status {
 	align-items: center;
 	color: var(--text-muted);

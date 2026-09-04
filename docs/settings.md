@@ -45,6 +45,12 @@ command palette does the same thing on demand.
 - **Show agent details** — token counts, spend, and raw tool arguments in the
   chat panel. Off by default; turn it on when you want to see what the agent
   actually sent.
+- **Open tool activity** — how much of the machine traffic starts open:
+  thinking, tool calls, results. Everything is collapsed by default, and any row
+  still opens by hand. In that mode a run of consecutive tool calls folds one
+  step further, into a single row that says what the run did — "changed a note
+  and read 5 notes" — with the rows it replaced inside it. A failed call and an
+  answered question stay outside the fold: neither should cost a click to see.
 - **Compaction** — the reserve and retention budgets that decide when the
   conversation gets summarized to make room. Piem plans against the context
   window you configured for the model.
