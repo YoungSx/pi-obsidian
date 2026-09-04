@@ -208,6 +208,57 @@ describe("icon contrast in the resting state (WCAG 1.4.11)", () => {
 	});
 });
 
+describe("the banner reports state with its glyph, not with a fill (WCAG 1.4.3 / 1.4.11)", () => {
+	/*
+	 * `--background-modifier-error` and `--text-error` both resolve to
+	 * `--color-red` in stock Obsidian, which is what made the old treatment
+	 * unmeasurable: the red border was the colour of the red fill it bordered
+	 * (1.00:1), and `--text-normal` on that fill measured 2.47:1 dark / 3.78:1
+	 * light. This row is `--font-ui-smaller`, so 4.5:1 is the floor for the words
+	 * and 3:1 for the glyph, and the dark theme missed both.
+	 *
+	 * Structural rather than numeric for the reason the file header gives: the
+	 * tokens live in Obsidian's `app.css`, which does not exist here. What is
+	 * assertable is the *shape* — no red fill anywhere on the row, and the red
+	 * spent on the one child small enough to afford it.
+	 */
+	it("never fills the error row, so the words keep Obsidian's own body pair", () => {
+		const shared = ruleBody(
+			".piem-chat__banner--error,\n.piem-chat__banner--notice,\n.piem-chat__banner--wall,\n.piem-chat__banner--recovery",
+		);
+
+		expect(shared).toContain("background: var(--background-secondary-alt)");
+		expect(shared).toContain("color: var(--text-normal)");
+		expect(declarations(ruleBody(".piem-chat__banner--error"))).not.toContain("--background-modifier-error");
+	});
+
+	it("spends the red on the glyph", () => {
+		expect(ruleBody(".piem-chat__banner--error .piem-chat__banner-icon")).toContain("color: var(--text-error)");
+	});
+
+	/*
+	 * The border is kept — it is the row's second red note and, unlike before,
+	 * it now contrasts with what it borders.
+	 */
+	it("keeps the red border, which finally differs from the fill", () => {
+		expect(ruleBody(".piem-chat__banner--error")).toContain("border-color: var(--text-error)");
+	});
+
+	/*
+	 * `--recovery` had no rule of its own: the crash-recovery offer rendered on
+	 * the bare `.piem-chat__banner` while its two sibling offers carried a
+	 * background. A variant the component renders and the stylesheet does not
+	 * name is the defect this asserts against.
+	 */
+	it("gives every variant the component renders a ground and an icon colour", () => {
+		const muted = ruleBody(
+			".piem-chat__banner--notice .piem-chat__banner-icon,\n.piem-chat__banner--wall .piem-chat__banner-icon,\n.piem-chat__banner--recovery .piem-chat__banner-icon",
+		);
+
+		expect(muted).toContain("color: var(--text-muted)");
+	});
+});
+
 describe("message actions: revealed on hover where hover exists, visible where it doesn't", () => {
 	/*
 	 * The row must stay *laid out* on every device — only the buttons' paint is
