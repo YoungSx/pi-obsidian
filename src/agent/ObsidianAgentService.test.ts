@@ -1345,7 +1345,11 @@ describe("ObsidianAgentService", () => {
 			expect(requests.length).toBe(2);
 			expect(JSON.stringify(requests[1]?.messages[0])).not.toContain("MID-RUN SUMMARY");
 			const last = snapshots[snapshots.length - 1];
-			expect(last?.errorMessage).toContain("Could not compact the conversation");
+			// Reported, but quietly: a compaction that fails does not stop the panel,
+			// and the run below is the proof. The red assertive banner it used to
+			// raise overstated a background operation the next turn survives.
+			expect(last?.errorMessage).toBeUndefined();
+			expect(last?.noticeMessage).toContain("Could not tidy up earlier messages");
 			// The run still settled with its own reply, and the log has no summary
 			// to replay: a failed compaction must leave the session untouched.
 			expect(last?.messages.at(-1)?.role).toBe("assistant");
@@ -1431,11 +1435,12 @@ describe("ObsidianAgentService", () => {
 			await settledPrompt;
 
 			// A user who pressed stop is told the run stopped; the aborted
-			// compaction must not surface as "Could not compact the conversation".
+			// compaction must not surface as a tidy-up failure on either channel.
 			const last = snapshots[snapshots.length - 1];
 			expect(last?.isCompacting).toBe(false);
 			expect(last?.isStreaming).toBe(false);
-			expect(last?.errorMessage ?? "").not.toContain("Could not compact");
+			expect(last?.errorMessage ?? "").not.toContain("tidy up");
+			expect(last?.noticeMessage ?? "").not.toContain("tidy up");
 			// The hook returns `undefined` on cancel, leaving pi's loop in charge:
 			// it keeps going until a streaming call observes the aborted signal and
 			// settles the run with stopReason "aborted". The summary must not have

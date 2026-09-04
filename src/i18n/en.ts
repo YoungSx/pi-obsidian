@@ -216,6 +216,18 @@ export const en = {
 			/** Summary of the disclosure holding the provider's untouched text. */
 			raw: "What the provider said",
 		},
+			/**
+			 * A failed branch summary, reported outcome-first.
+			 *
+			 * The retry it belongs to has already gone out — `summarizeAbandonedBranch`
+			 * rewinds unconditionally because the retry was the user's actual request —
+			 * so the only loss is a note about the fork that was replaced. That is why
+			 * this rides the quiet channel: an assertive alert over a bookkeeping
+			 * summary was the loudest thing in the panel saying the least.
+			 */
+			branchSummaryFailed: "The retry went through, but Piem could not summarize the branch it replaced: {error}",
+			/** Uses the panel's own word for compaction, which is "tidy up" everywhere else. */
+			compactionFailed: "Could not tidy up earlier messages: {error}",
 		you: "You",
 		agent: "Piem",
 		thoughtItThrough: "Thought it through",

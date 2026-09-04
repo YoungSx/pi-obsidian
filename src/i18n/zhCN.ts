@@ -124,6 +124,8 @@ export const zhCN: DeepPartial<EnCopy> = {
 			unknownSpoken: "供应商没有回话，也没说为什么。",
 			raw: "供应商原话",
 		},
+			branchSummaryFailed: "重试已经发出去了，只是没能为被替换掉的分支生成摘要：{error}",
+			compactionFailed: "整理较早的消息失败：{error}",
 		you: "你",
 		agent: "Piem",
 		thoughtItThrough: "思考了一下",
