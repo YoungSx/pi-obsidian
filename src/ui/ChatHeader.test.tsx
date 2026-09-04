@@ -3,6 +3,7 @@ import type { App } from "obsidian";
 import { flushRender, installDom } from "../testUtils/dom";
 import { installObsidianStub, lastMenu, platformMock, resetMenus } from "../testUtils/obsidianStub";
 import type { ChatSnapshot } from "../agent/ObsidianAgentService";
+import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import type { ContextFill, UsageTotals } from "../agent/usage";
 import type { ActiveSessionInfo } from "../session/ObsidianSessionManager";
 
@@ -20,6 +21,8 @@ const app = {} as App;
 interface RenderOptions {
 	/** Passed through as the header's `onOpenSettings`; omitted means unreachable. */
 	onOpenSettings?: () => void;
+	/** Passed through as the header's `onExportSession`; omitted means unreachable. */
+	onExportSession?: () => void;
 	/** The vault's stored chats; the history controls gate on there being two. */
 	sessions?: ActiveSessionInfo[];
 }
@@ -38,6 +41,7 @@ async function renderHeader(snapshot: ChatSnapshot, options: RenderOptions = {})
 			onNewSession={() => undefined}
 			onRenameSession={() => undefined}
 			onDeleteSession={() => undefined}
+			onExportSession={options.onExportSession}
 			onOpenSettings={options.onOpenSettings}
 		/>,
 	);
@@ -168,16 +172,16 @@ describe("ChatHeader on a phone", () => {
 		expect((await openOverflow(host)).titles()).toEqual(["View chat history", "Rename chat", "Open settings", "Delete chat"]);
 	});
 
-	it("keeps history out of the menu mid-turn, like the button it replaces", async () => {
-		// Opening the picker mid-turn could pull the transcript out from under a
-		// running request — the same reason rename and delete go. What is left is
-		// the settings item, which a mid-turn user may legitimately want.
+	it("keeps history in the menu mid-turn — the picker never touches the run in flight", async () => {
+		// Issue #252: openSession and the picker leave a running request alone, and
+		// the picker's rows already mark which sessions are mid-run. The old rule
+		// ("history out of the menu mid-turn") is retired with it.
 		const host = await renderHeader(snapshot({ session: sessionInfo(), isStreaming: true }), {
 			onOpenSettings: () => undefined,
 			sessions: [sessionInfo("a"), sessionInfo("b")],
 		});
 
-		expect((await openOverflow(host)).titles()).toEqual(["Open settings"]);
+		expect((await openOverflow(host)).titles()).toEqual(["View chat history", "Rename chat", "Open settings", "Delete chat"]);
 	});
 });
 
@@ -218,9 +222,23 @@ describe("ChatHeader overflow menu", () => {
 	});
 
 	it("stays open on settings alone mid-turn, when the model is what the user wants to change", async () => {
-		const host = await renderHeader(snapshot({ session: sessionInfo(), isStreaming: true }), { onOpenSettings: () => undefined });
+		// Mid-turn with no session, only settings has anything to say — the empty
+		// state, not the disabled one. Rename and delete follow the session; a
+		// mid-turn *existing* chat keeps them (issue #252).
+		const host = await renderHeader(snapshot({ session: undefined, isStreaming: true }), { onOpenSettings: () => undefined });
 
 		expect((await openOverflow(host)).titles()).toEqual(["Open settings"]);
+	});
+
+	it("offers rename, export and delete mid-turn, which the service handles safely", async () => {
+		// Issue #252: rename and export write outside the agent's transcript and
+		// delete aborts first, so a mid-turn menu is the full one.
+		const host = await renderHeader(snapshot({ session: sessionInfo(), isStreaming: true, messages: [assistantMessage()] }), {
+			onExportSession: () => undefined,
+			onOpenSettings: () => undefined,
+		});
+
+		expect((await openOverflow(host)).titles()).toEqual(["Rename chat", "Save as note", "Open settings", "Delete chat"]);
 	});
 
 	it("routes the settings item to the host callback", async () => {
@@ -300,6 +318,7 @@ function snapshot(overrides: Partial<ChatSnapshot> = {}): ChatSnapshot {
 		lanes: [{ lane: "main", leafId: null, retired: false }],
 		provider: "deepseek",
 		modelId: "deepseek-v4-pro",
+		runningModelId: "deepseek-v4-pro",
 		thinkingLevel: "high",
 		thinkingLevels: ["off", "low", "high"],
 		modelChoices: [],
@@ -351,6 +370,23 @@ function sessionInfo(id = "session-1"): ActiveSessionInfo {
 
 function usageTotals(): UsageTotals {
 	return { tokens: 0, cost: 0, requests: 0 };
+}
+
+/**
+ * One completed reply, as export's `messages.length > 0` gate reads it. Only the
+ * fields the type demands are populated; the header never inspects the content.
+ */
+function assistantMessage(): AgentMessage {
+	return {
+		role: "assistant",
+		content: [{ type: "text", text: "Here is the answer." }],
+		api: "anthropic-messages",
+		provider: "deepseek",
+		model: "deepseek-v4-pro",
+		usage: { input: 1, output: 1, cacheRead: 0, cacheWrite: 0, totalTokens: 2, cost: { total: 0 } },
+		stopReason: "stop",
+		timestamp: Date.now(),
+	} as AgentMessage;
 }
 
 const roots = new WeakMap<HTMLElement, import("react-dom/client").Root>();

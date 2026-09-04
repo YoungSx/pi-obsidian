@@ -10,8 +10,6 @@ interface ThinkingLevelSelectorProps {
 	target: ThinkingTarget;
 	/** Sets the level on the live conversation and records it in the session. */
 	onSelect: (level: ThinkingLevel) => void;
-	/** Whether a turn or a compaction is in flight. */
-	isBusy: boolean;
 }
 
 /**
@@ -34,8 +32,13 @@ interface ThinkingLevelSelectorProps {
  * and arrives themed, dismissable and keyboard-navigable. Anchored to the
  * button rather than the pointer, because a click dispatched from Enter or
  * Space reports coordinates `0, 0`.
+ *
+ * Usable mid-turn (issue #252): a level chosen mid-run rides
+ * {@link ThinkingTarget.pendingThinkingLevel} and lands when the reply in
+ * flight does, so the check, the visible word and the title all show the intent
+ * while it waits.
  */
-export function ThinkingLevelSelector({ target, onSelect, isBusy }: ThinkingLevelSelectorProps): React.JSX.Element | null {
+export function ThinkingLevelSelector({ target, onSelect }: ThinkingLevelSelectorProps): React.JSX.Element | null {
 	const t = useT();
 	if (!hasThinkingChoice(target)) {
 		return null;
@@ -43,14 +46,17 @@ export function ThinkingLevelSelector({ target, onSelect, isBusy }: ThinkingLeve
 
 	// The level renders verbatim — "xhigh", not "极高" — because it is a wire
 	// keyword: the exact string the session file records and the request sends,
-	// the same rule model names follow (issue #143).
+	// the same rule model names follow (issue #143). A pending mid-run choice
+	// names the intent on every channel, so the panel never disagrees with the
+	// last thing the user clicked.
+	const shownLevel = target.pendingThinkingLevel ?? target.thinkingLevel;
 	const openMenu = (event: React.MouseEvent<HTMLButtonElement>): void => {
 		const menu = new Menu();
 		for (const level of target.thinkingLevels) {
 			menu.addItem((item) =>
 				item
 					.setTitle(level)
-					.setChecked(level === target.thinkingLevel)
+					.setChecked(level === shownLevel)
 					.onClick(() => onSelect(level)),
 			);
 		}
@@ -63,7 +69,6 @@ export function ThinkingLevelSelector({ target, onSelect, isBusy }: ThinkingLeve
 			icon="brain"
 			label={thinkingSelectorTitle(target, t)}
 			className="piem-chat__thinking-switcher"
-			disabled={isBusy}
 			hasPopup="menu"
 			onClick={openMenu}
 		>
@@ -75,7 +80,7 @@ export function ThinkingLevelSelector({ target, onSelect, isBusy }: ThinkingLeve
 			 * only one that is fully redundant with a channel the button already has.
 			 */}
 			<span className="piem-chat__thinking-switcher-name" aria-hidden="true">
-				{target.thinkingLevel}
+				{shownLevel}
 			</span>
 		</IconButton>
 	);

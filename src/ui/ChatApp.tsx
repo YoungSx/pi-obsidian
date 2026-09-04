@@ -743,17 +743,17 @@ export function ChatApp({ service, inputController, component, draftStore, onOpe
 							target={snapshot}
 							onSelect={(modelId) => void service.setActiveModel(modelId)}
 							onOpenSettings={canOpenSettings ? () => openPluginSettings(app) : undefined}
-							isBusy={snapshot.isStreaming || snapshot.isCompacting || snapshot.isRewinding}
 						/>
 					}
 					thinkingSelector={
 						<ThinkingLevelSelector
 							// Same deal: the snapshot is a `ThinkingTarget` as it stands. The
 							// selector hides itself for a model that takes no reasoning
-							// parameter, so nothing else has to gate on support.
+							// parameter, so nothing else has to gate on support. Both this and
+							// the switcher stay usable mid-run (issue #252) — the service
+							// defers the choice until the run lands.
 							target={snapshot}
 							onSelect={(level) => void service.setThinkingLevel(level)}
-							isBusy={snapshot.isStreaming || snapshot.isCompacting || snapshot.isRewinding}
 						/>
 					}
 					laneSwitcher={

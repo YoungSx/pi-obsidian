@@ -70,15 +70,12 @@ export function ChatHeader({
 }: ChatHeaderProps): React.JSX.Element {
 	const t = useT();
 	const activeSession = snapshot.session;
-	const isBusy = snapshot.isStreaming || snapshot.isCompacting;
-	// Narrowed to a single binding so the menu's three conditional blocks agree on
-	// one answer, and so TypeScript carries the non-undefined session into the
-	// click handlers without a second check inside each one.
-	const editableSession = isBusy ? undefined : activeSession;
 	// The dedicated history button's availability. On a phone it leaves the row
 	// entirely — see the actions row below — and this same check gates the menu
-	// item that replaces it, so the two doors share one answer.
-	const canPickSession = !isBusy && (sessions.length >= 2 || (sessions.length === 1 && onSearchSessions !== undefined));
+	// item that replaces it, so the two doors share one answer. Available mid-run
+	// too (issue #252): opening the picker never touches the run in flight, and
+	// the rows already mark which sessions are mid-run.
+	const canPickSession = sessions.length >= 2 || (sessions.length === 1 && onSearchSessions !== undefined);
 	const openPicker = (): void => {
 		openSessionPicker(
 			app,
@@ -95,12 +92,15 @@ export function ChatHeader({
 	/**
 	 * The overflow menu.
 	 *
-	 * Session actions are conditional: there is nothing to rename or delete
-	 * before the first message, and doing either mid-turn would pull the
-	 * transcript out from under a running request. Settings is neither, so it
-	 * keeps the button alive in states where the session actions alone would have
-	 * greyed it out — which is precisely when a user goes looking for settings,
-	 * since a wrong model or a missing key is what they are trying to fix.
+	 * Session actions are conditional on a session existing — there is nothing to
+	 * rename or delete before the first message — but not on the panel being
+	 * idle. Mid-run (issue #252) every one of them is safe: rename and export
+	 * write outside the agent's transcript, and delete is the service's own
+	 * choreography, which aborts the run and lands the panel on its replacement.
+	 * Settings is likewise unconditional, so it keeps the button alive in states
+	 * where the session actions alone would have greyed it out — which is
+	 * precisely when a user goes looking for settings, since a wrong model or a
+	 * missing key is what they are trying to fix.
 	 *
 	 * On a phone this menu is also the history picker's only door: the dedicated
 	 * button leaves the header row so the row can be one line tall, and the item
@@ -125,7 +125,7 @@ export function ChatHeader({
 		if (historyItem) {
 			menu.addItem((item) => item.setTitle(t.t("chat.openChatHistory")).setIcon("history").onClick(openPicker));
 		}
-		if (editableSession) {
+		if (activeSession) {
 			if (historyItem) {
 				menu.addSeparator();
 			}
@@ -133,7 +133,7 @@ export function ChatHeader({
 				item
 					.setTitle(t.t("chat.renameChat"))
 					.setIcon("pencil")
-					.onClick(() => openSessionRename(app, editableSession, onRenameSession, t)),
+					.onClick(() => openSessionRename(app, activeSession, onRenameSession, t)),
 			);
 			// An export needs a transcript worth writing; an empty chat's note
 			// would be a heading and nothing under it.
@@ -142,19 +142,19 @@ export function ChatHeader({
 			}
 		}
 		if (onOpenSettings) {
-			if (editableSession || historyItem) {
+			if (activeSession || historyItem) {
 				menu.addSeparator();
 			}
 			menu.addItem((item) => item.setTitle(t.t("chat.openSettings")).setIcon("settings").onClick(onOpenSettings));
 		}
-		if (editableSession) {
+		if (activeSession) {
 			menu.addSeparator();
 			menu.addItem((item) =>
 				item
 					.setTitle(t.t("chat.deleteChat"))
 					.setIcon("trash-2")
 					.setWarning(true)
-					.onClick(() => openSessionDeleteConfirm(app, editableSession, () => onDeleteSession(editableSession.path), t)),
+					.onClick(() => openSessionDeleteConfirm(app, activeSession, () => onDeleteSession(activeSession.path), t)),
 			);
 		}
 		menu.showAtMouseEvent(event.nativeEvent);
@@ -196,7 +196,7 @@ export function ChatHeader({
 						disabled={!canPickSession}
 					/>
 				)}
-				<IconButton icon="square-pen" label={t.t("chat.newChat")} onClick={onNewSession} disabled={isBusy} />
+				<IconButton icon="square-pen" label={t.t("chat.newChat")} onClick={onNewSession} />
 				{/* Disabled only when the menu would open empty — see `openMenu`. Three
 				    doors keep it alive; the slash-command list used to be a fourth, and
 				    its removal is why a vault with skills but no session and no settings
@@ -206,7 +206,7 @@ export function ChatHeader({
 					label={t.t("chat.moreActions")}
 					onClick={openMenu}
 					hasPopup="menu"
-					disabled={!editableSession && !onOpenSettings && !(Platform.isMobile && canPickSession)}
+					disabled={!activeSession && !onOpenSettings && !(Platform.isMobile && canPickSession)}
 				/>
 			</div>
 		</header>

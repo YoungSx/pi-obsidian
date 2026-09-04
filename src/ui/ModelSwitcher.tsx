@@ -15,8 +15,6 @@ interface ModelSwitcherProps {
 	 * gives its own settings entry.
 	 */
 	onOpenSettings?: () => void;
-	/** Whether a turn or a compaction is in flight. */
-	isBusy: boolean;
 }
 
 /**
@@ -38,13 +36,14 @@ interface ModelSwitcherProps {
  * which an `<option>` can be; and the menu arrives themed, dismissable, and
  * keyboard-navigable rather than reimplemented here.
  *
- * Disabled mid-turn. {@link ObsidianAgentService.setActiveModel} reconfigures the
- * live agent, so a switch during a tool-using run would move its remaining turns
- * onto a different model — half a run on each, with the transcript giving no sign
- * of where the seam is. Waiting for the turn to land costs seconds; the button
- * stays mounted so the row does not reflow around it.
+ * Usable mid-turn (issue #252). The choice is deferred — settings write through
+ * at once, the run in flight keeps the model it started on, and the service
+ * applies the new one when the run lands — so switching never moves a run's
+ * remaining turns onto a different model halfway through. The face shows the
+ * chosen model (the intent); the title notes when it is still pending, keyed off
+ * the gap between the settings target and {@link ModelTarget.runningModelId}.
  */
-export function ModelSwitcher({ target, onSelect, onOpenSettings, isBusy }: ModelSwitcherProps): React.JSX.Element {
+export function ModelSwitcher({ target, onSelect, onOpenSettings }: ModelSwitcherProps): React.JSX.Element {
 	const t = useT();
 	const choices = target.modelChoices;
 	// Nothing to pick and nowhere to go: the menu would open as a popover with one
@@ -101,7 +100,7 @@ export function ModelSwitcher({ target, onSelect, onOpenSettings, isBusy }: Mode
 			icon="chevrons-up-down"
 			label={modelSwitcherTitle(target, t)}
 			className="piem-chat__model-switcher"
-			disabled={isBusy || isEmpty}
+			disabled={isEmpty}
 			hasPopup="menu"
 			onClick={openMenu}
 		>

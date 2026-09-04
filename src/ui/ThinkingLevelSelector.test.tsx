@@ -15,7 +15,6 @@ const levels = ["off", "low", "high"] as const;
 interface RenderOptions {
 	target?: Partial<ThinkingTarget>;
 	onSelect?: (level: ThinkingTarget["thinkingLevel"]) => void;
-	isBusy?: boolean;
 }
 
 /** Returns null when the selector declines to render — the `["off"]` model case. */
@@ -28,7 +27,6 @@ async function renderSelector(options: RenderOptions = {}): Promise<HTMLElement 
 		<ThinkingLevelSelector
 			target={target(options.target)}
 			onSelect={options.onSelect ?? (() => undefined)}
-			isBusy={options.isBusy ?? false}
 		/>,
 	);
 	await flushRender();
@@ -160,11 +158,20 @@ describe("ThinkingLevelSelector availability", () => {
 		document.body.replaceChildren();
 	});
 
-	it("stays mounted but inert mid-turn, so the send row does not reflow", async () => {
-		// The level change rewrites the live agent and the session file; landing it
-		// mid-run would split a turn across two levels with no seam in the transcript.
-		const host = (await renderSelector({ isBusy: true })) as HTMLElement;
+	it("stays usable mid-turn: a mid-run choice is deferred until the run lands", async () => {
+		// Issue #252: the choice rides pendingThinkingLevel and the service applies
+		// it when the reply in flight settles. Nothing here has to go inert.
+		const host = (await renderSelector({ target: { pendingThinkingLevel: "high" } })) as HTMLElement;
 
-		expect(button(host).disabled).toBe(true);
+		expect(button(host).disabled).toBe(false);
+	});
+
+	it("shows the pending choice on every channel — word, check, and title — while it waits", async () => {
+		const host = (await renderSelector({ target: { pendingThinkingLevel: "high" } })) as HTMLElement;
+
+		expect(host.querySelector(".piem-chat__thinking-switcher-name")?.textContent).toBe("high");
+		expect(button(host).getAttribute("aria-label")).toBe("Change thinking level · high · Takes effect after this reply");
+		const items = (await openMenu(host)).items;
+		expect(items.map((item) => item.checked)).toEqual([false, false, true]);
 	});
 });
