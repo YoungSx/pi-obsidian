@@ -1356,36 +1356,50 @@ describe("MessageList provider failure, reported where it happened", () => {
 		const host = renderMessages([assistantMessage("Half a thou", { stopReason: "error", errorMessage: "504 Gateway Time-out" })]);
 		await flushRender();
 
-		const notice = host.querySelector(".piem-chat__interrupted");
-		expect(notice?.textContent).toContain("The provider did not answer in time.");
+		const pill = host.querySelector(".piem-chat__trace--failed");
+		expect(pill?.querySelector(".piem-chat__trace-name")?.textContent).toBe("The provider did not answer in time.");
 		// The modifier is what tints the glyph, and only the glyph.
-		expect(notice?.className).toContain("piem-chat__interrupted--failed");
+		expect(pill?.className).toContain("piem-chat__trace--failed");
 	});
 
-	it("keeps the provider's own words one disclosure away", async () => {
+	it("reports a failed turn as one pill, opened onto the provider's own words", async () => {
 		const host = renderMessages([
 			assistantMessage("", { stopReason: "error", errorMessage: "429 Rate limit reached for gpt-4o" }),
 		]);
 		await flushRender();
 
-		const detail = host.querySelector(".piem-chat__cutoff-detail");
-		expect(detail?.querySelector("summary")?.textContent).toBe("What the provider said");
-		expect(detail?.querySelector(".piem-chat__cutoff-raw")?.textContent).toBe("429 Rate limit reached for gpt-4o");
-		// Closed until asked for: the sentence above it is the report.
-		expect((detail as HTMLDetailsElement | null)?.open ?? false).toBe(false);
+		// One row, not a notice with a stray repeat beneath it. The classified
+		// sentence is the summary; the raw text is what opening reveals.
+		const pill = host.querySelector("details.piem-chat__trace--failed");
+		expect(pill?.querySelector(".piem-chat__trace-name")?.textContent).toBe("The provider is too busy right now. Give it a moment, then try again.");
+		expect(pill?.querySelector(".piem-chat__cutoff-raw")?.textContent).toBe("429 Rate limit reached for gpt-4o");
+		// Closed until asked for: the sentence itself is the report.
+		expect((pill as HTMLDetailsElement | null)?.open ?? false).toBe(false);
 	});
 
 	/*
-	 * `<details>` is not phrasing content, so it cannot sit inside the notice's
-	 * `<p>`. A renderer that nests it there produces markup the browser silently
-	 * reparents, which moves the disclosure out of the bubble.
+	 * An empty `raw` must not become an empty disclosure: a pill that opens onto
+	 * nothing is the one dishonesty this row must not commit, and the `unknown`
+	 * sentence already carries the news that there was nothing to show.
 	 */
-	it("puts the disclosure beside the notice, not inside its paragraph", async () => {
-		const host = renderMessages([assistantMessage("", { stopReason: "error", errorMessage: "boom" })]);
+	it("renders a failure the provider said nothing about as a flat row", async () => {
+		const host = renderMessages([assistantMessage("", { stopReason: "error" })]);
 		await flushRender();
 
-		expect(host.querySelector(".piem-chat__interrupted .piem-chat__cutoff-detail")).toBeNull();
-		expect(host.querySelector(".piem-chat__bubble > .piem-chat__cutoff-detail")).not.toBeNull();
+		const pill = host.querySelector(".piem-chat__trace--failed");
+		expect(pill?.querySelector(".piem-chat__trace-name")?.textContent).toBe("The provider did not answer, and did not say why.");
+		expect(host.querySelector(".piem-chat__cutoff-raw")).toBeNull();
+		expect(pill?.matches("details")).toBe(false);
+	});
+
+	it("keeps a stopped reply the flat paragraph it always was", async () => {
+		// A stop has nothing behind its line, so no disclosure affordance may
+		// point at nothing.
+		const host = renderMessages([assistantMessage("Half a thou", { stopReason: "aborted" })]);
+		await flushRender();
+
+		expect(host.querySelector(".piem-chat__trace--failed")).toBeNull();
+		expect(host.querySelector(".piem-chat__interrupted")?.textContent).toContain("You stopped this reply.");
 	});
 
 	it("says nothing extra about a reply that ended normally", async () => {
@@ -1393,7 +1407,7 @@ describe("MessageList provider failure, reported where it happened", () => {
 		await flushRender();
 
 		expect(host.querySelector(".piem-chat__interrupted")).toBeNull();
-		expect(host.querySelector(".piem-chat__cutoff-detail")).toBeNull();
+		expect(host.querySelector(".piem-chat__trace--failed")).toBeNull();
 	});
 
 	/*

@@ -869,29 +869,43 @@ function MessageRow({
 				<div className="piem-chat__bubble">
 					<div className="piem-chat__message-content">{renderMessageContent(message, { index, isStreaming, renderContext })}</div>
 					{cutoff ? (
-						<>
+						cutoff.raw !== undefined ? (
+							/*
+							 * The failure pill — the classified sentence IS the summary, and
+							 * the provider's untouched words are what opens. The raw text used
+							 * to sit in a second, unstyled disclosure below the notice; it was
+							 * a sibling rather than a child only because `<details>` is not
+							 * phrasing content and could not live inside the notice's `<p>`,
+							 * and the stray row read as a repeat of the report above it. The
+							 * transcript now reports a failed turn the same way it reports a
+							 * failed tool call: one row, opened on demand.
+							 *
+							 * Closed by default and uncapped when open — the height cap the
+							 * banner needed was a consequence of sitting *above* the
+							 * transcript, and a reader who opened it asked for all of it.
+							 *
+							 * An empty `raw` renders flat rather than as an empty disclosure:
+							 * a pill that opens onto nothing is the one dishonesty this row
+							 * must not commit, and the `unknown` sentence ("did not say why")
+							 * already carries that news itself.
+							 */
+							<Trace
+								icon={cutoff.icon}
+								name={cutoff.notice}
+								className="piem-chat__trace--failed"
+								body={cutoff.raw ? <p className="piem-chat__cutoff-raw">{cutoff.raw}</p> : null}
+							/>
+						) : (
+							/*
+							 * A stopped or truncated reply has nothing behind its line, so it
+							 * stays the flat paragraph it always was — no disclosure affordance
+							 * pointing at nothing.
+							 */
 							<p className={`piem-chat__interrupted piem-chat__interrupted--${cutoff.kind}`}>
 								<ObsidianIcon name={cutoff.icon} className="piem-chat__interrupted-icon" />
 								{cutoff.notice}
 							</p>
-							{/*
-							 * The provider's own words, one disclosure below the sentence that
-							 * summarised them. A sibling of the notice rather than a child:
-							 * `<details>` is not phrasing content and cannot live inside the
-							 * `<p>`.
-							 *
-							 * Closed by default and uncapped when open — the height cap the
-							 * banner needed was a consequence of sitting *above* the
-							 * transcript, and nothing here is pushing a conversation out of a
-							 * sidebar. A reader who opened it asked for all of it.
-							 */}
-							{cutoff.detail ? (
-								<details className="piem-chat__cutoff-detail">
-									<summary>{cutoff.detail.label}</summary>
-									<p className="piem-chat__cutoff-raw">{cutoff.detail.text}</p>
-								</details>
-							) : null}
-						</>
+						)
 					) : null}
 					{/*
 					 * The only report in this panel about loss the reader cannot undo, so

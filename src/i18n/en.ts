@@ -231,8 +231,6 @@ export const en = {
 			serverErrorSpoken: "the provider hit an error of its own. Trying again often works.",
 			unknown: "The provider did not answer, and did not say why.",
 			unknownSpoken: "the provider did not answer, and did not say why.",
-			/** Summary of the disclosure holding the provider's untouched text. */
-			raw: "What the provider said",
 		},
 		/**
 		 * A failed branch summary, reported outcome-first.
