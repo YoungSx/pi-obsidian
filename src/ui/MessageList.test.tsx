@@ -374,6 +374,25 @@ describe("MessageList reply actions", () => {
 		expect(host.querySelector(".piem-chat__message-actions")).toBeNull();
 	});
 
+	/*
+	 * The blank-row defect (#239): a provider failure before the first token leaves
+	 * an assistant message with no prose, and the guard here used to be `if (!text)
+	 * return null` — so the transcript grew an empty row and the retry that would
+	 * fix it did not exist, on the one turn where retrying is the whole point.
+	 */
+	it("keeps the retry on a failed turn that produced no words", async () => {
+		const host = renderMessages([assistantMessage("", { stopReason: "error", errorMessage: "504 Gateway Time-out" })], {
+			onRetry: () => undefined,
+		});
+		await flushRender();
+
+		const labels = Array.from(host.querySelectorAll(".piem-chat__message-actions button"), (button) =>
+			button.getAttribute("aria-label"),
+		);
+		// Only the retry: the three note-facing actions have nothing to act on.
+		expect(labels).toEqual(["Regenerate reply"]);
+	});
+
 	it("gives the user's own turn no reply actions", async () => {
 		const host = renderMessages([userMessage("a question")], { onRetry: () => undefined });
 		await flushRender();
@@ -1195,6 +1214,82 @@ function compactionSummary(text: string): AgentMessage {
 function userMessage(text: string): UserMessage {
 	return { role: "user", content: text, timestamp: Date.now() };
 }
+
+describe("MessageList provider failure, reported where it happened", () => {
+	/*
+	 * #239. The failure used to reach the user only through the top banner, whose
+	 * copy pi discards when the next run departs and which cannot say which turn
+	 * it belonged to. Here it is anchored, and it reads off `errorMessage` — the
+	 * field `appendMessage` writes to the session log — so it survives a reload.
+	 */
+	it("names the failure in the reader's language, under the turn it ended", async () => {
+		const host = renderMessages([assistantMessage("Half a thou", { stopReason: "error", errorMessage: "504 Gateway Time-out" })]);
+		await flushRender();
+
+		const notice = host.querySelector(".piem-chat__interrupted");
+		expect(notice?.textContent).toContain("The provider did not answer in time.");
+		// The modifier is what tints the glyph, and only the glyph.
+		expect(notice?.className).toContain("piem-chat__interrupted--failed");
+	});
+
+	it("keeps the provider's own words one disclosure away", async () => {
+		const host = renderMessages([
+			assistantMessage("", { stopReason: "error", errorMessage: "429 Rate limit reached for gpt-4o" }),
+		]);
+		await flushRender();
+
+		const detail = host.querySelector(".piem-chat__cutoff-detail");
+		expect(detail?.querySelector("summary")?.textContent).toBe("What the provider said");
+		expect(detail?.querySelector(".piem-chat__cutoff-raw")?.textContent).toBe("429 Rate limit reached for gpt-4o");
+		// Closed until asked for: the sentence above it is the report.
+		expect((detail as HTMLDetailsElement | null)?.open ?? false).toBe(false);
+	});
+
+	/*
+	 * `<details>` is not phrasing content, so it cannot sit inside the notice's
+	 * `<p>`. A renderer that nests it there produces markup the browser silently
+	 * reparents, which moves the disclosure out of the bubble.
+	 */
+	it("puts the disclosure beside the notice, not inside its paragraph", async () => {
+		const host = renderMessages([assistantMessage("", { stopReason: "error", errorMessage: "boom" })]);
+		await flushRender();
+
+		expect(host.querySelector(".piem-chat__interrupted .piem-chat__cutoff-detail")).toBeNull();
+		expect(host.querySelector(".piem-chat__bubble > .piem-chat__cutoff-detail")).not.toBeNull();
+	});
+
+	it("says nothing extra about a reply that ended normally", async () => {
+		const host = renderMessages([assistantMessage("the answer")]);
+		await flushRender();
+
+		expect(host.querySelector(".piem-chat__interrupted")).toBeNull();
+		expect(host.querySelector(".piem-chat__cutoff-detail")).toBeNull();
+	});
+
+	/*
+	 * Without this the screen-reader path announced the empty string for a turn
+	 * that failed before producing a word — a reader told, literally, that nothing
+	 * had happened. `youStoppedSpoken` / `replyTruncatedSpoken` proved the pattern
+	 * existed; `error` was the case it had not been extended to.
+	 */
+	it("announces a failure that produced no words at all", async () => {
+		const host = renderMessages([assistantMessage("", { stopReason: "error", errorMessage: "504 Gateway Time-out" })]);
+		await flushRender();
+
+		// Standing alone, so `assistantSpeech` publishes the notice rather than the
+		// sentence-continuing form — this turn has no sentence to continue.
+		const live = Array.from(host.querySelectorAll('[aria-live="polite"]'), (node) => node.textContent ?? "");
+		expect(live.some((text) => text.includes("The provider did not answer in time."))).toBe(true);
+	});
+
+	it("appends the failure to the words the turn did manage, as a sentence tail", async () => {
+		const host = renderMessages([assistantMessage("Half a thou", { stopReason: "error", errorMessage: "504 Gateway Time-out" })]);
+		await flushRender();
+
+		const live = Array.from(host.querySelectorAll('[aria-live="polite"]'), (node) => node.textContent ?? "");
+		expect(live.some((text) => text.includes("Half a thou — the provider did not answer in time."))).toBe(true);
+	});
+});
 
 function assistantMessage(text: string, overrides: Partial<AssistantMessage> = {}): AssistantMessage {
 	return { ...assistantBase(), content: [{ type: "text", text }], ...overrides };

@@ -7,8 +7,11 @@ import { getT } from "../i18n";
 const en = getT("en");
 const zh = getT("zh-cn");
 
-/** An assistant turn that ended for `stopReason`; only that field matters here. */
-function reply(stopReason: StopReason): AssistantMessage {
+/**
+ * An assistant turn that ended for `stopReason`; only that field and
+ * `errorMessage` matter here.
+ */
+function reply(stopReason: StopReason, errorMessage?: string): AssistantMessage {
 	return {
 		role: "assistant",
 		content: [{ type: "text", text: "Half a sen" }],
@@ -24,6 +27,7 @@ function reply(stopReason: StopReason): AssistantMessage {
 			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
 		},
 		stopReason,
+		errorMessage,
 		timestamp: 0,
 	};
 }
@@ -50,21 +54,53 @@ describe("describeReplyCutoff", () => {
 		expect(describeReplyCutoff(reply("toolUse"), en)).toBeNull();
 	});
 
-	it("stays silent for a failure, which the banner already reports", () => {
-		// `error` carries `errorMessage`, which reaches the user through the
-		// assertive banner. A second notice under the message would say it twice.
-		expect(describeReplyCutoff(reply("error"), en)).toBeNull();
+	/*
+	 * This case used to return `null`, on the grounds that the banner already
+	 * reported it. The banner's copy does not survive the next run's departure and
+	 * cannot say which turn it belonged to, so #239 moved the report here — where
+	 * it is positioned, persisted with the message, and sits above the regenerate
+	 * control that is the recovery.
+	 */
+	it("reports a turn the provider failed, in words the reader can act on", () => {
+		const cutoff = describeReplyCutoff(reply("error", "504 Gateway Time-out"), en);
+
+		expect(cutoff?.kind).toBe("failed");
+		expect(cutoff?.notice).toBe("The provider did not answer in time.");
+		expect(cutoff?.icon).toBe("alert-triangle");
+		expect(cutoff?.retryable).toBe(true);
 	});
 
-	it("translates both notices", () => {
+	it("keeps the provider's own words behind the sentence that summarised them", () => {
+		// The classification is made from wording, so the original has to stay
+		// reachable: a family guessed wrong then costs a headline, not a fact.
+		const cutoff = describeReplyCutoff(reply("error", "429 quota exhausted, check billing"), en);
+
+		expect(cutoff?.detail?.text).toBe("429 quota exhausted, check billing");
+		expect(cutoff?.detail?.label).toBe("What the provider said");
+		// Quota, not rate limit: waiting does not fix it, so no retry is offered.
+		expect(cutoff?.retryable).toBe(false);
+	});
+
+	it("still reports a failure the provider described with nothing at all", () => {
+		// The empty disclosure is the honest report that there was nothing to
+		// disclose; omitting it would read as the panel holding something back.
+		const cutoff = describeReplyCutoff(reply("error"), en);
+
+		expect(cutoff?.kind).toBe("failed");
+		expect(cutoff?.notice).toBe("The provider did not answer, and did not say why.");
+		expect(cutoff?.detail).toEqual({ label: "What the provider said", text: "" });
+	});
+
+	it("translates every notice", () => {
 		expect(describeReplyCutoff(reply("aborted"), zh)?.notice).toBe("你已停止这条回复。");
 		expect(describeReplyCutoff(reply("length"), zh)?.notice).toBe("这条回复达到模型的长度上限，提前结束了。");
+		expect(describeReplyCutoff(reply("error", "504 Gateway Time-out"), zh)?.notice).toBe("供应商没在规定时间内回话。");
 	});
 
 	it("phrases the spoken form to continue a sentence, not to open one", () => {
 		// It is appended to the reply text for a screen reader, so an upper-case
 		// start would read as a new announcement mid-sentence.
-		for (const stopReason of ["aborted", "length"] as const) {
+		for (const stopReason of ["aborted", "length", "error"] as const) {
 			const spoken = describeReplyCutoff(reply(stopReason), en)?.spoken ?? "";
 			expect(spoken).not.toBe("");
 			expect(spoken[0]).toBe(spoken[0]?.toLowerCase());

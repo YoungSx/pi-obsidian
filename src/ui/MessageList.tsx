@@ -813,10 +813,29 @@ function MessageRow({ index, message, isStreaming, renderContext, onRetry, onEdi
 				<div className="piem-chat__bubble">
 					<div className="piem-chat__message-content">{renderMessageContent(message, { index, isStreaming, renderContext })}</div>
 					{cutoff ? (
-						<p className="piem-chat__interrupted">
-							<ObsidianIcon name={cutoff.icon} />
-							{cutoff.notice}
-						</p>
+						<>
+							<p className={`piem-chat__interrupted piem-chat__interrupted--${cutoff.kind}`}>
+								<ObsidianIcon name={cutoff.icon} className="piem-chat__interrupted-icon" />
+								{cutoff.notice}
+							</p>
+							{/*
+							 * The provider's own words, one disclosure below the sentence that
+							 * summarised them. A sibling of the notice rather than a child:
+							 * `<details>` is not phrasing content and cannot live inside the
+							 * `<p>`.
+							 *
+							 * Closed by default and uncapped when open — the height cap the
+							 * banner needed was a consequence of sitting *above* the
+							 * transcript, and nothing here is pushing a conversation out of a
+							 * sidebar. A reader who opened it asked for all of it.
+							 */}
+							{cutoff.detail ? (
+								<details className="piem-chat__cutoff-detail">
+									<summary>{cutoff.detail.label}</summary>
+									<p className="piem-chat__cutoff-raw">{cutoff.detail.text}</p>
+								</details>
+							) : null}
+						</>
 					) : null}
 				</div>
 				{message.role === "assistant" && !isStreaming ? (
@@ -826,6 +845,7 @@ function MessageRow({ index, message, isStreaming, renderContext, onRetry, onEdi
 						durationMs={replyTiming?.durationMs}
 						startedAt={replyTiming?.startedAt}
 						onRetry={onRetry}
+						failed={cutoff?.kind === "failed"}
 					/>
 				) : null}
 				{message.role === "user" && (onEdit || onCompare) ? (

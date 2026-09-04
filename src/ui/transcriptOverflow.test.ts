@@ -132,6 +132,35 @@ describe("prose wraps where machine output scrolls", () => {
 	});
 });
 
+/*
+ * The provider's own words, behind the failure row's disclosure (#239). Machine
+ * output, but not code: its horizontal extent carries nothing, so it wraps
+ * rather than owning a scroll box — which is what keeps it out of
+ * `SCROLLS_IN_PLACE` above and keeps the column the only thing that scrolls.
+ * A later switch to `<pre>` would satisfy neither half of the invariant.
+ */
+describe("a provider error wraps rather than scrolling", () => {
+	it("breaks inside a token, so an org id or URL cannot push the column", () => {
+		expect(declarations(ruleBody(".piem-chat__cutoff-raw"))).toContain("overflow-wrap: anywhere");
+	});
+
+	it("keeps the newlines a provider joined its message with", () => {
+		// Without `pre-line` a multi-line diagnostic collapses into one run-on
+		// sentence; with `pre` it would stop wrapping and need a scroll box.
+		expect(declarations(ruleBody(".piem-chat__cutoff-raw"))).toContain("white-space: pre-line");
+	});
+
+	it("takes no height cap, unlike the banner it replaced", () => {
+		/*
+		 * The banner caps this content at 9em with its own scrollbar, because it
+		 * sits *above* the transcript and an unbounded dump pushed the conversation
+		 * out of a sidebar pane. Inside the transcript there is nothing to push, and
+		 * a reader who opened the disclosure asked for all of it.
+		 */
+		expect(declarations(ruleBody(".piem-chat__cutoff-raw"))).not.toContain("max-height");
+	});
+});
+
 describe("intrinsically sized media comes down to the column", () => {
 	/*
 	 * A screenshot pasted from a desktop carries its own width — the fixture here is
