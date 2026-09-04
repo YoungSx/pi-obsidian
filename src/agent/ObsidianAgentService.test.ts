@@ -970,10 +970,14 @@ describe("ObsidianAgentService", () => {
 		expect(await service.sendPrompt("Hello")).toBe(true);
 	});
 
-	it("keeps a reply whose write to the vault failed, and reports it as a notice", async () => {
-		// The reader has already seen the reply on screen when the append fails, so
-		// a red alert would overstate the damage; it arrives on the grey notice
-		// channel instead, and the earlier warning (if any) is kept alongside.
+	it("marks the reply whose write to the vault failed, by identity", async () => {
+		/*
+		 * The reader has already seen the reply when the append fails, so this is not
+		 * a red alert — but it is the one report in the panel about loss they cannot
+		 * undo, so it also cannot be a dismissible line at the top of the panel that
+		 * the next send clears. It is reported by identity, and the transcript puts
+		 * the warning under the reply it names.
+		 */
 		const adapter = new MemoryAdapter();
 		const service = createService(adapter);
 		// Open the session first, so only the turn's writes hit the broken append.
@@ -991,8 +995,33 @@ describe("ObsidianAgentService", () => {
 
 		const snapshot = service.getSnapshot();
 		expect(snapshot.errorMessage).toBeUndefined();
-		expect(snapshot.noticeMessage).toContain("Disk full");
-		expect(snapshot.messages.at(-1)?.role).toBe("assistant");
+		// Neither channel: nothing the next send can erase.
+		expect(snapshot.noticeMessage).toBeUndefined();
+		const last = snapshot.messages.at(-1);
+		expect(last?.role).toBe("assistant");
+		expect(snapshot.unpersistedMessages).toContain(last as object);
+	});
+
+	it("marks every message of a run the log refused, not only the first", async () => {
+		// The realistic cause is a log the host cannot write at all, so stopping at
+		// the first failure would mark one message and leave the rest of the run
+		// silently unrecorded.
+		const adapter = new MemoryAdapter();
+		const service = createService(adapter);
+		await service.sendPrompt("First conversation");
+		const original = adapter.append.bind(adapter);
+		adapter.append = async (path: string, data: string) => {
+			if (data.includes('"role"')) {
+				throw new Error("Disk full");
+			}
+			return original(path, data);
+		};
+
+		await service.sendPrompt("Second conversation");
+
+		const marked = service.getSnapshot().unpersistedMessages ?? [];
+		// Both halves of the turn the log refused: the question and the reply.
+		expect(marked.length).toBeGreaterThanOrEqual(2);
 	});
 
 	it("reports context fill against the model's window, heuristic before any usage", async () => {

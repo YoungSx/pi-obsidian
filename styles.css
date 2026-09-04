@@ -992,6 +992,24 @@ button.piem-chat__context-open {
 }
 
 /*
+ * A message the session log did not take, and the button that rescues it.
+ *
+ * Muted like the rest of the row and deliberately not red: the red glyph is
+ * spent on the failure that has a retry, and this row's weight comes from where
+ * it sits and from having no dismiss control — it is the one report in the panel
+ * about loss the reader cannot undo.
+ *
+ * The action is a bare button rather than an icon: it has to be readable at a
+ * glance by someone who has just been told their words are not saved, and the
+ * icon rows beside it are hover-revealed on desktop.
+ */
+.piem-chat__interrupted-action {
+	font-size: var(--font-ui-smaller);
+	margin-inline-start: var(--size-4-1);
+	min-height: var(--size-4-6);
+}
+
+/*
  * The provider's untouched text, behind a disclosure.
  *
  * `pre-line` plus `anywhere`, which is the recipe `.piem-chat__banner-text` and

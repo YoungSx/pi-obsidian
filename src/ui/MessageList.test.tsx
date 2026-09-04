@@ -1215,6 +1215,65 @@ function userMessage(text: string): UserMessage {
 	return { role: "user", content: text, timestamp: Date.now() };
 }
 
+describe("MessageList marks a message the session log did not take", () => {
+	/*
+	 * The inversion this fixes: every other report in the panel describes something
+	 * retryable, and this one describes silent irreversible loss — yet it rode the
+	 * dismissible grey notice, ranked below "Nothing to tidy up yet.", and was
+	 * cleared unconditionally by the next send. The warning about the reply about to
+	 * be lost was destroyed by the act of continuing the conversation.
+	 */
+	it("warns under the reply it names, with no way to dismiss it", async () => {
+		const reply = assistantMessage("the answer");
+		const host = renderMessages([reply], { unpersistedMessages: [reply] });
+		await flushRender();
+
+		const warning = host.querySelector(".piem-chat__interrupted--unsaved");
+		expect(warning?.textContent).toContain("Not saved to the vault");
+		// No dismiss control anywhere in the row: this one cannot be acknowledged
+		// away, because acknowledging it does not make the reply exist on disk.
+		expect(warning?.querySelector(".piem-chat__banner-dismiss")).toBeNull();
+	});
+
+	it("puts the rescue one press away, since the reply actions are hover-revealed", async () => {
+		const reply = assistantMessage("the answer");
+		const host = renderMessages([reply], { unpersistedMessages: [reply] });
+		await flushRender();
+
+		const action = host.querySelector(".piem-chat__interrupted--unsaved .piem-chat__interrupted-action");
+		expect(action?.textContent).toBe("Copy it out");
+	});
+
+	/*
+	 * A question that never reached disk is worse than a reply that did not: the
+	 * transcript reloads missing the words the reader typed, and nothing else in
+	 * the panel would ever mention it.
+	 */
+	it("marks the user's own turn too", async () => {
+		const question = userMessage("a question");
+		const host = renderMessages([question], { unpersistedMessages: [question] });
+		await flushRender();
+
+		expect(host.querySelector(".piem-chat__interrupted--unsaved")).not.toBeNull();
+	});
+
+	it("marks only the message it was given, not the whole transcript", async () => {
+		const first = assistantMessage("saved fine");
+		const second = assistantMessage("never written");
+		const host = renderMessages([first, second], { unpersistedMessages: [second] });
+		await flushRender();
+
+		expect(host.querySelectorAll(".piem-chat__interrupted--unsaved")).toHaveLength(1);
+	});
+
+	it("says nothing when every message reached the log", async () => {
+		const host = renderMessages([assistantMessage("the answer")], { unpersistedMessages: [] });
+		await flushRender();
+
+		expect(host.querySelector(".piem-chat__interrupted--unsaved")).toBeNull();
+	});
+});
+
 describe("MessageList provider failure, reported where it happened", () => {
 	/*
 	 * #239. The failure used to reach the user only through the top banner, whose
