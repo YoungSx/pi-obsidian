@@ -5,6 +5,7 @@ import { MarkdownText } from "./MarkdownText";
 import { IconButton } from "./ObsidianIcon";
 import { configItems, incompleteNote, processSteps, reportBody, statusText, timingLine, usageItems } from "./inspectorCopy";
 import { useT } from "./TranslatorContext";
+import { suppressOwnTooltip } from "./tooltipSuppression";
 
 export interface SubagentInspectorProps {
 	/** Every subagent this session spawned, oldest first. */
@@ -80,7 +81,12 @@ export function SubagentInspector({
 	const showDetail = selected !== undefined;
 
 	return (
-		<div className="piem-subagents" role="group" aria-label={t.t("subagents.panelAria")}>
+		<div
+			className="piem-subagents"
+			role="group"
+			aria-label={t.t("subagents.panelAria")}
+			onMouseOver={suppressOwnTooltip}
+		>
 			{showDetail ? (
 				<SubagentDetail
 					snapshot={selected}
@@ -144,7 +150,11 @@ function SubagentList({ snapshots, onSelect, onStopAll }: SubagentListProps): Re
 					</button>
 				) : null}
 			</p>
-			<ul className="piem-subagents__list" aria-label={t.t("subagents.listAria")}>
+			<ul
+				className="piem-subagents__list"
+				aria-label={t.t("subagents.listAria")}
+				onMouseOver={suppressOwnTooltip}
+			>
 				{snapshots.map((snapshot) => (
 					<li key={snapshot.id}>
 						<SubagentRow snapshot={snapshot} onSelect={onSelect} />
@@ -170,7 +180,9 @@ function SubagentRow({ snapshot, onSelect }: { snapshot: SubagentSnapshot; onSel
 			type="button"
 			className="piem-subagents__row"
 			onClick={() => onSelect(snapshot.id)}
-			aria-label={t.t("subagents.openDetail", { role: snapshot.role, status: statusText(snapshot.status, t) })}
+			/* Task first, matching how the row itself reads — the role and the
+			    status are printed in the row's meta line below. */
+			aria-label={t.t("subagents.openDetail", { task: snapshot.task })}
 		>
 			<span className="piem-subagents__row-head">
 				<StatusDot status={snapshot.status} />

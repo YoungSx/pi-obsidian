@@ -224,10 +224,10 @@ describe("the list is a record, read forward", () => {
 		expect(host.querySelector(".piem-subagents__dot")?.getAttribute("aria-hidden")).toBe("true");
 	});
 
-	it("names a row for a screen reader by role and state, since the task can be a paragraph", async () => {
+	it("names a row for a screen reader by its task, since the role can be a paragraph of identical ones", async () => {
 		const host = await renderInspector({ snapshots: [snapshot({ status: "running" })] });
 
-		expect(host.querySelector(".piem-subagents__row")?.getAttribute("aria-label")).toBe("Open scout: working");
+		expect(host.querySelector(".piem-subagents__row")?.getAttribute("aria-label")).toBe("Sweep Projects/ for stale notes — open run");
 	});
 });
 

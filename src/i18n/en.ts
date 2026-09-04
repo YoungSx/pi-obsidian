@@ -1327,8 +1327,8 @@ export const en = {
 		entryRunning: "{count} subagent(s) working. Open the subagent panel.",
 		entrySettled: "{count} subagent(s) in this chat. Open the subagent panel.",
 		popoverAria: "Subagents in this chat",
-		/** One popover row: opens the panel already showing that run. */
-		openDetail: "Open {role}: {status}",
+		/** One popover row: opens the panel already showing that run. Task first — a reader scanning rows remembers what they asked, and "scout" describes several of them. */
+		openDetail: "{task} — open run",
 		listAria: "Subagents, oldest first",
 		empty: "No subagents yet.",
 		emptyHint: "When Piem hands a task to a subagent, the run shows up here: what it was asked, what it reported, and every step in between.",

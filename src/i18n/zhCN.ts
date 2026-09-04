@@ -828,7 +828,7 @@ export const zhCN: DeepPartial<EnCopy> = {
 		entryRunning: "{count} 个子代理正在干活。打开子代理面板。",
 		entrySettled: "此对话共 {count} 个子代理。打开子代理面板。",
 		popoverAria: "此对话的子代理",
-		openDetail: "打开 {role}：{status}",
+		openDetail: "{task}——查看运行",
 		listAria: "子代理，最早的在前",
 		empty: "还没有子代理。",
 		emptyHint: "当 Piem 把一件事交给子代理去做，这里会出现那次运行：它接到什么、报回什么，以及中间的每一步。",
