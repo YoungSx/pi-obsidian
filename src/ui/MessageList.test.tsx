@@ -418,6 +418,34 @@ describe("MessageList reply actions", () => {
 	});
 
 	/*
+	 * A tool-using turn leaves several assistant entries — one per model call. The
+	 * actions row is a turn-level affordance: copy/insert under a mid-turn "let me
+	 * look" would offer half a process sentence, so only the reply that closes its
+	 * turn earns the row.
+	 */
+	it("gives the actions row to only the reply that closes its turn, not every model call inside it", async () => {
+		const host = renderMessages(
+			[
+				userMessage("q1"),
+				assistantMessage("let me look"),
+				toolResultFor("read"),
+				assistantMessage("the answer"),
+				userMessage("q2"),
+				assistantMessage("the second answer"),
+			],
+			{ onRetry: () => undefined },
+		);
+		await flushRender();
+
+		const replies = host.querySelectorAll(".piem-chat__message--assistant");
+		expect(replies).toHaveLength(3);
+		// The turn-tail rows are the two answers; the process sentence above them has none.
+		expect(replies[0]?.querySelector(":scope > .piem-chat__message-actions")).toBeNull();
+		expect(replies[1]?.querySelector(":scope > .piem-chat__message-actions")).not.toBeNull();
+		expect(replies[2]?.querySelector(":scope > .piem-chat__message-actions")).not.toBeNull();
+	});
+
+	/*
 	 * The blank-row defect (#239): a provider failure before the first token leaves
 	 * an assistant message with no prose, and the guard here used to be `if (!text)
 	 * return null` — so the transcript grew an empty row and the retry that would
