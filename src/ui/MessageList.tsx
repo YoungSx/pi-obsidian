@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from "react";
-import type { AgentMessage, CompactionSummaryMessage } from "@earendil-works/pi-agent-core";
+import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import type { PendingToolCall } from "../agent/ObsidianAgentService";
 import type { AssistantMessage, ImageContent, ToolCall, ToolResultMessage, UserMessage } from "@earendil-works/pi-ai";
 import type { App, Component, IconName } from "obsidian";
@@ -29,6 +29,17 @@ import {
 	type TraceRowRef,
 } from "./traceFold";
 import { planToolPairs, pairedResult, resultIsPaired, type ToolPairPlan } from "./toolPair";
+import {
+	compactionDrawsMessage,
+	compactionRowClass,
+	compactionRowIcon,
+	compactionRowLabel,
+	compactionRowsAt,
+	planCompactionRows,
+	type CompactionPlan,
+	type CompactionRow,
+} from "./compactionRow";
+import type { CompactionEvent } from "../agent/compaction";
 import type { AskUserAnswer } from "../tools/askUserQuestion";
 import type { AskUserRequest } from "../tools/askUserBroker";
 
@@ -122,6 +133,23 @@ export interface MessageListProps {
 	hasActiveNote?: boolean;
 	/** Whether a compaction request is in flight — one more reason to hide the follow-ups. */
 	isCompacting?: boolean;
+	/**
+	 * The tidying attempt the transcript draws, from working to settled or failed.
+	 *
+	 * Separate from {@link isCompacting}, which is only the busy flag other rows
+	 * gate on: this is the row's own material, and it outlives the request on the
+	 * failure path. A success carries no event — pi's summary message in
+	 * {@link messages} is the record.
+	 */
+	compactionEvent?: CompactionEvent | null;
+	/**
+	 * Messages the last compaction kept, which is what places its row.
+	 *
+	 * pi files the summary at index 0 because that is what replaces the history in
+	 * the *request*; the tidy itself ran after every turn it retained. See
+	 * {@link planCompactionRows}.
+	 */
+	compactionRetained?: number;
 	/**
 	 * Sends a tapped quick-action prompt as the user's own message.
 	 *
@@ -392,6 +420,8 @@ export function MessageList({
 	composerAnchorId,
 	hasActiveNote = false,
 	isCompacting = false,
+	compactionEvent = null,
+	compactionRetained = 0,
 	onQuickAction,
 	suggestedActions = [],
 	pendingQuestion = null,
@@ -411,6 +441,7 @@ export function MessageList({
 	// has to break a run the same way the failure itself always has.
 	const pairPlan = planToolPairs(messages);
 	const foldPlan = planTraceFolds(messages, { mode: traceExpand, showAgentDetails, liveRow, pairs: pairPlan });
+	const compactionPlan = planCompactionRows({ messages, event: compactionEvent, retained: compactionRetained });
 	const context: MessageContext = { app, component, sourcePath, showAgentDetails, traceExpand, foldPlan, pairPlan, liveRow, t };
 	const regenerateIndex = regenerableIndex(messages);
 	const editIndex = editableQuestionIndex(messages);
@@ -520,8 +551,15 @@ export function MessageList({
 					/>
 				) : (
 					messages.map((message, index) => (
+						<React.Fragment key={index}>
+							{/*
+							 * The tidying row, drawn at the position the tidy happened rather
+							 * than where pi files its summary. See `compactionRow.ts`; the
+							 * message it was projected from draws nothing of its own.
+							 */}
+							{seamRows(compactionPlan, index, context)}
+							{compactionDrawsMessage(compactionPlan, index) ? null : (
 						<MessageRow
-							key={index}
 							index={index}
 							message={message}
 							isStreaming={index === activeIndex}
@@ -547,8 +585,16 @@ export function MessageList({
 							}
 							notPersisted={unpersistedMessages?.includes(message)}
 						/>
+							)}
+						</React.Fragment>
 					))
 				)}
+				{/*
+				 * A tidy in flight draws at the tail, because that is where "now" is —
+				 * and, once it lands, where its own summary row will be. The reader
+				 * watching the panel work sees one row change state in place.
+				 */}
+				{seamRows(compactionPlan, messages.length, context)}
 				{/*
 				 * The question sits at the tail, below the last thing said and above the
 				 * running-tools line — which is where the turn actually is: the tool that
@@ -818,11 +864,6 @@ function MessageRow({
 	replyTiming,
 	notPersisted,
 }: MessageRowProps): React.JSX.Element | null {
-	// The summary fronts a compacted transcript; it reads as a divider ("history
-	// above this was summarized"), not as one more message bubble.
-	if (message.role === "compactionSummary") {
-		return <CompactionDivider message={message} renderContext={renderContext} />;
-	}
 	if (message.role === "toolResult") {
 		/*
 		 * Drawn already, by the call row it answered — see `toolPair.ts`. Checked
@@ -1052,23 +1093,49 @@ function replyCutoff(message: UserMessage | AssistantMessage, t: Translator): Re
 }
 
 /**
- * Visible marker that everything above it was summarized.
+ * The tidying rows planned for one transcript position, usually none.
  *
- * Rendered outside the normal message card so scrolling back makes it obvious
- * why earlier turns are gone — the raw summary text stays below the heading,
- * plain-text rendered via the harness kind so its formatting is never distorted
- * by the Markdown pipeline.
+ * A function rather than inline markup because two call sites need it — every
+ * message position, and the tail — and the tail is the one that matters: a tidy in
+ * flight has no message to hang on, so without a row after the last message the
+ * reader would sit through the wait with nothing on screen saying why.
  */
-function CompactionDivider({ message, renderContext }: { message: CompactionSummaryMessage; renderContext: MessageContext }): React.JSX.Element {
-	const t = useT();
+function seamRows(plan: CompactionPlan, at: number, context: MessageContext): React.JSX.Element[] {
+	return compactionRowsAt(plan, at).map((row, order) => (
+		<CompactionSeam key={`tidy-${at}-${order}`} row={row} context={context} />
+	));
+}
+
+/**
+ * One tidying attempt, as one row.
+ *
+ * The transcript's own trace vocabulary — a collapsed row that opens onto what it
+ * is about — set across the column as a seam rather than aligned left with the
+ * tool rows, because this is the one row that is not something the model did on
+ * the reader's behalf: it is the conversation itself being cut. The state changes
+ * in place, working to settled, the way a tool call becomes its result.
+ *
+ * The failure reveals the provider's untouched words in the same treatment the
+ * failed-reply pill uses, and a settled summary reveals prose set in the interface
+ * font: it is writing about the conversation, not machine output.
+ */
+function CompactionSeam({ row, context }: { row: CompactionRow; context: MessageContext }): React.JSX.Element {
 	return (
-		// No `aria-label`: the heading inside is the section's name and the first
-		// thing read aloud anyway, and a label here would only surface as a native
-		// tooltip restating that heading on hover.
-		<section className="piem-chat__compaction">
-			<div className="piem-chat__compaction-heading">{t.t("chat.earlierSummarized")}</div>
-			<Block text={message.summary} kind="summary" isStreaming={false} context={renderContext} />
-		</section>
+		<Trace
+			icon={compactionRowIcon(row.state)}
+			name={compactionRowLabel(row.state, context.t)}
+			className={compactionRowClass(row.state)}
+			// Running has nothing behind it yet, so it renders flat — a disclosure
+			// that opens onto nothing is the one dishonesty a trace row must not commit.
+			body={
+				row.body === undefined ? null : row.state === "failed" ? (
+					<p className="piem-chat__cutoff-raw">{row.body}</p>
+				) : (
+					<Block text={row.body} kind="summary" isStreaming={false} context={context} />
+				)
+			}
+			open={traceOpensByDefault(context.traceExpand, "harness", false)}
+		/>
 	);
 }
 

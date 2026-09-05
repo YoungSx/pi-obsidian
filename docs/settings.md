@@ -39,8 +39,9 @@ Behavior on top, storage underneath.
 Two things happen here without a switch, and both are worth knowing about. The
 note you have open is injected into **every** turn — its path and its body — so
 you never have to say "the note I'm looking at". And when the context window
-fills, the conversation compacts itself; *Tidy up earlier messages* in the
-command palette does the same thing on demand.
+fills, the conversation tidies itself; *Tidy earlier thoughts* in the
+command palette does the same thing on demand, and the transcript records each
+tidy as a seam you can open to read the summary it wrote.
 
 - **Show agent details** — token counts, spend, and raw tool arguments in the
   chat panel. Off by default; turn it on when you want to see what the agent
@@ -89,7 +90,7 @@ Everything Piem adds to the command palette, shown as *Piem: …*:
 | Open log view | Opens the log leaf |
 | New chat | Starts a fresh conversation |
 | Stop response | Aborts the turn in flight |
-| Tidy up earlier messages | Compacts the conversation by hand |
+| Tidy earlier thoughts | Compacts the conversation by hand |
 | Focus chat input | Jumps the cursor into the composer |
 | Ask about selection | Sends your selection as the question |
 | Ask about this note | Sends the current note as the question |

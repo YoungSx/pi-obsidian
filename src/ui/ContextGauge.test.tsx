@@ -223,7 +223,7 @@ describe("ContextGauge popover", () => {
 		document.body.replaceChildren();
 		const measuredHost = await renderGauge({ fill: fill({ heuristicOnly: false }) });
 		expect((await openPopover(measuredHost))?.querySelector(".piem-chat__context-note")?.textContent).toContain(
-			"Compaction starts near 98%",
+			"Tidying starts near 98%",
 		);
 	});
 
@@ -480,7 +480,7 @@ describe("ContextGauge tidy action", () => {
 
 		const tidy = (await openPopover(host))?.querySelector<HTMLButtonElement>(".piem-chat__context-tidy");
 		expect(tidy?.disabled).toBe(true);
-		expect(tidy?.getAttribute("aria-label")).toBe("Tidy up earlier messages once the reply finishes");
+		expect(tidy?.getAttribute("aria-label")).toBe("Tidy earlier thoughts once the reply finishes");
 	});
 
 	it("disables itself while a compaction is already running, and says so", async () => {
@@ -488,7 +488,7 @@ describe("ContextGauge tidy action", () => {
 
 		const tidy = (await openPopover(host))?.querySelector<HTMLButtonElement>(".piem-chat__context-tidy");
 		expect(tidy?.disabled).toBe(true);
-		expect(tidy?.getAttribute("aria-label")).toBe("Tidying up earlier messages…");
+		expect(tidy?.getAttribute("aria-label")).toBe("Tidying thoughts…");
 	});
 });
 
@@ -508,14 +508,14 @@ describe("ContextGauge in Chinese", () => {
 		expect(host.querySelector(".piem-chat__context-gauge")?.getAttribute("aria-label")).toContain("上下文窗口占用");
 		const popover = await openPopover(host);
 		expect(popover?.textContent).toContain("上下文即将占满");
-		expect(popover?.querySelector(".piem-chat__context-tidy")?.getAttribute("aria-label")).toBe("整理较早的消息");
+		expect(popover?.querySelector(".piem-chat__context-tidy")?.getAttribute("aria-label")).toBe("整理较早思维");
 	});
 
 	it("translates the disabled reason too", async () => {
 		const host = await renderGauge({ isStreaming: true }, "zh-cn");
 
 		const tidy = (await openPopover(host))?.querySelector(".piem-chat__context-tidy");
-		expect(tidy?.getAttribute("aria-label")).toBe("回复结束后可整理较早的消息");
+		expect(tidy?.getAttribute("aria-label")).toBe("回复结束后可整理较早思维");
 	});
 });
 

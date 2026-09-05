@@ -56,18 +56,15 @@ afterEach(() => {
 	document.body.replaceChildren();
 });
 
-describe("MessageList compaction divider", () => {
-	it("renders the summary as a labelled divider instead of a plain message bubble", async () => {
+describe("MessageList tidying seam", () => {
+	it("draws the settled tidy as a seam row, not as a message bubble", async () => {
 		const host = renderMessages([compactionSummary("Summary of everything earlier")]);
 		await flushRender();
 
-		const divider = host.querySelector("section.piem-chat__compaction");
-		expect(divider).not.toBeNull();
-		// The visible heading is the divider's name; an `aria-label` would only
-		// resurface as a native hover tooltip restating it.
-		expect(divider?.getAttribute("aria-label")).toBeNull();
-		expect(divider?.querySelector(".piem-chat__compaction-heading")?.textContent).toContain("summarized");
-		expect(divider?.textContent).toContain("Summary of everything earlier");
+		const seam = host.querySelector("details.piem-chat__trace--seam");
+		expect(seam).not.toBeNull();
+		expect(seam?.querySelector(".piem-chat__trace-name")?.textContent).toBe("Thoughts tidied");
+		expect(seam?.textContent).toContain("Summary of everything earlier");
 		// Not modelled as a normal message card.
 		expect(host.querySelector("article.piem-chat__message--compactionSummary")).toBeNull();
 	});
@@ -77,7 +74,7 @@ describe("MessageList compaction divider", () => {
 		await flushRender();
 
 		expect(markdownRenderMock).toHaveBeenCalledTimes(0);
-		const text = document.querySelector(".piem-chat__compaction pre");
+		const text = document.querySelector(".piem-chat__trace--seam .piem-chat__text");
 		expect(text?.textContent).toBe("**not** markdown #heading");
 	});
 
@@ -87,9 +84,57 @@ describe("MessageList compaction divider", () => {
 		renderMessages([compactionSummary("Summary of everything earlier")]);
 		await flushRender();
 
-		const text = document.querySelector(".piem-chat__compaction pre");
+		const text = document.querySelector(".piem-chat__trace--seam .piem-chat__text");
 		expect(text?.classList.contains("piem-chat__text--prose")).toBe(true);
 		expect(text?.classList.contains("piem-chat__text--machine")).toBe(false);
+	});
+
+	it("draws a tidy in flight at the tail, where the reader is watching", async () => {
+		// The wait used to be reported in the status bar above the composer while its
+		// outcome appeared as a divider further up the transcript. One row now, at the
+		// position the next state change will keep.
+		const host = renderMessages([userMessage("Audit my reading list")], {
+			compactionEvent: { state: "running", anchor: 1 },
+		});
+		await flushRender();
+
+		const rows = Array.from(host.querySelectorAll(".piem-chat__message, .piem-chat__trace"));
+		const seam = host.querySelector(".piem-chat__trace--seam");
+		expect(seam).not.toBeNull();
+		expect(rows.at(-1)).toBe(seam ?? undefined);
+		expect(seam?.querySelector(".piem-chat__trace-name")?.textContent).toBe("Tidying thoughts…");
+		// Nothing to reveal yet, so no disclosure affordance pointing at nothing.
+		expect(seam?.tagName.toLowerCase()).toBe("div");
+		expect(seam?.className).toContain("piem-chat__trace--live");
+	});
+
+	it("reports a failed tidy on the row the attempt already occupied", async () => {
+		const host = renderMessages([userMessage("Audit my reading list")], {
+			compactionEvent: { state: "failed", anchor: 1, error: "429 slow down" },
+		});
+		await flushRender();
+
+		const seam = host.querySelector("details.piem-chat__trace--seam");
+		expect(seam?.className).toContain("piem-chat__trace--seam-failed");
+		expect(seam?.querySelector(".piem-chat__trace-name")?.textContent).toBe("Could not tidy thoughts");
+		expect(seam?.querySelector(".piem-chat__cutoff-raw")?.textContent).toBe("429 slow down");
+	});
+
+	it("draws the settled seam after the tail it kept, not at the head pi files it under", async () => {
+		// pi puts the summary at index 0 because that is what replaces the history in
+		// the request; the tidy itself ran once those retained turns had happened.
+		const host = renderMessages(
+			[compactionSummary("Earlier turns"), userMessage("kept question"), assistantMessage("kept reply"), userMessage("asked afterwards")],
+			{ compactionRetained: 2 },
+		);
+		await flushRender();
+
+		const rows = Array.from(host.querySelectorAll(".piem-chat__message, .piem-chat__trace"));
+		const seam = host.querySelector(".piem-chat__trace--seam");
+		expect(rows).toHaveLength(4);
+		// Two retained turns above it, the question that arrived afterwards below.
+		expect(rows.indexOf(seam as Element)).toBe(2);
+		expect(rows.at(-1)?.className).toContain("piem-chat__message--user");
 	});
 
 	it("announces running tools as a status region, in the reader's vocabulary", async () => {

@@ -697,6 +697,8 @@ export function ChatApp({ service, inputController, component, draftStore, onOpe
 					composerAnchorId={composerAnchorId}
 					hasActiveNote={hasActiveNote}
 					isCompacting={snapshot.isCompacting}
+					compactionEvent={snapshot.compactionEvent}
+					compactionRetained={snapshot.compactionRetained}
 					onQuickAction={handleQuickAction}
 					suggestedActions={suggestedActions}
 					pendingQuestion={ask.request}
@@ -711,13 +713,7 @@ export function ChatApp({ service, inputController, component, draftStore, onOpe
 				 * controls below it, and pinning it to the top pushed the first message
 				 * down behind numbers the reader had not asked to read first.
 				 */}
-				<ChatStatusBar
-					isInitializing={isInitializing}
-					isCompacting={snapshot.isCompacting}
-					isRewinding={snapshot.isRewinding}
-					showAgentDetails={snapshot.showAgentDetails}
-					run={run}
-				/>
+				<ChatStatusBar isInitializing={isInitializing} isRewinding={snapshot.isRewinding} run={run} />
 
 				<ChatComposer
 					input={input}

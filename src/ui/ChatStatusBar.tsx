@@ -5,11 +5,8 @@ import { useT } from "./TranslatorContext";
 
 export interface ChatStatusBarProps {
 	isInitializing: boolean;
-	isCompacting: boolean;
 	/** True while a retry/edit-resend runs its branch summary and rewind. */
 	isRewinding: boolean;
-	/** Whether the panel may show agent-internal readouts at all. */
-	showAgentDetails: boolean;
 	/**
 	 * The run now in flight, carried while the turn streams and dropped when it
 	 * settles. Present drives the elapsed-and-steps readout; absent means idle,
@@ -38,14 +35,15 @@ export interface ChatStatusBarProps {
  * The occupancy meter and the spend counter used to live here too, on the same
  * row as the status line. Both moved into {@link ContextGauge}'s popover, beside
  * Send: they answer one question ("is there room, and what has it cost") and
- * splitting them across a bar and a ring said it twice. What is left is a single
- * live line, which is a job this element can hold alone.
+ * splitting them across a bar and a ring said it twice. Tidying left the same way
+ * and for the same reason, into the transcript row that also carries its outcome.
+ * What is left is a single live line, which is a job this element can hold alone.
  *
  * Never unmounts: when there is nothing to report it collapses to the
  * screen-reader-only treatment, so an idle chat spends no height on an empty row
  * while its live region stays in the DOM. See `isQuiet`.
  */
-export function ChatStatusBar({ isInitializing, isCompacting, isRewinding, showAgentDetails, run }: ChatStatusBarProps): React.JSX.Element {
+export function ChatStatusBar({ isInitializing, isRewinding, run }: ChatStatusBarProps): React.JSX.Element {
 	const t = useT();
 	/*
 	 * The elapsed readout reads the clock at render time, not from state: every
@@ -67,14 +65,14 @@ export function ChatStatusBar({ isInitializing, isCompacting, isRewinding, showA
 		return () => window.clearInterval(timer);
 	}, [isRunning]);
 	const progress = run ? runProgressText(run, Date.now(), t) : null;
-	const status = chatStatusText({ isInitializing, isCompacting, isRewinding, showAgentDetails }, t);
+	const status = chatStatusText({ isInitializing, isRewinding }, t);
 	/*
 	 * Nothing to show, but still something to keep: the bar collapses to the
 	 * screen-reader-only treatment rather than unmounting.
 	 *
 	 * An `aria-live` region is only announced if it was already in the DOM when
 	 * its content changed. Returning null here — which this did — meant the very
-	 * first "Opening chat…" (or compaction notice) of a quiet chat arrived in a
+	 * first "Opening chat…" (or resend notice) of a quiet chat arrived in a
 	 * region inserted in the same commit, which a screen reader may never
 	 * announce at all. Hiding it visually costs no height and keeps the region
 	 * discovered.
@@ -92,7 +90,7 @@ export function ChatStatusBar({ isInitializing, isCompacting, isRewinding, showA
 			 * screen reader has to re-discover, and the next state change after that
 			 * can go unannounced.
 			 */}
-			<span className={`piem-chat__status${isCompacting ? " piem-chat__compacting" : ""}`} role="status" aria-live="polite">
+			<span className="piem-chat__status" role="status" aria-live="polite">
 				{status ? (
 					<>
 						<ObsidianIcon name="loader-circle" className="piem-chat__spinner" />

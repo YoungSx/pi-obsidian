@@ -19,7 +19,7 @@ export const zhCN: DeepPartial<EnCopy> = {
 		openChat: "打开对话",
 		newChat: "新建对话",
 		stopResponse: "停止回复",
-		tidyUp: "整理较早的消息",
+		tidyUp: "整理较早思维",
 		focusInput: "聚焦对话输入框",
 		askAboutSelection: "询问所选内容",
 		askAboutNote: "询问此笔记",
@@ -48,14 +48,13 @@ export const zhCN: DeepPartial<EnCopy> = {
 		openChatHistory: "查看历史对话",
 		newChat: "新建对话",
 		moreActions: "更多对话操作",
-		compacting: "正在整理上下文…",
 		openSettings: "打开设置",
 		dismissMessage: "关闭消息",
 		/**
 		 * 上下文越过自动压缩阈值的横幅提示及其按钮文案（阈值与圆环着色同源）。
 		 * 走 polite 通道播报并附带整理按钮：颜色变化是屏幕阅读器收不到的信号。
 		 */
-		contextWall: "上下文快满了。整理较早的消息可以继续聊更久。",
+		contextWall: "上下文快满了。整理较早思维可以继续聊更久。",
 		contextWallAction: "整理",
 		/**
 		 * 崩溃恢复横幅及其按钮：上一次会话有没跑完的运行、用户的话还留在
@@ -110,8 +109,8 @@ export const zhCN: DeepPartial<EnCopy> = {
 			authSpoken: "供应商拒绝了这个密钥。到设置里核对一下再问。",
 			quota: "这个账号在供应商那边额度用完了。充值后再问。",
 			quotaSpoken: "这个账号在供应商那边额度用完了。充值后再问。",
-			contextLength: "这段对话超出了模型能装下的长度。整理较早的消息后再问。",
-			contextLengthSpoken: "这段对话超出了模型能装下的长度。整理较早的消息后再问。",
+			contextLength: "这段对话超出了模型能装下的长度。整理较早思维后再问。",
+			contextLengthSpoken: "这段对话超出了模型能装下的长度。整理较早思维后再问。",
 			refused: "供应商拒绝回答这一条。换个说法通常就好了。",
 			refusedSpoken: "供应商拒绝回答这一条。换个说法通常就好了。",
 			rateLimit: "供应商现在太忙了。等一下再试。",
@@ -127,8 +126,7 @@ export const zhCN: DeepPartial<EnCopy> = {
 			unknownSpoken: "供应商没有回话，也没说为什么。",
 		},
 		branchSummaryFailed: "重试已经发出去了，只是没能为被替换掉的分支生成摘要：{error}",
-		compactionFailed: "整理较早的消息失败：{error}",
-		busyTidying: "Piem 正在整理较早的消息。过一会儿再发这条。",
+		busyTidying: "Piem 正在整理思维。过一会儿再发这条。",
 		busyResending: "Piem 正在重发你的消息。过一会儿再发这条。",
 		compareFailed: "没能从那条消息开始对比：{error}",
 		laneChoiceFailed: "没能保留那个分支：{error}",
@@ -139,7 +137,17 @@ export const zhCN: DeepPartial<EnCopy> = {
 		thoughtItThrough: "思考了一下",
 		/** 思考行仍在流式生成时；落定后读「思考了一下」。 */
 		thinkingNow: "正在思考…",
-		earlierSummarized: "较早的历史已被总结，以适应上下文窗口。",
+		/**
+		 * 整理行的三种状态文案。
+		 *
+		 * 说「思维」不说「消息」：被整理掉的是智能体自己更早的思考，读者不必
+		 * 先知道「上下文窗口装的是一串消息」才能看懂对话里发生了什么。落定后
+		 * 的文案报的是一次事件、不是一个位置——正因如此，一行才能承载整段
+		 * 过程：它画在整理发生的那个时刻，而不是残存记录的开头。
+		 */
+		tidyRunning: "整理思维中…",
+		tidyDone: "思维已整理",
+		tidyFailed: "思维整理失败",
 		imagePlaceholder: "[图片：{mimeType}]",
 		imagesNotSupported: "{model} 不支持图片。请更换模型或移除图片。",
 		/** 压缩或重写正占用回合时又收到一次发送；编辑器的控件让这只会是罕见的竞态。 */
@@ -239,7 +247,6 @@ export const zhCN: DeepPartial<EnCopy> = {
 
 	chatStatus: {
 		opening: "正在打开对话…",
-		tidyingUp: "正在整理较早的消息…",
 		// 重发窗口：先为被舍弃的分支写摘要，再发新问题，消息流全程不报。
 		resending: "正在重发您的消息…",
 		// 序数而非总数：轮次还在飞，总数尚不存在。
@@ -273,9 +280,9 @@ export const zhCN: DeepPartial<EnCopy> = {
 		filling: "正在填充",
 		ok: "正常",
 		meterHeuristic: "按消息大小估算，首次回复后更新。",
-		meterMeasured: "接近 {percent}% 时自动整理较早的消息。",
-		tidyWhileCompacting: "正在整理较早的消息…",
-		tidyWhileStreaming: "回复结束后可整理较早的消息",
+		meterMeasured: "接近 {percent}% 时自动整理思维。",
+		tidyWhileCompacting: "整理思维中…",
+		tidyWhileStreaming: "回复结束后可整理较早思维",
 	},
 
 	contextRow: {
@@ -644,7 +651,7 @@ export const zhCN: DeepPartial<EnCopy> = {
 
 	compaction: {
 		groupLabel: "上下文整理",
-		groupHint: "高级选项。在上下文占满之前，Piem 已经会自动总结较早的消息。",
+		groupHint: "高级选项。在上下文占满之前，Piem 已经会自动整理较早思维。",
 		reserveName: "整理前预留的余量",
 		reserveDesc: "为撰写总结而预留的 token。调高会更早整理，调低则先用掉更多窗口。默认 {default}。",
 		keepName: "保留的近期消息",
@@ -698,7 +705,7 @@ export const zhCN: DeepPartial<EnCopy> = {
 	target: {
 		customEndpoint: "自定义端点（{modelId}）",
 		needsKeyToSend: "{target} 需要先在插件设置中填写 API 密钥，才能发送提示词。",
-		needsKeyToCompact: "{target} 需要先在插件设置中填写 API 密钥，才能整理较早的消息。",
+		needsKeyToCompact: "{target} 需要先在插件设置中填写 API 密钥，才能整理较早思维。",
 	},
 
 	confirmDelete: {

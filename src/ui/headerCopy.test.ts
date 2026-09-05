@@ -122,27 +122,27 @@ describe("tidyLabel", () => {
 	 * the only channel it has to explain why it cannot be pressed.
 	 */
 	it("names the action when it can run", () => {
-		expect(tidyLabel({ isStreaming: false, isCompacting: false }, en)).toBe("Tidy up earlier messages");
+		expect(tidyLabel({ isStreaming: false, isCompacting: false }, en)).toBe("Tidy earlier thoughts");
 	});
 
 	it("says a compaction is already running", () => {
-		expect(tidyLabel({ isStreaming: false, isCompacting: true }, en)).toBe("Tidying up earlier messages…");
+		expect(tidyLabel({ isStreaming: false, isCompacting: true }, en)).toBe("Tidying thoughts…");
 	});
 
 	it("says to wait for the reply, since compaction cannot start mid-turn", () => {
-		expect(tidyLabel({ isStreaming: true, isCompacting: false }, en)).toBe("Tidy up earlier messages once the reply finishes");
+		expect(tidyLabel({ isStreaming: true, isCompacting: false }, en)).toBe("Tidy earlier thoughts once the reply finishes");
 	});
 
 	it("prefers the in-flight reason when both hold, since it is the nearer one", () => {
 		// A compaction that is already running is the more specific fact; naming the
 		// stream instead would tell the reader to wait for something that already ended.
-		expect(tidyLabel({ isStreaming: true, isCompacting: true }, en)).toBe("Tidying up earlier messages…");
+		expect(tidyLabel({ isStreaming: true, isCompacting: true }, en)).toBe("Tidying thoughts…");
 	});
 
 	it("translates every reason", () => {
-		expect(tidyLabel({ isStreaming: false, isCompacting: false }, zh)).toBe("整理较早的消息");
-		expect(tidyLabel({ isStreaming: false, isCompacting: true }, zh)).toBe("正在整理较早的消息…");
-		expect(tidyLabel({ isStreaming: true, isCompacting: false }, zh)).toBe("回复结束后可整理较早的消息");
+		expect(tidyLabel({ isStreaming: false, isCompacting: false }, zh)).toBe("整理较早思维");
+		expect(tidyLabel({ isStreaming: false, isCompacting: true }, zh)).toBe("整理思维中…");
+		expect(tidyLabel({ isStreaming: true, isCompacting: false }, zh)).toBe("回复结束后可整理较早思维");
 	});
 });
 

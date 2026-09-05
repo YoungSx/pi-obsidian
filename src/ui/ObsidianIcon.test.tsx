@@ -76,8 +76,8 @@ describe("the glyph holder", () => {
 	 * button's holder is shaped by the same rule as a bare one's. */
 	it("is the same holder inside an icon button", async () => {
 		const host = await render(
-			<IconButton icon="archive" label="Tidy up earlier messages" onClick={() => undefined}>
-				<span className="piem-chat__context-tidy-label">Tidy up earlier messages</span>
+			<IconButton icon="archive" label="Tidy earlier thoughts" onClick={() => undefined}>
+				<span className="piem-chat__context-tidy-label">Tidy earlier thoughts</span>
 			</IconButton>,
 		);
 

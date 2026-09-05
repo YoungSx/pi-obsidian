@@ -35,8 +35,9 @@ Mistral、Moonshot、OpenAI、OpenRouter、xAI、Z.AI——如果端点支持列
 
 有两件事在这里不经开关就会发生，都值得知道。你正打开的那篇笔记会被注入**每
 一轮**——路径和正文都在——所以你永远不用说「我正在看的那篇」。以及上下文窗口
-将满时，对话会自己压缩；命令面板里的 *Tidy up earlier messages* 是同一件事的
-手动版。
+将满时，对话会自己整理；命令面板里的 *Tidy earlier thoughts*（中文界面为
+「整理较早思维」）是同一件事的手动版，而每次整理都会在消息流里留下一道接缝，
+点开就能读到它写下的总结。
 
 - **Show agent details** —— 在聊天面板里显示 token 数、花费和原始工具参数。
   默认关；想看代理实际发了什么的时候打开它。
@@ -77,7 +78,7 @@ Piem 加进命令面板的全部内容，显示为 *Piem: …*：
 | Open log view | 打开日志叶子 |
 | New chat | 起一段新对话 |
 | Stop response | 中止正在进行的这一轮 |
-| Tidy up earlier messages | 手动压缩对话 |
+| Tidy earlier thoughts | 手动压缩对话 |
 | Focus chat input | 把光标跳进输入框 |
 | Ask about selection | 把你的选区作为问题发出去 |
 | Ask about this note | 把当前笔记作为问题发出去 |

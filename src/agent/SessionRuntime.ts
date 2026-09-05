@@ -1,7 +1,7 @@
 import { type Agent, type ThinkingLevel } from "@earendil-works/pi-agent-core";
 import { type Usage } from "@earendil-works/pi-ai";
 import { type ActiveSessionInfo, type SessionLane } from "../session/ObsidianSessionManager";
-import { type CompactResult } from "./compaction";
+import { type CompactionEvent, type CompactResult } from "./compaction";
 import { type ContextRef } from "./contextRefs";
 import { PromptQueue } from "./promptQueue";
 
@@ -141,8 +141,27 @@ export class SessionRuntime {
 	overheadUsage: Usage[] = [];
 	/** Single-flight guard for compaction — the in-flight promise, if any. */
 	compaction: Promise<boolean> | null = null;
-	/** Mirrors `compaction` for the snapshot: true from launch until it settles. */
-	isCompacting = false;
+	/**
+	 * The attempt the transcript draws: running from launch until it settles, then
+	 * either gone (a success leaves pi's summary message behind instead) or held as
+	 * the failure until the next attempt supersedes it.
+	 *
+	 * Distinct from {@link compaction}, which is the promise the single-flight
+	 * guard awaits. This is what the row is made of, and it outlives the promise on
+	 * the failure path — a failed tidy has no message to hang on, so the record has
+	 * to be the runtime's.
+	 */
+	compactionEvent: CompactionEvent | null = null;
+	/**
+	 * Whether a compaction is in flight, for the four busy guards and the panel.
+	 *
+	 * Derived rather than stored: it and {@link compactionEvent} answer the same
+	 * question, and a second field would be one more thing to keep synchronized
+	 * with the lifecycle in `trackCompaction`.
+	 */
+	get isCompacting(): boolean {
+		return this.compactionEvent?.state === "running";
+	}
 	/** Abort controller for the in-flight compaction. */
 	compactionController: AbortController | null = null;
 
