@@ -958,6 +958,64 @@ SCENARIOS["tidy-seam"] = () => seamPage();
  * The saved-row frame is the one that proves the selection is honest: it holds
  * Anthropic's endpoint and nothing told it so, the dropdown derived it.
  */
+/*
+ * The fork confirmation, in both languages.
+ *
+ * The dialog *is* the change issue #273's follow-up makes: pressing fork used to
+ * grow two buttons in the send bar, and now it asks once. Its whole substance is
+ * three strings and which of the two buttons carries the accent, so a picture is
+ * the only check that reads them the way a user does — side by side, at the width
+ * Obsidian gives a modal, with the Chinese copy next to the English it was
+ * written against.
+ */
+SCENARIOS["fork-confirm"] = async () => {
+	const { openForkConfirm } = await import("../src/ui/forkConfirmModal.ts");
+	const { getT } = await import("../src/i18n/index.ts");
+
+	const frame = (language) => {
+		const before = new Set(Array.from(document.body.children));
+		openForkConfirm({}, { t: getT(language), onConfirm: async () => {} });
+		// The stub's `Modal` appends its own element on construction, titleEl first
+		// and contentEl second — see `src/testUtils/obsidianStub.ts`. Taking the
+		// child that appeared keeps this from depending on body order.
+		const modalEl = Array.from(document.body.children).find((element) => !before.has(element));
+		if (!modalEl) {
+			throw new Error("openForkConfirm mounted nothing");
+		}
+		return `<div class="modal"><div class="modal-title">${modalEl.firstElementChild?.textContent ?? ""}</div>${modalEl.lastElementChild?.outerHTML ?? ""}</div>`;
+	};
+
+	const states = [
+		["English", frame("en")],
+		["\u4e2d\u6587 \u2014 the panel calls a chat \u300c\u5bf9\u8bdd\u300d everywhere else, so this does too", frame("zh-cn")],
+	];
+	const width = 520;
+	const columns = `<div class="harness-panel">
+	<h3>${width}px</h3>
+	${states.map(([label, html]) => `<h4>${label}</h4>\n\t<div style="width: ${width}px">${html}</div>`).join("\n\t")}
+</div>`;
+
+	const html = `<!doctype html>
+<html><head><meta charset="utf-8"><title>fork-confirm</title><style>
+:root {${TOKENS}}
+body { background: #111; color: var(--text-normal); font-family: var(--font-interface); margin: 0; padding: 16px; display: flex; gap: 24px; align-items: flex-start; }
+.harness-panel h3 { color: #888; font-size: 11px; font-weight: 400; margin: 0 0 6px; }
+.harness-panel h4 { color: #6e6e6e; font-size: 11px; font-weight: 400; margin: 16px 0 4px; }
+${styles}
+${OBSIDIAN_CORE_SHIM}
+</style></head><body>
+${columns}
+</body></html>`;
+
+	return {
+		element: document.body,
+		html,
+		width: width + 32 + 40,
+		height: 520,
+		cleanup: async () => document.body.replaceChildren(),
+	};
+};
+
 SCENARIOS["provider-modal"] = async () => {
 	const { ProviderModal } = await import("../src/ui/settings/ProviderModal.ts");
 	const { getT } = await import("../src/i18n/index.ts");
