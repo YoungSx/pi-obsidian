@@ -1,5 +1,6 @@
 import type { ImageContent, TextContent, ToolResultMessage } from "@earendil-works/pi-ai";
 import type { Translator } from "../i18n";
+import { toolCopyKey } from "./toolCatalog";
 
 /**
  * One-line summaries for the collapsed trace rows in the transcript.
@@ -12,30 +13,6 @@ import type { Translator } from "../i18n";
 const MAX_DETAIL_LENGTH = 48;
 
 /**
- * Maps a tool id to its copy key.
- *
- * The tool ids are the model's vocabulary, not the reader's: "get_active_note"
- * and "grep" say nothing to someone whose mental model is notes and links.
- * Unmapped ids fall through to the raw name, which is the honest answer for a
- * tool this table has not been taught.
- */
-const TOOL_COPY_KEYS = {
-	read: "traceTool.read",
-	write: "traceTool.write",
-	edit: "traceTool.edit",
-	ls: "traceTool.ls",
-	find: "traceTool.find",
-	grep: "traceTool.grep",
-	get_active_note: "traceTool.getActiveNote",
-	get_note_links: "traceTool.noteLinks",
-	get_note_metadata: "traceTool.noteMetadata",
-	list_tasks: "traceTool.listTasks",
-	summarize_tasks: "traceTool.summarizeTasks",
-	move_note: "traceTool.moveNote",
-	trash_note: "traceTool.trashNote",
-} as const;
-
-/**
  * Names a tool for the reader.
  *
  * The agent-details tier keeps the raw id, because someone reading tool
@@ -46,7 +23,7 @@ export function describeTool(toolName: string, showAgentDetails: boolean, t: Tra
 	if (showAgentDetails) {
 		return toolName;
 	}
-	const key = TOOL_COPY_KEYS[toolName as keyof typeof TOOL_COPY_KEYS];
+	const key = toolCopyKey(toolName);
 	return key ? t.t(key) : toolName;
 }
 
@@ -64,7 +41,7 @@ export function isToolIdentifier(toolName: string, showAgentDetails: boolean): b
 	if (showAgentDetails) {
 		return true;
 	}
-	return !(toolName in TOOL_COPY_KEYS);
+	return toolCopyKey(toolName) === null;
 }
 
 /**

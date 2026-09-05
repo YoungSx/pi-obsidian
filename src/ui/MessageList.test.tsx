@@ -940,23 +940,25 @@ describe("MessageList consecutive-tool folding", () => {
 		expect(host.querySelectorAll(".piem-chat__trace")).toHaveLength(1);
 		const row = host.querySelector(".piem-chat__trace");
 		expect(row?.querySelector(".piem-chat__trace-name")?.textContent).toBe("Wrote a note");
-		// The glyph is the status, which is what the wrench never was.
-		expect(iconNames(row)).toEqual(["check"]);
+		// A row that worked spends its glyph on the tool, because "it worked" is
+		// what the sentence beside it already says — a tick there was the same fact
+		// twice, and left reading a note and trashing one looking identical.
+		expect(iconNames(row)).toEqual(["file-plus"]);
 		// And the argument survives absorbing the result, because "which note" is the
 		// question a collapsed tool row exists to answer.
 		expect(row?.querySelector(".piem-chat__trace-detail")?.textContent).toBe("Clippings/Note.md");
 	});
 
 	/*
-	 * The state the wrench is left to mean, and the only one: asked, not answered.
-	 * A turn interrupted between the two used to leave a wrench with no tick under
-	 * it, which read the same as a call that had succeeded.
+	 * Asked, never answered — a turn interrupted between the call and its result.
+	 * It outranks the tool's own glyph because the reader has to act on it, and it
+	 * borrows the glyph the transcript already uses for a reply they stopped.
 	 */
-	it("keeps the wrench for a call whose result never came", async () => {
+	it("marks a call whose result never came as cut off", async () => {
 		const host = renderMessages([assistantToolCall("write", { path: "Clippings/Note.md" })]);
 		await flushRender();
 
-		expect(iconNames(host.querySelector(".piem-chat__trace"))).toEqual(["wrench"]);
+		expect(iconNames(host.querySelector(".piem-chat__trace"))).toEqual(["circle-slash"]);
 	});
 
 	/*
