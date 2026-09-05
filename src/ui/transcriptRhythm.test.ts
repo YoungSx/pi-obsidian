@@ -4,16 +4,23 @@ import { readFileSync } from "node:fs";
 /**
  * Structural gates over the transcript's vertical rhythm.
  *
- * The transcript has three spacings, and which applies is decided by meaning
- * rather than markup: 4px between the blocks inside one message, 8px between the
- * rows of one turn, 16px where the conversation changes hands.
+ * The transcript has two spacings, and which applies is decided by meaning rather
+ * than markup: 4px everywhere inside a turn, 16px where the conversation changes
+ * footing.
  *
- * The middle one is the constraint the other two are shaped around. `pi` splits a
- * single turn across several messages — prose in an assistant message, the tool
- * result as a row of its own, the next sentence in another assistant message — and
- * a reader who can see those seams is reading the transport rather than the turn.
- * So every boundary inside a turn gets the same 8px whatever kinds of row meet at
- * it, and only the user's own turn is allowed to stand further off.
+ * The first is reached two ways that have to agree. `pi` splits a single turn
+ * across several messages — prose in an assistant message, the tool result as a
+ * row of its own, the next sentence in another assistant message — so some
+ * boundaries inside a turn fall between the blocks of one message (where
+ * `.piem-chat__message-content` hands out a margin, block flow having no gap to
+ * give) and the rest fall between rows of the column (where the `gap` does). Both
+ * owe 4px, because a reader who can tell which is which is reading the transport
+ * rather than the turn — and the pair the seams separated most was a tool call and
+ * its own result, which is the pair that belongs together most.
+ *
+ * Only two boundaries mark meaning, and each asks for its own spacing: the user's
+ * turn and the tidying seam carry 12px on both faces, which against the
+ * column's 4px is the 16px the roles have always stood apart.
  *
  * What broke it was two faults that a declaration cannot show. `.piem-chat__message`
  * carried `padding: var(--size-4-2)`; both conversational roles cancelled it on
@@ -84,22 +91,59 @@ describe("one turn's rows are spaced the same however pi split it into messages"
 	 * boundary in the column to a single number.
 	 */
 	it("keeps row spacing in the column's gap, where every boundary reads it", () => {
-		expect(declarations(ruleBody(".piem-chat__messages"))).toContain("gap: var(--size-4-2)");
+		expect(declarations(ruleBody(".piem-chat__messages"))).toContain("gap: var(--size-4-1)");
+	});
+
+	/*
+	 * And holds it to the same token the message's own margin uses. Two rules, one
+	 * number, and the assertion is that they agree: any turn-internal boundary the
+	 * reader can pick out is a seam in how `pi` delivered the turn, which is not
+	 * something they were told and not something they can act on.
+	 *
+	 * The tier that closed to make this true was 8px, and it was doing visible
+	 * damage: a tool call sat 4px under the prose that introduced it and 8px above
+	 * its own result, so the tightest pair in the run read as the loosest.
+	 */
+	it("gives a turn's rows the same spacing a message gives its blocks", () => {
+		const columnGap = declarations(ruleBody(".piem-chat__messages")).match(/gap:\s*([^;]+);/)?.[1];
+		const messageMargin = declarations(ruleBody(TRACE_MARGIN)).match(/margin-block:\s*([^;]+);/)?.[1];
+		expect(columnGap).toBe("var(--size-4-1)");
+		expect(messageMargin).toBe(columnGap);
+	});
+
+	/*
+	 * The running-tools line reports what the turn is doing right now, so it belongs
+	 * to the turn as much as a tool result does. It used to add 8px of its own on
+	 * top of an 8px gap, putting a turn's own progress further from it than the next
+	 * speaker would have been.
+	 */
+	it("leaves the running-tools line inside the turn it reports on", () => {
+		expect(declarations(ruleBody(".piem-chat__tool-status"))).not.toMatch(/margin/);
 	});
 
 	/*
 	 * The one exception, and it is on the role rather than on a boundary rule
 	 * because only one role means anything: a question is where the conversation
-	 * changes hands, and 8px of seam did not say so — measured against the shipped
+	 * changes footing, and a seam did not say so — measured against the shipped
 	 * markup, the reply's own heading read as a caption on the bubble above it.
 	 *
-	 * 8px on both faces adds to the gap either side and restores the 16px the two
-	 * roles stood apart before the row shed its padding. So this assertion is not a
-	 * new spacing being introduced; it is the landmark being held where it was while
-	 * the seams inside a turn closed up.
+	 * 12px on both faces adds to the 4px gap either side and is the 16px the two
+	 * roles stood apart before any of this. So neither assertion introduces a new
+	 * spacing; they hold the two landmarks where they were while every seam inside a
+	 * turn closed to 4px.
 	 */
 	it("spends the one extra spacing on the turn that changes hands", () => {
-		expect(declarations(ruleBody(".piem-chat__message--user"))).toContain("margin-block: var(--size-4-2)");
+		expect(declarations(ruleBody(".piem-chat__message--user"))).toContain("margin-block: var(--size-4-3)");
+	});
+
+	/*
+	 * The seam earns it for the same reason and no other: "everything above this is
+	 * summarized" is a change of footing, not a seam in one turn. It pins the row
+	 * rather than one of its states, so the landmark keeps its ground whether the
+	 * ink above it claims full strength, is still in flight, or has failed.
+	 */
+	it("spends it on the tidying seam too, which is the other real boundary", () => {
+		expect(declarations(ruleBody(".piem-chat__trace--seam"))).toContain("margin-block: var(--size-4-3)");
 	});
 });
 

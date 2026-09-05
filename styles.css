@@ -702,7 +702,24 @@ button.piem-chat__context-open {
 	display: flex;
 	flex: 1 1 auto;
 	flex-direction: column;
-	gap: var(--size-4-2);
+	/*
+	 * The rhythm of a turn, and the same 4px a message spends between its own
+	 * blocks (`.piem-chat__message-content`) — deliberately the same number,
+	 * because they are the same kind of boundary.
+	 *
+	 * `pi` delivers one turn as several messages: the reply's prose, the tool call
+	 * inside it, the result as a row of its own, the next sentence as another
+	 * message. Only the first of those boundaries falls inside a message, so any
+	 * gap here wider than the message's own margin draws a line exactly where the
+	 * transport happened to split — and the pair it separates most is a call and
+	 * its own result, which is the pair that belongs together most. At 8px the
+	 * reader could see `pi`'s seams and read them as grouping.
+	 *
+	 * What does deserve a line asks for one itself: `--user` adds a margin, and so
+	 * does the tidying seam. Everything else in this column is one turn
+	 * unfolding, and reads as one column of 4px steps.
+	 */
+	gap: var(--size-4-1);
 	/*
 	 * The invariant, stated rather than left to the cascade: this column never
 	 * scrolls sideways. `overflow-y: auto` alone does not leave the other axis
@@ -793,6 +810,15 @@ button.piem-chat__context-open {
 	 * lie this row could tell.
 	 */
 	--piem-seam-ink: var(--background-modifier-border-hover);
+	/*
+	 * The second of the two boundaries in this column that mark meaning rather than
+	 * delivery, and so the second to ask for spacing of its own: 12px on both faces
+	 * against the column's 4px is the 16px a question gets, for the same reason —
+	 * "everything above this is summarized" is a change of footing, not a seam in
+	 * one turn. On the row itself rather than gated on a state, so the landmark
+	 * holds its ground while the ink decides how much of the claim it can make.
+	 */
+	margin-block: var(--size-4-3);
 }
 
 .piem-chat__trace--seam.piem-chat__trace--live,
@@ -906,10 +932,13 @@ button.piem-chat__context-open {
  * seams of `pi`'s message split rather than the shape of the turn.
  *
  * With the padding gone every boundary in the column is one `gap`, whatever the
- * two rows on either side of it happen to be — and the one boundary that should
- * read as more than a seam asks for the extra itself, on the user's own turn. So
- * the whole transcript is three spacings: 4px inside a message, 8px between the
- * rows of one turn, 16px where the speaker changes.
+ * two rows on either side of it happen to be — and the column sets that gap to the
+ * same 4px a message spends between its own blocks, so a turn reads as one run of
+ * rows whether or not `pi` split it. What deserves more asks for it: the user's
+ * turn and the tidying seam each carry a margin.
+ *
+ * Two spacings in the whole transcript, then, and neither is about markup: 4px
+ * everywhere inside a turn, 16px where the conversation changes footing.
  */
 
 /*
@@ -934,15 +963,15 @@ button.piem-chat__context-open {
  * seam does not say so; the reply's own heading ended up looking like a caption on
  * the bubble above it.
  *
- * 8px on both faces, added to the `gap` either side, restores the 16px the two
- * roles stood apart before the row shed its padding — the reader's landmark is
- * exactly where it was, and only the seams inside a turn have closed up. Both
- * faces rather than `margin-block-start` alone because the turn *after* a question
- * has the same claim on being findable as the question does.
+ * 12px on both faces, added to the 4px `gap` either side, is the 16px the two
+ * roles stood apart before any of this — the reader's landmark has not moved,
+ * while every seam inside a turn has closed to 4px. Both faces rather than
+ * `margin-block-start` alone because the turn *after* a question has the same
+ * claim on being findable as the question does.
  */
 .piem-chat__message--user {
 	align-self: flex-end;
-	margin-block: var(--size-4-2);
+	margin-block: var(--size-4-3);
 	max-width: 90%;
 }
 
@@ -1787,7 +1816,13 @@ button.piem-chat__context-open {
 	display: inline-flex;
 	font-size: var(--font-ui-smaller);
 	gap: var(--size-4-1);
-	margin-top: var(--size-4-2);
+	/*
+	 * No margin. This line reports what the turn is doing right now — it belongs to
+	 * the turn above it as much as a tool result does, so it takes the column's 4px
+	 * like every other row of one. It used to carry 8px of its own on top of an 8px
+	 * gap, which set the turn's own progress further from the turn than the next
+	 * speaker would have been.
+	 */
 	padding: var(--size-4-1) var(--size-4-2);
 }
 
@@ -1907,9 +1942,10 @@ button.piem-chat__latest--asking {
  */
 /*
  * No `margin-top`: both parents that host this row (`.piem-chat__messages`,
- * `.piem-chat__empty`) already separate their children with a `--size-4-2` gap,
- * and a margin on top of the gap doubles the space above the row to 16px while
- * everything below it stays at 8px. The container owns separation; the row owns
+ * `.piem-chat__empty`) already separate their children with a gap of their own —
+ * 4px in the transcript column since it took the message rhythm, 8px in the empty
+ * state — and a margin on top of the gap doubles the space above the row while
+ * everything below it stays put. The container owns separation; the row owns
  * only what is inside it.
  */
 .piem-chat__quick-actions {
