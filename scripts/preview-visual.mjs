@@ -940,6 +940,130 @@ ${grid("light")}
 
 SCENARIOS["tidy-seam"] = () => seamPage();
 
+/**
+ * The provider form, and specifically its preset row.
+ *
+ * Built the way production builds it — `new ProviderModal(...).open()` runs
+ * `onOpen`, so these are the rows `Setting` actually emits — then wrapped in the
+ * `.modal` frame Obsidian would put around a modal's content. Not a React tree
+ * like every other page here, which is why it assembles its own HTML.
+ *
+ * Three states at the desktop modal width. One width, not several: Obsidian
+ * reshapes settings rows on a narrow screen through app.css rules this harness's
+ * shim does not carry, so a phone column would be showing the harness's layout
+ * rather than the app's. What this width does answer is the question the preset
+ * row actually raises — its longest option is a full token-plan host (Qwen's), and
+ * whether that pushes the row past the modal edge is visible here.
+ *
+ * The saved-row frame is the one that proves the selection is honest: it holds
+ * Anthropic's endpoint and nothing told it so, the dropdown derived it.
+ */
+SCENARIOS["provider-modal"] = async () => {
+	const { ProviderModal } = await import("../src/ui/settings/ProviderModal.ts");
+	const { getT } = await import("../src/i18n/index.ts");
+	const t = getT("en");
+	const opened = [];
+
+	const frame = (provider, pick) => {
+		const modal = new ProviderModal({
+			app: {},
+			...(provider ? { provider } : {}),
+			// The plainest key tier: one text field, so the preset row is not sharing
+			// the picture with a keychain picker.
+			secretStorage: "manual",
+			readSecret: () => "",
+			t,
+			test: async () => ({ ok: true, detail: "" }),
+			onSubmit: async () => {},
+		});
+		modal.open();
+		opened.push(modal);
+		if (pick) {
+			// Chosen the way a user chooses, so the production handler fills the three
+			// fields below it rather than the harness writing them in.
+			for (const select of Array.from(modal.contentEl.querySelectorAll("select"))) {
+				if (Array.from(select.options).some((option) => option.value === pick)) {
+					select.value = pick;
+					select.dispatchEvent(new Event("change"));
+					break;
+				}
+			}
+		}
+		/*
+		 * `outerHTML` serializes attributes, and a form control's current state is
+		 * not one: `input.value` and a `<select>`'s selection are properties. Left
+		 * alone every field would render as its placeholder and every dropdown as
+		 * its first option — the picture would show an empty Custom form no matter
+		 * what the form actually holds, which is precisely the thing under test.
+		 * So the state is written back as attributes before serializing.
+		 */
+		for (const input of Array.from(modal.contentEl.querySelectorAll("input"))) {
+			if (input.value) {
+				input.setAttribute("value", input.value);
+			}
+		}
+		for (const select of Array.from(modal.contentEl.querySelectorAll("select"))) {
+			for (const option of Array.from(select.options)) {
+				if (option.value === select.value) {
+					option.setAttribute("selected", "selected");
+				} else {
+					option.removeAttribute("selected");
+				}
+			}
+		}
+		return `<div class="modal"><div class="modal-title">${modal.titleEl.textContent}</div>${modal.contentEl.outerHTML}</div>`;
+	};
+
+	const SAVED = {
+		id: "p-anthropic",
+		name: "Anthropic",
+		baseUrl: "https://api.anthropic.com",
+		protocol: "anthropic-messages",
+		apiKey: "sk-ant-existing",
+		secretRef: "",
+		source: "user",
+	};
+	const states = [
+		["New form — Custom, where it opens", frame(undefined, undefined)],
+		["Preset picked — Qwen, the longest label there is", frame(undefined, "qwen")],
+		["Editing a saved row — the selection is derived from its URL", frame(SAVED, undefined)],
+	];
+
+	const columns = [600]
+		.map(
+			(width) => `<div class="harness-panel">
+	<h3>${width}px</h3>
+	${states.map(([label, html]) => `<h4>${label}</h4>\n\t<div style="width: ${width}px">${html}</div>`).join("\n\t")}
+</div>`,
+		)
+		.join("\n");
+
+	const html = `<!doctype html>
+<html><head><meta charset="utf-8"><title>provider-modal</title><style>
+:root {${TOKENS}}
+body { background: #111; color: var(--text-normal); font-family: var(--font-interface); margin: 0; padding: 16px; display: flex; gap: 24px; align-items: flex-start; }
+.harness-panel h3 { color: #888; font-size: 11px; font-weight: 400; margin: 0 0 6px; }
+.harness-panel h4 { color: #6e6e6e; font-size: 11px; font-weight: 400; margin: 16px 0 4px; }
+${styles}
+${OBSIDIAN_CORE_SHIM}
+</style></head><body>
+${columns}
+</body></html>`;
+
+	return {
+		element: document.body,
+		html,
+		width: 600 + 32 + 40,
+		height: 1740,
+		cleanup: async () => {
+			for (const modal of opened) {
+				modal.close();
+			}
+			document.body.replaceChildren();
+		},
+	};
+};
+
 /* ------------------------------------------------------------------ page assembly */
 
 /** Minimal markdown face for the stub renderer: the shapes replies actually carry. */
@@ -1069,6 +1193,11 @@ const TOKENS = `
 	--shadow-l: 0 4px 12px rgba(0, 0, 0, 0.5);
 	--layer-menu: 65;
 	--scrollbar-thumb-bg: #555;
+	--line-height-tight: 1.3;
+	--input-radius: 5px;
+	--modal-background: #1e1e1e;
+	--modal-radius: 12px;
+	--background-modifier-form-field: #1a1a1a;
 `;
 
 // Buttons and links get their look from Obsidian's app.css, not the plugin
@@ -1108,6 +1237,39 @@ button.mod-destructive { background-color: rgba(var(--background-modifier-error-
    the default theme styles links with accent color and no underline anyway. */
 a { color: var(--text-accent); cursor: pointer; text-decoration: none; }
 a:hover { text-decoration: underline; }
+/* Settings rows and the modal frame. Every row a settings form draws is built by
+   Obsidian's Setting, whose layout lives entirely in app.css — styles.css only
+   carries the piem-* rules on top of it. Without this block a form page renders
+   as a stack of unstyled divs, which is worse than no picture: the plugin's own
+   spacing rules would appear to do nothing.
+   Layout values are the shipped 1.13 ones so a spacing defect in a piem rule still
+   shows; colors are approximate, like the rest of this shim. Judge structure,
+   alignment and wrapping from these pages — never a colour verdict. */
+.setting-item { align-items: center; border-top: 1px solid var(--background-modifier-border); display: flex; gap: var(--size-4-4); justify-content: space-between; padding: var(--size-4-3) 0; }
+.setting-item:first-child { border-top: none; padding-top: 0; }
+.setting-item-info { margin-right: auto; min-width: 0; }
+.setting-item-name { color: var(--text-normal); }
+.setting-item-description { color: var(--text-muted); font-size: var(--font-ui-smaller); line-height: var(--line-height-tight); padding-top: var(--size-4-1); }
+.setting-item-control { align-items: center; display: flex; flex: 0 0 auto; gap: var(--size-4-2); justify-content: flex-end; }
+.setting-item-heading .setting-item-name { font-size: var(--font-ui-medium); font-weight: var(--font-semibold); }
+input.text-input, select.dropdown {
+	background: var(--background-modifier-form-field);
+	border: 1px solid var(--background-modifier-border);
+	border-radius: var(--input-radius);
+	color: var(--text-normal);
+	font-family: var(--font-interface);
+	font-size: var(--font-ui-small);
+	height: 30px;
+	padding: 0 var(--size-4-2);
+}
+/* Obsidian caps a form control so a long value cannot push the row wider than the
+   modal. Reproduced because the preset dropdown's longest label is a full
+   token-plan host, and whether that wraps or overflows is exactly what these
+   pictures are for. */
+input.text-input, select.dropdown { max-width: 100%; }
+select.dropdown { appearance: none; background-image: none; text-overflow: ellipsis; }
+.modal { background: var(--modal-background); border-radius: var(--modal-radius); box-shadow: var(--shadow-l); padding: var(--size-4-4); }
+.modal-title { font-size: var(--font-ui-medium); font-weight: var(--font-semibold); margin-bottom: var(--size-4-3); text-align: center; }
 `;
 
 /**
