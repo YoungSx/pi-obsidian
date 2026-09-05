@@ -1,69 +1,85 @@
 import { describe, expect, it } from "bun:test";
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
+import type { ImageContent } from "@earendil-works/pi-ai";
 import { PromptQueue } from "./promptQueue";
 
-/** A minimal user message; identity, not shape, is what the queue settles on. */
+/** A minimal user message; the queue only ever hands it back for dispatch. */
 function userMessage(text: string): AgentMessage {
 	return { role: "user", content: [{ type: "text", text }], timestamp: Date.now() };
 }
 
-function addSteer(queue: PromptQueue, text: string, message = userMessage(text)) {
-	queue.add({ kind: "steer", text, imageCount: 0, message });
+function image(data: string): ImageContent {
+	return { type: "image", data, mimeType: "image/png" };
+}
+
+function addPrompt(queue: PromptQueue, text: string, staged: readonly ImageContent[] = []) {
+	const message = userMessage(text);
+	queue.add({ text, imageCount: staged.length, stagedImages: staged, message });
 	return message;
 }
 
 describe("PromptQueue", () => {
 	it("lists waiting messages oldest first, without the agent objects", () => {
 		const queue = new PromptQueue();
-		addSteer(queue, "first");
-		addSteer(queue, "second");
+		addPrompt(queue, "first");
+		addPrompt(queue, "second");
 
 		const listed = queue.list();
 
 		expect(listed.map((entry) => entry.text)).toEqual(["first", "second"]);
 		expect(listed.every((entry) => !("message" in entry))).toBe(true);
+		expect(listed.every((entry) => !("stagedImages" in entry))).toBe(true);
 	});
 
 	it("allocates ids from a counter, so repeated text still has unique handles", () => {
 		const queue = new PromptQueue();
-		const first = addSteer(queue, "same words");
-		const second = addSteer(queue, "same words");
+		addPrompt(queue, "same words");
+		addPrompt(queue, "same words");
 
 		const [a, b] = queue.list();
-		expect(first).toBeDefined();
-		expect(second).toBeDefined();
+		expect(a?.id).toBeDefined();
+		expect(b?.id).toBeDefined();
 		expect(a?.id).not.toBe(b?.id);
 	});
 
-	it("settles by identity, so identical text removes only the injected entry", () => {
+	it("reports the image count so a chip can say so without holding bytes", () => {
 		const queue = new PromptQueue();
-		addSteer(queue, "same words");
-		const injected = addSteer(queue, "same words");
+		// Two riding along, only one of them staged: the other came out of an
+		// `![[…]]` embed that is still written in the text.
+		queue.add({ text: "look at ![[cat.png]]", imageCount: 2, stagedImages: [image("pasted")], message: userMessage("look") });
 
-		expect(queue.settle(injected)).toBe(true);
-		expect(queue.list().map((entry) => entry.id)).toHaveLength(1);
+		expect(queue.list()[0]?.imageCount).toBe(2);
 	});
 
-	it("reports a miss when the message was never queued", () => {
+	it("remove hands back the words as typed, so the composer can refill from them", () => {
 		const queue = new PromptQueue();
+		addPrompt(queue, "a");
+		addPrompt(queue, "b");
 
-		expect(queue.settle(userMessage("unrelated"))).toBe(false);
+		const taken = queue.remove("queued-2");
+
+		expect(taken?.text).toBe("b");
+		expect(queue.list().map((entry) => entry.text)).toEqual(["a"]);
 	});
 
-	it("remove reports the survivors of that kind, oldest first", () => {
+	it("remove hands back only the staged pictures, not the ones the text still names", () => {
 		const queue = new PromptQueue();
-		const a = addSteer(queue, "a");
-		addSteer(queue, "b");
-		const c = addSteer(queue, "c");
+		const pasted = image("pasted");
+		queue.add({
+			text: "compare this with ![[cat.png]]",
+			imageCount: 2,
+			stagedImages: [pasted],
+			message: userMessage("compare"),
+		});
 
-		const removal = queue.remove("queued-2");
-		expect(removal?.kind).toBe("steer");
-		expect(removal?.survivors).toEqual([a, c]);
+		// Restaging the embedded one too would send that picture twice on the next
+		// send: the embed is still in the text the composer gets back.
+		expect(queue.remove("queued-1")?.images).toEqual([pasted]);
 	});
 
 	it("remove returns undefined for an unknown id, without touching the queue", () => {
 		const queue = new PromptQueue();
-		addSteer(queue, "a");
+		addPrompt(queue, "a");
 
 		expect(queue.remove("queued-99")).toBeUndefined();
 		expect(queue.size).toBe(1);
@@ -71,8 +87,8 @@ describe("PromptQueue", () => {
 
 	it("clear forgets everything", () => {
 		const queue = new PromptQueue();
-		addSteer(queue, "a");
-		addSteer(queue, "b");
+		addPrompt(queue, "a");
+		addPrompt(queue, "b");
 
 		queue.clear();
 
@@ -82,8 +98,8 @@ describe("PromptQueue", () => {
 
 	it("drain takes every entry and leaves the queue empty, oldest first", () => {
 		const queue = new PromptQueue();
-		addSteer(queue, "a");
-		addSteer(queue, "b");
+		addPrompt(queue, "a");
+		addPrompt(queue, "b");
 
 		const drained = queue.drain();
 
@@ -91,22 +107,31 @@ describe("PromptQueue", () => {
 		expect(queue.size).toBe(0);
 	});
 
+	it("drained entries carry the message the agent will be prompted with", () => {
+		const queue = new PromptQueue();
+		const message = addPrompt(queue, "a");
+
+		expect(queue.drain()[0]?.message).toBe(message);
+	});
+
 	it("restore puts drained entries back in front, oldest first", () => {
 		const queue = new PromptQueue();
-		addSteer(queue, "a");
+		addPrompt(queue, "a");
 		const stranded = queue.drain();
-		addSteer(queue, "new");
+		addPrompt(queue, "new");
 
 		queue.restore(stranded);
 
 		expect(queue.list().map((entry) => entry.text)).toEqual(["a", "new"]);
 	});
 
-	it("tracks size across both kinds", () => {
+	it("tracks size as entries arrive and leave", () => {
 		const queue = new PromptQueue();
-		addSteer(queue, "a");
-		queue.add({ kind: "followUp", text: "b", imageCount: 0, message: userMessage("b") });
-
+		addPrompt(queue, "a");
+		addPrompt(queue, "b");
 		expect(queue.size).toBe(2);
+
+		queue.remove("queued-1");
+		expect(queue.size).toBe(1);
 	});
 });

@@ -88,6 +88,9 @@ export const zhCN: DeepPartial<EnCopy> = {
 		askAboutVaultHintAfter: "。",
 		youStopped: "你已停止这条回复。",
 		youStoppedSpoken: "你已停止这条回复。",
+		/** 中断的另一种来路：读者在回复途中又发了一条，面板把这一轮就地掐断让它立刻出去。 */
+		replySteered: "你的下一条消息打断了这条回复。",
+		replySteeredSpoken: "你的下一条消息打断了这条回复。",
 		editMessage: "编辑并重发",
 		editingNotice: "正在编辑上一条提问——发送后将替换这条回复。",
 		/**
@@ -154,10 +157,12 @@ export const zhCN: DeepPartial<EnCopy> = {
 		queueLabel: "等待插话",
 		/** 排队 chip 上的图片数量后缀。 */
 		queueImages: "{count} 张图",
-		/** 排队 chip 的撤回按钮。 */
-		queueCancel: "撤回",
-		/** 回复流式输出期间，回合槽位已是停止档位，这个安静的文字按钮为鼠标用户保留草稿的排队入口；只在有草稿时出现，键盘快捷键不受影响。 */
-		queueDraft: "排队发送",
+		/** 排队 chip 的取回按钮：文字退回编辑框重写，而不是被丢掉。 */
+		queueEdit: "取回改写",
+		/** 排队 chip 的丢弃按钮：文字直接没了，什么都不退回。 */
+		queueDiscard: "丢弃",
+		/** 回复流式输出期间，回合槽位已是停止档位，这个安静的文字按钮为鼠标用户保留发送入口；只在有草稿时出现，键盘快捷键不受影响。「立刻」是它必须许下的承诺：屏幕上的回复会被掐断，这条顶上去。 */
+		sendNow: "立刻发送",
 		/** 回复已生成但没能写进 vault。读者反正已看到正文，所以这是通知而不是警报。 */
 		persistFailed: "没能存进笔记库——重新载入后这条回复就没了。",
 		persistFailedCopy: "先复制出来",

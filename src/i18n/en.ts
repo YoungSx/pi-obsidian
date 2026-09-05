@@ -133,6 +133,18 @@ export const en = {
 		/** Appended to spoken text, so it continues the sentence in lower case. */
 		youStoppedSpoken: "you stopped this reply.",
 		/**
+		 * The other way an aborted reply happens: the reader sent something mid-
+		 * reply and the panel cut the turn short so it could go straight out.
+		 *
+		 * Names the cause, not the mechanism. "Interrupted" alone would read as a
+		 * fault; "your message" is the whole explanation, and the message itself is
+		 * the very next thing in the transcript, so the line only has to connect
+		 * the two.
+		 */
+		replySteered: "Your next message interrupted this reply.",
+		/** Appended to spoken text, so it continues the sentence in lower case. */
+		replySteeredSpoken: "your next message interrupted this reply.",
+		/**
 		 * The edit-and-resend control on the last answered question. Names both
 		 * halves of what it does — the composer opens with the words, and sending
 		 * rewrites the conversation from that turn — because "edit" alone reads
@@ -274,15 +286,28 @@ export const en = {
 		queueLabel: "Waiting to be read",
 		/** Image count suffix on a queued chip. */
 		queueImages: "{count} images",
-		/** Retract button on a queued chip. */
-		queueCancel: "Take back",
 		/**
-		 * The mouse half of mid-run queueing: while a reply streams the single
-		 * turn slot is Stop, so this quiet text button keeps the draft's queue
-		 * path open for pointer users. Visible only while a draft exists — the
-		 * chord keeps working regardless.
+		 * Take-back button on a queued chip: the words go back into the composer
+		 * for another pass rather than being thrown away (issue #289).
+		 *
+		 * Two verbs because it does two things, and the reader needs both to
+		 * predict it: the chip goes, and the draft comes back. "Edit" alone would
+		 * promise an in-place edit of the chip.
 		 */
-		queueDraft: "Queue draft",
+		queueEdit: "Take back to edit",
+		/** Discard button on a queued chip: the words go, nothing comes back. */
+		queueDiscard: "Discard",
+		/**
+		 * The mouse half of a mid-run send: while a reply streams the single turn
+		 * slot is Stop, so this quiet text button keeps the send path open for
+		 * pointer users. Visible only while a draft exists — the chord keeps
+		 * working regardless.
+		 *
+		 * "Now" is the promise the button has to make: the reply on screen is cut
+		 * short and this goes out in its place. It read "Queue draft" for as long
+		 * as a mid-run send waited a whole turn for pi to inject it (issue #289).
+		 */
+		sendNow: "Send now",
 		/**
 		 * Rendered under the reply it names, and never dismissible.
 		 *

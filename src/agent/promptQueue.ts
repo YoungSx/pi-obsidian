@@ -3,136 +3,128 @@
  *
  * The panel used to refuse them outright: a send during a streaming reply set
  * the "agent is already responding" banner and dropped the text back into the
- * composer. That is a lie about what the agent can do — pi has carried two
- * queues since 0.84 (`Agent.steer`, `Agent.followUp`) and drains them at
- * defined points inside a run — and it is also the wrong shape for a chat
- * panel, where the natural correction ("no, not that file") arrives *because*
- * the reply is already underway.
+ * composer. That is a lie about what the agent can do, and it is also the wrong
+ * shape for a chat panel, where the natural correction ("no, not that file")
+ * arrives *because* the reply is already underway.
  *
- * Two kinds, and the difference is *when pi injects them*, not how they are
- * written:
+ * ## Interrupt, not wait (issue #289)
  *
- * - `steer` lands at the next turn boundary inside the current run: after the
- *   tools of this turn finish, before the assistant speaks again. This is the
- *   correction case.
- * - `followUp` lands only where the run would otherwise have ended, and
- *   restarts the loop from there. This is the "when you're done, also…" case.
+ * The first fix routed those sends through pi's own steering queue
+ * (`Agent.steer`), which injects at the next *turn boundary* — after the tools
+ * of the running turn finish, before the assistant speaks again. That is one
+ * whole turn of latency, and a turn is however long the model wants plus
+ * however long its tools take: a correction typed three seconds into a
+ * subagent call sat on screen, visibly ignored, for minutes.
  *
- * ## Why a mirror exists at all
+ * So a mid-run send now interrupts. The service records the message here,
+ * aborts the run, and dispatches the queue as a fresh prompt the moment the run
+ * lands — the transcript keeps every completed tool result, and only the
+ * sentence the model was midway through is lost. pi's queues are not used at
+ * all, which is why this class is no longer a mirror of anything: it is *the*
+ * queue, and pi learns of a message only when it is prompted with it.
  *
- * pi's queues are write-only from outside: `steer()` and `followUp()` push,
- * `hasQueuedMessages()` reports a single boolean, and the clears are per-queue
- * and total. Nothing can enumerate them. A panel that shows the user what is
- * waiting — and lets them take one item back — therefore has to keep its own
- * ordered copy. This module is that copy, and nothing else: it allocates no
- * messages, calls no agent, and knows no vault. The service owns both halves
- * and keeps them in step.
+ * That also removes the failure the mirror had by construction. pi drains its
+ * steering queue at the turn boundary *inside* the dying run — so an abort that
+ * landed while tools were still finishing would have pi inject the correction
+ * and then immediately end the run, leaving the user's words in the transcript
+ * with nothing answering them. Nothing can inject from a queue pi cannot see.
  *
  * ## How an entry leaves
  *
- * By identity, not by matching text. pi pushes the exact `AgentMessage` object
- * it was handed into the transcript and emits it as `message_end`, so the
- * service can hand that object back here and have the right entry removed even
- * when the user queued the same words twice. Comparing text would settle the
- * wrong one, and comparing a stamped id would need a field pi's own type does
- * not have.
+ * Two ways, and neither needs to match text or identity:
  *
- * ## Single-item cancel, on top of a total-clear API
+ * - {@link drain} takes everything for dispatch. This is the normal exit: the
+ *   run has landed and the queue departs as one prompt, oldest first.
+ * - {@link remove} takes one back by the chip's id, and hands its words and
+ *   pictures to the caller — the composer refills from them, so "take back"
+ *   means the user gets to edit and resend rather than lose what they typed.
  *
- * pi cannot drop one queued message. So {@link PromptQueue.remove} does not
- * try: it removes the entry here and reports the *survivors* of that kind, and
- * the service clears pi's queue and re-pushes them in order. Coarse underneath,
- * exact on screen. The alternative — offering only "clear all" — makes a queue
- * of three an all-or-nothing decision, which is precisely the situation where a
- * user wants to retract one thing.
+ * Ids come from a counter rather than a uuid because the list dies with the
+ * panel: nothing persists an id, so uniqueness within one process is all it has
+ * to buy.
  */
 
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
-
-/** When pi injects a queued message. See the module note for the distinction. */
-export type QueuedPromptKind = "steer" | "followUp";
+import type { ImageContent } from "@earendil-works/pi-ai";
 
 /**
  * One waiting message, as the panel renders it.
  *
- * Deliberately without the `AgentMessage`: the UI needs the words and a handle,
- * and handing it the object pi will inject invites a component to mutate the
- * thing already promised to the agent.
+ * Deliberately without the `AgentMessage` and without the image bytes: the UI
+ * needs the words, a count, and a handle, and handing it the object the agent
+ * will be prompted with invites a component to mutate it.
  */
 export interface QueuedPrompt {
-	/** Stable handle for cancel. Session-scoped and never persisted. */
+	/** Stable handle for take-back. Session-scoped and never persisted. */
 	id: string;
-	kind: QueuedPromptKind;
 	/** What the user typed, before command expansion — that is what they recognize. */
 	text: string;
 	/** How many images ride along, so the chip can say so without holding bytes. */
 	imageCount: number;
 }
 
-/** A queued message plus the object pi was handed. Exported for the rescue path's take/restore pair. */
+/** A queued message plus what dispatching or taking it back needs. */
 export interface QueueEntry extends QueuedPrompt {
+	/** The message the agent will be prompted with: expanded text plus every image. */
 	message: AgentMessage;
+	/**
+	 * Only the images the user had staged in the composer, for the take-back.
+	 *
+	 * A subset of `message`'s images, not a copy of them — the same objects, so
+	 * the base64 is held once. The rest of `message`'s images were resolved out
+	 * of `![[…]]` embeds that are still written in {@link QueuedPrompt.text},
+	 * and restaging those would send each picture twice on the next send.
+	 */
+	stagedImages: readonly ImageContent[];
 }
 
-/** What {@link PromptQueue.remove} leaves behind, for the caller to re-push into pi. */
-export interface QueueRemoval {
-	/** The kind whose pi-side queue has to be rebuilt. */
-	kind: QueuedPromptKind;
-	/** Every message of that kind that is still waiting, oldest first. */
-	survivors: AgentMessage[];
+/** What the composer refills from when the user takes a queued message back. */
+export interface TakenPrompt {
+	/** The words as typed, ready to go back into the draft. */
+	text: string;
+	/** The pictures to restage beside them; empty when there were none. */
+	images: readonly ImageContent[];
 }
 
 /**
- * The panel's ordered view of what pi has been handed and not yet injected.
+ * The panel's queue of mid-run sends, oldest first.
  *
- * Not a general queue: `add` is append-only and `settle` removes by identity,
- * which is exactly the pair of operations that keeps this in step with pi. Ids
- * come from a counter rather than a uuid because the list dies with the panel —
- * nothing persists an id, so uniqueness within one process is all it has to buy.
+ * Not a general queue: `add` is append-only, and the only bulk exit is
+ * {@link drain}, which is what keeps "what the chips say" and "what will be
+ * sent" the same list rather than two that have to be kept in step.
  */
 export class PromptQueue {
 	private entries: QueueEntry[] = [];
 	private nextId = 1;
 
-	/** Records a message that has just been handed to pi. Returns the panel's view of it. */
-	add(input: { kind: QueuedPromptKind; text: string; imageCount: number; message: AgentMessage }): QueuedPrompt {
+	/** Records a message waiting to go out. Returns the panel's view of it. */
+	add(input: {
+		text: string;
+		imageCount: number;
+		stagedImages: readonly ImageContent[];
+		message: AgentMessage;
+	}): QueuedPrompt {
 		const entry: QueueEntry = {
 			id: `queued-${this.nextId}`,
-			kind: input.kind,
 			text: input.text,
 			imageCount: input.imageCount,
+			stagedImages: input.stagedImages,
 			message: input.message,
 		};
 		this.nextId += 1;
 		this.entries.push(entry);
-		return { id: entry.id, kind: entry.kind, text: entry.text, imageCount: entry.imageCount };
+		return { id: entry.id, text: entry.text, imageCount: entry.imageCount };
 	}
 
 	/**
-	 * Drops the entry for a message pi has now injected.
-	 *
-	 * Returns whether one was found, which is how the service tells an injected
-	 * queued message from every other `message_end` — a plain prompt, an
-	 * assistant reply, a tool result — without inspecting roles.
-	 */
-	settle(message: AgentMessage): boolean {
-		const index = this.entries.findIndex((entry) => entry.message === message);
-		if (index === -1) {
-			return false;
-		}
-		this.entries.splice(index, 1);
-		return true;
-	}
-
-	/**
-	 * Takes one entry back, and reports what must be re-pushed in its place.
+	 * Takes one entry back, and returns what the composer should show again.
 	 *
 	 * `undefined` for an unknown id: a chip can outlive its entry by one render
-	 * if pi injects the message just as the user reaches for the X, and that race
-	 * is not an error — the message went out, which is what the user would have
-	 * been told anyway.
+	 * if the queue is dispatched just as the user reaches for the button, and
+	 * that race is not an error — the message went out, which is what the user
+	 * would have been told anyway.
 	 */
-	remove(id: string): QueueRemoval | undefined {
+	remove(id: string): TakenPrompt | undefined {
 		const index = this.entries.findIndex((entry) => entry.id === id);
 		if (index === -1) {
 			return undefined;
@@ -141,13 +133,10 @@ export class PromptQueue {
 		if (!removed) {
 			return undefined;
 		}
-		return {
-			kind: removed.kind,
-			survivors: this.entries.filter((entry) => entry.kind === removed.kind).map((entry) => entry.message),
-		};
+		return { text: removed.text, images: removed.stagedImages };
 	}
 
-	/** Forgets everything. Pairs with pi's `clearAllQueues()` on abort and on session change. */
+	/** Forgets everything. Pairs with the abort, and with a session change. */
 	clear(): void {
 		this.entries = [];
 	}
@@ -155,10 +144,9 @@ export class PromptQueue {
 	/**
 	 * Takes every entry for dispatch, oldest first.
 	 *
-	 * For the rescue path only: a run that ended without injecting its steers
-	 * still owes the model those words, and the service re-sends them as a
-	 * fresh run. A pair with {@link restore} — take, then put back on failure
-	 * — keeps the panel's chips from lying either way.
+	 * A pair with {@link restore} — take, then put back on failure — so the
+	 * chips do not lie either way: while the prompt is in flight they are gone
+	 * because the words are, and if it never departed they are back.
 	 */
 	drain(): QueueEntry[] {
 		const taken = this.entries;
@@ -171,17 +159,16 @@ export class PromptQueue {
 		this.entries.unshift(...entries);
 	}
 
-	/** The waiting messages, oldest first, without the objects pi holds. */
+	/** The waiting messages, oldest first, without the bytes or the agent's objects. */
 	list(): QueuedPrompt[] {
 		return this.entries.map((entry) => ({
 			id: entry.id,
-			kind: entry.kind,
 			text: entry.text,
 			imageCount: entry.imageCount,
 		}));
 	}
 
-	/** How many messages are waiting, both kinds together. */
+	/** How many messages are waiting. */
 	get size(): number {
 		return this.entries.length;
 	}
