@@ -559,32 +559,32 @@ export function MessageList({
 							 */}
 							{seamRows(compactionPlan, index, context)}
 							{compactionDrawsMessage(compactionPlan, index) ? null : (
-						<MessageRow
-							index={index}
-							message={message}
-							isStreaming={index === activeIndex}
-							renderContext={context}
-							replyTiming={replyTimingFor(messages, index) ?? undefined}
-							onRetry={onRetry && index === regenerateIndex ? () => onRetry(index) : undefined}
-							turnCloses={message.role === "assistant" ? closesTurn(messages, index) : undefined}
-							/*
-							 * The edit hides itself on an unsettled turn too — the resend
-							 * truncates the transcript, and a turn still streaming (or
-							 * being compacted) is not a tail worth standing on. `onRetry`
-							 * leans on its caller for this; the edit owns it, because the
-							 * control sits on an *earlier* message than the streaming one
-							 * and would otherwise stay live through it.
-							 */
-							onEdit={
-								onEditMessage && index === editIndex && !isStreaming && !isCompacting
-									? () => onEditMessage(index)
-									: undefined
-							}
-							onCompare={
-								onCompare && index === regenerateIndex && !isStreaming && !isCompacting ? () => onCompare(index) : undefined
-							}
-							notPersisted={unpersistedMessages?.includes(message)}
-						/>
+								<MessageRow
+									index={index}
+									message={message}
+									isStreaming={index === activeIndex}
+									renderContext={context}
+									replyTiming={replyTimingFor(messages, index) ?? undefined}
+									onRetry={onRetry && index === regenerateIndex ? () => onRetry(index) : undefined}
+									turnCloses={message.role === "assistant" ? closesTurn(messages, index) : undefined}
+									/*
+									 * The edit hides itself on an unsettled turn too — the resend
+									 * truncates the transcript, and a turn still streaming (or
+									 * being compacted) is not a tail worth standing on. `onRetry`
+									 * leans on its caller for this; the edit owns it, because the
+									 * control sits on an *earlier* message than the streaming one
+									 * and would otherwise stay live through it.
+									 */
+									onEdit={
+										onEditMessage && index === editIndex && !isStreaming && !isCompacting
+											? () => onEditMessage(index)
+											: undefined
+									}
+									onCompare={
+										onCompare && index === regenerateIndex && !isStreaming && !isCompacting ? () => onCompare(index) : undefined
+									}
+									notPersisted={unpersistedMessages?.includes(message)}
+								/>
 							)}
 						</React.Fragment>
 					))
