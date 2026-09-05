@@ -73,19 +73,21 @@ const panels = JSON.parse(payload.replace(/&quot;/g, '"').replace(/&amp;/g, "&")
 const NARROW_ENOUGH_TO_OVERFLOW = 400;
 
 /*
- * The whole of the transcript's vertical vocabulary. Three numbers, and two
- * questions decide which one applies: do these blocks share a message, and does
- * the conversation change hands between them?
+ * The whole of the transcript's vertical vocabulary. Two numbers, and one question
+ * decides which: does the conversation change footing across this boundary?
  *
- * 4px is what a message hands its own blocks (`.piem-chat__message-content` is
- * block flow, so a margin); 8px is the column's `gap`, which is all there is
- * between two rows of one turn now that the article carries no padding; 16px is
- * that gap plus the margin the user's own turn adds on both faces, the one
- * boundary in the column that marks meaning rather than delivery. A fourth number
- * means something has started spending spacing of its own again.
+ * 4px is a turn's own rhythm, and it is one number reached two ways on purpose —
+ * a message hands its blocks a margin (`.piem-chat__message-content` is block
+ * flow, which has no gap to give), the column hands its rows a `gap`, and they
+ * agree because a reader must not be able to tell which boundary is which. `pi`
+ * decides where a turn splits into messages; that decision is not information.
+ *
+ * 16px is that gap plus the 12px a question or a tidying seam adds on both
+ * faces — the two boundaries in this column that mark meaning rather than
+ * delivery. A third number means something has started spending spacing of its
+ * own again.
  */
-const WITHIN_MESSAGE = 4;
-const BETWEEN_ROWS = 8;
+const WITHIN_TURN = 4;
 const ACROSS_SPEAKERS = 16;
 
 const failures = [];
@@ -96,11 +98,14 @@ for (const panel of panels) {
 	 * that started to would be caught the day it landed rather than on a phone.
 	 */
 	for (const step of panel.rhythm ?? []) {
-		const kind = step.withinMessage
-			? { want: WITHIN_MESSAGE, name: "two blocks of one message" }
-			: step.speakerChange
-				? { want: ACROSS_SPEAKERS, name: "a boundary where the speaker changes" }
-				: { want: BETWEEN_ROWS, name: "a boundary between rows of one turn" };
+		const kind = step.speakerChange
+			? { want: ACROSS_SPEAKERS, name: "a boundary where the speaker changes" }
+			: {
+					want: WITHIN_TURN,
+					// Named for which boundary it is so a failure says whether the message
+					// margin or the column gap drifted, even though both owe the same 4px.
+					name: step.withinMessage ? "two blocks of one message" : "two rows of one turn",
+				};
 		if (Math.abs(step.gap - kind.want) > 0.5) {
 			failures.push(`${panel.panel}: ${step.from} → ${step.to} sits ${step.gap}px apart, but ${kind.name} is ${kind.want}px`);
 		}
@@ -166,6 +171,5 @@ if (failures.length > 0) {
 }
 console.log(
 	`\nall ${panels.length} panel widths hold their column still, every wide construct stays reachable inside its own scroller,` +
-		` and the gaps are ${WITHIN_MESSAGE}px inside a message, ${BETWEEN_ROWS}px between rows of a turn,` +
-		` ${ACROSS_SPEAKERS}px where the speaker changes`,
+		` and the gaps are ${WITHIN_TURN}px everywhere inside a turn, ${ACROSS_SPEAKERS}px where the speaker changes`,
 );
