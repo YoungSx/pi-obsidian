@@ -1,110 +1,88 @@
-import { anthropicProvider } from "@earendil-works/pi-ai/providers/anthropic";
-import { deepseekProvider } from "@earendil-works/pi-ai/providers/deepseek";
-import { groqProvider } from "@earendil-works/pi-ai/providers/groq";
-import { mistralProvider } from "@earendil-works/pi-ai/providers/mistral";
-import { moonshotaiProvider } from "@earendil-works/pi-ai/providers/moonshotai";
-import { openaiProvider } from "@earendil-works/pi-ai/providers/openai";
-import { openrouterProvider } from "@earendil-works/pi-ai/providers/openrouter";
-import { xaiProvider } from "@earendil-works/pi-ai/providers/xai";
-import { zaiProvider } from "@earendil-works/pi-ai/providers/zai";
-import { ANTHROPIC_MODELS } from "@earendil-works/pi-ai/providers/anthropic.models";
-import { DEEPSEEK_MODELS } from "@earendil-works/pi-ai/providers/deepseek.models";
-import { GROQ_MODELS } from "@earendil-works/pi-ai/providers/groq.models";
-import { MISTRAL_MODELS } from "@earendil-works/pi-ai/providers/mistral.models";
-import { MOONSHOTAI_MODELS } from "@earendil-works/pi-ai/providers/moonshotai.models";
-import { OPENAI_MODELS } from "@earendil-works/pi-ai/providers/openai.models";
-import { OPENROUTER_MODELS } from "@earendil-works/pi-ai/providers/openrouter.models";
-import { XAI_MODELS } from "@earendil-works/pi-ai/providers/xai.models";
-import { ZAI_MODELS } from "@earendil-works/pi-ai/providers/zai.models";
-import type { Model, Provider } from "@earendil-works/pi-ai";
+import type { Model } from "@earendil-works/pi-ai";
+import { DEFAULT_MODEL_ID, DEFAULT_PROVIDER } from "../constants";
+import type { WireProtocol } from "../modelConfig";
 
 /**
- * The slice of pi-ai's builtin catalog this plugin ships.
+ * The one model this build knows about without being told.
  *
- * pi-ai's `providers/all` entrypoint reaches 39 providers and 1312 models
- * through one static `MODELS` map, and importing any part of it pulls all of it:
- * 487 KiB of catalog JSON, plus every provider's API implementation and whatever
- * SDK that implementation needs. `main.js` is evaluated in full on every Obsidian
- * launch, including on phones, so that mattered.
+ * This module used to carry a slice of pi-ai's builtin catalog — nine provider
+ * factories beside nine model catalogs — so the panel could suggest model ids
+ * and fall back to a working pair before anything was configured. Measurement
+ * retired that shape. The catalog data and the factories are welded together
+ * upstream: every `providers/<id>.js` imports its `X_MODELS` at module scope and
+ * names it inside `createProvider`, so esbuild cannot shake the data loose from
+ * the code. Importing nine factories therefore cost 283 KiB of bundle — 164 KiB
+ * of it JSON, and 125 KiB of *that* OpenRouter's 351 entries alone — every byte
+ * of which Obsidian parses on every launch, phones included. Dropping the
+ * factories takes the same seam to 102 KiB.
  *
- * Naming the providers here trades catalog breadth for start-up weight. What is
- * lost is narrow by design: since the settings rework, the panel has no builtin
- * provider picker at all — a user configures their own endpoint, and the catalog
- * only serves two purposes. It supplies the model-id suggestions in the model
- * form, and it backs the built-in fallback the plugin uses before anything is
- * configured. Both survive a shorter list; a model id that is no longer suggested
- * can still be typed, because the field accepts any id.
+ * What is lost is narrower than the byte count suggests, because the shipped
+ * catalog was already the third source consulted, behind two better ones:
  *
- * Every id here must stay resolvable: {@link DEFAULT_PROVIDER} /
- * {@link DEFAULT_MODEL_ID} is looked up through this module, and losing it turns
- * an unconfigured plugin into a load-time throw.
+ * - Model id suggestions come first from {@link ../net/modelListingCache}, which
+ *   asks the user's own endpoint what it serves. That answer is authoritative
+ *   and current where a snapshot is neither, and it is the only one that knows
+ *   anything at all about a private gateway.
+ * - Capability hints come first from the live models.dev index
+ *   ({@link ./modelsDev}), 7,561 models against the snapshot's 460.
  *
- * The two lists below must name the same providers. Shipping a catalog without
- * its factory looks tempting whenever the data is cheap and the SDK is not, but
- * it produces a provider whose models resolve and then fail to dispatch with
- * "Unknown provider" at send time, which is exactly the silent broken
- * configuration this trimming was meant to avoid. A provider is either fully
- * carried or absent; `catalogConsistency.test.ts` enforces that.
+ * So the catalog only ever answered in one window: offline, on the first model
+ * form of a cold start. It is also where the suggestions were least useful —
+ * every id it knew belonged to a vendor whose own endpoint would have listed
+ * more of them. And nothing became unreachable: the field accepts any id typed
+ * into it, {@link ../net/providerPresets} fills the connection details in for
+ * every vendor the catalog used to name, and each capability control stays
+ * editable with a working default.
  *
- * `google` was carried until that invariant was applied to it. Its 8 KiB of
- * model data sat behind `@google/genai`, 270 KiB and 16% of the bundle, and the
- * adapter behind it throws on any `fetch` that is not `globalThis.fetch` — which
- * every request here is, because the transport has to be ours: `requestUrl` is
- * the only path that is CORS-free by construction rather than by the endpoint's
- * continued goodwill, and Obsidian's origin differs per platform anyway
- * (`app://obsidian.md`, `capacitor://localhost`, `http://localhost`). Nor is
- * `google-generative-ai` a {@link WireProtocol}, so a configured endpoint could
- * not select it either. Both halves went. Gemini is still reachable the way it
- * always actually worked: a user-configured endpoint on Gemini's
- * OpenAI-compatible path (`/v1beta/openai/`) speaking `openai-completions`,
- * which supplies its own model ids through {@link probeModelListing}.
+ * What could not go is the fallback pair. {@link ../settings}'s `getSelectedModel`
+ * resolves {@link DEFAULT_PROVIDER}/{@link DEFAULT_MODEL_ID} through this module
+ * when nothing is configured, and throws if it cannot — which would take the
+ * whole plugin down at load rather than degrade. So the entry below is that one
+ * pair, written out as a literal.
+ *
+ * It is a copy of what models.dev published for it, taken from pi-ai's snapshot
+ * on 2026-09-05 and deliberately not kept in sync: this is a placeholder that
+ * has to resolve, not a claim about DeepSeek's current pricing. Note also that
+ * it can never actually serve a request — the settings panel has no field for a
+ * builtin provider's key, so an unconfigured vault reaching here has none. Its
+ * job is to give the panel a name to render and compaction a context window to
+ * plan against, so that "not configured yet" looks like a setting to finish
+ * rather than a crash.
  */
-
-/** Model catalogs, keyed the way pi-ai's own `MODELS` map is. */
-const MODELS: Record<string, Record<string, Model<string>>> = {
-	anthropic: ANTHROPIC_MODELS,
-	deepseek: DEEPSEEK_MODELS,
-	groq: GROQ_MODELS,
-	mistral: MISTRAL_MODELS,
-	moonshotai: MOONSHOTAI_MODELS,
-	openai: OPENAI_MODELS,
-	openrouter: OPENROUTER_MODELS,
-	xai: XAI_MODELS,
-	zai: ZAI_MODELS,
-} as unknown as Record<string, Record<string, Model<string>>>;
+const FALLBACK_MODEL: Model<WireProtocol> = {
+	id: DEFAULT_MODEL_ID,
+	name: "DeepSeek V4 Pro",
+	api: "openai-completions",
+	baseUrl: "https://api.deepseek.com",
+	provider: DEFAULT_PROVIDER,
+	reasoning: true,
+	input: ["text"],
+	cost: { input: 0.435, output: 0.87, cacheRead: 0.003625, cacheWrite: 0 },
+	contextWindow: 1_000_000,
+	maxTokens: 384_000,
+	compat: {
+		supportsStore: false,
+		supportsDeveloperRole: false,
+		maxTokensField: "max_tokens",
+		requiresReasoningContentOnAssistantMessages: true,
+		thinkingFormat: "deepseek",
+	},
+	thinkingLevelMap: { minimal: null, low: null, medium: null, high: "high", max: "max" },
+};
 
 /**
- * Provider factories, in the same order as {@link MODELS}.
+ * Provider ids this build carries a model for — now exactly one.
  *
- * Separate from the catalogs because they cost differently: a `*.models` import
- * is data, while a provider factory drags in its API implementation and any SDK
- * that needs. Keeping the two lists side by side makes it visible that adding a
- * provider here is the expensive half.
+ * Kept as a list rather than collapsed to a constant because its callers iterate
+ * it ({@link ../ui/settings/ModelModal}'s suggestions,
+ * {@link ../ui/settings/catalogCapabilityHint}'s snapshot pass), and a list of
+ * one keeps those loops correct without special-casing.
  */
-const PROVIDER_FACTORIES: Array<() => Provider> = [
-	anthropicProvider,
-	deepseekProvider,
-	groqProvider,
-	mistralProvider,
-	moonshotaiProvider,
-	openaiProvider,
-	openrouterProvider,
-	xaiProvider,
-	zaiProvider,
-];
-
-/** Provider ids this build carries a catalog for. */
 export function getBuiltinProviders(): string[] {
-	return Object.keys(MODELS);
+	return [DEFAULT_PROVIDER];
 }
 
-/** Models this build knows about for one provider, or none for an unknown id. */
+/** Models this build knows about for one provider, or none for any other id. */
 export function getBuiltinModels(provider: string): Model<string>[] {
-	const models = MODELS[provider];
-	return models ? Object.values(models) : [];
-}
-
-/** Freshly constructed providers, for registration in a `Models` collection. */
-export function builtinProviders(): Provider[] {
-	return PROVIDER_FACTORIES.map((create) => create());
+	return provider === DEFAULT_PROVIDER ? [FALLBACK_MODEL] : [];
 }

@@ -3,11 +3,13 @@ import { createFetchForTransport, type FetchFn } from "./obsidianFetch";
 /**
  * Asking models.dev what it knows about a model id, at runtime.
  *
- * pi-ai's builtin catalog is a build-time snapshot — the same upstream data
- * (models.dev) cut into the bundle, frozen at release. This module fetches the
- * live edition instead, so a recommendation reflects what the authority says
- * *today*: a model released after this plugin was built is still recognized,
- * and a stale snapshot entry no longer misleads.
+ * This is the only source of capability data the plugin has. It used to be the
+ * fresher of two — pi-ai's builtin catalog carried the same upstream data cut
+ * into the bundle at release — but that snapshot cost 164 KiB of start-up parsing
+ * for 460 models against this endpoint's 7,561, and went (see
+ * {@link ./builtinCatalog}). So a recommendation now always reflects what the
+ * authority says *today*, and when this cannot be reached there is no
+ * recommendation rather than a stale one.
  *
  * The payload is large — a few MiB covering every provider models.dev tracks —
  * so it is fetched lazily, once per session, and only when a model form opens:
