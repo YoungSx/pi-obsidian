@@ -52,9 +52,12 @@ import {
 } from "../session/ObsidianSessionManager";
 import { aggregateSessionSearchHits, type SessionSearchResult } from "../session/sessionSearch";
 import { arrayBufferToBase64, extractImageRefs, mimeTypeForPath, sanitizeMessageForLog, stripImageRefs } from "../vault/image";
-import { injectContext, type InjectedNote } from "./contextInjection";
+import { injectContext, type FrozenRunContext, type InjectedNote } from "./contextInjection";
+import { probeEnvironment, probeWorkspaceContext } from "./contextProbe";
 import { noteFileName, renderTranscriptMarkdown, type ExportableMessage } from "./exportNote";
 import { MAX_PINNED_REFS, type ContextRef } from "./contextRefs";
+import { withEnvironment } from "./environmentPrompt";
+import { EMPTY_WORKSPACE_CONTEXT, type WorkspaceContext } from "./workspaceContext";
 import { createSubagentExtension } from "../subagent/extension";
 import { OBSIDIAN_AGENT_SYSTEM_PROMPT } from "./systemPrompt";
 import { composeSystemPrompt, emptySkillLoadReport, expandSkill, findSkill, loadVaultSkills, mergeSkills, type SkillLoadReport } from "./skillLoader";
@@ -1128,7 +1131,7 @@ export class ObsidianAgentService {
 		let tailBefore: AgentMessage | undefined;
 		try {
 			tailBefore = lastAssistantTurn(agent.state.messages);
-			rt.activeRunContext = this.contextRefList(rt);
+			rt.activeRunContext = this.freezeRunContext(rt);
 			this.notify();
 			await this.compactContextIfNeeded(rt, agent);
 			// The budget is per run, and `compactBetweenTurns` spends it.
@@ -1255,7 +1258,7 @@ export class ObsidianAgentService {
 			// and the compaction can throw, for the same reason
 			// {@link reportDispatchFailure} explains.
 			tailBefore = lastAssistantTurn(agent.state.messages);
-			rt.activeRunContext = this.contextRefList(rt);
+			rt.activeRunContext = this.freezeRunContext(rt);
 			this.notify();
 			await this.compactContextIfNeeded(rt, agent);
 			// pi's own queues may still hold what this dispatch is re-sending;
@@ -1297,7 +1300,7 @@ export class ObsidianAgentService {
 			// and the compaction can throw, for the same reason
 			// {@link reportDispatchFailure} explains.
 			tailBefore = lastAssistantTurn(agent.state.messages);
-			rt.activeRunContext = this.contextRefList(rt);
+			rt.activeRunContext = this.freezeRunContext(rt);
 			this.notify();
 			await this.compactContextIfNeeded(rt, agent);
 			// The budget is per run, and `compactBetweenTurns` spends it.
@@ -2938,6 +2941,50 @@ export class ObsidianAgentService {
 	}
 
 	/**
+	 * Freezes the half of the context that must not move during one user run.
+	 *
+	 * Both halves are read here, together: the workspace facts are derived from the
+	 * same active note the refs name, and reading them at different moments is what
+	 * would let the block name one note as active and a different note's folder as
+	 * current.
+	 *
+	 * The workspace read degrades to nothing rather than failing the run. It is all
+	 * in-memory reads off Obsidian's own caches, so a throw means the app handed
+	 * over something structurally unexpected — worth a log line, never worth losing
+	 * the user's turn over.
+	 */
+	private freezeRunContext(rt: SessionRuntime | null): FrozenRunContext {
+		const refs = this.contextRefList(rt);
+		return { refs, workspace: this.readWorkspaceContext(refs) };
+	}
+
+	private readWorkspaceContext(refs: readonly ContextRef[]): WorkspaceContext {
+		try {
+			return probeWorkspaceContext(this.app, refs);
+		} catch (error) {
+			this.log.debug("Failed to read the workspace context; sending the notes-only context block", () => ({ error: String(error) }));
+			return EMPTY_WORKSPACE_CONTEXT;
+		}
+	}
+
+	/**
+	 * The base system prompt with the environment sentence appended.
+	 *
+	 * Composed here rather than inside `composeSystemPrompt`, whose job is skills
+	 * and which the subagent runner shares. Degrades to the bare prompt if the read
+	 * throws: an unnamed vault is a worse prompt, a failed session is a worse
+	 * product.
+	 */
+	private promptWithEnvironment(): string {
+		try {
+			return withEnvironment(OBSIDIAN_AGENT_SYSTEM_PROMPT, probeEnvironment(this.app));
+		} catch (error) {
+			this.log.debug("Failed to read the environment facts; composing the prompt without them", () => ({ error: String(error) }));
+			return OBSIDIAN_AGENT_SYSTEM_PROMPT;
+		}
+	}
+
+	/**
 	 * Builds the tool set the agent runs with.
 	 *
 	 * Vault tools come straight from the tools module; delegation rides in
@@ -3025,25 +3072,28 @@ export class ObsidianAgentService {
 			// compacted turn without surfacing an error.
 			convertToLlm,
 			// Names the active and pinned notes to the model on every turn, with the
-			// active note's current text riding along. pi applies this per LLM request
-			// against a copy of the transcript, so the block is re-derived for each
-			// turn of a tool loop and never reaches `state.messages` — nothing lands
-			// in the session log or the panel. Read through a per-run snapshot while a
-			// prompt is active, so a note switch cannot retarget a tool loop halfway
-			// through a user request. Re-reading per request is what makes the content
-			// honest: an `edit` the model just made is visible to its next turn.
+			// active note's current text and the workspace around it riding along. pi
+			// applies this per LLM request against a copy of the transcript, so the
+			// block is re-derived for each turn of a tool loop and never reaches
+			// `state.messages` — nothing lands in the session log or the panel. Refs
+			// and workspace facts are read through a per-run snapshot while a prompt is
+			// active, so a note switch cannot retarget a tool loop halfway through a
+			// user request. The note body is re-read per request instead, which is what
+			// makes it honest: an `edit` the model just made is visible to its next turn.
 			transformContext: async (messages) => {
-				const refs = rt.activeRunContext ?? this.contextRefList(rt);
-				const activePath = refs.find((ref) => ref.kind === "active")?.path;
+				const frozen = rt.activeRunContext ?? this.freezeRunContext(rt);
+				const activePath = frozen.refs.find((ref) => ref.kind === "active")?.path;
 				const note = activePath ? await this.readActiveNote(activePath) : null;
-				return injectContext(messages, refs, note);
+				// The date is read per request rather than frozen with the refs: a run
+				// that spans midnight must not keep asserting yesterday's date.
+				return injectContext(messages, { refs: frozen.refs, workspace: frozen.workspace, note, today: new Date() });
 			},
 			initialState: {
 				// Skills were loaded by the same async path that led here
 				// (`initializeAgent` / `openSession` / `newSession` all await
 				// `reloadSkills` first), so the composed prompt is current; a live
 				// agent gets its prompt refreshed by `reloadSkills` itself.
-				systemPrompt: composeSystemPrompt(OBSIDIAN_AGENT_SYSTEM_PROMPT, this.skills),
+				systemPrompt: composeSystemPrompt(this.promptWithEnvironment(), this.skills),
 				model,
 				// The caller resolves this: the loaded session's own level, or the
 				// seed a new session was created with. Global settings have no say.
@@ -3123,7 +3173,7 @@ export class ObsidianAgentService {
 		// background session mid-conversation deserves the refreshed prompt too.
 		for (const rt of this.runtimes.values()) {
 			if (rt.agent) {
-				rt.agent.state.systemPrompt = composeSystemPrompt(OBSIDIAN_AGENT_SYSTEM_PROMPT, skills);
+				rt.agent.state.systemPrompt = composeSystemPrompt(this.promptWithEnvironment(), skills);
 			}
 		}
 	}

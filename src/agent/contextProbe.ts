@@ -1,0 +1,100 @@
+/**
+ * The one place that reads Obsidian for the facts injected into a request.
+ *
+ * Everything here is a thin read: no filtering worth testing, no ordering, no
+ * caps. Those live in {@link ./workspaceContext} as pure functions over the
+ * {@link WorkspaceReadout} this produces, so the rules that decide what the model
+ * is told can be tested without an Obsidian runtime, and this file stays small
+ * enough that reading it is the same as verifying it.
+ *
+ * Nothing here catches. Every call is an in-memory read off caches Obsidian keeps
+ * warm — no disk, no network — so a throw means the app handed over something
+ * structurally unexpected, and the caller ({@link ./ObsidianAgentService}) is
+ * where the logger and the degrade-to-nothing decision live. Swallowing here
+ * would turn a real breakage into a silently emptier prompt.
+ */
+
+import { apiVersion, getLanguage, MarkdownView, Platform, TFolder, type App } from "obsidian";
+import type { ContextRef } from "./contextRefs";
+import type { EnvironmentFacts } from "./environmentPrompt";
+import { buildWorkspaceContext, type FolderEntry, type WorkspaceContext, type WorkspaceReadout } from "./workspaceContext";
+
+/**
+ * Reads the facts that cannot change while a conversation is open.
+ *
+ * `apiVersion` and `getLanguage` are module-level exports rather than methods on
+ * `App`, which is why this takes the app only for the vault name. The plugin's
+ * `minAppVersion` is 1.13.0 and `getLanguage` landed in 1.8.7, so no capability
+ * probe is needed.
+ */
+export function probeEnvironment(app: App): EnvironmentFacts {
+	return {
+		vaultName: app.vault.getName(),
+		appVersion: apiVersion,
+		language: getLanguage(),
+		platform: {
+			isMacOS: Platform.isMacOS,
+			isWin: Platform.isWin,
+			isLinux: Platform.isLinux,
+			isIosApp: Platform.isIosApp,
+			isAndroidApp: Platform.isAndroidApp,
+			isPhone: Platform.isPhone,
+			isTablet: Platform.isTablet,
+		},
+	};
+}
+
+/**
+ * Reads the workspace around the active note.
+ *
+ * `getLastOpenFiles` needs both filters and neither is optional:
+ *
+ * - **Existence.** Measured against a real vault: Obsidian never prunes a
+ *   deleted file from that list. Injecting it unfiltered puts paths in front of
+ *   the model that `read` will fail on, and it has no way to tell which.
+ * - **Markdown.** The same list holds canvases and any other file type the user
+ *   opened, and the note tools cannot act on those — the same reason
+ *   `resolveWorkingNotePath` filters the active file down to `.md`.
+ *
+ * The open-tab read goes through `instanceof MarkdownView` to reach `view.file`,
+ * matching how `messageActions` walks leaves. `leaf.getViewState().state.file`
+ * carries the same path but as an untyped `Record` value, and one unchecked cast
+ * is a worse trade than one `instanceof`.
+ */
+function readWorkspace(app: App, activePath: string | null): WorkspaceReadout {
+	const openPaths: string[] = [];
+	for (const leaf of app.workspace.getLeavesOfType("markdown")) {
+		const view = leaf.view;
+		if (view instanceof MarkdownView && view.file) {
+			openPaths.push(view.file.path);
+		}
+	}
+
+	const recentPaths = app.workspace.getLastOpenFiles().filter((path) => {
+		const file = app.vault.getFileByPath(path);
+		return file !== null && file.extension === "md";
+	});
+
+	let folderPath: string | null = null;
+	let folderEntries: readonly FolderEntry[] = [];
+	// `getFileByPath` returns `null` for a folder or a missing path, so reaching
+	// `.parent` here needs no type guard of its own.
+	const parent = activePath === null ? null : app.vault.getFileByPath(activePath)?.parent;
+	if (parent) {
+		folderPath = parent.path;
+		folderEntries = parent.children.map((child) => ({ path: child.path, isFolder: child instanceof TFolder }));
+	}
+
+	return { folderPath, folderEntries, openPaths, recentPaths };
+}
+
+/**
+ * Reads and shapes the workspace facts for one request.
+ *
+ * Takes the same `refs` the block will name, so exclusion and the active note's
+ * folder are derived from one list rather than two reads that could disagree.
+ */
+export function probeWorkspaceContext(app: App, refs: readonly ContextRef[]): WorkspaceContext {
+	const activePath = refs.find((ref) => ref.kind === "active")?.path ?? null;
+	return buildWorkspaceContext(refs, readWorkspace(app, activePath));
+}

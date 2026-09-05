@@ -2,7 +2,7 @@ import { type Agent, type ThinkingLevel } from "@earendil-works/pi-agent-core";
 import { type Usage } from "@earendil-works/pi-ai";
 import { type ActiveSessionInfo } from "../session/ObsidianSessionManager";
 import { type CompactionEvent, type CompactResult } from "./compaction";
-import { type ContextRef } from "./contextRefs";
+import { type FrozenRunContext } from "./contextInjection";
 import { PromptQueue } from "./promptQueue";
 
 /**
@@ -193,8 +193,12 @@ export class SessionRuntime {
 
 	// --- run bookkeeping ---
 
-	/** Frozen for one user turn so a mid-loop note switch cannot retarget a write. */
-	activeRunContext: ContextRef[] | null = null;
+	/**
+	 * Frozen for one user turn so a mid-loop note switch cannot retarget a write,
+	 * or leave the block naming one note as active and another note's folder as
+	 * current. See {@link FrozenRunContext}.
+	 */
+	activeRunContext: FrozenRunContext | null = null;
 	/**
 	 * The panel's mirror of pi's two write-only queues. Emptied on abort or
 	 * agent replacement alongside pi's own queues rather than replaced, so ids

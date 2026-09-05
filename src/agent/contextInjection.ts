@@ -27,17 +27,26 @@
  *   about when to refresh. The service supplies a frozen per-prompt ref list, so
  *   navigation during a tool loop cannot silently retarget the user's request.
  *
- * The block must be byte-identical between turns whenever the notes have not
- * changed. Anything volatile in it (a timestamp, a cursor position, a selection
- * length) makes the block itself miss the cache for no benefit. The active
- * note's *content* rides the same rule: it is re-read every turn, but its bytes
- * only move when the note itself does, which is exactly when a fresh read is
- * the point. The `mtime` is emitted as a fixed ISO string off the file stat —
+ * The block must be byte-identical between turns whenever the reported facts have
+ * not changed. Anything volatile in it (a clock reading, a cursor position, a
+ * selection length) makes the block itself miss the cache for no benefit. The
+ * active note's *content* rides the same rule: it is re-read every turn, but its
+ * bytes only move when the note itself does, which is exactly when a fresh read
+ * is the point. The `mtime` is emitted as a fixed ISO string off the file stat —
  * stable until the file changes, so it costs a cache byte only when it is news.
+ *
+ * The date is the one fact here that moves on its own, and it earns the
+ * exception: it changes once a day, at the tail of the prefix, and without it
+ * "today's note" is a guess. It deliberately does *not* live in the system
+ * prompt, where it would be assembled once per session and then quietly lie
+ * through midnight. Facts that genuinely cannot change mid-session — the vault,
+ * the device, the interface language — do live there; see
+ * {@link ./environmentPrompt}.
  */
 
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import type { ContextRef } from "./contextRefs";
+import { EMPTY_WORKSPACE_CONTEXT, renderWorkspaceLines, type WorkspaceContext } from "./workspaceContext";
 
 /**
  * Timestamp stamped on the injected message.
@@ -62,6 +71,16 @@ const INJECTED_TIMESTAMP = 0;
 export const MAX_ACTIVE_NOTE_CHARS = 20_000;
 
 /**
+ * Weekday names for the date line.
+ *
+ * A fixed table rather than `toLocaleDateString`: the block's bytes must depend
+ * only on the facts, and a locale-derived name would make the same Saturday
+ * render differently on two machines — or change under the user's feet when they
+ * switch Obsidian's language.
+ */
+const WEEKDAY_NAMES = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"] as const;
+
+/**
  * The active note's current text, read off the vault for this turn.
  *
  * The service supplies the raw payload; this module decides how much of it the
@@ -73,6 +92,41 @@ export interface InjectedNote {
 	path: string;
 	content: string;
 	modifiedAt: number | null;
+}
+
+/**
+ * The half of a turn's context that is frozen for one user run.
+ *
+ * `refs` was already frozen so a mid-loop note switch could not retarget a write.
+ * The workspace facts have to be frozen *with* it, because they are derived from
+ * the same active note: a live folder reading paired with a frozen ref list would
+ * eventually name one note as active and a different note's folder as current —
+ * a block that contradicts itself. The active note's *body* is deliberately not
+ * in here; it is re-read every turn so an `edit` the model just made is visible
+ * to its next turn.
+ */
+export interface FrozenRunContext {
+	refs: ContextRef[];
+	workspace: WorkspaceContext;
+}
+
+/**
+ * Everything one turn's block reports.
+ *
+ * An object rather than positional parameters. Four facts of four different
+ * shapes read as four anonymous arguments at the call site, and the two optional
+ * ones would have to be passed as `null` to reach the third — the exact shape
+ * that makes a caller pass a workspace context where a note belonged.
+ */
+export interface InjectedContext {
+	/** Notes named to the model, active note first. */
+	refs: readonly ContextRef[];
+	/** The active note's text, or `null` when the read failed. */
+	note?: InjectedNote | null;
+	/** Facts about the folder and tabs around the active note. */
+	workspace?: WorkspaceContext;
+	/** The current local date, or `null` to leave it out. */
+	today?: Date | null;
 }
 
 /**
@@ -134,53 +188,88 @@ function renderNoteBody(note: InjectedNote): string[] {
 }
 
 /**
- * Renders the block naming each referenced note, with the active note's text
- * when the caller could read it.
+ * Renders the date line.
  *
- * Full vault paths, never the shortened labels the chips display: the path is
- * what the model passes to `read` and `edit`, so a truncated one would be worse
- * than useless. The tag wrapper marks the boundary between this and the user's
- * own words, so a note title that reads like an instruction cannot be mistaken
- * for one.
+ * Assembled from the local-time getters rather than `toISOString`, which formats
+ * in UTC: for anyone east of Greenwich in the evening, or west of it in the
+ * morning, the UTC date is a different day than the one on the user's wall. A
+ * "today's note" resolved off that would be the wrong note, and the mistake
+ * would be invisible for most of the day.
+ */
+function formatToday(date: Date): string {
+	const year = date.getFullYear();
+	const month = String(date.getMonth() + 1).padStart(2, "0");
+	const day = String(date.getDate()).padStart(2, "0");
+	return `Today: ${year}-${month}-${day} (${WEEKDAY_NAMES[date.getDay()]})`;
+}
+
+/**
+ * The block's body, one line per fact, or `[]` when there is nothing to report.
+ *
+ * Order is deliberate and stable: the date, then the notes (which carry the
+ * active note's body and are therefore the long part), then the workspace around
+ * them. Reordering would rewrite the whole block for no new information, so the
+ * order is part of the cache contract, not a formatting preference.
+ *
+ * Full vault paths for every note, never the shortened labels the chips display:
+ * the path is what the model passes to `read` and `edit`, so a truncated one
+ * would be worse than useless.
  *
  * Only the active note carries content ({@link InjectedNote}); a pinned note
  * stays a path line, and the model reads it with the `read` tool when it needs
  * to. When the active ref is absent — follow dismissed, non-Markdown leaf — or
- * the read failed and `note` is `null`, the block degrades to the path-only
- * form it had before, which is still strictly better than nothing.
+ * the read failed and `note` is `null`, that entry degrades to the path-only
+ * form, which is still strictly better than nothing.
  */
-export function renderContextBlock(refs: ContextRef[], note?: InjectedNote | null): string {
-	const lines = ["<context>"];
-	for (const ref of refs) {
+function renderContextLines(input: InjectedContext): string[] {
+	const lines: string[] = [];
+	if (input.today) {
+		lines.push(formatToday(input.today));
+	}
+	for (const ref of input.refs) {
 		if (ref.kind === "active") {
 			lines.push(`Active note: ${ref.path}`);
-			if (note && note.path === ref.path) {
-				lines.push(...renderNoteBody(note));
+			if (input.note && input.note.path === ref.path) {
+				lines.push(...renderNoteBody(input.note));
 			}
 		} else {
 			lines.push(`Pinned note: ${ref.path}`);
 		}
 	}
-	lines.push("</context>");
-	return lines.join("\n");
+	lines.push(...renderWorkspaceLines(input.workspace ?? EMPTY_WORKSPACE_CONTEXT));
+	return lines;
+}
+
+/**
+ * Renders the block, or `""` when nothing is worth reporting.
+ *
+ * The tag wrapper marks the boundary between this and the user's own words, so a
+ * note title that reads like an instruction cannot be mistaken for one.
+ */
+export function renderContextBlock(input: InjectedContext): string {
+	const body = renderContextLines(input);
+	if (body.length === 0) {
+		return "";
+	}
+	return ["<context>", ...body, "</context>"].join("\n");
 }
 
 /**
  * Appends the context block to the messages bound for the model.
  *
- * Returns `messages` unchanged when there is nothing to report — no active
- * Markdown note and no pins — which costs zero tokens and, more importantly,
- * avoids telling the model the negative fact that nothing is open. That is a
- * fact it has no use for, and stating it would make the prompt churn every time
- * the user clicked away from a note.
+ * Returns `messages` unchanged when there is nothing to report, which costs zero
+ * tokens and, more importantly, avoids telling the model the negative fact that
+ * nothing is open. That is a fact it has no use for, and stating it would make
+ * the prompt churn every time the user clicked away from a note.
  *
  * The appended message is `role: "user"` because this project hands pi's own
  * `convertToLlm` to the agent, and that keeps only `user`, `assistant`, and
  * `toolResult`. Any other role would be dropped silently, with no error.
  */
-export function injectContext(messages: AgentMessage[], refs: ContextRef[], note?: InjectedNote | null): AgentMessage[] {
-	if (refs.length === 0) {
+export function injectContext(messages: AgentMessage[], input: InjectedContext): AgentMessage[] {
+	const content = renderContextBlock(input);
+	if (content === "") {
 		return messages;
 	}
-	return [...messages, { role: "user", content: renderContextBlock(refs, note), timestamp: INJECTED_TIMESTAMP }];
+	return [...messages, { role: "user", content, timestamp: INJECTED_TIMESTAMP }];
 }
