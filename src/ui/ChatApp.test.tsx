@@ -848,22 +848,26 @@ describe("ChatApp A/B comparison", () => {
 		return button;
 	}
 
-	it("offers the compare action on the question the edit is offered on", async () => {
-		// Same bound, for the same reason: the fork lands at that turn, so an
-		// earlier one would strand every turn between it and the tail.
+	it("offers the compare action beside the newest reply's regenerate", async () => {
+		// Issue #273: the fork answers "not satisfied with this reply", so it
+		// rides the reply's actions row and shares regenerate's bound — the fork
+		// lands at that turn, so an earlier one would strand every turn between
+		// it and the tail.
 		mounted = await mountChat({ snapshot: answered });
 
 		expect(compareButton(mounted.host)).toBeDefined();
 		expect(mounted.host.querySelector('[aria-label="Edit and resend"]')).toBeDefined();
 	});
 
-	it("starts the comparison at the question that was pressed", async () => {
+	it("starts the comparison at the reply that was pressed", async () => {
+		// The button passes the reply's index; the service walks back from it to
+		// the question the fork actually lands on.
 		mounted = await mountChat({ snapshot: answered });
 
 		compareButton(mounted.host).click();
 		await flushRender();
 
-		expect(mounted.service.comparisons).toEqual([0]);
+		expect(mounted.service.comparisons).toEqual([1]);
 	});
 
 	it("hides the compare action while a turn is in flight", async () => {

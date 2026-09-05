@@ -33,6 +33,13 @@ interface ReplyActionsProps {
 	 */
 	onRetry?: () => void;
 	/**
+	 * Forks the conversation at the question this reply answers, opening two
+	 * comparison branches. Shares {@link onRetry}'s bound — the same newest-reply
+	 * gate, the same in-flight gate — because both reshape the same turn, and it
+	 * sits beside that button so the two ways out of a turn read together.
+	 */
+	onCompare?: () => void;
+	/**
 	 * Whether this turn ended in a provider failure.
 	 *
 	 * The one case that earns the row without prose. A turn that merely called
@@ -93,7 +100,7 @@ function DurationStamp({ durationMs, startedAt }: { durationMs: number; startedA
  * hover-only controls are unreachable. Keeping the layout box present on every
  * device also means the desktop reveal never reflows the transcript.
  */
-export function ReplyActions({ app, text, durationMs, startedAt, onRetry, failed }: ReplyActionsProps): React.JSX.Element | null {
+export function ReplyActions({ app, text, durationMs, startedAt, onRetry, onCompare, failed }: ReplyActionsProps): React.JSX.Element | null {
 	const t = useT();
 	/*
 	 * A failed reply with no prose still earns the row.
@@ -138,6 +145,13 @@ export function ReplyActions({ app, text, durationMs, startedAt, onRetry, failed
 					/>
 				</>
 			) : null}
+			{/*
+			 * The fork sits ahead of the regenerate button: the row escalates in
+			 * what it costs the reader — copy out, branch off, then the one
+			 * replacement that cannot be undone — and ending on the irreversible
+			 * control keeps that reading honest.
+			 */}
+			{onCompare ? <IconButton icon="git-branch" label={t.t("chat.compareFromHere")} onClick={onCompare} /> : null}
 			{/*
 			 * `refresh-cw`, not `rotate-ccw`: the counter-clockwise arrow is the
 			 * universal undo glyph, and this action is the one control in the row

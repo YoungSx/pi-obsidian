@@ -91,12 +91,12 @@ export interface MessageListProps {
 	 */
 	onEditMessage?: (index: number) => void;
 	/**
-	 * Starts an A/B comparison from the question behind `index`.
+	 * Starts an A/B comparison at the question behind the reply at `index`.
 	 *
-	 * Offered on the same question the edit is offered on, for the same reason
-	 * both are bounded that way: the comparison forks at that turn, so any
-	 * earlier one would strand the turns between it and the tail on a branch the
-	 * reader did not ask to leave. Absent while anything is in flight.
+	 * Offered on the newest reply, next to {@link onRetry} — both reshape the
+	 * turn, so both carry the same bound: the comparison forks at that turn, so
+	 * any earlier one would strand the turns between it and the tail on a branch
+	 * the reader did not ask to leave. Absent while anything is in flight.
 	 */
 	onCompare?: (index: number) => void;
 	/** Render context for `MarkdownRenderer.render`; supplied by the view. */
@@ -543,7 +543,7 @@ export function MessageList({
 									: undefined
 							}
 							onCompare={
-								onCompare && index === editIndex && !isStreaming && !isCompacting ? () => onCompare(index) : undefined
+								onCompare && index === regenerateIndex && !isStreaming && !isCompacting ? () => onCompare(index) : undefined
 							}
 							notPersisted={unpersistedMessages?.includes(message)}
 						/>
@@ -782,7 +782,11 @@ interface MessageRowProps {
 	turnCloses?: boolean;
 	/** Opens this question in the composer; supplied only for the newest answered one. */
 	onEdit?: () => void;
-	/** Forks this question into two comparison branches; same bound as {@link onEdit}. */
+	/**
+	 * Forks the conversation at the question behind this reply; same bound as
+	 * {@link onRetry}, and it travels with the reply's own actions row so the
+	 * two turn-level controls sit together.
+	 */
 	onCompare?: () => void;
 	/**
 	 * The reply's recorded generation duration and stream start, when the
@@ -952,22 +956,29 @@ function MessageRow({
 						durationMs={replyTiming?.durationMs}
 						startedAt={replyTiming?.startedAt}
 						onRetry={onRetry}
+						/*
+						 * The compare action lives here, not under the user's question
+						 * (issue #273): it answers "not satisfied with this reply", the
+						 * same urge the regenerate button next to it answers, so the two
+						 * read as the turn's two ways out. The map already pinned the
+						 * reply's index into this callback; the service walks back
+						 * from it to the question the fork lands on.
+						 */
+						onCompare={onCompare}
 						failed={cutoff?.kind === "failed"}
 					/>
 				) : null}
-				{message.role === "user" && (onEdit || onCompare) ? (
+				{message.role === "user" && onEdit ? (
 					/*
 					 * Rendered controls, mirroring the reply's actions row; the
 					 * stylesheet reveals them on hover where hover exists and keeps
 					 * them visible on touch. They sit under the bubble — outside the
 					 * card, in the row the article owns — so the two roles read the
-					 * same way.
+					 * same way. The compare action does not ride this row anymore
+					 * (issue #273): it belongs to the reply it replaces.
 					 */
 					<div className="piem-chat__message-actions">
-						{onEdit ? <IconButton icon="pen-line" label={renderContext.t.t("chat.editMessage")} onClick={onEdit} /> : null}
-						{onCompare ? (
-							<IconButton icon="git-branch" label={renderContext.t.t("chat.compareFromHere")} onClick={onCompare} />
-						) : null}
+						<IconButton icon="pen-line" label={renderContext.t.t("chat.editMessage")} onClick={onEdit} />
 					</div>
 				) : null}
 			</article>
