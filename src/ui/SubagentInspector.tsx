@@ -333,6 +333,7 @@ function SubagentDetail({ snapshot, showAgentDetails, onBack, onStop, app, compo
 	const report = reportBody(snapshot, t);
 	const usage = usageItems(snapshot, showAgentDetails, t);
 	const steps = processSteps(snapshot.messages, t);
+	const followUps = snapshot.followUps ?? [];
 	const isRunning = snapshot.status === "running";
 
 	// Arriving here replaced the list, so `<body>` is holding focus and a keyboard
@@ -369,6 +370,22 @@ function SubagentDetail({ snapshot, showAgentDetails, onBack, onStop, app, compo
 
 			<Section title={t.t("subagents.sectionTask")}>
 				<p className="piem-subagents__task">{snapshot.task}</p>
+				{/*
+				 * The later errands, under the first one. The row's title and this
+				 * paragraph both stay the task the child was spawned on, because that is
+				 * what the reader remembers asking for; the follow-ups read as what came
+				 * after, which is the order the child heard them in too.
+				 */}
+				{followUps.length > 0 ? (
+					<>
+						<p className="piem-subagents__followups-label">{t.t("subagents.followUpsLabel")}</p>
+						<ol className="piem-subagents__followups">
+							{followUps.map((followUp, index) => (
+								<li key={index}>{followUp}</li>
+							))}
+						</ol>
+					</>
+				) : null}
 				<p className="piem-subagents__timing">{timingLine(snapshot, t)}</p>
 			</Section>
 

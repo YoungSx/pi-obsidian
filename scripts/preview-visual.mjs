@@ -597,6 +597,7 @@ const INSPECTOR_SNAPSHOTS = [
 		id: "sub-1",
 		role: "researcher",
 		task: "Compare the two PDF readers the user shortlisted and summarize price, sync and mobile support.",
+		followUps: ["Check whether either one syncs annotations to an iPad offline."],
 		depth: 1,
 		modelId: "deepseek-v4-pro",
 		thinkingLevel: "medium",

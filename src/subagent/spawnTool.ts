@@ -1,11 +1,11 @@
 import { Type, type TLiteral } from "typebox";
-import type { AgentTool, Skill, StreamFn, ThinkingLevel } from "@earendil-works/pi-agent-core";
+import type { AgentMessage, AgentTool, Skill, StreamFn, ThinkingLevel } from "@earendil-works/pi-agent-core";
 import { clampThinkingLevel, type Model, type Models } from "@earendil-works/pi-ai";
 import type { CompactionSettings } from "../agent/compactionSettings";
 import { textResult, throwIfAborted } from "../tools/toolResult";
 import type { SubagentModelChoice } from "./extension";
-import { DEFAULT_SUBAGENT_ROLE_NAME, SUBAGENT_ROLES, findSubagentRole, type SubagentRoleName } from "./roles";
-import { linkSignals, runSubagent, type LinkedSignals } from "./runner";
+import { DEFAULT_SUBAGENT_ROLE_NAME, SUBAGENT_ROLES, findSubagentRole, type SubagentRole, type SubagentRoleName } from "./roles";
+import { linkSignals, runSubagent, type LinkedSignals, type SubagentRunResult } from "./runner";
 import type { SubagentRegistry } from "./registry";
 import type { WaitPacing } from "./waitTool";
 
@@ -72,6 +72,52 @@ export interface SubagentToolsContext {
 	 * Codex constants.
 	 */
 	waitPacing?: WaitPacing;
+}
+
+/** What one child run needs beyond the host wiring the context already carries. */
+export interface ChildRunSpec {
+	task: string;
+	/** What the child runs as, resolved: its role, its model, its clamped level. */
+	role: SubagentRole;
+	instructions?: string;
+	model: Model<string>;
+	thinkingLevel: ThinkingLevel;
+	/** The child's own depth, so its tool set is one level below its parent's. */
+	depth: number;
+	/** Context to continue from; absent starts the child with an empty transcript. */
+	initialMessages?: readonly AgentMessage[];
+	/** The child's linked signal — the run's kill switch. */
+	signal: AbortSignal;
+}
+
+/**
+ * Starts one child run against the host's wiring as it stands right now.
+ *
+ * Shared by the spawn and the follow-up because those two differ in exactly one
+ * thing — whether the child starts empty or continues — and everything else here
+ * is a seam that must not drift between them. What is read at this moment is the
+ * host's: transport, key resolution, the skill listing, the compaction registry
+ * and its thresholds, so a run started after a settings change rides the new
+ * wiring. What a follow-up deliberately does *not* re-read arrives on the spec:
+ * the role, the model and the level are the child's own, decided when it was
+ * spawned and kept because a transcript belongs to the model that wrote it.
+ */
+export function startChildRun(context: SubagentToolsContext, spec: ChildRunSpec): Promise<SubagentRunResult> {
+	return runSubagent({
+		task: spec.task,
+		role: spec.role,
+		instructions: spec.instructions,
+		tools: context.createChildTools(spec.depth),
+		skills: context.getSkills(),
+		model: spec.model,
+		streamFn: context.getStreamFn(),
+		thinkingLevel: spec.thinkingLevel,
+		models: context.getModels?.(),
+		compactionSettings: spec.model.contextWindow ? context.getCompactionSettings?.(spec.model.contextWindow) : undefined,
+		getApiKey: context.getApiKey,
+		initialMessages: spec.initialMessages,
+		signal: spec.signal,
+	});
 }
 
 /**
@@ -176,7 +222,7 @@ export function createSpawnSubagentTool(context: SubagentToolsContext, depth: nu
 	return {
 		name: "spawn_subagent",
 		label: "Spawn subagent",
-		description: `Start one self-contained task on a subagent and return immediately with its id — do not wait for the result here; collect it with wait_subagent. The subagent runs with this vault's tools and reports back when done. Use it when a task is better worked in isolation — a broad vault sweep, a critique, a summary — or when the intermediate tool output would flood this conversation. Several spawns started together run in parallel (up to ${SUBAGENT_CONCURRENCY_LIMIT} at once); check on them with list_subagents and stop one you no longer need with kill_subagent. Roles: ${ROLE_NAMES}; narrow one further with the instructions parameter for standing framing that is not the task.${describeModelChoices(modelChoices)} The subagent cannot ask questions; its reply is its only output, so a good task leaves nothing unsaid. It may spawn one further level down, but no deeper.`,
+		description: `Start one self-contained task on a subagent and return immediately with its id — do not wait for the result here; collect it with wait_subagent. The subagent runs with this vault's tools and reports back when done. Use it when a task is better worked in isolation — a broad vault sweep, a critique, a summary — or when the intermediate tool output would flood this conversation. Several spawns started together run in parallel (up to ${SUBAGENT_CONCURRENCY_LIMIT} at once); check on them with list_subagents, stop one you no longer need with kill_subagent, and give one that has already reported another instruction with follow_up_subagent instead of spawning a replacement. Roles: ${ROLE_NAMES}; narrow one further with the instructions parameter for standing framing that is not the task.${describeModelChoices(modelChoices)} The subagent cannot ask questions; its reply is its only output, so a good task leaves nothing unsaid. It may spawn one further level down, but no deeper.`,
 		parameters: buildSpawnParameters(modelChoices),
 		execute: async (_toolCallId, params, signal) => {
 			throwIfAborted(signal);
@@ -215,41 +261,33 @@ export function createSpawnSubagentTool(context: SubagentToolsContext, depth: nu
 			// parent run's signal (panel stop) and with disposeAll, and the runner
 			// listens on it to abort the child `Agent`.
 			const linked: LinkedSignals = linkSignals(signal);
+			// One deeper than this tool's own set — the tree grows by exactly one
+			// level per spawn, by construction.
+			const childDepth = depth + 1;
 			context.registry.spawn({
 				id,
-				role: role.name,
-				signal: linked.signal,
 				// The wait scope is the run that called spawn, not the child's own
 				// linked controller — the two signals are distinct by construction.
 				parentSignal: signal,
 				abort: linked.abort,
 				dispose: linked.dispose,
-				// Verbatim for the inspector: what it was asked to do, and the config
-				// it actually runs under (post-resolution, post-clamp).
+				// Verbatim for the inspector, and for any later errand: what it was
+				// asked to do, and what it actually runs as (post-resolution,
+				// post-clamp).
 				task: params.task,
 				instructions: params.instructions,
-				depth: depth + 1,
-				modelId: model.id,
+				depth: childDepth,
+				role,
+				model,
 				thinkingLevel,
 				start: () =>
-					runSubagent({
+					startChildRun(context, {
 						task: params.task,
 						role,
 						instructions: params.instructions,
-						// One deeper than this tool's own set — the tree grows by exactly
-						// one level per spawn, by construction.
-						tools: context.createChildTools(depth + 1),
-						skills: context.getSkills(),
 						model,
-						streamFn: context.getStreamFn(),
 						thinkingLevel,
-						// Resolved at spawn, so a child rides the registry and thresholds
-						// live at that moment. The window comes from the child's own
-						// model, which a per-spawn override can make differ from the
-						// parent's.
-						models: context.getModels?.(),
-						compactionSettings: model.contextWindow ? context.getCompactionSettings?.(model.contextWindow) : undefined,
-						getApiKey: context.getApiKey,
+						depth: childDepth,
 						signal: linked.signal,
 					}),
 			});

@@ -21,14 +21,14 @@ const MODEL = { id: "test-model", api: "openai-completions", provider: "test", c
  * Every tool id the plugin actually hands a model.
  *
  * Built from the real factories rather than listed here, which is the whole
- * point: a tool added to `createObsidianTools` or to the delegation four turns
+ * point: a tool added to `createObsidianTools` or to the delegation five turns
  * up in this array on its own, and the two tests below go red until the catalog
  * has been taught it. A hand-written list would have to be kept in step with
  * the catalog by the same person who forgot the catalog.
  *
  * Both optional deps are supplied so the two conditional tools (`read_skill`,
  * `ask_user`) are present; `createVaultTools` returns nothing so the extension
- * contributes only its own four.
+ * contributes only its own five.
  */
 function shippedToolIds(): string[] {
 	const app = {} as App;

@@ -14,6 +14,13 @@ export interface SubagentSnapshot {
 	role: string;
 	/** The task the spawn was given, verbatim. */
 	task: string;
+	/**
+	 * Later errands the parent handed this child, in order, when there were any.
+	 *
+	 * Absent for the common single-errand run, so the detail page's task block
+	 * stays one paragraph unless there is genuinely a history to read.
+	 */
+	followUps?: readonly string[];
 	instructions?: string;
 	/** Tree level: 1 is a direct child of the chat panel. */
 	depth: number;
@@ -35,12 +42,14 @@ export interface SubagentSnapshot {
 	spawnedAt: number;
 	settledAt?: number;
 	/**
-	 * How long the run took, or has been taking.
+	 * How long the current errand took, or has been taking.
 	 *
 	 * Derived at snapshot time from `now`, passed in by the caller, so a render
 	 * is deterministic and a test can pin the clock. A running child's duration
 	 * grows until the next snapshot — the inspector re-snapshots on registry
-	 * events, and only a timerless "still running" is honest between them.
+	 * events, and only a timerless "still running" is honest between them. Measured
+	 * from the errand's own start, not the child's birth: a child that answered in
+	 * three seconds and was re-tasked an hour later did not run for an hour.
 	 */
 	durationMs: number;
 	/** The final report text; present whenever a result was produced. */
@@ -49,7 +58,15 @@ export interface SubagentSnapshot {
 	incomplete?: true;
 	/** The named failure, when the run threw. */
 	errorMessage?: string;
-	/** Assistant turns and billed tokens, present whenever a result was produced. */
+	/**
+	 * Assistant turns and billed tokens across every errand, or absent when
+	 * nothing has settled yet.
+	 *
+	 * Cumulative, because the row is a child rather than a run: reporting the last
+	 * errand's tokens as the child's cost would under-read it once by every errand
+	 * before. Absent rather than zero while there is nothing measured, which is how
+	 * `usageItems` tells "no data" from "measured nothing".
+	 */
 	turns?: number;
 	usage?: UsageTotals;
 	/**
@@ -67,23 +84,26 @@ export interface SubagentSnapshot {
 function toSnapshot(entry: SubagentEntry, now: number): SubagentSnapshot {
 	return {
 		id: entry.id,
-		role: entry.role,
+		role: entry.role.name,
 		task: entry.task,
+		followUps: entry.followUps.length > 0 ? [...entry.followUps] : undefined,
 		instructions: entry.instructions,
 		depth: entry.depth,
-		modelId: entry.modelId,
+		modelId: entry.model.id,
 		thinkingLevel: entry.thinkingLevel,
 		status: statusOf(entry),
 		killedBy: entry.killedBy,
 		archived: entry.archived,
 		spawnedAt: entry.spawnedAt,
 		settledAt: entry.settledAt,
-		durationMs: (entry.settledAt ?? now) - entry.spawnedAt,
+		durationMs: (entry.settledAt ?? now) - entry.startedAt,
 		report: entry.result?.text,
 		incomplete: entry.result?.incomplete,
 		errorMessage: entry.error?.message,
-		turns: entry.result?.turns,
-		usage: entry.result?.usage,
+		// Nothing settled yet reads as no measurement rather than a measured zero,
+		// which is what keeps a row of zeroes off a run that has not reported.
+		turns: entry.spent.turns > 0 ? entry.spent.turns : undefined,
+		usage: entry.spent.usage.requests > 0 ? entry.spent.usage : undefined,
 		messages: entry.transcript,
 	};
 }

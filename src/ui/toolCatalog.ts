@@ -135,11 +135,15 @@ export const TOOL_CATALOG: Readonly<Record<string, ToolFacts>> = {
 	// The one tool that leaves the vault.
 	web_fetch: { copyKey: "traceTool.webFetch", category: "web", icon: "globe" },
 
-	// Delegation. One family, so a turn that spent itself on children reads as
-	// one shape: a person joins, the roster, a person leaves, the wait.
+	// Delegation. One family, so a turn that spent itself on children reads as one
+	// shape: a person joins, the roster, a person leaves, another word to one of
+	// them, the wait. The follow-up borrows the composer's own send glyph rather
+	// than a fifth `user-*`: dispatching an instruction is what that arrow already
+	// means everywhere else in the plugin, and only the recipient differs.
 	spawn_subagent: { copyKey: "traceTool.spawnSubagent", category: "subagent", icon: "user-plus" },
 	list_subagents: { copyKey: "traceTool.listSubagents", category: "subagent", icon: "users" },
 	kill_subagent: { copyKey: "traceTool.killSubagent", category: "subagent", icon: "user-x" },
+	follow_up_subagent: { copyKey: "traceTool.followUpSubagent", category: "subagent", icon: "send" },
 	wait_subagent: { copyKey: "traceTool.waitSubagent", category: "subagent", icon: "hourglass" },
 };
 

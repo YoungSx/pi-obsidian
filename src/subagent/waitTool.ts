@@ -94,12 +94,15 @@ const WaitParameters = Type.Object({
 
 /** How one waited child renders in the tool result text. */
 function describeEntry(entry: SubagentEntry): string {
-	const who = `Subagent ${entry.id} (role: ${entry.role})`;
+	const who = `Subagent ${entry.id} (role: ${entry.role.name})`;
 	if (!entry.settled) {
 		return `${who} is still running.`;
 	}
 	if (entry.error) {
-		return `${who} failed: ${entry.error.message}`;
+		// Named here because this line is where a parent meets a broken run, and the
+		// cheap recovery is not obvious: the child kept its transcript, so picking it
+		// up costs one instruction instead of the whole task again.
+		return `${who} failed: ${entry.error.message}\nIt kept what it had learned — follow_up_subagent can pick it up from there instead of starting over.`;
 	}
 	const result = entry.result;
 	if (result === undefined) {
@@ -212,7 +215,7 @@ export function createWaitSubagentTool(context: SubagentToolsContext): AgentTool
 			}
 			const details = targets.map((entry) => ({
 				subagentId: entry.id,
-				role: entry.role,
+				role: entry.role.name,
 				status: entry.error ? ("failed" as const) : entry.result?.incomplete ? ("incomplete" as const) : ("done" as const),
 				...(entry.result
 					? {
@@ -263,7 +266,7 @@ function pagedResult(
 		: "";
 	const ending = result?.incomplete ? " (end of what it wrote)." : " (complete).";
 	const header =
-		`${warning}Subagent ${entry.id} (role: ${entry.role}) report, lines ${slice.startLine}-${shown} of ${slice.totalLines}` +
+		`${warning}Subagent ${entry.id} (role: ${entry.role.name}) report, lines ${slice.startLine}-${shown} of ${slice.totalLines}` +
 		// Naming the next offset outright is cheaper than asking the model to do
 		// arithmetic on a truncation notice, and it cannot be off by one.
 		(shown < slice.totalLines ? ` — call wait_subagent again with offset ${shown + 1} for the rest.` : ending);
