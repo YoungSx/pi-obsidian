@@ -5,7 +5,8 @@ import type { ContextRef } from "./contextRefs";
 
 installObsidianStub();
 
-const { probeEnvironment, probeWorkspaceContext } = await import("./contextProbe");
+const { probeEnvironment, probeLinkContext, probeOutlines, probeRunContext, probeSelection, probeWorkspaceContext } = await import("./contextProbe");
+const { MAX_SELECTION_CHARS } = await import("./contextInjection");
 const { MarkdownView, TFolder } = await import("obsidian");
 
 /** A folder entry that satisfies the `instanceof TFolder` check the probe makes. */
@@ -30,9 +31,24 @@ interface FakeVault {
 	leaves?: object[];
 	recent?: string[];
 	name?: string;
+	/** `resolvedLinks` shape: source path to target path to count. */
+	resolvedLinks?: Record<string, Record<string, number>>;
+	/** `unresolvedLinks` shape: source path to *written link text* to count. */
+	unresolvedLinks?: Record<string, Record<string, number>>;
+	caches?: Record<string, unknown>;
+	activeEditor?: object | null;
 }
 
-function fakeApp({ files = {}, leaves = [], recent = [], name = "probe-vault" }: FakeVault): App {
+function fakeApp({
+	files = {},
+	leaves = [],
+	recent = [],
+	name = "probe-vault",
+	resolvedLinks = {},
+	unresolvedLinks = {},
+	caches = {},
+	activeEditor = null,
+}: FakeVault): App {
 	return {
 		vault: {
 			getName: () => name,
@@ -41,8 +57,21 @@ function fakeApp({ files = {}, leaves = [], recent = [], name = "probe-vault" }:
 		workspace: {
 			getLeavesOfType: () => leaves,
 			getLastOpenFiles: () => recent,
+			activeEditor,
+		},
+		metadataCache: {
+			resolvedLinks,
+			unresolvedLinks,
+			getFileCache: (file: { path: string }) => caches[file.path] ?? null,
 		},
 	} as unknown as App;
+}
+
+const pinnedRef = (path: string): ContextRef => ({ kind: "pinned", path, isPinned: true });
+
+/** An editor stand-in with the two members the selection probe reads. */
+function fakeEditor(file: string | null, selection: string): object {
+	return { file: file === null ? null : { path: file }, editor: { getSelection: () => selection } };
 }
 
 const activeRef = (path: string): ContextRef => ({ kind: "active", path, isPinned: false });
@@ -133,5 +162,159 @@ describe("probeWorkspaceContext", () => {
 		const app = fakeApp({ files: {}, leaves: [] });
 
 		expect(probeWorkspaceContext(app, [activeRef("Notes/gone.md")]).folder).toBeNull();
+	});
+});
+
+describe("probeLinkContext", () => {
+	test("inverts the forward link graph to find what points at the active note", () => {
+		const app = fakeApp({
+			files: { "Notes/today.md": fileEntry("Notes/today.md") },
+			resolvedLinks: {
+				"Notes/a.md": { "Notes/today.md": 2 },
+				"Notes/b.md": { "Notes/today.md": 1 },
+				"Notes/c.md": { "Notes/other.md": 1 },
+				"Notes/today.md": {},
+			},
+		});
+
+		expect(probeLinkContext(app, [activeRef("Notes/today.md")]).backlinks).toEqual(["Notes/a.md", "Notes/b.md"]);
+	});
+
+	test("reads unresolved links off the active note's own row, keyed by written text", () => {
+		// Measured: `unresolvedLinks` maps the text the user typed, not a path — which
+		// is why this needs no file lookup and why the renderer keeps the brackets.
+		const app = fakeApp({
+			files: { "Notes/today.md": fileEntry("Notes/today.md") },
+			unresolvedLinks: { "Notes/today.md": { "Weekly Review": 1, "no-such-note": 2 } },
+		});
+
+		expect(probeLinkContext(app, [activeRef("Notes/today.md")]).brokenLinks).toEqual(["Weekly Review", "no-such-note"]);
+	});
+
+	test("reports nothing when no note is being followed", () => {
+		const app = fakeApp({ resolvedLinks: { "Notes/a.md": { "Notes/today.md": 1 } } });
+
+		expect(probeLinkContext(app, [pinnedRef("Notes/pin.md")]).backlinks).toEqual([]);
+	});
+
+	test("reports nothing when the active path no longer resolves", () => {
+		const app = fakeApp({ files: {}, resolvedLinks: { "Notes/a.md": { "Notes/gone.md": 1 } } });
+
+		expect(probeLinkContext(app, [activeRef("Notes/gone.md")]).backlinks).toEqual([]);
+	});
+});
+
+describe("probeOutlines", () => {
+	test("builds a skeleton for each pinned note from the metadata cache", () => {
+		const app = fakeApp({
+			files: { "Notes/spec.md": fileEntry("Notes/spec.md") },
+			caches: {
+				"Notes/spec.md": {
+					headings: [{ level: 1, heading: "Overview" }],
+					frontmatter: { status: "active" },
+				},
+			},
+		});
+
+		expect(probeOutlines(app, [pinnedRef("Notes/spec.md")])).toEqual([
+			{
+				path: "Notes/spec.md",
+				headings: [{ level: 1, text: "Overview" }],
+				totalHeadings: 1,
+				properties: ["status: active"],
+				totalProperties: 1,
+			},
+		]);
+	});
+
+	test("skips the active note even when it is also pinned", () => {
+		// A pinned note that happens to be active is reported once, as the active
+		// entry, so an outline for it would attach to a line that is not there.
+		const app = fakeApp({
+			files: { "Notes/today.md": fileEntry("Notes/today.md") },
+			caches: { "Notes/today.md": { headings: [{ level: 1, heading: "Today" }] } },
+		});
+
+		expect(probeOutlines(app, [{ kind: "active", path: "Notes/today.md", isPinned: true }])).toEqual([]);
+	});
+
+	test("drops a pinned note with nothing to outline", () => {
+		const app = fakeApp({ files: { "Notes/stub.md": fileEntry("Notes/stub.md") }, caches: { "Notes/stub.md": {} } });
+
+		expect(probeOutlines(app, [pinnedRef("Notes/stub.md")])).toEqual([]);
+	});
+
+	test("drops a pinned note Obsidian has not cached", () => {
+		const app = fakeApp({ files: { "Notes/fresh.md": fileEntry("Notes/fresh.md") }, caches: {} });
+
+		expect(probeOutlines(app, [pinnedRef("Notes/fresh.md")])).toEqual([]);
+	});
+});
+
+describe("probeSelection", () => {
+	test("reads the selection out of the active editor", () => {
+		const app = fakeApp({ activeEditor: fakeEditor("Notes/today.md", "the selected part") });
+
+		expect(probeSelection(app, [activeRef("Notes/today.md")])).toEqual({
+			path: "Notes/today.md",
+			text: "the selected part",
+			length: 17,
+		});
+	});
+
+	test("reports nothing when the caret is collapsed", () => {
+		const app = fakeApp({ activeEditor: fakeEditor("Notes/today.md", "") });
+
+		expect(probeSelection(app, [activeRef("Notes/today.md")])).toBeNull();
+	});
+
+	test("refuses a selection made in a different note", () => {
+		// `activeEditor` reports the most recently active editor, so after a navigation
+		// it can still hold the note the user left. Without the guard, that note's
+		// selection would be attributed to this one.
+		const app = fakeApp({ activeEditor: fakeEditor("Notes/elsewhere.md", "not mine") });
+
+		expect(probeSelection(app, [activeRef("Notes/today.md")])).toBeNull();
+	});
+
+	test("survives a workspace with no editor at all", () => {
+		// Measured: opening a canvas leaves `activeEditor` null while `getActiveFile`
+		// still reports the canvas, so the optional chain here is load-bearing.
+		expect(probeSelection(fakeApp({ activeEditor: null }), [activeRef("Notes/today.md")])).toBeNull();
+	});
+
+	test("drops the text but keeps the size past the budget", () => {
+		const long = "y".repeat(MAX_SELECTION_CHARS + 10);
+		const app = fakeApp({ activeEditor: fakeEditor("Notes/today.md", long) });
+
+		expect(probeSelection(app, [activeRef("Notes/today.md")])).toEqual({
+			path: "Notes/today.md",
+			text: null,
+			length: long.length,
+		});
+	});
+});
+
+describe("probeRunContext", () => {
+	test("reads all four halves of a run's snapshot in one pass", () => {
+		const active = fileEntry("Notes/today.md");
+		active.parent = { path: "Notes", children: [active, fileEntry("Notes/other.md")] };
+		const app = fakeApp({
+			files: { "Notes/today.md": active, "Notes/pin.md": fileEntry("Notes/pin.md") },
+			leaves: [markdownLeaf("Ideas/x.md")],
+			resolvedLinks: { "Notes/a.md": { "Notes/today.md": 1 } },
+			unresolvedLinks: { "Notes/today.md": { missing: 1 } },
+			caches: { "Notes/pin.md": { headings: [{ level: 2, heading: "Spec" }] } },
+			activeEditor: fakeEditor("Notes/today.md", "picked"),
+		});
+
+		const context = probeRunContext(app, [activeRef("Notes/today.md"), pinnedRef("Notes/pin.md")]);
+
+		expect(context.workspace.folder?.path).toBe("Notes");
+		expect(context.workspace.openTabs).toEqual(["Ideas/x.md"]);
+		expect(context.links.backlinks).toEqual(["Notes/a.md"]);
+		expect(context.links.brokenLinks).toEqual(["missing"]);
+		expect(context.outlines.map((outline) => outline.path)).toEqual(["Notes/pin.md"]);
+		expect(context.selection?.text).toBe("picked");
 	});
 });

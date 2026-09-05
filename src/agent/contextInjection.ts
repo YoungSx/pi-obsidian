@@ -1,5 +1,6 @@
 /**
- * Puts the notes the user is working with in front of the model on every turn.
+ * Puts the notes the user is working with — and what surrounds them — in front of
+ * the model on every turn.
  *
  * The panel could always *answer* "which note am I looking at" — `get_active_note`
  * reports it — but nothing ever volunteered it, so "rewrite this note" made the
@@ -28,12 +29,21 @@
  *   navigation during a tool loop cannot silently retarget the user's request.
  *
  * The block must be byte-identical between turns whenever the reported facts have
- * not changed. Anything volatile in it (a clock reading, a cursor position, a
- * selection length) makes the block itself miss the cache for no benefit. The
- * active note's *content* rides the same rule: it is re-read every turn, but its
- * bytes only move when the note itself does, which is exactly when a fresh read
- * is the point. The `mtime` is emitted as a fixed ISO string off the file stat —
- * stable until the file changes, so it costs a cache byte only when it is news.
+ * not changed. Anything volatile in it makes the block itself miss the cache for
+ * no benefit, which is why a cursor position, a scroll offset and a word count
+ * are permanently out: they move on every keystroke and the model can act on
+ * none of them. The active note's *content* is the opposite case — re-read every
+ * turn, but its bytes only move when the note does, which is exactly when a fresh
+ * read is the point. The `mtime` is emitted as a fixed ISO string off the file
+ * stat, stable until the file changes, so it costs a cache byte only when it is
+ * news.
+ *
+ * The selection sits on the near side of that line despite moving often. It is
+ * absent entirely until the user selects something, it is frozen for the run
+ * ({@link FrozenRunContext}) rather than re-read per turn, and when present it is
+ * the single strongest statement of what the request is about — "translate this"
+ * is unanswerable without it. A selection *offset* would have been the volatile
+ * half with none of the value, so only the text and its length are reported.
  *
  * The date is the one fact here that moves on its own, and it earns the
  * exception: it changes once a day, at the tail of the prefix, and without it
@@ -46,6 +56,8 @@
 
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import type { ContextRef } from "./contextRefs";
+import { EMPTY_LINK_CONTEXT, renderLinkLines, type LinkContext } from "./linkContext";
+import { renderOutlineLines, type NoteOutline } from "./noteOutline";
 import { EMPTY_WORKSPACE_CONTEXT, renderWorkspaceLines, type WorkspaceContext } from "./workspaceContext";
 
 /**
@@ -69,6 +81,18 @@ const INJECTED_TIMESTAMP = 0;
  * `read` tool call away — so this bounds the worst case to one document.
  */
 export const MAX_ACTIVE_NOTE_CHARS = 20_000;
+
+/**
+ * How much selected text rides along.
+ *
+ * A selection is a pointer — "this paragraph", "these three bullets" — and at
+ * that size it is the strongest statement of intent the block can carry. Past
+ * roughly a thousand tokens it stops being a pointer and becomes a second copy
+ * of the note, whose full text is already here. Over the budget the block
+ * reports the size and names the tool that can page it, the same trade a pinned
+ * note makes with its body.
+ */
+export const MAX_SELECTION_CHARS = 4_000;
 
 /**
  * Weekday names for the date line.
@@ -95,20 +119,60 @@ export interface InjectedNote {
 }
 
 /**
+ * What the user had selected when they sent the message.
+ *
+ * Frozen with the refs rather than re-read per turn, because it is *intent*, not
+ * state: it records the passage the person meant when they typed "translate
+ * this", and a mid-loop click that collapses the selection must not retarget the
+ * request that is already running. The consequence is deliberate — after the
+ * model edits the note, the selection text it was given may no longer appear in
+ * the re-read body. That is the honest reading: the user selected the text as it
+ * was before the edit.
+ */
+export interface InjectedSelection {
+	/** The note the selection was read from, matched against the active ref. */
+	path: string;
+	/** The selected text, or `null` when it exceeded {@link MAX_SELECTION_CHARS}. */
+	text: string | null;
+	/** Character count of the whole selection, reported either way. */
+	length: number;
+}
+
+/**
  * The half of a turn's context that is frozen for one user run.
  *
  * `refs` was already frozen so a mid-loop note switch could not retarget a write.
- * The workspace facts have to be frozen *with* it, because they are derived from
- * the same active note: a live folder reading paired with a frozen ref list would
- * eventually name one note as active and a different note's folder as current —
- * a block that contradicts itself. The active note's *body* is deliberately not
- * in here; it is re-read every turn so an `edit` the model just made is visible
- * to its next turn.
+ * Everything derived from those refs has to freeze *with* them: the folder, the
+ * link graph, the pinned notes' skeletons and the selection all answer questions
+ * about the notes the ref list names, and a live reading paired with a frozen
+ * list would eventually name one note as active and describe another's
+ * surroundings — a block that contradicts itself.
+ *
+ * The active note's *body* is deliberately not in here. It is re-read every turn
+ * so an `edit` the model just made is visible to its next turn, which is the one
+ * place a live reading is more honest than a snapshot.
  */
 export interface FrozenRunContext {
 	refs: ContextRef[];
 	workspace: WorkspaceContext;
+	links: LinkContext;
+	outlines: NoteOutline[];
+	selection: InjectedSelection | null;
 }
+
+/**
+ * What a failed probe degrades to.
+ *
+ * The refs still stand — they come from the panel's own state, not from Obsidian —
+ * so a structural surprise costs the surroundings and not the note the user is
+ * looking at.
+ */
+export const EMPTY_RUN_CONTEXT: Omit<FrozenRunContext, "refs"> = {
+	workspace: EMPTY_WORKSPACE_CONTEXT,
+	links: EMPTY_LINK_CONTEXT,
+	outlines: [],
+	selection: null,
+};
 
 /**
  * Everything one turn's block reports.
@@ -123,6 +187,12 @@ export interface InjectedContext {
 	refs: readonly ContextRef[];
 	/** The active note's text, or `null` when the read failed. */
 	note?: InjectedNote | null;
+	/** What the user had selected, or `null` when nothing was. */
+	selection?: InjectedSelection | null;
+	/** The active note's place in the link graph. */
+	links?: LinkContext;
+	/** Skeletons for the pinned notes, matched to their refs by path. */
+	outlines?: readonly NoteOutline[];
 	/** Facts about the folder and tabs around the active note. */
 	workspace?: WorkspaceContext;
 	/** The current local date, or `null` to leave it out. */
@@ -188,6 +258,29 @@ function renderNoteBody(note: InjectedNote): string[] {
 }
 
 /**
+ * Renders the selection, under the active note's body.
+ *
+ * After the body rather than before it: the block is the last message in the
+ * request, so its tail sits closest to where the model generates, and "this
+ * passage, in that note" reads in the order it is written. The tag wrapper does
+ * the same job `<note-content>` does — a selection containing `</context>` closes
+ * only its own tag.
+ *
+ * Over budget the line stops quoting and starts pointing. It names the tool by
+ * the argument that gets the text, because "read the selection" without that
+ * argument returns the note instead and looks like the tool ignored the request.
+ */
+function renderSelection(selection: InjectedSelection): string[] {
+	if (selection.text === null) {
+		return [
+			`The user has ${selection.length} characters selected in this note, which is more than fits here. Read it with get_active_note (includeSelection) if the request depends on the exact text.`,
+		];
+	}
+	const unit = selection.length === 1 ? "character" : "characters";
+	return [`Selected text (${selection.length} ${unit}):`, "<selection>", selection.text, "</selection>"];
+}
+
+/**
  * Renders the date line.
  *
  * Assembled from the local-time getters rather than `toISOString`, which formats
@@ -206,10 +299,11 @@ function formatToday(date: Date): string {
 /**
  * The block's body, one line per fact, or `[]` when there is nothing to report.
  *
- * Order is deliberate and stable: the date, then the notes (which carry the
- * active note's body and are therefore the long part), then the workspace around
- * them. Reordering would rewrite the whole block for no new information, so the
- * order is part of the cache contract, not a formatting preference.
+ * Order is deliberate and stable, and runs from nearest to furthest: the date,
+ * then the active note (path, body, selection, link graph), then each pinned note
+ * with its skeleton, then the workspace around them. Reordering would rewrite the
+ * whole block for no new information, so the order is part of the cache contract,
+ * not a formatting preference.
  *
  * Full vault paths for every note, never the shortened labels the chips display:
  * the path is what the model passes to `read` and `edit`, so a truncated one
@@ -232,8 +326,19 @@ function renderContextLines(input: InjectedContext): string[] {
 			if (input.note && input.note.path === ref.path) {
 				lines.push(...renderNoteBody(input.note));
 			}
+			if (input.selection && input.selection.path === ref.path) {
+				lines.push(...renderSelection(input.selection));
+			}
+			// Link facts describe the active note, so they belong to its entry rather
+			// than to the block: with follow dismissed there is no note for them to be
+			// about, and the probe stops reading them.
+			lines.push(...renderLinkLines(input.links ?? EMPTY_LINK_CONTEXT));
 		} else {
 			lines.push(`Pinned note: ${ref.path}`);
+			const outline = input.outlines?.find((candidate) => candidate.path === ref.path);
+			if (outline) {
+				lines.push(...renderOutlineLines(outline));
+			}
 		}
 	}
 	lines.push(...renderWorkspaceLines(input.workspace ?? EMPTY_WORKSPACE_CONTEXT));

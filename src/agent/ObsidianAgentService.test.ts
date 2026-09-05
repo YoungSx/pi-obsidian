@@ -1212,6 +1212,73 @@ describe("ObsidianAgentService", () => {
 		expect(sent).not.toContain("Notes/today.md");
 	});
 
+	it("names what links to the active note and what its links fail to resolve", async () => {
+		const contexts: Context[] = [];
+		const service = createService(new MemoryAdapter(), {
+			streamFn: createCapturingStreamFn(contexts),
+			vaultFiles: { "Notes/today.md": "body" },
+			probeData: {
+				resolvedLinks: { "Notes/inbound.md": { "Notes/today.md": 2 }, "Notes/today.md": {} },
+				unresolvedLinks: { "Notes/today.md": { "Weekly Review": 1 } },
+			},
+		});
+		service.setActiveNotePath("Notes/today.md");
+
+		await service.sendPrompt("Rename the heading");
+
+		const sent = JSON.stringify(contexts[0]?.messages);
+		// Renaming a heading is exactly the edit that breaks other notes; the model
+		// cannot weigh that without knowing something points here.
+		expect(sent).toContain("Linked from: Notes/inbound.md");
+		// And the brackets say this one is link text, not a path `read` would accept.
+		expect(sent).toContain("Unresolved links in this note: [[Weekly Review]]");
+	});
+
+	it("rides the user's selection along with the note", async () => {
+		const contexts: Context[] = [];
+		const service = createService(new MemoryAdapter(), {
+			streamFn: createCapturingStreamFn(contexts),
+			vaultFiles: { "Notes/today.md": "first\nsecond\nthird" },
+			probeData: { activeEditor: { file: { path: "Notes/today.md" }, editor: { getSelection: () => "second" } } },
+		});
+		service.setActiveNotePath("Notes/today.md");
+
+		await service.sendPrompt("Translate this");
+
+		const sent = JSON.stringify(contexts[0]?.messages);
+		// "Translate this" is unanswerable without it, and the panel is the only place
+		// that can know which passage "this" was.
+		expect(sent).toContain("Selected text (6 characters)");
+		expect(sent).toContain("second");
+	});
+
+	it("gives a pinned note its headings and properties without its body", async () => {
+		const contexts: Context[] = [];
+		const service = createService(new MemoryAdapter(), {
+			streamFn: createCapturingStreamFn(contexts),
+			vaultFiles: { "Notes/today.md": "body", "Notes/spec.md": "PINNED BODY TEXT" },
+			probeData: {
+				caches: {
+					"Notes/spec.md": { headings: [{ level: 1, heading: "Decision log" }], frontmatter: { status: "active" } },
+				},
+			},
+		});
+		// Pins live on the session runtime, which only exists once the service has
+		// started — `pinContextRef` is a silent no-op before that.
+		await service.initialize();
+		service.setActiveNotePath("Notes/today.md");
+		service.pinContextRef("Notes/spec.md");
+
+		await service.sendPrompt("Check the spec");
+
+		const sent = JSON.stringify(contexts[0]?.messages);
+		expect(sent).toContain("Outline: # Decision log");
+		expect(sent).toContain("Properties: status: active");
+		// The skeleton is the whole point: it routes the question without quoting a
+		// second document into every turn.
+		expect(sent).not.toContain("PINNED BODY TEXT");
+	});
+
 	it("keeps naming a pinned note after the user navigates away", async () => {
 		const contexts: Context[] = [];
 		const service = createService(new MemoryAdapter(), { streamFn: createCapturingStreamFn(contexts), loadUserSkills: NO_USER_SKILLS });
@@ -3414,7 +3481,12 @@ describe("vault skills", () => {
 
 function createService(
 	memoryAdapter: MemoryAdapter = new MemoryAdapter(),
-	overrides: { streamFn?: StreamFn; vaultFiles?: Record<string, string>; loadUserSkills?: typeof NO_USER_SKILLS } = {},
+	overrides: {
+		streamFn?: StreamFn;
+		vaultFiles?: Record<string, string>;
+		loadUserSkills?: typeof NO_USER_SKILLS;
+		probeData?: ProbeData;
+	} = {},
 ): ObsidianAgentServiceType {
 	return createServiceWithSettings(memoryAdapter, overrides).service;
 }
@@ -3515,19 +3587,26 @@ function createServiceWithSettings(
 		loadUserSkills?: typeof NO_USER_SKILLS;
 		/** Stands in for the plugin's `saveSettings`; omitted reconfigures in memory. */
 		persistSettings?: (options?: { reconfigure?: boolean }) => Promise<void>;
+		/** Link graph, metadata cache and active editor for the context probe. */
+		probeData?: ProbeData;
 	} = {},
 ): { service: ObsidianAgentServiceType; settings: PiemSettings } {
 	const adapter = asDataAdapter(memoryAdapter);
 	const settings = defaultTestSettings();
 	const sessionManager = new ObsidianSessionManager(adapter, SESSION_DIR, "obsidian-vault:Test");
-	const service = new ObsidianAgentService(createFakeApp(adapter, overrides.vaultFiles), () => settings, sessionManager, {
-		streamFn: overrides.streamFn ?? createFakeStreamFn(),
-		// Forwarded, not defaulted: a test that swaps in a throwing loader is how
-		// a failed *start* is simulated, and a default here would silently swallow
-		// the override.
-		loadUserSkills: overrides.loadUserSkills ?? NO_USER_SKILLS,
-		...(overrides.persistSettings ? { persistSettings: overrides.persistSettings } : {}),
-	});
+	const service = new ObsidianAgentService(
+		createFakeApp(adapter, overrides.vaultFiles, undefined, undefined, overrides.probeData),
+		() => settings,
+		sessionManager,
+		{
+			streamFn: overrides.streamFn ?? createFakeStreamFn(),
+			// Forwarded, not defaulted: a test that swaps in a throwing loader is how
+			// a failed *start* is simulated, and a default here would silently swallow
+			// the override.
+			loadUserSkills: overrides.loadUserSkills ?? NO_USER_SKILLS,
+			...(overrides.persistSettings ? { persistSettings: overrides.persistSettings } : {}),
+		},
+	);
 	return { service, settings };
 }
 
@@ -3847,11 +3926,30 @@ function createRecordingToolCallingStreamFn(
  * its own `linkIndex`. The file it returns only needs a `path`: `readBinary`
  * keys the staged bytes on it, exactly as the real vault would.
  */
+/**
+ * What the context probe reads beyond the file tree.
+ *
+ * Kept as one optional bag rather than four parameters: the probe reads all of it
+ * on every request, and a fixture that supplies none of it must still not throw —
+ * a throwing probe degrades silently and takes every fact in the block with it.
+ */
+interface ProbeData {
+	/** Source path to target path to count, as `metadataCache.resolvedLinks` is shaped. */
+	resolvedLinks?: Record<string, Record<string, number>>;
+	/** Source path to *written link text* to count. */
+	unresolvedLinks?: Record<string, Record<string, number>>;
+	/** Path to the cache entry `getFileCache` returns. */
+	caches?: Record<string, unknown>;
+	/** Stands in for `workspace.activeEditor`, whose `file` the selection probe checks. */
+	activeEditor?: { file: { path: string } | null; editor: { getSelection: () => string } } | null;
+}
+
 function createFakeApp(
 	adapter: DataAdapter,
 	vaultFiles: Record<string, string> = {},
 	imageFiles?: Map<string, ArrayBuffer>,
 	linkIndex?: (linkpath: string, sourcePath: string) => TFile | null,
+	probeData: ProbeData = {},
 ): App {
 	const files = new Map<string, TFile>();
 	const folders = new Map<string, TFolder>();
@@ -3921,6 +4019,11 @@ function createFakeApp(
 		},
 		metadataCache: {
 			getFirstLinkpathDest: (linkpath: string, sourcePath: string) => linkIndex?.(linkpath, sourcePath) ?? null,
+			// Read by the context probe for backlinks, unresolved links and pinned-note
+			// skeletons. Empty defaults keep the probe on its normal path.
+			resolvedLinks: probeData.resolvedLinks ?? {},
+			unresolvedLinks: probeData.unresolvedLinks ?? {},
+			getFileCache: (file: TFile) => probeData.caches?.[file.path] ?? null,
 		},
 		workspace: {
 			getActiveViewOfType: () => null,
@@ -3929,6 +4032,7 @@ function createFakeApp(
 			// which passes silently while covering nothing.
 			getLeavesOfType: () => [],
 			getLastOpenFiles: () => [],
+			activeEditor: probeData.activeEditor ?? null,
 		},
 	} as unknown as App;
 }
