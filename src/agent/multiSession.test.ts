@@ -176,6 +176,10 @@ function createFakeApp(adapter: DataAdapter, vaultFiles: Record<string, string> 
 		},
 		workspace: {
 			getActiveViewOfType: () => null,
+			// Read by the context probe on every request; absent methods would make it
+			// throw and degrade instead of reporting an empty workspace.
+			getLeavesOfType: () => [],
+			getLastOpenFiles: () => [],
 		},
 	} as unknown as App;
 }
@@ -225,12 +229,22 @@ function scriptedTextStream(model: Model<Api>, text: string) {
 const HANG_A = "hang-a";
 const HANG_B = "hang-b";
 
+/**
+ * What the person actually typed, in a captured request.
+ *
+ * Not simply the last user message: `transformContext` appends the per-turn
+ * `<context>` block as a user message on every request, so an echo script that
+ * took the last one would parrot the block back instead of the prompt.
+ */
 function lastUserPromptText(context: Context): string {
 	for (let index = context.messages.length - 1; index >= 0; index -= 1) {
 		const message = context.messages[index];
 		if (message && message.role === "user") {
 			const content = (message as { content: string | Array<{ type: string; text?: string }> }).content;
 			if (typeof content === "string") {
+				if (content.startsWith("<context>")) {
+					continue;
+				}
 				return content.trim();
 			}
 			return content

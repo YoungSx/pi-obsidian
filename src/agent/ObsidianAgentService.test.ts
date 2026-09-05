@@ -1164,7 +1164,7 @@ describe("ObsidianAgentService", () => {
 		expect(sent).not.toContain("Note content");
 	});
 
-	it("injects nothing when no Markdown note is active", async () => {
+	it("names no note when no Markdown note is active", async () => {
 		const contexts: Context[] = [];
 		const service = createService(new MemoryAdapter(), { streamFn: createCapturingStreamFn(contexts), loadUserSkills: NO_USER_SKILLS });
 
@@ -1172,8 +1172,11 @@ describe("ObsidianAgentService", () => {
 
 		// A canvas, a PDF, or an empty workspace must not produce "no note open":
 		// that is a negative fact the model has no use for, and stating it would
-		// churn the prompt every time the user clicked away.
-		expect(JSON.stringify(contexts[0]?.messages)).not.toContain("<context>");
+		// churn the prompt every time the user clicked away. The date still rides
+		// along — it is true regardless of what is open.
+		const sent = JSON.stringify(contexts[0]?.messages);
+		expect(sent).not.toContain("Active note:");
+		expect(sent).not.toContain("Current folder:");
 	});
 
 	it("re-derives the injected block per turn rather than freezing it", async () => {
@@ -1202,7 +1205,11 @@ describe("ObsidianAgentService", () => {
 		service.setFollowActiveNote(false);
 		await service.sendPrompt("Hello");
 
-		expect(JSON.stringify(contexts[0]?.messages)).not.toContain("<context>");
+		// Dismissing follow means "stop watching where I am", not "stop telling the
+		// model anything" — the folder line goes with the note, the date does not.
+		const sent = JSON.stringify(contexts[0]?.messages);
+		expect(sent).not.toContain("Active note:");
+		expect(sent).not.toContain("Notes/today.md");
 	});
 
 	it("keeps naming a pinned note after the user navigates away", async () => {
@@ -3005,7 +3012,7 @@ describe("prompt commands", () => {
 		vaultFiles["Piem/prompts/fresh.md"] = "FRESH TEMPLATE BODY: $ARGUMENTS";
 
 		expect(await service.sendPrompt("/fresh with detail")).toBe(true);
-		const sent = JSON.stringify(contexts.at(-1)?.messages.at(-1)?.content);
+		const sent = lastUserContent(contexts.at(-1));
 		expect(sent).toContain("FRESH TEMPLATE BODY: with detail");
 	});
 
@@ -3036,7 +3043,7 @@ describe("prompt commands", () => {
 		expect(await service.sendPrompt("/echo hello world")).toBe(true);
 
 		// The model must see the expansion; the raw `/echo …` never reaches it.
-		const sent = contexts.at(-1)?.messages.at(-1);
+		const sent = lastUserMessage(contexts.at(-1));
 		expect(sent?.role).toBe("user");
 		expect(JSON.stringify(sent?.content)).toContain("Repeat this verbatim: hello world");
 		expect(JSON.stringify(sent?.content)).not.toContain("/echo");
@@ -3053,7 +3060,7 @@ describe("prompt commands", () => {
 
 		// pi's parseCommandArgs keeps the quoted span as a single positional, so
 		// `$2` is the whole phrase rather than just `two`.
-		expect(JSON.stringify(contexts.at(-1)?.messages.at(-1)?.content)).toContain("First is one and second is two three.");
+		expect(lastUserContent(contexts.at(-1))).toContain("First is one and second is two three.");
 	});
 
 	it("refuses an unknown /name with a notice instead of sending it as prose", async () => {
@@ -3076,7 +3083,7 @@ describe("prompt commands", () => {
 		const service = createService(new MemoryAdapter(), { streamFn: createCapturingStreamFn(contexts), loadUserSkills: NO_USER_SKILLS });
 
 		expect(await service.sendPrompt("/summarize")).toBe(true);
-		expect(JSON.stringify(contexts.at(-1)?.messages.at(-1)?.content)).toContain("Summarize the active note concisely.");
+		expect(lastUserContent(contexts.at(-1))).toContain("Summarize the active note concisely.");
 	});
 
 	it("offers builtins and vault templates together for autocomplete", async () => {
@@ -3108,11 +3115,11 @@ describe("prompt commands", () => {
 		});
 
 		expect(await service.sendPrompt("/review first")).toBe(true);
-		expect(JSON.stringify(contexts.at(-1)?.messages.at(-1)?.content)).toContain("PROMPT VERSION: first");
+		expect(lastUserContent(contexts.at(-1))).toContain("PROMPT VERSION: first");
 		expect(service.getSnapshot().noticeMessage).toContain("use /skill:review for the skill");
 
 		expect(await service.sendPrompt("/skill:review focus on risks")).toBe(true);
-		const explicit = JSON.stringify(contexts.at(-1)?.messages.at(-1)?.content);
+		const explicit = lastUserContent(contexts.at(-1));
 		expect(explicit).toContain("SKILL VERSION");
 		expect(explicit).toContain("focus on risks");
 	});
@@ -3122,7 +3129,7 @@ describe("prompt commands", () => {
 		const service = createService(new MemoryAdapter(), { streamFn: createCapturingStreamFn(contexts), loadUserSkills: NO_USER_SKILLS });
 
 		expect(await service.sendPrompt("what does src/main.ts do?")).toBe(true);
-		expect(JSON.stringify(contexts.at(-1)?.messages.at(-1)?.content)).toContain("what does src/main.ts do?");
+		expect(lastUserContent(contexts.at(-1))).toContain("what does src/main.ts do?");
 	});
 });
 
@@ -3261,7 +3268,7 @@ describe("vault skills", () => {
 
 		expect(await service.sendPrompt("/link-graph focus on unresolved links")).toBe(true);
 
-		const sent = JSON.stringify(contexts.at(-1)?.messages.at(-1)?.content);
+		const sent = lastUserContent(contexts.at(-1));
 		expect(sent).toContain("link-graph");
 		expect(sent).toContain("Call get_note_links with direction set to both");
 		expect(sent).toContain("focus on unresolved links");
@@ -3281,7 +3288,7 @@ describe("vault skills", () => {
 
 		expect(await service.sendPrompt("/skill:summarize")).toBe(true);
 
-		const sent = JSON.stringify(contexts.at(-1)?.messages.at(-1)?.content);
+		const sent = lastUserContent(contexts.at(-1));
 		expect(sent).toContain("MY VAULT INSTRUCTIONS");
 		expect(sent).toContain("Piem/skills/summarize/SKILL.md");
 		expect(sent).not.toContain("Call get_active_note");
@@ -3399,7 +3406,7 @@ describe("vault skills", () => {
 		skillFiles["Piem/skills/new/SKILL.md"] = "---\nname: new\ndescription: Newly saved\n---\nFRESH SKILL BODY";
 
 		expect(await service.sendPrompt("/new extra detail")).toBe(true);
-		const sent = JSON.stringify(contexts.at(-1)?.messages.at(-1)?.content);
+		const sent = lastUserContent(contexts.at(-1));
 		expect(sent).toContain("FRESH SKILL BODY");
 		expect(sent).toContain("extra detail");
 	});
@@ -3726,6 +3733,32 @@ function createToolCallingStreamFn(
  * Records the context of each request so a test can assert on what the model was
  * actually sent, rather than on whether a hook happened to run.
  */
+/**
+ * The message the user actually sent, in a captured request.
+ *
+ * Not `messages.at(-1)`: `transformContext` appends the per-turn `<context>`
+ * block as a user message on every request, which is the seam working as
+ * designed. A test asking what was sent means what the person typed.
+ */
+function lastUserMessage(context: Context | undefined): Context["messages"][number] | undefined {
+	for (let index = (context?.messages.length ?? 0) - 1; index >= 0; index -= 1) {
+		const message = context?.messages[index];
+		if (message?.role !== "user") {
+			continue;
+		}
+		if (typeof message.content === "string" && message.content.startsWith("<context>")) {
+			continue;
+		}
+		return message;
+	}
+	return undefined;
+}
+
+/** JSON of that message's content, which is the shape the `toContain` assertions want. */
+function lastUserContent(context: Context | undefined): string {
+	return JSON.stringify(lastUserMessage(context)?.content);
+}
+
 function createCapturingStreamFn(contexts: Context[]): StreamFn {
 	const inner = createFakeStreamFn();
 	return (model: Model<Api>, context: Context, options?: SimpleStreamOptions) => {
@@ -3829,7 +3862,11 @@ function createFakeApp(
 			return existing;
 		}
 		const folder = new TFolderClass();
-		folder.path = path;
+		// Obsidian reports the root folder's path as "/" and its name as "" — measured
+		// against a real vault, and load-bearing: the context block special-cases that
+		// exact value so a bare slash never reaches the model as a usable path. The map
+		// is still keyed by "" so `getParent` stays a plain string operation.
+		folder.path = path === "" ? "/" : path;
 		folder.name = path.slice(path.lastIndexOf("/") + 1);
 		folder.children = [];
 		folders.set(path, folder);
@@ -3846,7 +3883,11 @@ function createFakeApp(
 		file.extension = path.slice(path.lastIndexOf(".") + 1);
 		file.stat = { size, mtime: 1, ctime: 1 };
 		files.set(path, file);
-		folderAt(getParent(path)).children.push(file);
+		const parent = folderAt(getParent(path));
+		// The context probe reaches the current folder through `file.parent`; without
+		// it every request would report no folder and the wiring would go uncovered.
+		file.parent = parent;
+		parent.children.push(file);
 	};
 
 	folderAt("");
@@ -3883,6 +3924,11 @@ function createFakeApp(
 		},
 		workspace: {
 			getActiveViewOfType: () => null,
+			// The context probe walks Markdown leaves and the recent-files list.
+			// Missing methods would send every request down the probe's degrade path,
+			// which passes silently while covering nothing.
+			getLeavesOfType: () => [],
+			getLastOpenFiles: () => [],
 		},
 	} as unknown as App;
 }

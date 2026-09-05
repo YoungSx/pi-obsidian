@@ -369,6 +369,28 @@ export const platformMock = {
 	isIosApp: false,
 	isAndroidApp: false,
 	isMacOS: false,
+	// Read by the environment probe (src/agent/contextProbe.ts). Absent flags would
+	// type-check and then quietly label every desktop as "unknown platform".
+	isWin: false,
+	isLinux: true,
+	isPhone: false,
+	isTablet: false,
+};
+
+/**
+ * Module-level readings the environment probe takes, which do not hang off `App`.
+ *
+ * `language` is mutable because `getLanguage()` is a function call, so a test can
+ * reassign it and the next probe sees it. `apiVersion` is a `let` export that
+ * consumers bind with a named import, and that binding is resolved once against
+ * this stub object — reassigning it later would not reach the probe, so it is a
+ * constant here rather than a promise the stub cannot keep. Nothing is lost: the
+ * real value cannot change within a running app either.
+ */
+export const STUB_API_VERSION = "1.13.0";
+
+export const environmentMock = {
+	language: "en",
 };
 
 /** One toast handed to Obsidian's `Notice`. */
@@ -1195,6 +1217,8 @@ const obsidianStub = {
 	 * tests that care inject their own expectation instead of relying on this.
 	 */
 	requireApiVersion: (): boolean => true,
+	apiVersion: STUB_API_VERSION,
+	getLanguage: (): string => environmentMock.language,
 	/*
 	 * Records the name on the element instead of painting it.
 	 *
