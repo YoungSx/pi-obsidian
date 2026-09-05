@@ -68,7 +68,8 @@ that have no file in your vault. See [Extending Piem](extending.md).
 
 ## Delegation
 
-`spawn_subagent` · `wait_subagent` — see [Subagents](#subagents) below.
+`spawn_subagent` · `wait_subagent` · `list_subagents` · `kill_subagent` ·
+`follow_up_subagent` — see [Subagents](#subagents) below.
 
 ## MCP
 
@@ -82,7 +83,10 @@ calling it sends arguments to a server outside your vault and outside Obsidian.
 ## Subagents
 
 `spawn_subagent` starts one self-contained task and returns immediately with an
-id. `wait_subagent` collects the report.
+id. `wait_subagent` collects the report. `list_subagents` says where each one
+stands without waiting, `kill_subagent` stops one whose answer is no longer
+needed, and `follow_up_subagent` gives one that has stopped another
+instruction.
 
 Subagents run in-process on the same model and transport as the parent, with an
 isolated in-memory transcript — nothing they do lands in the session log. Their
@@ -104,7 +108,16 @@ grandchild's tool set simply does not contain the spawn tools.
 
 A wait window that closes means "not done yet", never a kill. The subagent
 keeps working between waits. You can stop a run yourself from the subagent
-panel — the parent is told when that happens.
+panel — the parent is told when that happens, and will not restart what you
+stopped.
+
+A subagent that has stopped can be given another instruction, on the same id and
+the same transcript: one more question about a report it just gave, or a second
+run at a task that broke partway. A failed subagent keeps everything it had
+learned, so picking it back up costs one instruction instead of the whole task
+again — which is what makes a dropped connection recoverable rather than fatal.
+It still cannot see your conversation, and its instructions are still Piem's, not
+yours.
 
 Once a run has finished, **Archive finished** in the panel puts every finished
 run into a closed **Archived** section. It is a tidy-up, not a delete: the runs

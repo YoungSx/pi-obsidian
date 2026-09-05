@@ -65,6 +65,17 @@ export interface SubagentRunOptions {
 	 * opinion to pass on.
 	 */
 	compactionSettings?: CompactionSettings;
+	/**
+	 * Context to continue from, for an errand handed to a child that already ran.
+	 *
+	 * Absent starts the child empty, which is every spawn. Present is a follow-up:
+	 * the transcript is seeded, the new task lands after it as the next thing said,
+	 * and the child answers with everything it already worked out still in view.
+	 * Repaired on the way in — see {@link resumableTranscript} — because a run that
+	 * died mid-turn is not a transcript any provider will accept another message
+	 * after.
+	 */
+	initialMessages?: readonly AgentMessage[];
 	/** The parent run's signal; aborting it aborts the subagent immediately. */
 	signal?: AbortSignal;
 	/** Escape hatch for tests and logging; the runner itself stays event-blind. */
@@ -92,13 +103,15 @@ export interface SubagentRunResult {
 	 */
 	incomplete?: true;
 	/**
-	 * The child's full transcript, as it stood when the run ended.
+	 * The child's full context when the run ended, seeded history included.
 	 *
 	 * The wait tool never needed this — the report text is its whole answer — but
 	 * the inspector shows the process, and a transcript read from the entry after
 	 * settlement is the only way to show it without streaming plumbing through
-	 * every turn. Session memory only, never written to disk, and bounded by the
-	 * same lifetime the entry already has: it dies with the service.
+	 * every turn. It is also what a later errand continues from, which is why it is
+	 * the *whole* context and not this run's share of it: everything above is the
+	 * child's memory. Session memory only, never written to disk, and bounded by
+	 * the same lifetime the entry already has: it dies with the service.
 	 */
 	messages: readonly AgentMessage[];
 }
@@ -126,6 +139,44 @@ export class SubagentRunError extends Error {
 		this.name = "SubagentRunError";
 		this.messages = messages;
 	}
+}
+
+/**
+ * The longest prefix of a transcript another message may be appended to.
+ *
+ * A run that broke partway — the case a follow-up exists for — can leave tool
+ * calls nothing ever answered: the provider stream reports an error before the
+ * loop executes them, so the assistant message asking for them is the last thing
+ * in the transcript. Every provider rejects that. Anthropic requires a
+ * `tool_result` for every `tool_use`, and OpenAI the matching `tool` messages, so
+ * seeding one back verbatim would turn a resumable child into a 400.
+ *
+ * Unanswered calls are dropped block by block rather than by the message, so the
+ * text and thinking a killed sweep had already written ("Found two so far…") stay
+ * as context. A message left with nothing in it goes: an aborted turn that wrote
+ * no blocks at all is a message some providers reject for being empty, and none
+ * of them learn anything from.
+ */
+export function resumableTranscript(messages: readonly AgentMessage[]): AgentMessage[] {
+	const answered = new Set<string>();
+	for (const message of messages) {
+		if (message.role === "toolResult") {
+			answered.add(message.toolCallId);
+		}
+	}
+	const kept: AgentMessage[] = [];
+	for (const message of messages) {
+		if (message.role !== "assistant") {
+			kept.push(message);
+			continue;
+		}
+		const content = message.content.filter((block) => block.type !== "toolCall" || answered.has(block.id));
+		if (content.length === 0) {
+			continue;
+		}
+		kept.push(content.length === message.content.length ? message : { ...message, content });
+	}
+	return kept;
 }
 
 export interface LinkedSignals {
@@ -226,8 +277,9 @@ function textOfBlocks(content: ReadonlyArray<{ type: string; text?: string }>): 
  * Runs one delegated task on an isolated in-memory `Agent`.
  *
  * The child shares the parent's model, transport, and API-key resolution but
- * nothing else: its transcript starts empty, is never persisted, and dies with
- * this call.
+ * nothing else: its transcript is never persisted and dies with this call. It
+ * starts empty on a spawn, and from the child's own earlier context when a
+ * follow-up errand hands one over.
  *
  * The run has no deadline. A child that is still working is nobody's emergency,
  * and from out here a thorough sweep and a wedged one are the same silence — so
@@ -238,6 +290,10 @@ function textOfBlocks(content: ReadonlyArray<{ type: string; text?: string }>): 
  */
 export async function runSubagent(options: SubagentRunOptions): Promise<SubagentRunResult> {
 	const { task, role, tools, model, streamFn, thinkingLevel } = options;
+	// Repaired here rather than at the call site: a caller that forgot would hand
+	// the provider a transcript with unanswered tool calls in it, which fails as a
+	// 400 nobody would read as "the seed was malformed".
+	const seeded = resumableTranscript(options.initialMessages ?? []);
 	const linked = linkSignals(options.signal);
 	// Compaction bookkeeping, run-local because the run is one function call: the
 	// parent needs fields on a service for the same state because its run outlives
@@ -321,7 +377,10 @@ export async function runSubagent(options: SubagentRunOptions): Promise<Subagent
 			model,
 			thinkingLevel,
 			tools,
-			messages: [],
+			// Copied because pi's setter copies the top-level array anyway and the
+			// seed belongs to the entry that lent it; element identity is preserved,
+			// which is what the `produced` split below relies on.
+			messages: [...seeded],
 		},
 		getApiKey: options.getApiKey,
 		toolExecution: "sequential",
@@ -379,12 +438,19 @@ export async function runSubagent(options: SubagentRunOptions): Promise<Subagent
 	}
 
 	const messages = agent.state.messages;
-	const lastAssistant = [...messages].reverse().find((message) => message.role === "assistant");
+	// Accounting and the report come from what *this* errand produced; the
+	// transcript handed back is the child's whole context. Membership rather than
+	// an index, because a mid-run compaction rewrites the prefix: `slice` would
+	// read a summary as seeded history and a retained turn as new work, and the
+	// numbers a follow-up reported would include the errand before it.
+	const seededMessages = new Set<AgentMessage>(seeded);
+	const produced = messages.filter((message) => !seededMessages.has(message));
+	const lastAssistant = [...produced].reverse().find((message) => message.role === "assistant");
 	const accounting = {
-		turns: messages.filter((message) => message.role === "assistant").length,
+		turns: produced.filter((message) => message.role === "assistant").length,
 		// Compaction requests are billed but leave no message behind, so they ride
 		// the extras channel `sumUsage` takes for exactly this.
-		usage: sumUsage(messages, compactionUsage),
+		usage: sumUsage(produced, compactionUsage),
 	};
 
 	// pi resolves `prompt` — rather than rejecting — when a run ends aborted, so
@@ -414,7 +480,9 @@ export async function runSubagent(options: SubagentRunOptions): Promise<Subagent
 		// leaves the parent unable to tell "no matches" from "the run broke", so
 		// only a recorded error raises here — the empty-but-clean run returns as
 		// itself and the wait tool words it as "no report".
-		const failure = lastToolError(messages) ?? agent.state.errorMessage;
+		// Scoped to this errand as well: an old failed tool result still sitting in
+		// the seeded history would be reported as this run's cause of death.
+		const failure = lastToolError(produced) ?? agent.state.errorMessage;
 		if (failure) {
 			throw new SubagentRunError(`Subagent failed: ${describeFailure(failure, lastAssistant, model, accounting.turns)}`, messages);
 		}

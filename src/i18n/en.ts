@@ -724,6 +724,7 @@ export const en = {
 		spawnSubagent: "Started a subagent",
 		listSubagents: "Listed the subagents",
 		killSubagent: "Stopped a subagent",
+		followUpSubagent: "Sent a subagent another instruction",
 		waitSubagent: "Waited for a subagent",
 		failed: "failed",
 		/**
@@ -1494,6 +1495,13 @@ export const en = {
 		killedByTool: "Piem stopped it: the answer was no longer needed.",
 		killedByUser: "You stopped it from this panel.",
 		sectionTask: "Task",
+		/**
+		 * Introduces the later errands, under the task the child was spawned on.
+		 * Names Piem rather than saying "follow-ups" because who asked is the part a
+		 * reader cannot infer: the panel forbids *them* talking to a child, so an
+		 * extra instruction can only have come from the chat.
+		 */
+		followUpsLabel: "Then Piem asked for:",
 		sectionInstructions: "Standing instructions",
 		sectionConfig: "Setup",
 		sectionReport: "Report",

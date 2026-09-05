@@ -4,13 +4,15 @@ import { createAssistantMessageEventStream } from "@earendil-works/pi-ai";
 import {
 	Agent,
 	convertToLlm,
+	type AgentMessage,
 	type AgentTool,
 	type Skill,
 	type StreamFn,
 } from "@earendil-works/pi-agent-core";
 import { Type } from "typebox";
 import { clampWait, clampWaitTimeoutMs, WAIT_DEFAULT_MS, WAIT_MIN_MS, type WaitPacing } from "./waitTool";
-import { runSubagent, SUBAGENT_MAX_COMPACTIONS } from "./runner";
+import { resumableTranscript, runSubagent, SUBAGENT_MAX_COMPACTIONS } from "./runner";
+import { statusOf } from "./registry";
 import { SUBAGENT_CONCURRENCY_LIMIT } from "./spawnTool";
 import { createSubagentExtension, type SubagentHost } from "./extension";
 import { anyRunning, snapshotSubagents } from "./inspectorModel";
@@ -878,15 +880,16 @@ describe("spawn/wait extension", () => {
 		extension.disposeAll();
 	});
 
-	it("the parent set carries the delegation four", () => {
+	it("the parent set carries the delegation five", () => {
 		const names = toolsWithPacing(scriptedStreamFn([{ text: "ok" }])).map((tool) => tool.name);
 		expect(names).toContain("spawn_subagent");
 		expect(names).toContain("wait_subagent");
 		expect(names).toContain("list_subagents");
 		expect(names).toContain("kill_subagent");
+		expect(names).toContain("follow_up_subagent");
 	});
 
-	it("the grandchild set carries none of the four", async () => {
+	it("the grandchild set carries none of the five", async () => {
 		const observations: ChildObservation[] = [];
 		const parentStream = scriptedStreamFn([
 			{ toolCall: { id: "p1", name: "spawn_subagent", arguments: { task: "Sweep" } } },
@@ -923,7 +926,7 @@ describe("spawn/wait extension", () => {
 			(o) => o.systemPrompt?.includes("delegated task") && !o.toolNames.includes("spawn_subagent"),
 		);
 		expect(grandchild).toBeDefined();
-		for (const name of ["spawn_subagent", "wait_subagent", "list_subagents", "kill_subagent"]) {
+		for (const name of ["spawn_subagent", "wait_subagent", "list_subagents", "kill_subagent", "follow_up_subagent"]) {
 			expect(grandchild!.toolNames).not.toContain(name);
 		}
 		extension.disposeAll();
@@ -1357,6 +1360,357 @@ describe("spawn/wait extension", () => {
 	});
 });
 
+describe("resumableTranscript", () => {
+	const assistant = (content: AssistantMessage["content"], stopReason: AssistantMessage["stopReason"] = "stop"): AgentMessage =>
+		({
+			role: "assistant",
+			content,
+			api: MODEL.api,
+			provider: MODEL.provider,
+			model: MODEL.id,
+			usage: usageReporting(10),
+			stopReason,
+			timestamp: 1,
+		}) as AgentMessage;
+	const toolResult = (id: string): AgentMessage =>
+		({ role: "toolResult", toolCallId: id, toolName: "grep", content: [{ type: "text", text: "ok" }], isError: false, timestamp: 2 }) as AgentMessage;
+	const user = (text: string): AgentMessage => ({ role: "user", content: text, timestamp: 0 }) as AgentMessage;
+
+	it("leaves a transcript whose every tool call was answered exactly as it is", () => {
+		const messages = [user("Sweep"), assistant([{ type: "toolCall", id: "t1", name: "grep", arguments: {} }], "toolUse"), toolResult("t1"), assistant([{ type: "text", text: "Done." }])];
+
+		// Identity, not just equality: an untouched transcript must not be rebuilt,
+		// because the `produced` split downstream keys on message identity.
+		expect(resumableTranscript(messages)).toEqual(messages);
+		expect(resumableTranscript(messages)[1]).toBe(messages[1]);
+	});
+
+	it("drops a tool call nothing answered but keeps what the turn had already written", () => {
+		// The shape a killed or network-broken run leaves. The text is the salvage
+		// worth carrying into the next errand; the dangling call is a 400.
+		const messages = [
+			user("Sweep"),
+			assistant([{ type: "text", text: "Found two so far." }, { type: "toolCall", id: "t1", name: "grep", arguments: {} }], "toolUse"),
+		];
+		const kept = resumableTranscript(messages);
+
+		expect(kept).toHaveLength(2);
+		expect(kept[1]).toMatchObject({ content: [{ type: "text", text: "Found two so far." }] });
+	});
+
+	it("drops a turn left with nothing at all", () => {
+		// An aborted stream reports an assistant message with no blocks. Seeding it
+		// back is a message some providers reject and none of them learn from.
+		const messages = [user("Sweep"), assistant([], "aborted")];
+
+		expect(resumableTranscript(messages)).toEqual([messages[0]!]);
+	});
+
+	it("keeps every answered call in a turn that also lost one", () => {
+		const messages = [
+			user("Sweep"),
+			assistant(
+				[
+					{ type: "toolCall", id: "t1", name: "grep", arguments: {} },
+					{ type: "toolCall", id: "t2", name: "grep", arguments: {} },
+				],
+				"toolUse",
+			),
+			toolResult("t1"),
+		];
+		const kept = resumableTranscript(messages);
+
+		expect(kept).toHaveLength(3);
+		expect(kept[1]).toMatchObject({ content: [{ type: "toolCall", id: "t1" }] });
+	});
+});
+
+describe("follow-up errands", () => {
+	function makeHost(streamFn: StreamFn): SubagentHost {
+		return {
+			createVaultTools: () => [],
+			getModel: () => MODEL,
+			getStreamFn: () => streamFn,
+			getThinkingLevel: () => "off" as never,
+			getSkills: () => [],
+		};
+	}
+
+	/** Records the transcript each child request was made against. */
+	function recordingContexts(streamFn: StreamFn, contexts: Context[]): StreamFn {
+		return (model, context, options) => {
+			contexts.push(context);
+			return streamFn(model, context, options);
+		};
+	}
+
+	/** Answers the first request, then hangs — so a second errand stays in flight. */
+	function answerThenHang(text: string): StreamFn {
+		const scripted = scriptedStreamFn([{ text }]);
+		const hanging = hangingStreamFn();
+		let requests = 0;
+		return (model, context, options) => {
+			requests += 1;
+			return requests === 1 ? scripted(model, context, options) : hanging(model, context, options);
+		};
+	}
+
+	/** The text of every user and assistant block in one recorded request. */
+	function said(context: Context): string {
+		return context.messages
+			.map((message) =>
+				typeof message.content === "string"
+					? message.content
+					: message.content.map((block) => ("text" in block ? block.text : "")).join(" "),
+			)
+			.join(" | ");
+	}
+
+	it("hands a settled child another instruction on the transcript it already has", async () => {
+		const contexts: Context[] = [];
+		const extension = createSubagentExtension(
+			makeHost(recordingContexts(scriptedStreamFn([{ text: "Three notes are stale." }, { text: "Two of them are in Archive/." }]), contexts)),
+			{ waitPacing: TEST_PACING },
+		);
+		const tools = extension.createTools();
+		await toolNamed(tools, "spawn_subagent").execute("c1", { task: "Sweep Projects/" }, undefined);
+		await toolNamed(tools, "wait_subagent").execute("c2", { subagentId: "subagent-1" }, undefined);
+
+		const followUp = await toolNamed(tools, "follow_up_subagent").execute(
+			"c3",
+			{ subagentId: "subagent-1", task: "Which of them are in Archive/?" },
+			undefined,
+		);
+		expect(followUp.details).toMatchObject({ subagentId: "subagent-1", resumed: true, status: "running" });
+		const collected = await toolNamed(tools, "wait_subagent").execute("c4", { subagentId: "subagent-1" }, undefined);
+
+		// The whole point: the second request carries the first errand and its
+		// answer, so the child is not paying to work them out again.
+		expect(contexts).toHaveLength(2);
+		expect(said(contexts[1]!)).toContain("Sweep Projects/");
+		expect(said(contexts[1]!)).toContain("Three notes are stale.");
+		expect(said(contexts[1]!)).toContain("Which of them are in Archive/?");
+		expect(textBlock(collected)).toContain("Two of them are in Archive/.");
+		// One row, one id, and the errand history on the entry.
+		expect(extension.registry.all()).toHaveLength(1);
+		expect(extension.registry.get("subagent-1")!.followUps).toEqual(["Which of them are in Archive/?"]);
+	});
+
+	it("reports this errand's turns to the parent and the child's whole spend to the panel", async () => {
+		// The `produced` split: a resumed run's accounting must not re-count the
+		// transcript it was seeded with, while the panel's row is the child rather
+		// than the run and so has to add the errands up.
+		const extension = createSubagentExtension(makeHost(scriptedStreamFn([{ text: "First." }, { text: "Second." }])), {
+			waitPacing: TEST_PACING,
+		});
+		const tools = extension.createTools();
+		await toolNamed(tools, "spawn_subagent").execute("c1", { task: "a" }, undefined);
+		await toolNamed(tools, "wait_subagent").execute("c2", {}, undefined);
+		await toolNamed(tools, "follow_up_subagent").execute("c3", { subagentId: "subagent-1", task: "b" }, undefined);
+		const collected = await toolNamed(tools, "wait_subagent").execute("c4", { subagentId: "subagent-1" }, undefined);
+
+		expect(collected.details).toMatchObject({ subagents: [{ subagentId: "subagent-1", turns: 1 }] });
+		const snapshot = snapshotSubagents(extension.registry, Date.now())[0]!;
+		expect(snapshot.turns).toBe(2);
+		expect(snapshot.usage?.requests).toBe(2);
+		expect(snapshot.followUps).toEqual(["b"]);
+	});
+
+	it("picks a broken run back up rather than starting it over", async () => {
+		/*
+		 * The case the issue named: a run that died partway — here to a failing tool
+		 * rather than a dropped connection, which is the same shape from the child's
+		 * side — and is then handed another instruction. What must survive is the
+		 * work it had already done, which is the whole saving over a fresh spawn.
+		 */
+		const contexts: Context[] = [];
+		const extension = createSubagentExtension(
+			{
+				...makeHost(
+					recordingContexts(
+						scriptedStreamFn([
+							{ toolCall: { id: "t1", name: "grep" }, text: "Read 40 notes so far." },
+							{ text: "" },
+							{ text: "Recovered: 3 stale notes." },
+						]),
+						contexts,
+					),
+				),
+				createVaultTools: () => [failingTool()],
+			},
+			{ waitPacing: TEST_PACING },
+		);
+		const tools = extension.createTools();
+		await toolNamed(tools, "spawn_subagent").execute("c1", { task: "Sweep everything" }, undefined);
+		await extension.registry.get("subagent-1")!.promise.catch(() => undefined);
+		expect(statusOf(extension.registry.get("subagent-1")!)).toBe("failed");
+
+		const resumed = await toolNamed(tools, "follow_up_subagent").execute(
+			"c2",
+			{ subagentId: "subagent-1", task: "Carry on from where you stopped." },
+			undefined,
+		);
+		expect(resumed.details).toMatchObject({ resumed: true });
+		const collected = await toolNamed(tools, "wait_subagent").execute("c3", { subagentId: "subagent-1" }, undefined);
+
+		expect(textBlock(collected)).toContain("Recovered: 3 stale notes.");
+		// The dead run's own work came along, and the tool call nothing answered did
+		// not — a dangling `tool_use` is what providers reject.
+		const resumedRequest = contexts[contexts.length - 1]!;
+		expect(said(resumedRequest)).toContain("Read 40 notes so far.");
+		expect(said(resumedRequest)).toContain("Carry on from where you stopped.");
+	});
+
+	it("refuses a child that is still working, and says what to do first", async () => {
+		const extension = createSubagentExtension(makeHost(hangingStreamFn()), { waitPacing: TEST_PACING });
+		const tools = extension.createTools();
+		try {
+			await toolNamed(tools, "spawn_subagent").execute("c1", { task: "a" }, undefined);
+			const refused = await toolNamed(tools, "follow_up_subagent").execute("c2", { subagentId: "subagent-1", task: "b" }, undefined);
+
+			expect(refused.details).toMatchObject({ resumed: false, reason: "still-running" });
+			expect(textBlock(refused)).toContain("wait_subagent");
+			expect(textBlock(refused)).toContain("kill_subagent");
+			// Nothing was recorded against the child, so the record still reads as one
+			// errand that is still going.
+			expect(extension.registry.get("subagent-1")!.followUps).toEqual([]);
+		} finally {
+			extension.disposeAll();
+		}
+	});
+
+	it("will not pick up what the user stopped from the panel", async () => {
+		/*
+		 * The user's kill is the user's circuit breaker (issue #233). A tool that
+		 * could undo it would make the breaker advisory — so the parent is told to
+		 * spawn something fresh, which leaves the decision where the user put it.
+		 */
+		const extension = createSubagentExtension(makeHost(hangingStreamFn()), { waitPacing: TEST_PACING });
+		const tools = extension.createTools();
+		try {
+			await toolNamed(tools, "spawn_subagent").execute("c1", { task: "a" }, undefined);
+			extension.registry.kill("subagent-1", undefined, "user");
+			await extension.registry.get("subagent-1")!.promise.catch(() => undefined);
+			const refused = await toolNamed(tools, "follow_up_subagent").execute("c2", { subagentId: "subagent-1", task: "b" }, undefined);
+
+			expect(refused.details).toMatchObject({ resumed: false, reason: "user-stopped" });
+			expect(textBlock(refused)).toContain("Spawn a fresh subagent");
+			expect(extension.registry.get("subagent-1")!.settled).toBe(true);
+		} finally {
+			extension.disposeAll();
+		}
+	});
+
+	it("names every id it knows when the id is wrong, across turns", async () => {
+		// Scoped by id rather than by the calling run's signal, so the hint has to
+		// be too: a list scoped to this turn would deny children the same call
+		// could have re-tasked.
+		const extension = createSubagentExtension(makeHost(scriptedStreamFn([{ text: "done" }])), { waitPacing: TEST_PACING });
+		const tools = extension.createTools();
+		const earlier = new AbortController();
+		await toolNamed(tools, "spawn_subagent").execute("c1", { task: "a" }, earlier.signal);
+		await extension.registry.get("subagent-1")!.promise;
+
+		const later = new AbortController();
+		const missing = await toolNamed(tools, "follow_up_subagent").execute("c2", { subagentId: "subagent-9", task: "b" }, later.signal);
+
+		expect(missing.details).toMatchObject({ resumed: false, reason: "not-found" });
+		expect(textBlock(missing)).toContain("subagent-1");
+	});
+
+	it("re-tasks a child spawned in an earlier turn, and takes over its wait scope", async () => {
+		/*
+		 * The ordinary shape of a follow-up is two runs: spawn and collect in one
+		 * turn, re-task on what the user said next. Signal scoping — which is how
+		 * `kill_subagent` decides ownership — would refuse exactly that, so this is
+		 * scoped by id. Ownership moves with the errand: a bare wait in the new turn
+		 * covers the work that turn started.
+		 */
+		const extension = createSubagentExtension(makeHost(scriptedStreamFn([{ text: "First." }, { text: "Second." }])), {
+			waitPacing: TEST_PACING,
+		});
+		const tools = extension.createTools();
+		const firstTurn = new AbortController();
+		await toolNamed(tools, "spawn_subagent").execute("c1", { task: "a" }, firstTurn.signal);
+		await extension.registry.get("subagent-1")!.promise;
+
+		const secondTurn = new AbortController();
+		const resumed = await toolNamed(tools, "follow_up_subagent").execute("c2", { subagentId: "subagent-1", task: "b" }, secondTurn.signal);
+		expect(resumed.details).toMatchObject({ resumed: true });
+		// The bare wait — no id — is the one that reads ownership.
+		const collected = await toolNamed(tools, "wait_subagent").execute("c3", {}, secondTurn.signal);
+
+		expect(textBlock(collected)).toContain("Second.");
+	});
+
+	it("brings an archived child back into the list when it re-arms it", async () => {
+		// Hiding a working child in the panel's closed section is the one thing the
+		// panel exists not to do.
+		const extension = createSubagentExtension(makeHost(scriptedStreamFn([{ text: "First." }, { text: "Second." }])), {
+			waitPacing: TEST_PACING,
+		});
+		const tools = extension.createTools();
+		await toolNamed(tools, "spawn_subagent").execute("c1", { task: "a" }, undefined);
+		await extension.registry.get("subagent-1")!.promise;
+		expect(extension.registry.archiveSettled()).toBe(1);
+
+		await toolNamed(tools, "follow_up_subagent").execute("c2", { subagentId: "subagent-1", task: "b" }, undefined);
+
+		expect(extension.registry.get("subagent-1")!.archived).toBeUndefined();
+		await toolNamed(tools, "wait_subagent").execute("c3", { subagentId: "subagent-1" }, undefined);
+	});
+
+	it("times the current errand, not the child's whole life", async () => {
+		// A child that answered in three seconds and was re-tasked an hour later did
+		// not run for an hour, and the row's one number is what a reader uses to ask
+		// "is this stuck?".
+		const extension = createSubagentExtension(makeHost(answerThenHang("First.")), { waitPacing: TEST_PACING });
+		const tools = extension.createTools();
+		try {
+			await toolNamed(tools, "spawn_subagent").execute("c1", { task: "a" }, undefined);
+			await extension.registry.get("subagent-1")!.promise;
+			// Age the child by an hour without ageing the errand it is about to get.
+			extension.registry.get("subagent-1")!.spawnedAt -= 3_600_000;
+
+			await toolNamed(tools, "follow_up_subagent").execute("c2", { subagentId: "subagent-1", task: "b" }, undefined);
+			const entry = extension.registry.get("subagent-1")!;
+			const snapshot = snapshotSubagents(extension.registry, entry.startedAt + 2_000)[0]!;
+
+			expect(entry.startedAt - entry.spawnedAt).toBeGreaterThanOrEqual(3_600_000);
+			expect(snapshot.status).toBe("running");
+			expect(snapshot.durationMs).toBe(2_000);
+		} finally {
+			extension.disposeAll();
+		}
+	});
+
+	it("counts a re-armed child against the width cap like a spawn", async () => {
+		// Re-arming makes a child live again, so it has to answer to the same limit
+		// — otherwise a parent at the cap could keep going by re-tasking instead of
+		// spawning.
+		const extension = createSubagentExtension(makeHost(hangingStreamFn()), { waitPacing: TEST_PACING });
+		const tools = extension.createTools();
+		const spawn = toolNamed(tools, "spawn_subagent");
+		try {
+			for (let i = 0; i < SUBAGENT_CONCURRENCY_LIMIT; i++) {
+				await spawn.execute(`c${i}`, { task: `task ${i}` }, undefined);
+			}
+			// Settle one and replace it, so the cap is full again while a settled
+			// child sits there waiting to be re-tasked.
+			extension.registry.kill("subagent-1", undefined);
+			await extension.registry.get("subagent-1")!.promise.catch(() => undefined);
+			await spawn.execute("replacement", { task: "one more" }, undefined);
+
+			const refused = await toolNamed(tools, "follow_up_subagent").execute("f1", { subagentId: "subagent-1", task: "again" }, undefined);
+
+			expect(refused.details).toMatchObject({ resumed: false, reason: "at-capacity" });
+			expect(textBlock(refused)).toContain(`limit (${SUBAGENT_CONCURRENCY_LIMIT})`);
+		} finally {
+			extension.disposeAll();
+		}
+	});
+});
+
 describe("archiving from the panel", () => {
 	function makeHost(streamFn: StreamFn): SubagentHost {
 		return {
@@ -1458,15 +1812,18 @@ describe("inspector data", () => {
 				controller.signal,
 			);
 			const entry = extension.registry.get("subagent-1");
-			expect(entry).toMatchObject({
-				task: "Sweep",
-				instructions: "Be brief.",
-				role: "scout",
-				depth: 1,
-				modelId: "test-model",
-				thinkingLevel: "off",
-			});
+			// The resolved spec, not its names: this is what a later errand would have
+			// to run as, so the record keeps the role and the model themselves.
+			expect(entry?.task).toBe("Sweep");
+			expect(entry?.instructions).toBe("Be brief.");
+			expect(entry?.role.name).toBe("scout");
+			expect(entry?.model.id).toBe("test-model");
+			expect(entry?.thinkingLevel).toBe("off");
+			expect(entry?.depth).toBe(1);
+			expect(entry?.followUps).toEqual([]);
+			expect(entry?.spent).toEqual({ turns: 0, usage: { tokens: 0, cost: 0, requests: 0 } });
 			expect(entry?.spawnedAt).toBeGreaterThan(0);
+			expect(entry?.startedAt).toBe(entry!.spawnedAt);
 			expect(entry?.settledAt).toBeUndefined();
 			// One event so far: the spawn. Nothing settles while the child hangs.
 			expect(events).toEqual(["change"]);
@@ -1508,6 +1865,7 @@ describe("inspector data", () => {
 			expect(snapshot.messages.length).toBeGreaterThan(0);
 			expect(snapshot).not.toHaveProperty("abort");
 			expect(snapshot).not.toHaveProperty("promise");
+			expect(snapshot).not.toHaveProperty("start");
 		} finally {
 			extension.disposeAll();
 		}

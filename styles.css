@@ -4031,6 +4031,7 @@ button.piem-chat__latest--asking {
 	white-space: pre-wrap;
 }
 
+.piem-subagents__followups-label,
 .piem-subagents__instructions,
 .piem-subagents__timing,
 .piem-subagents__usage,
@@ -4038,6 +4039,31 @@ button.piem-chat__latest--asking {
 	color: var(--text-muted);
 	font-size: var(--font-ui-smaller);
 	margin: 0;
+}
+
+.piem-subagents__followups-label {
+	margin-top: var(--size-4-2);
+}
+
+/*
+ * The later errands, numbered.
+ *
+ * Numbers earn their indent here, unlike in the process record's steps: there are
+ * rarely more than two or three, and "which one came second" is the question a
+ * reader asks of a re-tasked child. So no flex layout — a flex container drops
+ * list markers.
+ */
+.piem-subagents__followups {
+	color: var(--text-normal);
+	font-size: var(--font-ui-smaller);
+	margin: var(--size-4-1) 0 0;
+	padding-left: var(--size-4-4);
+	text-wrap: pretty;
+	white-space: pre-wrap;
+}
+
+.piem-subagents__followups li + li {
+	margin-top: var(--size-4-1);
 }
 
 .piem-subagents__instructions {

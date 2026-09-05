@@ -85,6 +85,27 @@ function getMessageUsage(message: AgentMessage): Usage[] {
 	return message.usage ? [message.usage] : [];
 }
 
+/**
+ * Adds two totals, for an accumulator that outlives any one transcript.
+ *
+ * {@link sumUsage} answers "what did these messages cost", which is the whole
+ * question while one transcript is the whole record. A subagent given several
+ * errands has several — and a mid-run compaction drops the messages an earlier
+ * one was measured from — so a running total has to be kept rather than
+ * re-derived from whatever context survives.
+ */
+export function addUsageTotals(a: UsageTotals, b: UsageTotals): UsageTotals {
+	return {
+		tokens: a.tokens + b.tokens,
+		cost: a.cost + b.cost,
+		requests: a.requests + b.requests,
+		input: plus(a.input, b.input),
+		cacheRead: plus(a.cacheRead, b.cacheRead),
+		cacheWrite: plus(a.cacheWrite, b.cacheWrite),
+		reasoning: plus(a.reasoning, b.reasoning),
+	};
+}
+
 /** Formats a token count for a compact status line: 1234 → "1.2k". */
 export function formatTokens(tokens: number): string {
 	if (tokens < 1_000) {

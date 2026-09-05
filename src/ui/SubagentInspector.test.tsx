@@ -439,6 +439,33 @@ describe("the detail page answers in the order a reader asks", () => {
 		expect(host.querySelector(".piem-subagents__instructions")?.textContent).toBe("Answer in one paragraph.");
 	});
 
+	it("shows the later errands under the first, in the order they were given", async () => {
+		/*
+		 * A re-tasked child has a history, and the reader needs to know Piem asked
+		 * again — the panel forbids *them* talking to a child, so an extra
+		 * instruction can only have come from the chat, and a report that answers
+		 * something the task never asked would otherwise read as a wandering child.
+		 * The row's title and the task paragraph stay the spawn task: that is what
+		 * the reader remembers asking for.
+		 */
+		const host = await renderInspector({
+			snapshots: [snapshot({ followUps: ["Which are in Archive/?", "Now check Inbox/."] })],
+			selectedId: "subagent-1",
+		});
+		const later = Array.from(host.querySelectorAll(".piem-subagents__followups li"), (node) => node.textContent);
+
+		expect(host.querySelector(".piem-subagents__task")?.textContent).toBe("Sweep Projects/ for stale notes");
+		expect(text(host)).toContain("Then Piem asked for:");
+		expect(later).toEqual(["Which are in Archive/?", "Now check Inbox/."]);
+	});
+
+	it("says nothing about later errands when there were none", async () => {
+		const host = await renderInspector({ snapshots: [snapshot()], selectedId: "subagent-1" });
+
+		expect(text(host)).not.toContain("Then Piem asked for");
+		expect(host.querySelector(".piem-subagents__followups")).toBeNull();
+	});
+
 	it("keeps spend behind the agent-details tier", async () => {
 		const withoutTier = await renderInspector({ snapshots: [snapshot()], selectedId: "subagent-1", showAgentDetails: false });
 		const withTier = await renderInspector({ snapshots: [snapshot()], selectedId: "subagent-1", showAgentDetails: true });
