@@ -3,12 +3,12 @@ import { AbstractInputSuggest, type App } from "obsidian";
 /**
  * Search-as-you-type over a fixed list of catalog entries.
  *
- * A `<select>` cannot carry this list: the builtin catalog holds 39 providers
- * and, for some of them, several hundred models — openrouter alone contributes
- * over 350. A dropdown that long is a scroll hunt, and it also forces a choice
- * from the list, which is wrong here: a gateway commonly serves a model id that
- * no catalog knows. A suggest field ranks matches as the user types while
- * leaving any typed value acceptable.
+ * A `<select>` cannot carry this list. The endpoints it is built from answer with
+ * whatever they serve — a relay commonly lists several hundred ids, and one that
+ * fronts OpenRouter lists over 350 — so a dropdown would be a scroll hunt. It
+ * would also force a choice from the list, which is wrong here: the id a gateway
+ * accepts is frequently one nothing has listed. A suggest field ranks matches as
+ * the user types while leaving any typed value acceptable.
  */
 
 export interface CatalogSuggestion {

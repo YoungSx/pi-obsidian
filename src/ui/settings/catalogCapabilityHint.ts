@@ -34,10 +34,11 @@ export interface CatalogCapabilityHint {
  * Looks one model id up across the recommendation sources and reports its
  * capabilities.
  *
- * Two sources, one authority. The live models.dev index answers first because
- * it is the same dataset the builtin snapshot was cut from, merely fresher; the
- * snapshot fills in when the fetch has not landed or cannot — offline, or
- * models.dev reshaped. Within each source, matching is exact first: ids are
+ * Two sources, one authority. The live models.dev index answers first, covering
+ * every provider models.dev tracks; the builtin snapshot behind it is now the
+ * fallback pair alone, so in practice an unreachable index means no hint rather
+ * than a smaller one — and every control it would have filled has a working,
+ * editable default. Within each source, matching is exact first: ids are
  * commonly namespaced by the gateway in front — an OpenRouter-style endpoint
  * serves `anthropic/claude-…` — so the final path segment matches too. Which of
  * the two answered is not reported; the form narrates the recommendation, not

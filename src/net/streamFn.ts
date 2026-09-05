@@ -4,9 +4,8 @@ import { openAICompletionsApi } from "@earendil-works/pi-ai/api/openai-completio
 import { openAIResponsesApi } from "@earendil-works/pi-ai/api/openai-responses.lazy";
 import { createModels, createProvider } from "@earendil-works/pi-ai";
 import type { Api, Model, Models, Provider, ProviderStreams } from "@earendil-works/pi-ai";
-import { builtinProviders } from "./builtinCatalog";
 import { createFetchForTransport, toFetchFunction, type FetchFn, type NetworkTransport } from "./obsidianFetch";
-import { CUSTOM_ENDPOINT_PROVIDER } from "../constants";
+import { CUSTOM_ENDPOINT_PROVIDER, DEFAULT_PROVIDER } from "../constants";
 import { isCustomEndpointActive, type CustomEndpointConfig } from "../customEndpoint";
 import { describeProviderConfig, type ProviderConfig, type WireProtocol } from "../modelConfig";
 
@@ -44,12 +43,18 @@ export interface ObsidianModelsOptions {
 	customEndpoint?: CustomEndpointConfig | null;
 }
 
-/** Builds the `Models` collection with every builtin provider registered, plus the user's configured endpoints. */
+/** Builds the `Models` collection with the builtin fallback registered, plus the user's configured endpoints. */
 export function createObsidianModels(options: ObsidianModelsOptions): ObsidianModelsBundle {
 	const models = createModels();
-	for (const provider of builtinProviders()) {
-		models.setProvider(provider);
-	}
+	// The fallback pair an unconfigured vault resolves to (see
+	// {@link ../net/builtinCatalog}) names {@link DEFAULT_PROVIDER}, so something
+	// has to answer for that id or `streamSimple` throws "Unknown provider"
+	// before the panel can say the real problem, which is that no endpoint is
+	// configured. It goes through the same factory as a configured row rather
+	// than pi-ai's own `deepseekProvider`: that factory would drag DeepSeek's
+	// model catalog into the bundle, and the two differ in nothing that matters
+	// here — both dispatch on `model.api` and resolve auth from the request key.
+	models.setProvider(createConfiguredProvider(DEFAULT_PROVIDER, "DeepSeek"));
 	// Configured endpoints are in no catalog, so their providers have to be
 	// registered here — `streamSimple` throws "Unknown provider" otherwise.
 	for (const provider of options.providers ?? []) {

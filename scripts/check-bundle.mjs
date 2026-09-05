@@ -36,42 +36,52 @@ const METAFILE = `${BUNDLE}.meta.json`;
  * Nothing else in the suite notices it: a bundle that doubles in size still
  * parses, still loads, still passes every test.
  *
- * The number is anchored to measurement, not taste. Trimming pi-ai's provider
- * catalog down to the shipped slice (see {@link ../src/net/builtinCatalog.ts})
- * took the bundle from ~1.83 MiB to ~1.47 MiB. The skills feature (URL import,
- * the manager, its settings UI, and bilingual copy) spent the original 180 KiB
- * of headroom by ~1.67 MiB, so the ceiling moved with it, to 1.75 MiB: again
- * roughly 80 KiB above the measured size, enough that ordinary feature work
- * does not trip the gate, while a regression that pulls the full catalog — or
- * anything else of that order — lands above the line and gets caught here
- * rather than on a user's phone.
+ * The number is anchored to measurement, not taste, and it has moved three
+ * times:
+ *
+ * 1. Trimming pi-ai's provider catalog from 39 providers to nine took the bundle
+ *    from ~1.83 MiB to ~1.47 MiB, and the ceiling to 1.75 MiB.
+ * 2. The skills feature (URL import, the manager, its settings UI, and bilingual
+ *    copy) spent that headroom back up to ~1.67 MiB, leaving the ceiling alone.
+ * 3. Dropping the remaining nine providers took it to ~1.51 MiB — 183 KiB, of
+ *    which 164 KiB was catalog JSON that Obsidian parsed on every launch (see
+ *    {@link ../src/net/builtinCatalog.ts}). The ceiling follows to 1.59 MiB.
+ *
+ * Each time the target is roughly 80 KiB above the measured size: enough that
+ * ordinary feature work does not trip the gate, while a regression of catalog
+ * size — or anything else of that order — lands above the line and gets caught
+ * here rather than on a user's phone. Lowering the ceiling with the bundle is the
+ * point; a ratchet left at its old value stops measuring anything.
  */
-const MAX_BUNDLE_BYTES = Math.round(1.75 * 1024 * 1024);
+const MAX_BUNDLE_BYTES = Math.round(1.59 * 1024 * 1024);
 
 /**
  * Dynamic imports with a non-literal specifier that today's bundle still has.
  *
- * A ratchet rather than a ban, because these three are inherited, unreachable
- * in practice, and non-fatal — while the check that finds them is new. All
- * three come from pi-ai reaching for node builtins through a variable
- * specifier so browser bundlers cannot follow it:
+ * A ratchet rather than a ban, because the one left is inherited, unreachable in
+ * practice, and non-fatal: `auth/context.js` reaches for a node builtin inside
+ * `fileExists` through a variable specifier, so browser bundlers cannot follow
+ * it — but the call is already wrapped in try/catch and returns false, which is
+ * the browser answer anyway.
  *
- * - `env-api-keys.js` fires `node:fs`/`node:os`/`node:path` at module scope,
- *   guarded by `process.versions.node`. Under Obsidian each one rejects, and
- *   nothing awaits them, so they surface as unhandled rejections at load and
- *   the feature behind them (ambient credential files) reports "not found".
- * - `auth/context.js` does the same inside `fileExists`, which is already
- *   wrapped in try/catch and returns false — the browser answer anyway.
- * - `auth/oauth/load.js` is the OAuth flow loader, which nothing here calls.
+ * Two others were here until the provider factories went (see
+ * {@link ../src/net/builtinCatalog.ts}), and both were worse than this one:
  *
- * So the number is what the bundle measurably has, and the gate's job is to
- * stop it from growing: a *new* opaque import is the dangerous case, because
- * the code that adds one intends the module to load, and under Obsidian's eval
- * it never will. If a pi upgrade removes one, the count drops and the gate
- * fails too — deliberately, so the improvement gets recorded here instead of
- * leaving room to silently regress.
+ * - `env-api-keys.js` fired `node:fs`/`node:os`/`node:path` at *module scope*.
+ *   Under Obsidian each rejected with nothing awaiting them, so every launch
+ *   raised unhandled rejections. It was reachable only through a factory's
+ *   `envApiKeyAuth`, so dropping the factories dropped the file.
+ * - `auth/oauth/load.js`, the OAuth flow loader, arrived the same way via
+ *   `lazyOAuth` and was never called.
+ *
+ * So the number is what the bundle measurably has, and the gate's job is to stop
+ * it from growing: a *new* opaque import is the dangerous case, because the code
+ * that adds one intends the module to load, and under Obsidian's eval it never
+ * will. If a change removes one, the count drops and the gate fails too —
+ * deliberately, so the improvement gets recorded here instead of leaving room to
+ * silently regress.
  */
-const KNOWN_OPAQUE_DYNAMIC_IMPORTS = 3;
+const KNOWN_OPAQUE_DYNAMIC_IMPORTS = 1;
 
 /**
  * Dependencies removed on purpose, which no import may bring back.
@@ -82,6 +92,10 @@ const KNOWN_OPAQUE_DYNAMIC_IMPORTS = 3;
  * as a substring so a nested or pnpm-style layout is caught too.
  */
 const BANNED_MODULES = new Map([
+	[
+		"node_modules/@earendil-works/pi-ai/dist/providers/",
+		"283 KiB that Obsidian parses on every launch, 164 KiB of it catalog JSON. Every provider entrypoint imports its own `X_MODELS` at module scope and names it inside `createProvider`, so a factory cannot be taken without its data and esbuild cannot shake the data loose — importing one provider costs its whole model list. Nothing needs them: the builtin fallback is a literal in src/net/builtinCatalog.ts, dispatch goes through createConfiguredProvider in src/net/streamFn.ts, connection details for known vendors live in src/net/providerPresets.ts, and capability hints come from the live models.dev index. If this appears, an import reached for a provider or a `*.models` entrypoint (or a barrel that re-exports one, such as `providers/all`).",
+	],
 	[
 		"node_modules/@google/genai/",
 		"270 KiB of unreachable code: the adapter behind it throws on any fetch that is not globalThis.fetch, and every request here passes one to reach Obsidian's requestUrl. It returns through a provider factory in src/net/builtinCatalog.ts — import neither googleProvider nor GOOGLE_MODELS (see issue #91).",
@@ -335,7 +349,7 @@ if (bundleInputs) {
 if (sizeInBytes > MAX_BUNDLE_BYTES) {
 	failures.push({
 		name: `bundle over size limit (${formatSize(sizeInBytes)} > ${formatSize(MAX_BUNDLE_BYTES)})`,
-		why: `Every byte here is parsed on each Obsidian launch, on phones too. The usual cause is a newly imported module dragging in a large dependency; the known one is pi-ai's full provider catalog, which any import of "@earendil-works/pi-ai/providers/all" (or of a barrel that re-exports it) pulls in whole. Import the specific provider and models entrypoints instead, as src/net/builtinCatalog.ts does.`,
+		why: `Every byte here is parsed on each Obsidian launch, on phones too. The usual cause is a newly imported module dragging in a large dependency; the known one is pi-ai's provider catalog, which any import under "@earendil-works/pi-ai/providers/" pulls in whole — the banned-module check above names it precisely and is the error you should be reading instead of this one.`,
 		at: "-",
 	});
 }

@@ -3517,11 +3517,14 @@ function createServiceWithSettings(
 /**
  * A service backed by a multimodal model (claude-opus-5, `input: ["text","image"]`).
  *
- * The default service selects deepseek-v4-pro, which is text-only — fine for the
- * capability-gate test but useless for asserting images travel through. This
- * swaps the active model to a builtin that declares image capability, supplies
- * an api key so `hasApiKey` passes, and optionally stages vault image bytes for
- * `![[...]]` embed resolution (which reads `app.vault`, not the adapter).
+ * The default service falls back to deepseek-v4-pro, which is text-only — fine
+ * for the capability-gate test but useless for asserting images travel through.
+ * This configures a provider/model pair that declares image capability, which is
+ * also how a real vault gets one: the builtin catalog is the fallback pair alone
+ * now, and `supportsImages` is a field the user's own model row carries. The
+ * provider supplies the key so `hasApiKey` passes, and vault image bytes can be
+ * staged for `![[...]]` embed resolution (which reads `app.vault`, not the
+ * adapter).
  */
 function createServiceWithMultimodalModel(
 	overrides: { streamFn?: StreamFn; loadUserSkills?: typeof NO_USER_SKILLS } = {},
@@ -3530,11 +3533,32 @@ function createServiceWithMultimodalModel(
 ): { service: ObsidianAgentServiceType; settings: PiemSettings } {
 	const adapter = asDataAdapter(memoryAdapter);
 	const settings: PiemSettings = {
-		providers: [],
-		models: [],
+		providers: [
+			{
+				id: "p-multimodal",
+				name: "Anthropic",
+				baseUrl: "https://api.anthropic.com",
+				protocol: "anthropic-messages",
+				apiKey: "test-key",
+				secretRef: "",
+				source: "user",
+			},
+		],
+		models: [
+			{
+				id: "m-multimodal",
+				providerId: "p-multimodal",
+				modelApiId: "claude-opus-5",
+				displayName: "Claude Opus 5",
+				reasoning: true,
+				supportsImages: true,
+				contextWindow: 200_000,
+			},
+		],
+		activeModelId: "m-multimodal",
 		provider: "anthropic",
 		modelId: "claude-opus-5",
-		providerApiKeys: { anthropic: "test-key" },
+		providerApiKeys: {},
 		networkTransport: "requestUrl",
 		showAgentDetails: false,
 		traceExpand: "collapsed",

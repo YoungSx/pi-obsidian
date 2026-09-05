@@ -361,10 +361,10 @@ export function getActiveConfiguration(settings: PiemSettings): { model: ModelCo
 /**
  * Resolves the model every request goes out on.
  *
- * A configured provider/model pair wins outright: mixing it with a builtin
- * catalog entry would mean the dropdown's provider/model pair silently
- * overrides what the user configured. Only when nothing is configured do the
- * builtin providers apply.
+ * A configured provider/model pair wins outright: mixing it with the builtin
+ * fallback would mean a stored provider/model pair silently overriding what the
+ * user configured. Only when nothing is configured does the fallback apply, and
+ * it exists to be rendered rather than sent — see {@link ./net/builtinCatalog}.
  */
 export function getSelectedModel(settings: PiemSettings): Model<string> {
 	const active = getActiveConfiguration(settings);

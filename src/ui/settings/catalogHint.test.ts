@@ -8,33 +8,28 @@ import type { ModelsDevIndex, ModelsDevModel } from "../../net/modelsDev";
  * the user is only about to configure. Getting it wrong both ways is invisible:
  * a form that recommends "off" for a capable model saves a config that fails
  * only when a strict server rejects the request or silently drops the image,
- * and the reverse wastes parameters the server ignores. So these read the real
- * snapshot rather than a fixture, because what is being tested is the lookup
- * against that snapshot — and the precedence rules that decide which source
- * answers when both know the id.
+ * and the reverse wastes parameters the server ignores.
+ *
+ * The snapshot side reads the real {@link ../../net/builtinCatalog} rather than a
+ * fixture, and asserts against what that entry itself declares rather than
+ * against literals. The catalog is one pair now, and pinning its values here
+ * would turn "the fallback model changed" into a failure in a file that is not
+ * about the fallback model — while reading them keeps the thing under test what
+ * it should be: that the lookup finds the entry and reports it faithfully.
  */
 
-/** One snapshot entry advertising both capabilities. */
-function catalogFullEntryId(): string {
+/** The snapshot's single entry, with the capabilities it declares for itself. */
+function snapshotEntry(): { id: string; reasoning: boolean; images: boolean } {
 	for (const provider of getBuiltinProviders()) {
-		const model = getBuiltinModels(provider).find((entry) => entry.reasoning === true && entry.input.includes("image"));
+		const model = getBuiltinModels(provider)[0];
 		if (model) {
-			return model.id;
+			return { id: model.id, reasoning: model.reasoning, images: model.input.includes("image") };
 		}
 	}
-	throw new Error("the builtin catalog carries no thinking, image-accepting model");
+	throw new Error("the builtin snapshot carries no model at all — the fallback pair is gone");
 }
 
-/** One snapshot entry advertising neither capability. */
-function catalogPlainEntryId(): string {
-	for (const provider of getBuiltinProviders()) {
-		const model = getBuiltinModels(provider).find((entry) => entry.reasoning === false && !entry.input.includes("image"));
-		if (model) {
-			return model.id;
-		}
-	}
-	throw new Error("the builtin catalog carries only capable models");
-}
+const SNAPSHOT = snapshotEntry();
 
 /** Builds a live index holding one entry, under both lookup keys. */
 function liveIndex(id: string, model: ModelsDevModel): ModelsDevIndex {
@@ -42,28 +37,30 @@ function liveIndex(id: string, model: ModelsDevModel): ModelsDevIndex {
 }
 
 /**
- * Asserts a snapshot answer's capabilities field by field rather than as a
- * whole object: snapshot entries also carry limit numbers that belong to the
- * entry itself, and pinning those here would tie the test to whichever model
- * the real catalog serves first.
+ * Asserts a hint's capabilities field by field rather than as a whole object:
+ * snapshot entries also carry limit numbers that belong to the entry itself, and
+ * pinning those here would tie the test to whichever model the catalog serves.
  */
-function expectCapabilities(id: string, reasoning: boolean, images: boolean): void {
-	const hint = findCatalogCapabilityHint(id);
+function expectCapabilities(id: string, reasoning: boolean, images: boolean, live?: ModelsDevIndex): void {
+	const hint = findCatalogCapabilityHint(id, live);
 	expect(hint?.reasoning).toBe(reasoning);
 	expect(hint?.images).toBe(images);
 }
 
 describe("findCatalogCapabilityHint", () => {
-	it("reports a snapshot id's capabilities", () => {
-		expectCapabilities(catalogFullEntryId(), true, true);
+	it("reports the snapshot entry's own capabilities", () => {
+		expectCapabilities(SNAPSHOT.id, SNAPSHOT.reasoning, SNAPSHOT.images);
 	});
 
-	it("recommends off for a snapshot id that advertises neither capability", () => {
-		expectCapabilities(catalogPlainEntryId(), false, false);
+	it("reports both capabilities off when that is what the source says", () => {
+		// The snapshot no longer carries an entry that declares neither, so the
+		// negative case is exercised through the live index — the same branch, and
+		// the one that answers in production anyway.
+		expectCapabilities("plain-model-v1", false, false, liveIndex("plain-model-v1", { reasoning: false, images: false }));
 	});
 
 	it("carries the snapshot entry's limits, when it published any", () => {
-		const hint = findCatalogCapabilityHint(catalogFullEntryId());
+		const hint = findCatalogCapabilityHint(SNAPSHOT.id);
 		// Limits are present and positive, or absent — the values themselves
 		// belong to the snapshot, not to this test.
 		if (hint?.contextWindow !== undefined) {
@@ -75,11 +72,11 @@ describe("findCatalogCapabilityHint", () => {
 	});
 
 	it("matches ids case-insensitively, the way they are typed by hand", () => {
-		expectCapabilities(catalogFullEntryId().toUpperCase(), true, true);
+		expectCapabilities(SNAPSHOT.id.toUpperCase(), SNAPSHOT.reasoning, SNAPSHOT.images);
 	});
 
 	it("resolves a gateway-namespaced id through its final path segment", () => {
-		expectCapabilities(`example-gateway/${catalogFullEntryId()}`, true, true);
+		expectCapabilities(`example-gateway/${SNAPSHOT.id}`, SNAPSHOT.reasoning, SNAPSHOT.images);
 	});
 
 	it("recommends nothing for an id no source knows", () => {
@@ -94,15 +91,16 @@ describe("findCatalogCapabilityHint", () => {
 	it("lets the live index answer first", () => {
 		// A live contradiction of the snapshot must survive: the live fetch is the
 		// same dataset, merely fresher, so it outranks what was frozen in.
-		const live = liveIndex(catalogFullEntryId(), {
-			reasoning: false,
-			images: false,
+		const live = liveIndex(SNAPSHOT.id, {
+			reasoning: !SNAPSHOT.reasoning,
+			images: !SNAPSHOT.images,
 			contextWindow: 111,
 			maxTokens: 22,
 		});
-		expect(findCatalogCapabilityHint(catalogFullEntryId(), live)).toEqual({
-			reasoning: false,
-			images: false,
+
+		expect(findCatalogCapabilityHint(SNAPSHOT.id, live)).toEqual({
+			reasoning: !SNAPSHOT.reasoning,
+			images: !SNAPSHOT.images,
 			contextWindow: 111,
 			maxTokens: 22,
 		});
@@ -110,17 +108,17 @@ describe("findCatalogCapabilityHint", () => {
 
 	it("falls back to the snapshot when the live index misses the id", () => {
 		const live = liveIndex("some-other-model", { reasoning: true, images: true });
-		const hint = findCatalogCapabilityHint(catalogFullEntryId(), live);
-		expect(hint?.reasoning).toBe(true);
-		expect(hint?.images).toBe(true);
+
+		expectCapabilities(SNAPSHOT.id, SNAPSHOT.reasoning, SNAPSHOT.images, live);
 	});
 
 	it("resolves a namespaced id through the live index's tail map", () => {
 		const live: ModelsDevIndex = {
 			exact: new Map(),
-			tail: new Map([[catalogFullEntryId(), { reasoning: true, images: true, contextWindow: 999 }]]),
+			tail: new Map([["tail-only-model", { reasoning: true, images: true, contextWindow: 999 }]]),
 		};
-		expect(findCatalogCapabilityHint(`gateway/${catalogFullEntryId()}`, live)).toEqual({
+
+		expect(findCatalogCapabilityHint("gateway/tail-only-model", live)).toEqual({
 			reasoning: true,
 			images: true,
 			contextWindow: 999,
@@ -130,9 +128,8 @@ describe("findCatalogCapabilityHint", () => {
 	it("prefers a snapshot exact match over a live tail match", () => {
 		// An exact id is a stronger claim than a final-path-segment guess, so the
 		// snapshot's exact answer outranks the live index's tail one.
-		const live = liveIndex(`other-provider/${catalogFullEntryId()}`, { reasoning: false, images: false });
-		const hint = findCatalogCapabilityHint(catalogFullEntryId(), live);
-		expect(hint?.reasoning).toBe(true);
-		expect(hint?.images).toBe(true);
+		const live = liveIndex(`other-provider/${SNAPSHOT.id}`, { reasoning: !SNAPSHOT.reasoning, images: !SNAPSHOT.images });
+
+		expectCapabilities(SNAPSHOT.id, SNAPSHOT.reasoning, SNAPSHOT.images, live);
 	});
 });

@@ -50,7 +50,7 @@ export interface ModelModalOptions {
 	 * Injected rather than reached for, exactly as {@link test} is: it decides
 	 * which transport the request travels, which is a setting this form has no
 	 * business reading. Optional so a caller that has no network — a test, or a
-	 * future embedder — gets the builtin catalog and nothing worse.
+	 * future embedder — gets an empty suggestion list and nothing worse.
 	 *
 	 * Expected to resolve for an unreachable endpoint rather than reject; see
 	 * {@link ModelListingCache}.
@@ -60,9 +60,10 @@ export interface ModelModalOptions {
 	knownListings?(): readonly ProviderListing[];
 	/**
 	 * Fetches the live models.dev capability index, shared per session. Optional
-	 * for the same reason {@link listModels} is — a caller with no network gets
-	 * the builtin snapshot and nothing worse. Expected to reject on failure; this
-	 * form treats that as "the snapshot is the only source today", silently.
+	 * for the same reason {@link listModels} is — a caller with no network gets no
+	 * capability hints and every control on its default, which is editable.
+	 * Expected to reject on failure; this form treats that silently, the way it
+	 * treats a failed listing probe.
 	 */
 	fetchModelsDev?(signal: AbortSignal): Promise<ModelsDevIndex>;
 }
@@ -72,10 +73,13 @@ export interface ModelModalOptions {
  *
  * Two sources, in priority order. First, what the user's own endpoints said when
  * asked — the authority on what they will actually accept, and the only source
- * that knows anything about a private gateway. Then the builtin catalog, which
- * fills in ids no endpoint mentioned: it is a build-time snapshot, so it is the
- * fallback rather than the truth, and it still carries the plugin through an
- * endpoint that implements no listing or cannot be reached right now.
+ * that knows anything about a private gateway. Then whatever
+ * {@link ../../net/builtinCatalog} carries, which since the catalog was trimmed
+ * to the fallback pair is one id: enough to keep this loop and its attribution
+ * honest, not enough to be a source. An endpoint that implements no listing
+ * therefore offers nothing to pick from, which is correct — the field takes any
+ * id typed into it, and a suggestion for a model that endpoint does not serve
+ * would be worse than an empty list.
  *
  * Suggestions are never filtered to the selected provider, for two reasons. A
  * gateway commonly serves models it did not originate — an OpenAI-compatible
