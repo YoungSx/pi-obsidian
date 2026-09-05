@@ -1607,8 +1607,14 @@ button.piem-chat__context-open {
 	white-space: nowrap;
 }
 
-.piem-chat__trace--error .piem-chat__trace-icon,
-.piem-chat__trace--error .piem-chat__trace-name {
+/*
+ * Failure is carried by the glyph alone. The detail line next to it is the
+ * failure message itself — the row's one sentence of what went wrong — and
+ * painting a whole sentence red read as a wall of alarm, the same overload the
+ * banner triage ruled out: one red glyph is a signal, a red paragraph is noise.
+ * The name keeps its normal colour for the same reason.
+ */
+.piem-chat__trace--error .piem-chat__trace-icon {
 	color: var(--text-error);
 }
 
