@@ -45,7 +45,7 @@ bun test
 `bun test` runs on happy-dom, which does no layout: it can assert that a rule
 *declares* `text-overflow: ellipsis`, never that the right span is the one that
 truncates in a 300px sidebar. For CSS whose correctness is a layout consequence,
-two scripts answer that in a real engine:
+four `preview`/`measure` pairs answer that in a real engine:
 
 ```bash
 node scripts/preview-command-menu.mjs   # writes .preview/command-menu.html
@@ -53,15 +53,30 @@ node scripts/measure-command-menu.mjs   # measures it, exits non-zero on regress
 
 node scripts/preview-transcript.mjs     # writes .preview/transcript.html
 node scripts/measure-transcript.mjs     # asserts the message column never scrolls sideways
+
+node scripts/preview-ask-user.mjs       # writes .preview/ask-user.html
+node scripts/measure-ask-user.mjs       # asserts marker centring, one text column, contrast floors
+
+node scripts/preview-visual.mjs         # writes one page per scenario + visual-manifest.json
+node scripts/measure-visual.mjs         # screenshots every page the manifest names
 ```
 
-Each preview extracts its rules *from* `styles.css` rather than restating them,
-so it cannot drift from what ships. Not part of `npm run verify` — Chromium is
-not a project dependency — so the invariants worth keeping green in CI are
-mirrored as structural gates in `src/ui/panelA11y.test.ts` and
-`src/ui/transcriptOverflow.test.ts`. Override the browser with `CHROME=`; a
-snap-packaged Chromium cannot read a checkout under a dotted path
-(`~/.paseo/...`), which `PREVIEW_DIR=` works around.
+They split into two kinds, and the difference matters when you add one. The first
+three extract their rules *from* `styles.css` rather than restating them, and
+restate the *markup* — so the styling cannot drift from what ships, and the guards
+in each script cross-check every class the pictures depend on against the component
+that emits it. `preview-visual.mjs` gives up nothing to drift at all: it mounts the
+shipped React components in happy-dom and loads the whole shipped stylesheet, so a
+spacing defect in a component is a defect in the page. It pays for that with
+scenario setup — a scenario has to drive the real service — and it screenshots
+rather than asserts, so it is for looking, not for gating.
+
+None of them are part of `npm run verify` — Chromium is not a project dependency —
+so the invariants worth keeping green in CI are mirrored as structural gates in
+`src/ui/panelA11y.test.ts` and `src/ui/transcriptOverflow.test.ts`. Override the
+browser with `CHROME=` (`CHROMIUM_BIN=` for `measure-visual.mjs`); a snap-packaged
+Chromium cannot read a checkout under a dotted path (`~/.paseo/...`), which
+`PREVIEW_DIR=` works around.
 
 The transcript harness renders three panel widths (300px sidebar, 390px phone,
 560px wide leaf) and asserts two things that have to hold together: the message
