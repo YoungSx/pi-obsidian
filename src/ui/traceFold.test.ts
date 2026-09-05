@@ -12,6 +12,7 @@ import {
 	type TraceFoldPlan,
 	type TraceFoldTally,
 } from "./traceFold";
+import { planToolPairs } from "./toolPair";
 
 const en = getT("en");
 const zh = getT("zh-cn");
@@ -330,3 +331,64 @@ function text(value: string): AssistantMessage["content"][number] {
 function thinking(value: string): AssistantMessage["content"][number] {
 	return { type: "thinking", thinking: value };
 }
+
+/**
+ * What the planner does once it knows which result answered which call.
+ *
+ * These two rules exist because the renderer now draws an invocation as one row.
+ * Before that, a call and its result were two rows and the planner treated them as
+ * two; the fold rules were written against that shape, and one of them — a failure
+ * is never folded — silently stopped holding when the call started carrying the
+ * result.
+ */
+describe("planning a fold over paired rows", () => {
+	/*
+	 * A paired result is not a row at all: its call draws it. Counted as one, it
+	 * inflates what the fold claims to have swallowed, and when it happens to open a
+	 * run it becomes the run's *head* — the address the summary draws at — which is
+	 * an address nothing occupies, so the entire run disappears from the transcript.
+	 */
+	it("treats a result its call will draw as no row at all", () => {
+		const messages = [assistant(call("read"), call("grep")), result("read"), result("grep")];
+		const pairs = planToolPairs(messages);
+		const plan = planTraceFolds(messages, { mode: "collapsed", showAgentDetails: false, pairs });
+
+		const group = traceFoldSlot(plan, 0, 0)?.group;
+		expect(group?.rows.map((row) => row.kind)).toEqual(["call", "call"]);
+		// Neither result has a slot of its own, so neither can head a run.
+		expect(traceFoldSlot(plan, 1, null)).toBeNull();
+		expect(traceFoldSlot(plan, 2, null)).toBeNull();
+	});
+
+	/*
+	 * A failed result has always broken a run — a row the reader must not have to
+	 * open to see cannot be folded away — and it did that from its own slot. Now the
+	 * failure arrives on the call's row, so the break has to happen at the call:
+	 * otherwise the run swallows the call, the call carries the failure inside, and
+	 * the one row the rule exists to keep out is the one row hidden by it.
+	 */
+	it("breaks the run at a call whose result failed", () => {
+		const messages = [assistant(call("read"), call("grep"), call("write")), result("read", { isError: true }), result("grep"), result("write")];
+		const pairs = planToolPairs(messages);
+		const plan = planTraceFolds(messages, { mode: "collapsed", showAgentDetails: false, pairs });
+
+		// The failed call stands alone; the two that worked fold together.
+		expect(traceFoldSlot(plan, 0, 0)).toBeNull();
+		expect(traceFoldSlot(plan, 0, 1)?.head).toBe(true);
+		expect(traceFoldSlot(plan, 0, 1)?.group.rows).toHaveLength(2);
+	});
+
+	/*
+	 * The orphan is the one result still worth a row: nothing in the transcript
+	 * claimed it, so nothing else will draw it. It keeps its slot, which is what lets
+	 * it open a run the way any row does.
+	 */
+	it("keeps a result no call claimed", () => {
+		const messages = [result("read", { toolCallId: "vanished" }), assistant(call("grep"), call("write"))];
+		const pairs = planToolPairs(messages);
+		const plan = planTraceFolds(messages, { mode: "collapsed", showAgentDetails: false, pairs });
+
+		expect(traceFoldSlot(plan, 0, null)?.head).toBe(true);
+		expect(traceFoldSlot(plan, 0, null)?.group.rows.map((row) => row.kind)).toEqual(["result", "call", "call"]);
+	});
+});

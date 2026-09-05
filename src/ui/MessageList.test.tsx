@@ -41,6 +41,8 @@ function renderMessages(
 }
 
 beforeEach(() => {
+	callIds.clear();
+	resultIds.clear();
 	createRootSync = createRootImpl;
 	markdownRenderMock.mockReset();
 	markdownRenderMock.mockImplementation(async ({ el }: { el: HTMLElement }) => {
@@ -850,12 +852,85 @@ describe("MessageList consecutive-tool folding", () => {
 		// A sentence, so it is set in the interface font rather than the id face.
 		const name = fold?.querySelector(".piem-chat__trace-name");
 		expect(name?.classList.contains("piem-chat__trace-name--label")).toBe(true);
-		// All four rows moved inside, and none was left behind in the transcript.
-		expect(fold?.querySelectorAll(".piem-chat__trace-body > .piem-chat__trace")).toHaveLength(4);
+		// Two rows inside for two invocations — the call and result of each are one
+		// row now (see `toolPair.ts`) — and none was left behind in the transcript.
+		expect(fold?.querySelectorAll(".piem-chat__trace-body > .piem-chat__trace")).toHaveLength(2);
 		const stranded = Array.from(host.querySelectorAll(".piem-chat__trace")).filter(
 			(row) => !row.classList.contains("piem-chat__trace--fold") && row.closest(".piem-chat__trace--fold") === null,
 		);
 		expect(stranded).toHaveLength(0);
+	});
+
+	/*
+	 * One invocation, one row. The transcript used to draw two — a wrench row and a
+	 * tick row, both naming the tool from the same table — so a reader scanning for
+	 * what the agent did counted every action twice, and the two things they wanted
+	 * (which note, and did it work) sat in different rows with a truncation each.
+	 */
+	it("draws a call and its result as one row, with the outcome on the glyph", async () => {
+		const host = renderMessages([assistantToolCall("write", { path: "Clippings/Note.md" }), toolResultFor("write")]);
+		await flushRender();
+
+		expect(host.querySelectorAll(".piem-chat__trace")).toHaveLength(1);
+		const row = host.querySelector(".piem-chat__trace");
+		expect(row?.querySelector(".piem-chat__trace-name")?.textContent).toBe("Wrote a note");
+		// The glyph is the status, which is what the wrench never was.
+		expect(iconNames(row)).toEqual(["check"]);
+		// And the argument survives absorbing the result, because "which note" is the
+		// question a collapsed tool row exists to answer.
+		expect(row?.querySelector(".piem-chat__trace-detail")?.textContent).toBe("Clippings/Note.md");
+	});
+
+	/*
+	 * The state the wrench is left to mean, and the only one: asked, not answered.
+	 * A turn interrupted between the two used to leave a wrench with no tick under
+	 * it, which read the same as a call that had succeeded.
+	 */
+	it("keeps the wrench for a call whose result never came", async () => {
+		const host = renderMessages([assistantToolCall("write", { path: "Clippings/Note.md" })]);
+		await flushRender();
+
+		expect(iconNames(host.querySelector(".piem-chat__trace"))).toEqual(["wrench"]);
+	});
+
+	/*
+	 * A write's diff counts are the one thing the result knew that the call could
+	 * not, they are four characters, and they are worthless clipped — so they lead,
+	 * and the path gives up its tail to the panel's width instead.
+	 */
+	it("puts a write's diff counts in front of the path", async () => {
+		const host = renderMessages([
+			assistantToolCall("edit", { path: "Clippings/Note.md" }),
+			{ ...toolResultFor("edit"), details: { diff: "@@ -1 +1 @@\n+added\n-removed" } } as ToolResultMessage,
+		]);
+		await flushRender();
+
+		expect(host.querySelector(".piem-chat__trace-detail")?.textContent).toBe("+1 -1 · Clippings/Note.md");
+	});
+
+	/*
+	 * "Why not" outranks "which note" the moment there is a why-not: the glyph says
+	 * something went wrong, and the detail is the only place the row can say what.
+	 */
+	it("gives a failed row's line to the failure message", async () => {
+		const host = renderMessages([assistantToolCall("read", { path: "Missing.md" }), errorResultFor("read")]);
+		await flushRender();
+
+		const row = host.querySelector(".piem-chat__trace--error");
+		expect(row).not.toBeNull();
+		expect(iconNames(row)).toEqual(["alert-triangle"]);
+		expect(row?.querySelector(".piem-chat__trace-detail")?.textContent).toBe("File not found.");
+	});
+
+	/*
+	 * Nothing in the transcript asked for it — compaction ate the turn that did, or
+	 * the session file predates ids — so no row will draw it but its own.
+	 */
+	it("still draws a result no call claimed", async () => {
+		const host = renderMessages([orphanResult()]);
+		await flushRender();
+
+		expect(host.querySelectorAll("details.piem-chat__trace--result")).toHaveLength(1);
 	});
 
 	it("leaves a lone call unfolded, since its own row names the note it touched", async () => {
@@ -901,21 +976,22 @@ describe("MessageList consecutive-tool folding", () => {
 	});
 
 	it("draws the summary in a result's own slot when the run begins with one", async () => {
-		// The failure breaks the run, so the traffic after it starts on the result of
-		// the call that was still in flight when it broke.
-		const host = renderMessages([
-			assistantToolCalls("read", "grep"),
-			errorResultFor("read"),
-			toolResultFor("grep"),
-			assistantToolCalls("read", "read"),
-			toolResultFor("read"),
-		]);
+		/*
+		 * A result whose call is nowhere in the transcript — compaction ate the turn
+		 * that made it, or the session file predates ids being recorded. It is the one
+		 * kind of result that is still a row of its own, so it is the one kind that can
+		 * open a run: a paired result is drawn by its call and is not a row here at all.
+		 */
+		const host = renderMessages([orphanResult(), assistantToolCalls("read", "read"), toolResultFor("read"), toolResultFor("read")]);
 		await flushRender();
 
-		expect(foldSummaries(host)).toEqual(["Read a note and ran a search", "Read 2 notes"]);
-		const second = host.querySelectorAll("details.piem-chat__trace--fold")[1];
+		// Two calls in the run, and the orphan is not one of them: the summary counts
+		// what the agent did, and nothing in the transcript says this result was asked
+		// for by anything above it.
+		expect(foldSummaries(host)).toEqual(["Read 2 notes"]);
+		const fold = host.querySelector("details.piem-chat__trace--fold");
 		// Its first member is the stray result, drawn in the slot the summary took over.
-		expect(second?.querySelector(".piem-chat__trace-body > .piem-chat__trace")?.classList.contains("piem-chat__trace--result")).toBe(true);
+		expect(fold?.querySelector(".piem-chat__trace-body > .piem-chat__trace")?.classList.contains("piem-chat__trace--result")).toBe(true);
 	});
 
 	it("keeps a failure in the transcript rather than inside a fold", async () => {
@@ -974,7 +1050,7 @@ describe("MessageList consecutive-tool folding", () => {
 
 		expect(foldSummaries(host)).toEqual(["Read a note and ran a search"]);
 		const inner = Array.from(host.querySelectorAll(".piem-chat__trace-body > .piem-chat__trace .piem-chat__trace-name"));
-		expect(inner.map((node) => node.textContent)).toEqual(["read", "grep", "read", "grep"]);
+		expect(inner.map((node) => node.textContent)).toEqual(["read", "grep"]);
 	});
 
 	it("folds nothing in the two modes chosen to open machine traffic", async () => {
@@ -983,7 +1059,8 @@ describe("MessageList consecutive-tool folding", () => {
 			await flushRender();
 
 			expect(host.querySelector(".piem-chat__trace--fold")).toBeNull();
-			expect(host.querySelectorAll(".piem-chat__trace")).toHaveLength(4);
+			// Two invocations, two rows — unfolded, but still one row apiece.
+			expect(host.querySelectorAll(".piem-chat__trace")).toHaveLength(2);
 			host.remove();
 		}
 	});
@@ -1253,9 +1330,9 @@ function toolResult(details: Record<string, unknown>): ToolResultMessage {
 function assistantToolCalls(...names: string[]): AssistantMessage {
 	return {
 		...assistantBase(),
-		content: names.map((name, index): AssistantMessage["content"][number] => ({
+		content: names.map((name): AssistantMessage["content"][number] => ({
 			type: "toolCall",
-			id: `call-${index}`,
+			id: nextToolCallId(callIds, name),
 			name,
 			arguments: { path: `${name}.md` },
 		})),
@@ -1264,11 +1341,29 @@ function assistantToolCalls(...names: string[]): AssistantMessage {
 
 /** A settled result for `toolName`, on the shape {@link toolResult} already produces. */
 function toolResultFor(toolName: string): ToolResultMessage {
-	return { ...toolResult({}), toolName };
+	return { ...toolResult({}), toolName, toolCallId: nextToolCallId(resultIds, toolName) };
+}
+
+/**
+ * A result with no call to pair with, which is what compaction and older session
+ * files leave behind. Its `toolCallId` is deliberately one no fixture hands out.
+ */
+function orphanResult(): ToolResultMessage {
+	return { ...toolResult({}), toolName: "read", toolCallId: "no-such-call" };
 }
 
 function errorResultFor(toolName: string): ToolResultMessage {
 	return { ...toolResultFor(toolName), isError: true, content: [{ type: "text", text: "File not found." }] };
+}
+
+/**
+ * The icon names a row painted, in order.
+ *
+ * `setIcon` writes the name as text under `bun test` (see `obsidianStub.ts`), which
+ * is what makes a status glyph assertable without shipping an icon registry.
+ */
+function iconNames(row: Element | null | undefined): string[] {
+	return Array.from(row?.querySelectorAll("[data-icon]") ?? []).map((node) => node.getAttribute("data-icon") ?? "");
 }
 
 /** The summary line of every folded run, in transcript order. */
@@ -1444,7 +1539,32 @@ function assistantThinking(thinking: string): AssistantMessage {
 }
 
 function assistantToolCall(name: string, args: Record<string, unknown>): AssistantMessage {
-	return { ...assistantBase(), content: [{ type: "toolCall", id: "call-1", name, arguments: args }] };
+	return { ...assistantBase(), content: [{ type: "toolCall", id: nextToolCallId(callIds, name), name, arguments: args }] };
+}
+
+/**
+ * Call ids the results can find.
+ *
+ * A renderer that draws one row per invocation has to know which result answered
+ * which call, and `pi` says so with `ToolCall.id` and `ToolResultMessage.toolCallId`.
+ * These fixtures predate that being read, so they now generate the correspondence a
+ * provider would: the nth call of a tool and the nth result for that tool carry the
+ * same id. Which is how the fixtures already read — `assistantToolCalls("read",
+ * "grep")` followed by `toolResultFor("read")` and `toolResultFor("grep")` — so no
+ * call site changes, and a test that deliberately leaves a call unanswered simply
+ * omits the result.
+ *
+ * Two counters, not one: every fixture creates a call before its result, but a
+ * transcript may hold a call whose result never came, and one shared counter would
+ * hand the next result the wrong call's id.
+ */
+const callIds = new Map<string, number>();
+const resultIds = new Map<string, number>();
+
+function nextToolCallId(seq: Map<string, number>, name: string): string {
+	const nth = seq.get(name) ?? 0;
+	seq.set(name, nth + 1);
+	return `${name}#${nth}`;
 }
 
 function assistantBase(): AssistantMessage {

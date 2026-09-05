@@ -28,6 +28,7 @@ import {
 	type TraceFoldPlan,
 	type TraceRowRef,
 } from "./traceFold";
+import { planToolPairs, pairedResult, resultIsPaired, type ToolPairPlan } from "./toolPair";
 import type { AskUserAnswer } from "../tools/askUserQuestion";
 import type { AskUserRequest } from "../tools/askUserBroker";
 
@@ -406,8 +407,11 @@ export function MessageList({
 	 * every streamed token, so a memo keyed on it would recompute anyway.
 	 */
 	const liveRow = liveRowRef(messages, activeIndex);
-	const foldPlan = planTraceFolds(messages, { mode: traceExpand, showAgentDetails, liveRow });
-	const context: MessageContext = { app, component, sourcePath, showAgentDetails, traceExpand, foldPlan, liveRow, t };
+	// Pairs first: the fold planner reads them, because a call whose result failed
+	// has to break a run the same way the failure itself always has.
+	const pairPlan = planToolPairs(messages);
+	const foldPlan = planTraceFolds(messages, { mode: traceExpand, showAgentDetails, liveRow, pairs: pairPlan });
+	const context: MessageContext = { app, component, sourcePath, showAgentDetails, traceExpand, foldPlan, pairPlan, liveRow, t };
 	const regenerateIndex = regenerableIndex(messages);
 	const editIndex = editableQuestionIndex(messages);
 	/*
@@ -816,6 +820,17 @@ function MessageRow({
 		return <CompactionDivider message={message} renderContext={renderContext} />;
 	}
 	if (message.role === "toolResult") {
+		/*
+		 * Drawn already, by the call row it answered — see `toolPair.ts`. Checked
+		 * before the fold plan because a paired result is not a row at all: leaving
+		 * it to the plan would let a fold count it and, when it happens to be a run's
+		 * first row, draw the fold's summary at a position nothing occupies.
+		 *
+		 * `ask_user` never pairs, so its receipt below is unaffected.
+		 */
+		if (resultIsPaired(renderContext.pairPlan, index)) {
+			return null;
+		}
 		const slot = traceFoldSlot(renderContext.foldPlan, index, null);
 		if (slot) {
 			// The run's first row draws the summary where it stood; every later
@@ -1071,6 +1086,14 @@ interface MessageContext {
 	 * message — so no single row can work out its own place in one.
 	 */
 	foldPlan: TraceFoldPlan;
+	/**
+	 * Which result answered which call, so one invocation draws one row.
+	 *
+	 * Resolved for the whole transcript for the same reason `foldPlan` is: a call
+	 * and its result are never in the same message, so neither row can find the
+	 * other on its own.
+	 */
+	pairPlan: ToolPairPlan;
 	/** The block the model is writing right now; see {@link liveRowRef}. */
 	liveRow: TraceRowRef | null;
 	/**
@@ -1194,7 +1217,7 @@ function renderAssistantMessage(message: AssistantMessage, args: RenderArgs): Re
 		if (slot) {
 			return slot.head ? <FoldedTrace key={blockIndex} group={slot.group} context={context} /> : null;
 		}
-		return <ToolCallTrace key={blockIndex} call={content} live={live} context={context} />;
+		return <ToolCallTrace key={blockIndex} call={content} live={live} result={pairedResult(context.pairPlan, args.index, blockIndex)} context={context} />;
 	});
 }
 
@@ -1277,21 +1300,130 @@ function Trace({ icon, name, detail, className, nameIsIdentifier = false, body, 
  * working" reads one way everywhere machine traffic appears. Always false
  * inside a fold: a running call is never folded.
  */
-function ToolCallTrace({ call, live, context }: { call: ToolCall; live: boolean; context: MessageContext }): React.JSX.Element {
+/**
+ * One tool invocation, as one row.
+ *
+ * The call and the result used to be a row each, drawing the same name from the
+ * same table — so the transcript said "Wrote a note" under a wrench that reports
+ * no status, then "Wrote a note" again under a tick that does. Two rows to say
+ * one thing, and the two halves the reader wanted (which note, and did it work)
+ * split across them with a truncation each.
+ *
+ * `result` is the message that answered this call, or `null` while the tool is
+ * still out — which is also what a row looks like when the turn was interrupted
+ * before the result arrived. That is the only state the wrench is left to mean.
+ *
+ * A row that has its result wears `--result` so it keeps the height bound on its
+ * body: the call's own payload is a few lines of JSON, but a grep's output is not,
+ * and the class that used to carry that bound went with the row this one absorbed.
+ */
+function ToolCallTrace({
+	call,
+	live,
+	result,
+	context,
+}: {
+	call: ToolCall;
+	live: boolean;
+	result: ToolResultMessage | null;
+	context: MessageContext;
+}): React.JSX.Element {
 	const showDetails = context.showAgentDetails;
+	const diff = result ? extractDiff(result.details) : null;
+	const payload = showDetails ? <pre className="piem-chat__text">{JSON.stringify(call.arguments, null, 2)}</pre> : null;
+	/*
+	 * The result's own body, under the call's payload when both are shown. Order
+	 * matters and follows time: what was asked, then what came back.
+	 */
+	const answer = result ? (
+		<>
+			{result.content.map((content, index) =>
+				content.type === "text" ? (
+					<Block key={index} text={content.text} kind="toolResult" isStreaming={false} context={context} />
+				) : (
+					<ImageBlock key={index} content={content} t={context.t} />
+				),
+			)}
+			{diff ? <Block text={`\`\`\`diff\n${diff}\n\`\`\``} kind="assistant" isStreaming={false} context={context} /> : null}
+		</>
+	) : null;
 	return (
 		<Trace
-			icon={live ? "loader-circle" : "wrench"}
+			icon={traceIcon(live, result)}
 			name={describeTool(call.name, showDetails, context.t)}
 			nameIsIdentifier={isToolIdentifier(call.name, showDetails)}
-			detail={summarizeToolPayload(call.arguments)}
-			className={live ? "piem-chat__trace--live" : undefined}
-			open={traceOpensByDefault(context.traceExpand, "toolCall", false)}
-			// Without the payload there is nothing behind the row to open, so it
-			// renders as a plain line rather than an empty disclosure.
-			body={showDetails ? <pre className="piem-chat__text">{JSON.stringify(call.arguments, null, 2)}</pre> : null}
+			detail={pairedDetail(call, result, diff, context.t)}
+			className={traceClasses(live, result)}
+			// A diff-bearing row opens itself under `highValue`: the critique called
+			// the undo story the panel's biggest gap, and what an edit changed is the
+			// one thing a reader answers by reading rather than by deciding to read.
+			// Only a row that has its result can be that row, so a call still out asks
+			// the question the call row always asked.
+			open={result ? traceOpensByDefault(context.traceExpand, "toolResult", diff !== null) : traceOpensByDefault(context.traceExpand, "toolCall", false)}
+			// Without the payload or a result there is nothing behind the row to open,
+			// so it renders as a plain line rather than an empty disclosure.
+			body={payload || answer ? <>{payload}{answer}</> : null}
 		/>
 	);
+}
+
+/**
+ * The status glyph, which is the whole reason one row beats two.
+ *
+ * A wrench says a call was made, which the row's own text already said. These
+ * four states are what the reader actually asks of a tool row, and the paired row
+ * can answer all of them where the call row could answer none.
+ */
+function traceIcon(live: boolean, result: ToolResultMessage | null): IconName {
+	if (live) {
+		return "loader-circle";
+	}
+	if (!result) {
+		return "wrench";
+	}
+	return result.isError ? "alert-triangle" : "check";
+}
+
+/** Modifier classes for a paired row: the body bound, the failure tint, the spinner. */
+function traceClasses(live: boolean, result: ToolResultMessage | null): string | undefined {
+	const classes = [
+		result ? "piem-chat__trace--result" : null,
+		result?.isError ? "piem-chat__trace--error" : null,
+		live ? "piem-chat__trace--live" : null,
+	].filter(Boolean);
+	return classes.length > 0 ? classes.join(" ") : undefined;
+}
+
+/**
+ * What a paired row shows without being opened.
+ *
+ * The argument, because "which note" is the question a collapsed tool row exists
+ * to answer — and it is the call's half, which is why absorbing the result must
+ * not cost it. A write's diff counts join it in front: they are the one thing the
+ * result knew that the call could not, they are four characters, and they are
+ * worthless clipped where a path is still legible clipped.
+ *
+ * A success's own summary sentence ("Successfully wrote 887 bytes to …") does not
+ * appear. It restates the name, the argument and the tick — every part of it is
+ * already on the row — and it was the reason the old result row truncated the one
+ * thing it could have told the reader.
+ *
+ * A failure's does, and takes the whole line. "Why not" outranks "which note" the
+ * moment there is a why-not: the glyph says something went wrong and the detail is
+ * the only place the row can say what, whereas an argument the reader can no
+ * longer act on is worth less than the sentence naming what to fix. The messages
+ * these tools return name the path themselves when it is the path that was wrong.
+ */
+function pairedDetail(call: ToolCall, result: ToolResultMessage | null, diff: string | null, t: Translator): string {
+	if (result?.isError) {
+		return summarizeToolResult(result, t);
+	}
+	const argument = summarizeToolPayload(call.arguments);
+	const counts = diff ? formatDiffCounts(diff) : "";
+	if (counts && argument) {
+		return t.t("traceTool.detailPair", { counts, argument });
+	}
+	return counts || argument;
 }
 
 /**
@@ -1370,13 +1502,31 @@ function FoldedTrace({ group, context }: { group: TraceFoldGroup; context: Messa
 			icon="wrench"
 			name={describeTraceFold(group.tallies, context.t)}
 			className="piem-chat__trace--fold"
-			body={group.rows.map((row) =>
-				row.kind === "call" ? (
-					<ToolCallTrace key={`${row.ref.message}:${row.ref.block}`} call={row.call} live={false} context={context} />
-				) : (
-					<ToolResultTrace key={`${row.ref.message}:result`} message={row.result} context={context} />
-				),
-			)}
+			/*
+			 * The rows it swallowed, paired the same way the transcript pairs them —
+			 * so opening a fold shows what the reader would have seen unfolded, and a
+			 * run of three writes is three rows inside rather than six.
+			 *
+			 * A result whose call is paired is dropped rather than drawn: its call is
+			 * in this body too (a run is consecutive tool traffic, and a call is what
+			 * starts one), and it already carries the result. A result whose call is
+			 * *not* paired stayed a row of its own upstream, so it stays one here.
+			 */
+			body={group.rows
+				.filter((row) => row.kind === "call" || !resultIsPaired(context.pairPlan, row.ref.message))
+				.map((row) =>
+					row.kind === "call" ? (
+						<ToolCallTrace
+							key={`${row.ref.message}:${row.ref.block}`}
+							call={row.call}
+							live={false}
+							result={pairedResult(context.pairPlan, row.ref.message, row.ref.block ?? -1)}
+							context={context}
+						/>
+					) : (
+						<ToolResultTrace key={`${row.ref.message}:result`} message={row.result} context={context} />
+					),
+				)}
 		/>
 	);
 }

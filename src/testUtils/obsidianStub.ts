@@ -1195,7 +1195,15 @@ const obsidianStub = {
 	 * tests that care inject their own expectation instead of relying on this.
 	 */
 	requireApiVersion: (): boolean => true,
-	setIcon: () => undefined,
+	/*
+	 * Records the name on the element instead of painting it.
+	 *
+	 * An attribute rather than text content: a status glyph is worth asserting — it
+	 * is the whole point of a row that reports its own outcome — but the icon sits
+	 * inside rows and buttons whose `textContent` other tests read, and writing the
+	 * name there would prepend "check" to every label in the panel.
+	 */
+	setIcon: (element: HTMLElement, icon: string): void => element.setAttribute("data-icon", icon),
 	setTooltip: (element: HTMLElement, tooltip: string): void => setTooltipMock(element, tooltip),
 	SecretComponent: SecretComponentStub,
 };

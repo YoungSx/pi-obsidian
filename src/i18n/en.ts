@@ -715,6 +715,15 @@ export const en = {
 		moveNote: "Renamed or moved a note",
 		trashNote: "Sent a note to trash",
 		failed: "failed",
+		/**
+		 * Both halves of a paired row's detail, when a write reports a diff.
+		 *
+		 * The counts lead because they are short and never truncate; the argument
+		 * follows and gives up its tail to the panel's width, which is the right way
+		 * round — "+8 -0" is worthless clipped, a path is still legible clipped.
+		 * Copy rather than a literal so the separator is a translator's choice.
+		 */
+		detailPair: "{counts} · {argument}",
 	},
 
 	/**
