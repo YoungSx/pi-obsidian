@@ -845,13 +845,14 @@ button.piem-chat__context-open {
 }
 
 /*
- * A failed tidy reads like every other failure the transcript reports. The seam
- * itself only loses strength (above) rather than turning red: what failed is one
- * request, and a red line across the column would say the conversation had been
+ * A failed tidy reads like every other failure the transcript reports: the glyph
+ * alone carries it. The label stays in its normal colour for the reason the tool
+ * rows' does — one red glyph is a signal, red words are noise — and the seam only
+ * loses strength (above) rather than turning red, because what failed is one
+ * request and a red line across the column would say the conversation had been
  * damaged.
  */
-.piem-chat__trace--seam-failed .piem-chat__trace-icon,
-.piem-chat__trace--seam-failed .piem-chat__trace-name {
+.piem-chat__trace--seam-failed .piem-chat__trace-icon {
 	color: var(--text-error);
 }
 

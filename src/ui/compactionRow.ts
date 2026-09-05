@@ -153,12 +153,12 @@ export function compactionRowIcon(state: CompactionRowState): IconName {
 }
 
 /**
- * Classes for the row, seam look included.
+ * Classes for the row.
  *
  * Built here rather than in the renderer so the state-to-treatment mapping sits
- * beside the label and glyph it has to agree with: `--live` spins the loader and
- * `--failed` colours the report, both borrowed from the tool rows that already
- * mean exactly that.
+ * beside the label and glyph it has to agree with: `--live` spins the loader, and
+ * `--seam-failed` reddens the glyph — only the glyph, the way every failed row in
+ * the transcript reports one.
  */
 export function compactionRowClass(state: CompactionRowState): string {
 	const classes = ["piem-chat__trace--seam"];
