@@ -251,8 +251,8 @@ button.piem-chat__context-open {
 	 * Sits on the composer's text column, not the transcript's: the draft sits at
 	 * container padding (4-2) + shell padding (4-2) = 2 × --size-4-2 from the
 	 * panel edge — the shell's own fill needs that inset, so the draft cannot
-	 * join the transcript's column, which the assistant holds at 1 × 4-2 (it
-	 * carries no inline padding; see `.piem-chat__message--assistant`). The status
+	 * join the transcript's column, which the assistant holds at 1 × 4-2 (a
+	 * message row carries no padding; see `.piem-chat__message`). The status
 	 * line matches the draft it sits above, so the pair reads as one column of
 	 * words rather than two stray edges.
 	 */
@@ -834,10 +834,31 @@ button.piem-chat__context-open {
  * belongs to the two conversational roles only — tool calls, tool results and
  * harness output render as flat trace rows (below), so a bordered card never
  * contains a second bordered box.
+ *
+ * The row carries no padding at all, and that absence is load-bearing: vertical
+ * spacing between rows belongs to `.piem-chat__messages`' `gap`, and horizontal
+ * placement to the panel's own inset (`.piem-chat`). Neither role needs an inset
+ * of its own — the user's turn hands its padding to the bubble, which is the box
+ * with a fill to hold it off, and the assistant reads as the page.
+ *
+ * It used to declare `padding: var(--size-4-2)`, which was a margin wearing a
+ * padding's name. Both conversational roles already stripped the inline half, so
+ * the only thing the declaration ever did was add 8px above and below an
+ * assistant reply — spacing between rows, spent inside one. That is invisible
+ * until you notice a tool result and a folded run are not wrapped in this article
+ * at all: `MessageRow` returns them as bare `.piem-chat__trace` children of the
+ * column. One turn's rows were then spaced by three different sums — 4px inside
+ * a message, 8+8 from a message to a bare trace row, 8+8+8 from a message to the
+ * next message — so a fold pill closing a turn sat 4px under the prose it
+ * belonged to and 32px above the reply that followed, and the reader saw the
+ * seams of `pi`'s message split rather than the shape of the turn.
+ *
+ * With the padding gone every boundary in the column is one `gap`, whatever the
+ * two rows on either side of it happen to be — and the one boundary that should
+ * read as more than a seam asks for the extra itself, on the user's own turn. So
+ * the whole transcript is three spacings: 4px inside a message, 8px between the
+ * rows of one turn, 16px where the speaker changes.
  */
-.piem-chat__message {
-	padding: var(--size-4-2);
-}
 
 /*
  * The user's own turn is the filled one. The leaf background is already
@@ -850,28 +871,41 @@ button.piem-chat__context-open {
  * of the message rather than as a control for it. So the row sheds its chrome
  * and hands it to the inner wrapper.
  */
+/*
+ * The margin is the only spacing in the column that marks meaning rather than
+ * mechanism, which is why it sits on this role and nowhere else.
+ *
+ * Every other boundary separates rows of one turn — a reply, the tool it called,
+ * the sentence after — and those are seams in how `pi` delivered the turn, so the
+ * reader is better off not seeing them: they get the column's bare `gap`. A
+ * question is the one place the conversation actually changes hands, and 8px of
+ * seam does not say so; the reply's own heading ended up looking like a caption on
+ * the bubble above it.
+ *
+ * 8px on both faces, added to the `gap` either side, restores the 16px the two
+ * roles stood apart before the row shed its padding — the reader's landmark is
+ * exactly where it was, and only the seams inside a turn have closed up. Both
+ * faces rather than `margin-block-start` alone because the turn *after* a question
+ * has the same claim on being findable as the question does.
+ */
 .piem-chat__message--user {
 	align-self: flex-end;
+	margin-block: var(--size-4-2);
 	max-width: 90%;
-	padding: 0;
 }
 
 /*
  * The bubble wrapper exists so a role's actions can sit under its card without
  * being inside it. Only the user's turn paints it; for the assistant it is a
  * transparent pass-through — the assistant reads as the page — and it must add
- * no spacing of its own, or the reply's own padding would double up.
+ * no spacing of its own, or a reply would sit inset from the text column every
+ * other row in the transcript is flush with.
  */
 .piem-chat__message--user .piem-chat__bubble {
 	background: var(--background-primary);
 	border: 1px solid var(--background-modifier-border);
 	border-radius: var(--radius-m);
 	padding: var(--size-4-2);
-}
-
-/* The assistant reads as the page: no fill, no border, just text. */
-.piem-chat__message--assistant {
-	padding-inline: 0;
 }
 
 .piem-chat__message-role {
@@ -908,26 +942,78 @@ button.piem-chat__context-open {
 	font-size: var(--font-ui-medium);
 }
 
+/*
+ * 4px between a trace row and whatever sits beside it, inside a message.
+ *
+ * The row itself carries no margin (see `.piem-chat__trace`); this container is
+ * block flow, which has no `gap` to hand it one, so a margin is the only spacing
+ * available here. `margin-block` rather than `margin-top`: a pill followed by
+ * prose sat 0px below itself — the Markdown wrapper strips its children's edge
+ * margins — and 4px above, the crowding reported in #225. Adjacent margins fold
+ * to one 4px gap whichever way the pair faces.
+ *
+ * Placed above the two edge rules, and `:where()`d, for one reason each.
+ *
+ * Written plainly this selector is (0,2,0) — two classes — and so is
+ * `.piem-chat__message-content > :first-child`, because a pseudo-class counts
+ * where a class does. Two rules at (0,2,0) are settled by source order, and this
+ * one used to sit 500 lines *below* the edge rules, in the trace section where it
+ * looks like it belongs. So it won, the edge rules were dead text, every message
+ * spent 4px above its first row and below its last, and a fold pill closing a turn
+ * stood 32px clear of the reply that followed it while sitting 4px under its own
+ * prose. Moving it here is the fix.
+ *
+ * `:where()` is what keeps the fix from depending on that move. It contributes no
+ * specificity, dropping this rule to (0,1,0) and putting it *below* the edge rules
+ * outright — which is the standing the three of them should have had all along: a
+ * default the container's edge overrides, not a declaration the container has to
+ * out-rank. Ablate it and the spacing still measures correctly today, on order
+ * alone; ablate it and move this rule back down and the 32px returns.
+ */
+.piem-chat__message-content :where(.piem-chat__trace) {
+	margin-block: var(--size-4-1);
+}
+
+/*
+ * The content's outer faces are the column's business, not the message's: what a
+ * message would spend above its first row or below its last is spacing between
+ * *rows*, and `.piem-chat__messages` already owns that with one `gap`.
+ *
+ * Left general — any child, not just a trace row — because that is the invariant:
+ * nothing in this container reaches its outer edge carrying a margin. Today the
+ * trace rows are the only children with one to strip (`.piem-chat__text` zeroes
+ * its own, the Markdown wrapper never had one, the image has none), and the rule
+ * above is deliberately weak enough that this stays true of whatever is added
+ * next.
+ */
 .piem-chat__message-content > :first-child {
-	margin-top: 0;
+	margin-block-start: 0;
 }
 
 .piem-chat__message-content > :last-child {
-	margin-bottom: 0;
+	margin-block-end: 0;
 }
 
 /*
  * The turn that has been asked for but not started arriving.
  *
- * Borrows the assistant's own chrome (`--assistant`, so no fill and no border)
- * and adds only the typing dots. It is a placeholder for a message, so it must
- * occupy the place a message will: rendering it as a footnote somewhere else
- * would move the reader's eye twice — once to the promise, once to the reply.
+ * Wears the assistant's chrome by wearing none at all — that role declares
+ * nothing, which is what makes a reply read as the page. Only the typing dots are
+ * added. It is a placeholder for a message, so it must occupy the place a message
+ * will: rendering it as a footnote somewhere else would move the reader's eye
+ * twice — once to the promise, once to the reply.
+ *
+ * Which is what the floor is for. The dots are 8px tall and the row has no
+ * padding, so without it the promise of a reply is a third the height of the
+ * reply — it used to clear a line only by borrowing the 8px `.piem-chat__message`
+ * once spent on every row. One line, at the height a settled trace row rests at,
+ * so the transcript does not jolt when the first token lands.
  */
 .piem-chat__message--pending {
 	align-items: center;
 	color: var(--text-muted);
 	display: inline-flex;
+	min-height: var(--size-4-6);
 }
 
 /*
@@ -1413,20 +1499,13 @@ button.piem-chat__context-open {
 	font-size: var(--font-ui-smaller);
 	/*
 	 * Traces appear in two containers, and each owns its own spacing — the row
-	 * carries none. As a transcript row (tool results) the messages column is a
-	 * flex layout whose `gap` already separates it from its neighbours; stacking
-	 * a margin on top of that gap read as extra space around a bare result row.
-	 * Inside a message the content is block flow, which has no gap, so the
-	 * margin below is the spacing — and `margin-block` rather than `margin-top`:
-	 * a pill followed by prose sat 0px below itself (the markdown wrappers strip
-	 * their children's edge margins) and 4px above, the crowding reported in
-	 * #225. Adjacent margins fold to one 4px gap whichever way the pair faces,
-	 * and the content edge rules above strip the outer faces.
+	 * carries none. As a transcript row (a tool result, a folded run, harness
+	 * output) it is a flex child of the messages column, whose `gap` already
+	 * separates it from its neighbours; stacking a margin on top of that gap read
+	 * as extra space around a bare result row. Inside a message the container has
+	 * no `gap` to give, so `.piem-chat__message-content` hands it a margin
+	 * instead — stated there, with the rules that take its outer faces back.
 	 */
-}
-
-.piem-chat__message-content .piem-chat__trace {
-	margin-block: var(--size-4-1);
 }
 
 /*
@@ -1787,8 +1866,8 @@ button.piem-chat__latest--asking {
  * with the message column rather than centering like the empty screen's row.
  *
  * Zero inline padding puts the chip's own left edge on the assistant's text
- * column — the reply sits at the messages edge (the assistant carries no inline
- * padding; see `.piem-chat__message--assistant`), so the chips must not carry
+ * column — the reply sits at the messages edge (a message row carries no
+ * padding; see `.piem-chat__message`), so the chips must not carry
  * any either. The trailing padding is the row's own breathing room at the list's
  * end, where no gap follows it.
  */
