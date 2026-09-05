@@ -23,6 +23,15 @@ export interface SubagentSnapshot {
 	status: ReturnType<typeof statusOf>;
 	/** Who ordered the kill, when one was ordered. */
 	killedBy?: SubagentEntry["killedBy"];
+	/**
+	 * Whether the reader has put this run away.
+	 *
+	 * The list moves an archived run into its own closed section rather than
+	 * dropping it: the panel is the only window onto a record that dies with the
+	 * session, so a control that hid a report irrecoverably would be a delete
+	 * button wearing the word "archive".
+	 */
+	archived?: true;
 	spawnedAt: number;
 	settledAt?: number;
 	/**
@@ -66,6 +75,7 @@ function toSnapshot(entry: SubagentEntry, now: number): SubagentSnapshot {
 		thinkingLevel: entry.thinkingLevel,
 		status: statusOf(entry),
 		killedBy: entry.killedBy,
+		archived: entry.archived,
 		spawnedAt: entry.spawnedAt,
 		settledAt: entry.settledAt,
 		durationMs: (entry.settledAt ?? now) - entry.spawnedAt,

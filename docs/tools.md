@@ -106,6 +106,11 @@ A wait window that closes means "not done yet", never a kill. The subagent
 keeps working between waits. You can stop a run yourself from the subagent
 panel — the parent is told when that happens.
 
+Once a run has finished, **Archive finished** in the panel puts every finished
+run into a closed **Archived** section. It is a tidy-up, not a delete: the runs
+stay readable there, and the agent's own tools cannot tell the difference — a
+report you have already read and put away is still one it can collect.
+
 <!-- SCREENSHOT: subagents.png — the subagent inspector with two or three
      subagents running. See assets/screenshots/README.md for the widths, theme
      and conversion this folder expects. -->

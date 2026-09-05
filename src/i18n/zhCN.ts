@@ -898,6 +898,12 @@ export const zhCN: DeepPartial<EnCopy> = {
 		stopOne: "停止此 run",
 		stopAll: "全部停止",
 		stopAllAria: "停止所有正在运行的子代理",
+		archiveFinished: "归档已结束的",
+		archiveFinishedAria: "归档所有已结束的运行",
+		sectionArchived: "已归档",
+		archivedCount: "{count} 次运行",
+		archivedListAria: "已归档的子代理，最早的在前",
+		allArchived: "所有运行都已归档。展开下面的「已归档」可以查看。",
 		status: {
 			running: "进行中",
 			done: "已完成",

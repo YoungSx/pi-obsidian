@@ -26,6 +26,15 @@ export interface SubagentInspectorProps {
 	onStop: (id: string) => void;
 	/** Stops every running run; the list's "stop all". */
 	onStopAll: () => void;
+	/**
+	 * Puts every finished run away, on the reader's orders.
+	 *
+	 * Reader-side tidying, not a lifecycle change: the archived runs stay in the
+	 * record — in their own closed section below the list — and the parent's tools
+	 * cannot tell the difference. A callback for the same reason the two stops are:
+	 * the snapshots stay plain data, and the one real capability arrives here.
+	 */
+	onArchiveFinished: () => void;
 	/** Obsidian handles for rendering the report as Markdown. */
 	app: App;
 	component: Component;
@@ -58,6 +67,12 @@ export interface SubagentInspectorProps {
  * same registry event that flips the row to "cut short" — no confirmation, no
  * toast: the state change on screen is the feedback.
  *
+ * Tidying is the fourth thing the panel can do, and it is deliberately not a
+ * fifth rule: archiving moves finished runs into a closed section of this same
+ * list and changes nothing else. It is not a delete — the parent may still be
+ * about to collect a report the reader has already read and put away — and it is
+ * not persisted, because rule 3 holds for it too.
+ *
  * List and detail share one column rather than sitting side by side. The panel
  * lives in an Obsidian sidebar, ~300px wide, where two panes would each be too
  * narrow to read a report in; the detail replaces the list and a back control
@@ -70,6 +85,7 @@ export function SubagentInspector({
 	onSelect,
 	onStop,
 	onStopAll,
+	onArchiveFinished,
 	app,
 	component,
 }: SubagentInspectorProps): React.JSX.Element {
@@ -97,7 +113,12 @@ export function SubagentInspector({
 					component={component}
 				/>
 			) : (
-				<SubagentList snapshots={snapshots} onSelect={onSelect} onStopAll={onStopAll} />
+				<SubagentList
+					snapshots={snapshots}
+					onSelect={onSelect}
+					onStopAll={onStopAll}
+					onArchiveFinished={onArchiveFinished}
+				/>
 			)}
 		</div>
 	);
@@ -108,6 +129,8 @@ interface SubagentListProps {
 	onSelect: (id: string) => void;
 	/** Stops every running run; rendered only while at least one is running. */
 	onStopAll: () => void;
+	/** Archives every finished run; rendered only while at least one could move. */
+	onArchiveFinished: () => void;
 }
 
 /**
@@ -118,7 +141,7 @@ interface SubagentListProps {
  * one's report. Newest-first would put the freshest row on top, which matters
  * for a feed you check repeatedly and not for a history you read once.
  */
-function SubagentList({ snapshots, onSelect, onStopAll }: SubagentListProps): React.JSX.Element {
+function SubagentList({ snapshots, onSelect, onStopAll, onArchiveFinished }: SubagentListProps): React.JSX.Element {
 	const t = useT();
 
 	if (snapshots.length === 0) {
@@ -130,29 +153,102 @@ function SubagentList({ snapshots, onSelect, onStopAll }: SubagentListProps): Re
 		);
 	}
 
+	const current = snapshots.filter((snapshot) => !snapshot.archived);
+	const archived = snapshots.filter((snapshot) => snapshot.archived);
+	// Read off every snapshot rather than the shown ones, because "stop all" stops
+	// every live child whatever the reader has tidied away — and archiving only
+	// ever touches settled runs, so the two answers agree today. Asserting it here
+	// is what keeps them agreeing if that ever changes.
 	const anyRunning = snapshots.some((snapshot) => snapshot.status === "running");
+	const anyArchivable = current.some((snapshot) => snapshot.status !== "running");
 
 	return (
 		<>
 			<p className="piem-subagents__notice">
 				{t.t("subagents.panelNotice")}
 				{/*
-				 * Inside the notice because "you can stop" and the control that stops
-				 * belong in one breath — a separate toolbar row would read as a
-				 * command bar over the whole list, which is exactly the framing rule 2
-				 * refuses. Hidden entirely when nothing is running: a disabled stop-all
-				 * against a finished history is a button that can only ever do
-				 * nothing, and the record has no need of one.
+				 * Both list-wide controls sit in the notice: "you can stop" and the
+				 * control that stops belong in one breath, and a second row for the
+				 * other one would read as a command bar over the whole record — which
+				 * is exactly the framing rule 2 refuses. Each hides entirely when it
+				 * could only do nothing: a stop-all over a finished history and an
+				 * archive-finished over a list that is already clean are both buttons
+				 * with no available effect, and the record has no need of either.
 				 */}
 				{anyRunning ? (
-					<button type="button" className="piem-subagents__stop-all" onClick={onStopAll} aria-label={t.t("subagents.stopAllAria")}>
+					<button
+						type="button"
+						className="piem-subagents__notice-action piem-subagents__stop-all"
+						onClick={onStopAll}
+						aria-label={t.t("subagents.stopAllAria")}
+					>
 						{t.t("subagents.stopAll")}
 					</button>
 				) : null}
+				{anyArchivable ? (
+					<button
+						type="button"
+						className="piem-subagents__notice-action piem-subagents__archive"
+						onClick={onArchiveFinished}
+						aria-label={t.t("subagents.archiveFinishedAria")}
+					>
+						{t.t("subagents.archiveFinished")}
+					</button>
+				) : null}
 			</p>
+			{current.length > 0 ? (
+				<ul
+					className="piem-subagents__list"
+					aria-label={t.t("subagents.listAria")}
+					onMouseOver={suppressOwnTooltip}
+				>
+					{current.map((snapshot) => (
+						<li key={snapshot.id}>
+							<SubagentRow snapshot={snapshot} onSelect={onSelect} />
+						</li>
+					))}
+				</ul>
+			) : (
+				/*
+				 * Not the empty state: "no subagents yet" would be a lie told to the
+				 * one reader who knows better, having just archived them. This says
+				 * where they went, because the section that holds them is closed and a
+				 * closed section is easy to read as an absence.
+				 */
+				<p className="piem-subagents__note">{t.t("subagents.allArchived")}</p>
+			)}
+			{archived.length > 0 ? <ArchivedRuns snapshots={archived} onSelect={onSelect} /> : null}
+		</>
+	);
+}
+
+/**
+ * The runs the reader has put away, collapsed.
+ *
+ * A `<details>` for the same reasons the process record is one: the browser owns
+ * the disclosure, so keyboard and assistive-tech behaviour comes for free, and
+ * the count in the summary is what lets the reader decide whether to open it.
+ * Below the live list rather than above it, because the record still reads
+ * forward and archiving is the reader saying "not this part, for now".
+ */
+function ArchivedRuns({
+	snapshots,
+	onSelect,
+}: {
+	snapshots: readonly SubagentSnapshot[];
+	onSelect: (id: string) => void;
+}): React.JSX.Element {
+	const t = useT();
+
+	return (
+		<details className="piem-subagents__archived">
+			<summary className="piem-subagents__archived-summary">
+				<span className="piem-subagents__section-title">{t.t("subagents.sectionArchived")}</span>
+				<span className="piem-subagents__archived-count">{t.t("subagents.archivedCount", { count: snapshots.length })}</span>
+			</summary>
 			<ul
 				className="piem-subagents__list"
-				aria-label={t.t("subagents.listAria")}
+				aria-label={t.t("subagents.archivedListAria")}
 				onMouseOver={suppressOwnTooltip}
 			>
 				{snapshots.map((snapshot) => (
@@ -161,7 +257,7 @@ function SubagentList({ snapshots, onSelect, onStopAll }: SubagentListProps): Re
 					</li>
 				))}
 			</ul>
-		</>
+		</details>
 	);
 }
 
@@ -388,20 +484,6 @@ function ProcessRecord({ snapshot, steps }: { snapshot: SubagentSnapshot; steps:
 	);
 }
 
-export interface SelectionRequest {
-	/** The run to show. */
-	id: string;
-	/**
-	 * Monotonic counter, incremented per request by the view.
-	 *
-	 * Without it, asking for the same run twice is one unchanged prop and the
-	 * second ask does nothing: a reader who opened `subagent-2`, pressed back,
-	 * then pressed the same row in the entry popover would watch the panel
-	 * ignore them. The token is what makes a repeat a new event.
-	 */
-	token: number;
-}
-
 /**
  * An "open showing this run" request from outside the tree.
  *
@@ -412,21 +494,9 @@ export interface SelectionRequest {
  * the effect that applies it would never run.
  */
 export interface SelectionRequest {
+	/** The run to show. */
 	id: string;
 	/** Monotonic per request; the view mints it. */
-	token: number;
-}
-
-/**
- * A request from outside the tree to open one run.
- *
- * The token is what makes a repeat of the same id a second request. Without it
- * the id alone would be an unchanged prop, so a reader who had navigated back to
- * the list would press the same row in the entry popover and watch nothing
- * happen — the classic "prop as command" bug.
- */
-export interface SelectionRequest {
-	id: string;
 	token: number;
 }
 
@@ -439,6 +509,7 @@ export interface SubagentInspectorAppProps {
 	/** Passed through to the inspector; the view owns what these actually do. */
 	onStop: (id: string) => void;
 	onStopAll: () => void;
+	onArchiveFinished: () => void;
 	app: App;
 	component: Component;
 }
@@ -456,6 +527,7 @@ export function SubagentInspectorApp({
 	selectionRequest,
 	onStop,
 	onStopAll,
+	onArchiveFinished,
 	app,
 	component,
 }: SubagentInspectorAppProps): React.JSX.Element {
@@ -480,6 +552,7 @@ export function SubagentInspectorApp({
 			onSelect={setSelectedId}
 			onStop={onStop}
 			onStopAll={onStopAll}
+			onArchiveFinished={onArchiveFinished}
 			app={app}
 			component={component}
 		/>

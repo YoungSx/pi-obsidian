@@ -60,6 +60,7 @@ async function renderInspector(
 			onSelect={() => undefined}
 			onStop={() => undefined}
 			onStopAll={() => undefined}
+			onArchiveFinished={() => undefined}
 			app={app}
 			component={component}
 			{...overrides}
@@ -90,6 +91,22 @@ function snapshot(overrides: Partial<SubagentSnapshot> = {}): SubagentSnapshot {
 
 function text(host: HTMLElement): string {
 	return host.textContent ?? "";
+}
+
+/** Row titles in the live list — the child combinator excludes the archived section's own list. */
+function currentTasks(host: HTMLElement): string[] {
+	return Array.from(
+		host.querySelectorAll(".piem-subagents > .piem-subagents__list .piem-subagents__row-task"),
+		(node) => node.textContent ?? "",
+	);
+}
+
+/** Row titles inside the archived disclosure. */
+function archivedTasks(host: HTMLElement): string[] {
+	return Array.from(
+		host.querySelectorAll(".piem-subagents__archived .piem-subagents__row-task"),
+		(node) => node.textContent ?? "",
+	);
 }
 
 describe("one-way glass with a pressure valve", () => {
@@ -231,6 +248,91 @@ describe("the list is a record, read forward", () => {
 	});
 });
 
+describe("putting finished runs away", () => {
+	beforeEach(() => {
+		document.body.replaceChildren();
+	});
+
+	afterEach(async () => {
+		while (mounted.length > 0) {
+			mounted.pop()?.();
+		}
+		await flushRender();
+	});
+
+	it("offers the archive control only while a finished run could move", async () => {
+		// The mirror of stop-all: a control that could only ever do nothing is not
+		// worth the reader's attention. Here that is a list with nothing finished in
+		// it, and a list whose finished runs are already away.
+		let archived = 0;
+		const withFinished = await renderInspector({
+			snapshots: [snapshot({ status: "running", report: undefined }), snapshot({ id: "b" })],
+			onArchiveFinished: () => (archived += 1),
+		});
+		const archive = withFinished.querySelector<HTMLButtonElement>(".piem-subagents__archive");
+
+		expect(archive).not.toBeNull();
+		expect(archive!.getAttribute("aria-label")).toBe("Archive every run that has finished");
+		archive!.click();
+		expect(archived).toBe(1);
+
+		const onlyRunning = await renderInspector({ snapshots: [snapshot({ status: "running", report: undefined })] });
+		expect(onlyRunning.querySelector(".piem-subagents__archive")).toBeNull();
+
+		const alreadyAway = await renderInspector({ snapshots: [snapshot({ archived: true })] });
+		expect(alreadyAway.querySelector(".piem-subagents__archive")).toBeNull();
+	});
+
+	it("moves an archived run into a closed section instead of dropping it", async () => {
+		/*
+		 * Archiving is not deleting, and this is the assertion that says so. The
+		 * panel is the only window onto a record that dies with the session, and the
+		 * parent may still be about to collect a report the reader has read and put
+		 * away — so the run has to stay reachable, and the section it moves to has
+		 * to start closed or the tidying bought nothing.
+		 */
+		const host = await renderInspector({
+			snapshots: [snapshot({ id: "a", task: "Still open" }), snapshot({ id: "b", task: "Put away", archived: true })],
+		});
+		const details = host.querySelector<HTMLDetailsElement>(".piem-subagents__archived");
+
+		expect(currentTasks(host)).toEqual(["Still open"]);
+		expect(archivedTasks(host)).toEqual(["Put away"]);
+		expect(details).not.toBeNull();
+		expect(details!.open).toBe(false);
+		expect(text(host)).toContain("1 run(s)");
+	});
+
+	it("opens an archived run's detail from inside the section", async () => {
+		const opened: Array<string | null> = [];
+		const host = await renderInspector({
+			snapshots: [snapshot({ id: "b", task: "Put away", archived: true })],
+			onSelect: (id) => opened.push(id),
+		});
+		host.querySelector<HTMLButtonElement>(".piem-subagents__archived .piem-subagents__row")!.click();
+
+		expect(opened).toEqual(["b"]);
+	});
+
+	it("says where the runs went rather than claiming there are none", async () => {
+		// "No subagents yet" would be a lie told to the one reader who knows
+		// better, having just archived them — and a closed section reads as an
+		// absence unless something points at it.
+		const host = await renderInspector({ snapshots: [snapshot({ archived: true })] });
+
+		expect(text(host)).not.toContain("No subagents yet");
+		expect(text(host)).toContain("Every run is archived");
+		expect(host.querySelector(".piem-subagents__archived")).not.toBeNull();
+	});
+
+	it("still says nothing ever happened when nothing ever did", async () => {
+		const host = await renderInspector();
+
+		expect(text(host)).toContain("No subagents yet");
+		expect(host.querySelector(".piem-subagents__archived")).toBeNull();
+	});
+});
+
 describe("the detail page answers in the order a reader asks", () => {
 	beforeEach(() => {
 		document.body.replaceChildren();
@@ -366,6 +468,7 @@ describe("selection requests from outside the tree", () => {
 				selectionRequest={{ id: "b", token: 1 }}
 				onStop={() => undefined}
 				onStopAll={() => undefined}
+				onArchiveFinished={() => undefined}
 				app={app}
 				component={component}
 			/>,
@@ -383,6 +486,7 @@ describe("selection requests from outside the tree", () => {
 				selectionRequest={null}
 				onStop={() => undefined}
 				onStopAll={() => undefined}
+				onArchiveFinished={() => undefined}
 				app={app}
 				component={component}
 			/>,

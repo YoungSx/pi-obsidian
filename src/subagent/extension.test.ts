@@ -1357,6 +1357,67 @@ describe("spawn/wait extension", () => {
 	});
 });
 
+describe("archiving from the panel", () => {
+	function makeHost(streamFn: StreamFn): SubagentHost {
+		return {
+			createVaultTools: () => [],
+			getModel: () => MODEL,
+			getStreamFn: () => streamFn,
+			getThinkingLevel: () => "off" as never,
+			getSkills: () => [],
+		};
+	}
+
+	it("puts finished runs away, leaves live ones alone, and says how many moved", async () => {
+		const extension = createSubagentExtension(makeHost(hangingStreamFn()), { waitPacing: TEST_PACING });
+		const tools = extension.createTools();
+		const controller = new AbortController();
+		const events: string[] = [];
+		try {
+			await toolNamed(tools, "spawn_subagent").execute("c1", { task: "one" }, controller.signal);
+			await toolNamed(tools, "spawn_subagent").execute("c2", { task: "two" }, controller.signal);
+			// Settle the first deterministically, then tidy: the second is still
+			// hanging, which is the case the sweep must not touch.
+			extension.registry.kill("subagent-1", controller.signal);
+			await extension.registry.get("subagent-1")!.promise.catch(() => undefined);
+			const unsubscribe = extension.registry.subscribe(() => events.push("change"));
+
+			expect(extension.registry.archiveSettled()).toBe(1);
+			expect(extension.registry.get("subagent-1")!.archived).toBe(true);
+			expect(extension.registry.get("subagent-2")!.archived).toBeUndefined();
+			// The panel renders from snapshots and never polls, so a sweep that
+			// emitted nothing would leave the list showing what it had just moved.
+			expect(events).toEqual(["change"]);
+			// Nothing left to move, so pressing it again is not a second change.
+			expect(extension.registry.archiveSettled()).toBe(0);
+			expect(events).toEqual(["change"]);
+			unsubscribe();
+		} finally {
+			extension.disposeAll();
+		}
+	});
+
+	it("is invisible to the parent's own tools", async () => {
+		// The rule archiving lives by: it is the reader tidying the reader's view.
+		// A run the reader has put away is still one the parent can enumerate and
+		// collect, because otherwise a panel control could destroy a report nobody
+		// had read yet.
+		const extension = createSubagentExtension(makeHost(scriptedStreamFn([{ text: "The vault is clean." }])), {
+			waitPacing: TEST_PACING,
+		});
+		const tools = extension.createTools();
+		await toolNamed(tools, "spawn_subagent").execute("c1", { task: "Sweep" }, undefined);
+		await extension.registry.get("subagent-1")!.promise;
+
+		expect(extension.registry.archiveSettled()).toBe(1);
+		const listed = await toolNamed(tools, "list_subagents").execute("c2", {}, undefined);
+		const collected = await toolNamed(tools, "wait_subagent").execute("c3", { subagentId: "subagent-1" }, undefined);
+
+		expect(textBlock(listed)).toContain("subagent-1");
+		expect(textBlock(collected)).toContain("The vault is clean.");
+	});
+});
+
 describe("inspector data", () => {
 	function makeHost(streamFn: StreamFn): SubagentHost {
 		return {
