@@ -1,4 +1,5 @@
 import { App, Modal, Notice, Setting } from "obsidian";
+import type { DropdownComponent, TextComponent } from "obsidian";
 import type { ConnectionTestResult } from "../../connectionTest";
 import {
 	DEFAULT_WIRE_PROTOCOL,
@@ -8,6 +9,14 @@ import {
 	type ProviderConfig,
 	type WireProtocol,
 } from "../../modelConfig";
+import {
+	CUSTOM_PRESET_ID,
+	PROVIDER_PRESETS,
+	applyProviderPreset,
+	findProviderPreset,
+	matchProviderPreset,
+	providerPresetLabel,
+} from "../../net/providerPresets";
 import type { Translator } from "../../i18n";
 import { type SecretStorageState } from "./secretStorageCopy";
 import { addSecretKeyField } from "./secretField";
@@ -50,12 +59,32 @@ export class ProviderModal extends Modal {
 	private readonly originalDraft: string;
 	private readonly guard: DiscardGuard;
 	private status: ModalStatus | null = null;
+	/**
+	 * Which preset row the dropdown shows.
+	 *
+	 * Derived from the draft at open and after any edit to a field it keys on, but
+	 * held rather than recomputed at render time, because "Custom" has to be a
+	 * position the user can stay in. A purely derived selection would snap back to
+	 * whatever preset the URL still matches the moment they chose Custom.
+	 */
+	private presetChoice: string;
+	/**
+	 * The three components a preset writes into, kept so choosing one updates what
+	 * is on screen and not just the draft behind it.
+	 */
+	private presetDropdown: DropdownComponent | undefined;
+	private nameText: TextComponent | undefined;
+	private baseUrlText: TextComponent | undefined;
+	private protocolDropdown: DropdownComponent | undefined;
 
 	constructor(options: ProviderModalOptions) {
 		super(options.app);
 		this.options = options;
 		this.isNew = options.provider === undefined;
 		this.draft = options.provider ? { ...options.provider } : emptyProviderConfig();
+		// An edited row reports the preset it came from, so the form never claims a
+		// hand-typed gateway is one of ours — or hides that a saved row is Anthropic.
+		this.presetChoice = matchProviderPreset(this.draft.baseUrl, this.draft.protocol)?.id ?? CUSTOM_PRESET_ID;
 		this.originalDraft = JSON.stringify(normalizeProviderDraft(this.draft));
 		this.guard = new DiscardGuard(() => {
 			this.status?.showError(options.t.t("discard.warning"));
@@ -69,6 +98,23 @@ export class ProviderModal extends Modal {
 		const { t } = this.options;
 		this.setTitle(t.t(this.isNew ? "providerModal.addTitle" : "providerModal.editTitle"));
 
+		// First, because it writes the three rows below it. A native <select> cannot
+		// carry the vendor marks the rest of the panel uses, so each option names its
+		// host instead — which is the part that distinguishes a vendor's several
+		// services anyway.
+		new Setting(contentEl)
+			.setName(t.t("providerModal.preset"))
+			.setDesc(t.t("providerModal.presetDesc"))
+			.addDropdown((dropdown) => {
+				dropdown.addOption(CUSTOM_PRESET_ID, t.t("providerModal.presetCustom"));
+				for (const preset of PROVIDER_PRESETS) {
+					dropdown.addOption(preset.id, providerPresetLabel(preset));
+				}
+				dropdown.setValue(this.presetChoice);
+				dropdown.onChange((value) => this.choosePreset(value));
+				this.presetDropdown = dropdown;
+			});
+
 		new Setting(contentEl)
 			.setName(t.t("providerModal.name"))
 			.setDesc(t.t("providerModal.nameDesc"))
@@ -80,6 +126,7 @@ export class ProviderModal extends Modal {
 					this.onEdit();
 				});
 				submitOnEnter(text.inputEl, () => void this.submit());
+				this.nameText = text;
 			});
 
 		new Setting(contentEl)
@@ -90,10 +137,12 @@ export class ProviderModal extends Modal {
 				text.setValue(this.draft.baseUrl);
 				text.onChange((value) => {
 					this.draft.baseUrl = value;
+					this.syncPresetChoice();
 					this.onEdit();
 					this.testRow?.reset();
 				});
 				submitOnEnter(text.inputEl, () => void this.submit());
+				this.baseUrlText = text;
 			});
 
 		new Setting(contentEl)
@@ -106,9 +155,11 @@ export class ProviderModal extends Modal {
 				dropdown.setValue(this.draft.protocol ?? DEFAULT_WIRE_PROTOCOL);
 				dropdown.onChange((value) => {
 					this.draft.protocol = value as WireProtocol;
+					this.syncPresetChoice();
 					this.onEdit();
 					this.testRow?.reset();
 				});
+				this.protocolDropdown = dropdown;
 			});
 
 		// The key row changes shape with the tier: a keychain picker where the
@@ -192,6 +243,55 @@ export class ProviderModal extends Modal {
 	}
 
 	private testRow: ReturnType<typeof attachTestButton> | undefined;
+
+	/**
+	 * Applies a dropdown choice.
+	 *
+	 * Picking "Custom" only moves the marker. Clearing the fields would be a
+	 * destructive answer to a navigational click — and the user who lands there
+	 * after a mis-pick would lose a base URL they had just pasted. The row means
+	 * "this is not one of the presets", which is already true of whatever the
+	 * fields hold.
+	 *
+	 * Picking a preset writes all three fields and their inputs. `setValue` does
+	 * not fire `onChange` in Obsidian's components, so the draft is updated here
+	 * rather than left to a callback that will not run — and there is no loop back
+	 * into {@link syncPresetChoice}.
+	 */
+	private choosePreset(id: string): void {
+		this.presetChoice = id;
+		const preset = findProviderPreset(id);
+		if (!preset) {
+			return;
+		}
+		const applied = applyProviderPreset(this.draft, preset);
+		this.draft.name = applied.name;
+		this.draft.baseUrl = applied.baseUrl;
+		this.draft.protocol = applied.protocol;
+		this.nameText?.setValue(this.draft.name);
+		this.baseUrlText?.setValue(this.draft.baseUrl);
+		this.protocolDropdown?.setValue(this.draft.protocol);
+		this.onEdit();
+		this.testRow?.reset();
+	}
+
+	/**
+	 * Re-reads the selection after an edit to a field the match keys on.
+	 *
+	 * Typing one character into a preset's URL makes it a different endpoint, and
+	 * the dropdown has to stop claiming otherwise. The reverse also holds: typing
+	 * a preset's URL by hand selects it, which is the honest answer rather than a
+	 * coincidence to hide. The name is not consulted — renaming a row does not
+	 * change where it points.
+	 */
+	private syncPresetChoice(): void {
+		const id = matchProviderPreset(this.draft.baseUrl, this.draft.protocol)?.id ?? CUSTOM_PRESET_ID;
+		if (id === this.presetChoice) {
+			return;
+		}
+		this.presetChoice = id;
+		this.presetDropdown?.setValue(id);
+	}
 
 	/** One fresh edit clears the old verdict — it no longer describes this draft. */
 	private onEdit(): void {

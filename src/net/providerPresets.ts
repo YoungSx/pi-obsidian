@@ -1,0 +1,212 @@
+import type { ProviderConfig, WireProtocol } from "../modelConfig";
+
+/**
+ * Ready-made connection settings for the endpoints users configure most.
+ *
+ * The provider form asks for three things a user has to look up — base URL,
+ * wire protocol, and which of a vendor's several hosts to talk to — before it
+ * asks for the one thing only they have, the key. This table answers the first
+ * three so that configuring OpenRouter is picking its name and pasting a key.
+ *
+ * It replaces a capability the settings rework dropped rather than restoring
+ * the old mechanism. The panel used to offer pi-ai's builtin providers, which
+ * meant carrying their provider factories, and a factory drags its whole model
+ * catalog in with it — `providers/<id>.js` names `X_MODELS` inside
+ * `createProvider`, so esbuild cannot shake the data loose from the code. The
+ * old picker therefore cost ~183 KiB of bundle. This table costs about a
+ * kilobyte, because a preset is not a provider: it is a filled-in form. What it
+ * produces is an ordinary `source: "user"` {@link ProviderConfig}, indistinguishable
+ * from a hand-typed one, dispatched through the same `createConfiguredProvider`
+ * path every configured endpoint already uses.
+ *
+ * Nothing here is persisted. A preset's `id` exists only as the dropdown's
+ * option value; stored settings hold the resulting URL and protocol, so
+ * retiring or renaming an entry can never orphan a configured row.
+ *
+ * Data provenance: every `baseUrl`/`protocol` pair is the one models.dev
+ * publishes, read out of pi-ai's snapshot under `dist/providers/data/*.json`,
+ * and kept verbatim — including where upstream points at a plan-specific root.
+ * Z.ai and Zhipu publish their coding-plan paths (`/api/coding/paas/v4`), and
+ * Qwen publishes token-plan hosts. Those are the roots a subscriber's key is
+ * issued against, and substituting a general path would offer a URL that plan is
+ * not served on. Guessing in either direction is wrong for somebody, so the
+ * table does not guess: a key scoped elsewhere fails the connection test
+ * immediately, with the URL one field above it, already editable.
+ *
+ * The single exception is a protocol this build cannot speak. Google and Mistral
+ * publish `google-generative-ai` and `mistral-conversations`, so both point at
+ * the vendor's own OpenAI-compatible path instead — which is how Gemini has
+ * always actually been reachable here; see {@link ./builtinCatalog}'s header.
+ *
+ * Paths are exact, because {@link ../net/shims/apiHttp}'s `buildRequestUrl` is a
+ * concatenation: an `openai-completions` base must already end at the version
+ * segment (the shim appends `/chat/completions`), while an `anthropic-messages`
+ * base must not (it appends `/v1/messages`). Every URL below was verified to
+ * answer 401/400 rather than 404 at its protocol's real path — see
+ * `providerPresets.test.ts` for the invariants that keep the shapes honest.
+ */
+
+/** One filled-in provider form, offered by name in the add/edit modal. */
+export interface ProviderPreset {
+	/**
+	 * Dropdown option value. Stable so a reopened form re-selects the same row,
+	 * and stored nowhere, so it is free to change.
+	 */
+	id: string;
+	/**
+	 * Brand name written into {@link ProviderConfig.name}. Not translated —
+	 * these are proper nouns, and a vendor's mainland-China service is named
+	 * whatever that service is called there.
+	 */
+	name: string;
+	/** Root of the API, exact to the segment the protocol's shim appends onto. */
+	baseUrl: string;
+	protocol: WireProtocol;
+}
+
+/**
+ * The presets, in dropdown order: the endpoints reachable from anywhere first,
+ * then the mainland-China services. Within each group, no ranking is implied —
+ * the order is the one the vendor list has always been written in.
+ */
+export const PROVIDER_PRESETS: readonly ProviderPreset[] = [
+	{ id: "anthropic", name: "Anthropic", baseUrl: "https://api.anthropic.com", protocol: "anthropic-messages" },
+	{ id: "openai", name: "OpenAI", baseUrl: "https://api.openai.com/v1", protocol: "openai-responses" },
+	{
+		id: "google",
+		name: "Google Gemini",
+		baseUrl: "https://generativelanguage.googleapis.com/v1beta/openai",
+		protocol: "openai-completions",
+	},
+	{ id: "deepseek", name: "DeepSeek", baseUrl: "https://api.deepseek.com", protocol: "openai-completions" },
+	{ id: "groq", name: "Groq", baseUrl: "https://api.groq.com/openai/v1", protocol: "openai-completions" },
+	{ id: "mistral", name: "Mistral AI", baseUrl: "https://api.mistral.ai/v1", protocol: "openai-completions" },
+	{ id: "moonshotai", name: "Moonshot AI", baseUrl: "https://api.moonshot.ai/v1", protocol: "openai-completions" },
+	{ id: "xai", name: "xAI", baseUrl: "https://api.x.ai/v1", protocol: "openai-responses" },
+	{ id: "zai", name: "Z.ai", baseUrl: "https://api.z.ai/api/coding/paas/v4", protocol: "openai-completions" },
+	{ id: "openrouter", name: "OpenRouter", baseUrl: "https://openrouter.ai/api/v1", protocol: "openai-completions" },
+	{ id: "minimax", name: "MiniMax", baseUrl: "https://api.minimax.io/anthropic", protocol: "anthropic-messages" },
+	{
+		id: "qwen",
+		name: "Qwen",
+		baseUrl: "https://token-plan.ap-southeast-1.maas.aliyuncs.com/compatible-mode/v1",
+		protocol: "openai-completions",
+	},
+	{
+		id: "moonshotai-cn",
+		name: "Moonshot AI 国内站",
+		baseUrl: "https://api.moonshot.cn/v1",
+		protocol: "openai-completions",
+	},
+	{
+		id: "zai-cn",
+		name: "智谱 GLM",
+		baseUrl: "https://open.bigmodel.cn/api/coding/paas/v4",
+		protocol: "openai-completions",
+	},
+	{
+		id: "qwen-cn",
+		name: "通义千问",
+		baseUrl: "https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1",
+		protocol: "openai-completions",
+	},
+	{ id: "minimax-cn", name: "MiniMax 国内站", baseUrl: "https://api.minimaxi.com/anthropic", protocol: "anthropic-messages" },
+];
+
+/** Option value standing for "none of these" — the hand-typed endpoint. */
+export const CUSTOM_PRESET_ID = "";
+
+/**
+ * Dropdown label for one preset: its name, then the host it reaches.
+ *
+ * The host is shown rather than hidden because it is the part a user needs
+ * *before* choosing. Several vendors run more than one service — a mainland
+ * site and an international one — and the name alone cannot say which of them a
+ * key was issued for. Appending it also keeps the label honest without a
+ * translated "(China)" suffix on every such row.
+ */
+export function providerPresetLabel(preset: ProviderPreset): string {
+	return `${preset.name} · ${presetHost(preset.baseUrl)}`;
+}
+
+/** Host of a preset URL, for labelling. Presets are literals, so this cannot throw. */
+function presetHost(baseUrl: string): string {
+	return new URL(baseUrl).host;
+}
+
+/**
+ * Compares two base URLs the way a server would.
+ *
+ * Host case is insignificant per RFC 3986 and a pasted URL commonly carries a
+ * capital; path case is significant and deliberately preserved, so a draft
+ * pointing at `/V1` is *not* reported as the OpenAI preset — it is a different
+ * path, and one that endpoint rejects. A single trailing slash is dropped
+ * because `buildRequestUrl` already treats the two forms as one request.
+ */
+function canonicalBaseUrl(baseUrl: string): string | undefined {
+	const trimmed = baseUrl.trim();
+	if (!trimmed) {
+		return undefined;
+	}
+	let parsed: URL;
+	try {
+		parsed = new URL(trimmed);
+	} catch {
+		return undefined;
+	}
+	const path = parsed.pathname.endsWith("/") ? parsed.pathname.slice(0, -1) : parsed.pathname;
+	return `${parsed.protocol}//${parsed.host.toLowerCase()}${path}${parsed.search}`;
+}
+
+/**
+ * The preset a draft currently matches, or undefined for a hand-typed endpoint.
+ *
+ * Both fields have to agree: an OpenRouter URL switched to Anthropic Messages is
+ * no longer the OpenRouter preset, and reporting it as one would let the
+ * dropdown claim a configuration the form is not actually holding. That is the
+ * whole job of this function — the dropdown opens on its answer, so an edited
+ * row shows which preset it came from, and a hand-typed one shows "Custom".
+ */
+export function matchProviderPreset(baseUrl: string, protocol: WireProtocol): ProviderPreset | undefined {
+	const canonical = canonicalBaseUrl(baseUrl);
+	if (canonical === undefined) {
+		return undefined;
+	}
+	return PROVIDER_PRESETS.find(
+		(preset) => preset.protocol === protocol && canonicalBaseUrl(preset.baseUrl) === canonical,
+	);
+}
+
+/** Whether a name is one this table wrote, and therefore safe to overwrite. */
+function isPresetName(name: string): boolean {
+	return PROVIDER_PRESETS.some((preset) => preset.name === name);
+}
+
+/**
+ * A draft with one preset applied.
+ *
+ * URL and protocol are replaced outright — that is what was asked for. The name
+ * is only replaced when it is not the user's own words: blank, or still the name
+ * a previously chosen preset wrote. Someone who typed "Work account" and then
+ * switched preset keeps their label; someone flipping between presets sees the
+ * name follow, instead of a row called OpenRouter that points at Anthropic.
+ *
+ * The credential is deliberately untouched. It is almost certainly wrong for
+ * the new endpoint, but clearing a just-pasted key on a stray dropdown change
+ * costs more than the stale key does — the connection test says so immediately,
+ * and the field is right there.
+ */
+export function applyProviderPreset(draft: ProviderConfig, preset: ProviderPreset): ProviderConfig {
+	const name = draft.name.trim();
+	return {
+		...draft,
+		name: name === "" || isPresetName(name) ? preset.name : draft.name,
+		baseUrl: preset.baseUrl,
+		protocol: preset.protocol,
+	};
+}
+
+/** Looks a preset up by dropdown value; undefined for {@link CUSTOM_PRESET_ID}. */
+export function findProviderPreset(id: string): ProviderPreset | undefined {
+	return id === CUSTOM_PRESET_ID ? undefined : PROVIDER_PRESETS.find((preset) => preset.id === id);
+}

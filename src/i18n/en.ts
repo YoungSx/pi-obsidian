@@ -1311,6 +1311,15 @@ export const en = {
 	providerModal: {
 		addTitle: "Add provider",
 		editTitle: "Edit provider",
+		/**
+		 * First row of the form, above the fields it writes. The custom option
+		 * leads the list because it is the form's own default — someone pointing
+		 * at a gateway should not have to scroll past sixteen vendors they are
+		 * not using to reach the state the form already opened in.
+		 */
+		preset: "Preset",
+		presetDesc: "Fills in the base URL and protocol for a known provider. Choose Custom for anything else — a gateway, a proxy, or a self-hosted server.",
+		presetCustom: "Custom",
 		name: "Name",
 		nameDesc: "Shown wherever this provider is listed. Optional — the base URL is used when blank.",
 		namePlaceholder: "My gateway",
