@@ -294,3 +294,197 @@ describe("renderContextBlock with workspace facts", () => {
 		expect(first[first.length - 1]).toEqual(second[second.length - 1]);
 	});
 });
+
+describe("renderContextBlock with a selection", () => {
+	const note = { path: "Notes/today.md", content: "one\ntwo\nthree", modifiedAt: null };
+
+	test("quotes the selection under the note's body", () => {
+		// After the body, not before: the block is the request's last message, so its
+		// tail sits closest to where the model generates.
+		const block = renderContextBlock({
+			refs: ACTIVE_REFS,
+			note,
+			selection: { path: "Notes/today.md", text: "two", length: 3 },
+		});
+
+		expect(block).toBe(
+			[
+				"<context>",
+				"Active note: Notes/today.md",
+				"Note content (3 lines):",
+				"<note-content>",
+				"one\ntwo\nthree",
+				"</note-content>",
+				"Selected text (3 characters):",
+				"<selection>",
+				"two",
+				"</selection>",
+				"</context>",
+			].join("\n"),
+		);
+	});
+
+	test("agrees with itself about one character", () => {
+		const block = renderContextBlock({ refs: ACTIVE_REFS, selection: { path: "Notes/today.md", text: "x", length: 1 } });
+
+		expect(block).toContain("Selected text (1 character):");
+	});
+
+	test("points at the tool instead of quoting an oversized selection", () => {
+		// Past the budget a selection stops being a pointer and becomes a second copy
+		// of the note. The line names the argument that actually returns the text —
+		// without it the tool returns the note and looks like it ignored the request.
+		const block = renderContextBlock({
+			refs: ACTIVE_REFS,
+			selection: { path: "Notes/today.md", text: null, length: 12_345 },
+		});
+
+		expect(block).toContain("The user has 12345 characters selected in this note");
+		expect(block).toContain("get_active_note (includeSelection)");
+		expect(block).not.toContain("<selection>");
+	});
+
+	test("ignores a selection belonging to another note", () => {
+		// `activeEditor` reports the most recently active editor, which after a
+		// navigation can still be the note the user left. Attributing that selection
+		// here would point the model at the wrong passage.
+		expect(renderContextBlock({ refs: ACTIVE_REFS, selection: { path: "Notes/elsewhere.md", text: "x", length: 1 } })).toBe(
+			"<context>\nActive note: Notes/today.md\n</context>",
+		);
+	});
+
+	test("says nothing when nothing is selected", () => {
+		expect(renderContextBlock({ refs: ACTIVE_REFS, selection: null })).toBe("<context>\nActive note: Notes/today.md\n</context>");
+	});
+});
+
+describe("renderContextBlock with link facts", () => {
+	const LINKS = { backlinks: ["Notes/a.md"], totalBacklinks: 1, brokenLinks: ["Weekly Review"], totalBrokenLinks: 1 };
+
+	test("attaches the link graph to the active note's entry", () => {
+		expect(renderContextBlock({ refs: ACTIVE_REFS, links: LINKS })).toBe(
+			[
+				"<context>",
+				"Active note: Notes/today.md",
+				"Linked from: Notes/a.md",
+				"Unresolved links in this note: [[Weekly Review]]",
+				"</context>",
+			].join("\n"),
+		);
+	});
+
+	test("drops the link graph when no note is being followed", () => {
+		// The lines describe the active note. With follow dismissed there is no note
+		// for them to be about, so reporting them would attribute one note's graph to
+		// whatever the user looks at next.
+		expect(renderContextBlock({ refs: [{ kind: "pinned", path: "Notes/pin.md", isPinned: true }], links: LINKS })).toBe(
+			"<context>\nPinned note: Notes/pin.md\n</context>",
+		);
+	});
+});
+
+describe("renderContextBlock with pinned outlines", () => {
+	const outline = (path: string, heading: string) => ({
+		path,
+		headings: [{ level: 1, text: heading }],
+		totalHeadings: 1,
+		properties: [],
+		totalProperties: 0,
+	});
+
+	test("puts each skeleton under the pin it belongs to", () => {
+		const block = renderContextBlock({
+			refs: [
+				{ kind: "pinned", path: "Notes/one.md", isPinned: true },
+				{ kind: "pinned", path: "Notes/two.md", isPinned: true },
+			],
+			outlines: [outline("Notes/two.md", "Second"), outline("Notes/one.md", "First")],
+		});
+
+		// Matched by path, not by position: the probe skips notes with no metadata, so
+		// the outline list is shorter than the ref list and never aligns by index.
+		expect(block).toBe(
+			[
+				"<context>",
+				"Pinned note: Notes/one.md",
+				"  Outline: # First",
+				"Pinned note: Notes/two.md",
+				"  Outline: # Second",
+				"</context>",
+			].join("\n"),
+		);
+	});
+
+	test("leaves a pin bare when it has no skeleton", () => {
+		expect(renderContextBlock({ refs: [{ kind: "pinned", path: "Notes/one.md", isPinned: true }], outlines: [] })).toBe(
+			"<context>\nPinned note: Notes/one.md\n</context>",
+		);
+	});
+
+	test("never outlines the active note", () => {
+		// Its full body is already in the block, so an outline of it would be a second
+		// copy of the same headings.
+		const block = renderContextBlock({ refs: ACTIVE_REFS, outlines: [outline("Notes/today.md", "Heading")] });
+
+		expect(block).toBe("<context>\nActive note: Notes/today.md\n</context>");
+	});
+});
+
+describe("the whole block", () => {
+	test("runs from nearest to furthest, in one fixed order", () => {
+		// The order is the cache contract in one assertion: every group is present, so
+		// any reordering — however harmless it looks — fails here rather than silently
+		// rewriting the block for every user on the next release.
+		const block = renderContextBlock({
+			today: SATURDAY,
+			refs: [
+				{ kind: "active", path: "Notes/today.md", isPinned: false },
+				{ kind: "pinned", path: "Notes/pin.md", isPinned: true },
+			],
+			note: { path: "Notes/today.md", content: "body", modifiedAt: 1_756_400_000_000 },
+			selection: { path: "Notes/today.md", text: "body", length: 4 },
+			links: { backlinks: ["Notes/a.md"], totalBacklinks: 1, brokenLinks: ["missing"], totalBrokenLinks: 1 },
+			outlines: [
+				{
+					path: "Notes/pin.md",
+					headings: [{ level: 1, text: "Spec" }],
+					totalHeadings: 1,
+					properties: ["status: active"],
+					totalProperties: 1,
+				},
+			],
+			workspace: {
+				folder: { path: "Notes", entries: ["Notes/other.md"], totalEntries: 1 },
+				openTabs: ["Ideas/x.md"],
+				recentFiles: ["Archive/y.md"],
+			},
+		});
+
+		expect(block).toBe(
+			[
+				"<context>",
+				"Today: 2026-09-05 (Saturday)",
+				"Active note: Notes/today.md",
+				`Last modified: ${new Date(1_756_400_000_000).toISOString()}`,
+				"Note content (1 line):",
+				"<note-content>",
+				"body",
+				"</note-content>",
+				"Selected text (4 characters):",
+				"<selection>",
+				"body",
+				"</selection>",
+				"Linked from: Notes/a.md",
+				"Unresolved links in this note: [[missing]]",
+				"Pinned note: Notes/pin.md",
+				"  Properties: status: active",
+				"  Outline: # Spec",
+				"Current folder: Notes",
+				"Also in this folder: Notes/other.md",
+				"Other open tabs: Ideas/x.md",
+				"Recently opened: Archive/y.md",
+				"</context>",
+			].join("\n"),
+		);
+	});
+});

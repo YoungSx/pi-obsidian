@@ -52,12 +52,11 @@ import {
 } from "../session/ObsidianSessionManager";
 import { aggregateSessionSearchHits, type SessionSearchResult } from "../session/sessionSearch";
 import { arrayBufferToBase64, extractImageRefs, mimeTypeForPath, sanitizeMessageForLog, stripImageRefs } from "../vault/image";
-import { injectContext, type FrozenRunContext, type InjectedNote } from "./contextInjection";
-import { probeEnvironment, probeWorkspaceContext } from "./contextProbe";
+import { EMPTY_RUN_CONTEXT, injectContext, type FrozenRunContext, type InjectedNote } from "./contextInjection";
+import { probeEnvironment, probeRunContext } from "./contextProbe";
 import { noteFileName, renderTranscriptMarkdown, type ExportableMessage } from "./exportNote";
 import { MAX_PINNED_REFS, type ContextRef } from "./contextRefs";
 import { withEnvironment } from "./environmentPrompt";
-import { EMPTY_WORKSPACE_CONTEXT, type WorkspaceContext } from "./workspaceContext";
 import { createSubagentExtension } from "../subagent/extension";
 import { OBSIDIAN_AGENT_SYSTEM_PROMPT } from "./systemPrompt";
 import { composeSystemPrompt, emptySkillLoadReport, expandSkill, findSkill, loadVaultSkills, mergeSkills, type SkillLoadReport } from "./skillLoader";
@@ -2955,15 +2954,15 @@ export class ObsidianAgentService {
 	 */
 	private freezeRunContext(rt: SessionRuntime | null): FrozenRunContext {
 		const refs = this.contextRefList(rt);
-		return { refs, workspace: this.readWorkspaceContext(refs) };
+		return { refs, ...this.readRunContext(refs) };
 	}
 
-	private readWorkspaceContext(refs: readonly ContextRef[]): WorkspaceContext {
+	private readRunContext(refs: readonly ContextRef[]): Omit<FrozenRunContext, "refs"> {
 		try {
-			return probeWorkspaceContext(this.app, refs);
+			return probeRunContext(this.app, refs);
 		} catch (error) {
-			this.log.debug("Failed to read the workspace context; sending the notes-only context block", () => ({ error: String(error) }));
-			return EMPTY_WORKSPACE_CONTEXT;
+			this.log.debug("Failed to read the run context; sending the notes-only context block", () => ({ error: String(error) }));
+			return EMPTY_RUN_CONTEXT;
 		}
 	}
 
@@ -3086,7 +3085,15 @@ export class ObsidianAgentService {
 				const note = activePath ? await this.readActiveNote(activePath) : null;
 				// The date is read per request rather than frozen with the refs: a run
 				// that spans midnight must not keep asserting yesterday's date.
-				return injectContext(messages, { refs: frozen.refs, workspace: frozen.workspace, note, today: new Date() });
+				return injectContext(messages, {
+					refs: frozen.refs,
+					note,
+					selection: frozen.selection,
+					links: frozen.links,
+					outlines: frozen.outlines,
+					workspace: frozen.workspace,
+					today: new Date(),
+				});
 			},
 			initialState: {
 				// Skills were loaded by the same async path that led here

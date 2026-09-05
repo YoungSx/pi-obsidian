@@ -15,8 +15,12 @@
  */
 
 import { apiVersion, getLanguage, MarkdownView, Platform, TFolder, type App } from "obsidian";
+import { collectBacklinks, toLinkReferences } from "../vault/links";
+import { MAX_SELECTION_CHARS, type FrozenRunContext, type InjectedSelection } from "./contextInjection";
 import type { ContextRef } from "./contextRefs";
 import type { EnvironmentFacts } from "./environmentPrompt";
+import { buildLinkContext, type LinkContext } from "./linkContext";
+import { buildNoteOutline, hasOutlineFacts, type NoteOutline } from "./noteOutline";
 import { buildWorkspaceContext, type FolderEntry, type WorkspaceContext, type WorkspaceReadout } from "./workspaceContext";
 
 /**
@@ -97,4 +101,118 @@ function readWorkspace(app: App, activePath: string | null): WorkspaceReadout {
 export function probeWorkspaceContext(app: App, refs: readonly ContextRef[]): WorkspaceContext {
 	const activePath = refs.find((ref) => ref.kind === "active")?.path ?? null;
 	return buildWorkspaceContext(refs, readWorkspace(app, activePath));
+}
+
+/**
+ * Reads the active note's place in the link graph.
+ *
+ * No wait for the metadata index, unlike `get_note_links`: this runs on the
+ * request path, where blocking is not an option. An unindexed vault therefore
+ * reports no links, and the degradation is safe in the direction that matters —
+ * a missing line makes the model reach for the tool, which does wait, while a
+ * line claiming zero backlinks would be a conclusion it acts on.
+ *
+ * `unresolvedLinks` is keyed by the *written* link text rather than a path, which
+ * is why it needs no file lookup and why the renderer keeps the brackets.
+ */
+export function probeLinkContext(app: App, refs: readonly ContextRef[]): LinkContext {
+	const activePath = refs.find((ref) => ref.kind === "active")?.path ?? null;
+	const file = activePath === null ? null : app.vault.getFileByPath(activePath);
+	if (!file || activePath === null) {
+		return buildLinkContext({ backlinks: [], brokenLinks: [] });
+	}
+	return buildLinkContext({
+		backlinks: collectBacklinks(app, file),
+		brokenLinks: toLinkReferences(app.metadataCache.unresolvedLinks[activePath]),
+	});
+}
+
+/**
+ * Reads a skeleton for each pinned note.
+ *
+ * Pinned notes only. The active note's full body is already in the block, so an
+ * outline of it would be a second copy of the same headings. A note with neither
+ * headings nor frontmatter is dropped rather than reported as empty — the pin's
+ * path line already said it exists.
+ */
+export function probeOutlines(app: App, refs: readonly ContextRef[]): NoteOutline[] {
+	const outlines: NoteOutline[] = [];
+	for (const ref of refs) {
+		if (ref.kind !== "pinned") {
+			continue;
+		}
+		const file = app.vault.getFileByPath(ref.path);
+		const cache = file === null ? null : app.metadataCache.getFileCache(file);
+		if (!cache) {
+			continue;
+		}
+		const outline = buildNoteOutline({
+			path: ref.path,
+			headings: (cache.headings ?? []).map((heading) => ({ level: heading.level, text: heading.heading })),
+			frontmatter: cache.frontmatter ?? null,
+		});
+		if (hasOutlineFacts(outline)) {
+			outlines.push(outline);
+		}
+	}
+	return outlines;
+}
+
+/**
+ * The runtime shape of `workspace.activeEditor`, which carries a `file` that
+ * `obsidian.d.ts` does not declare on `MarkdownFileInfo`.
+ *
+ * Measured against a real vault: the property is there, and it is the only way
+ * to tell which note a selection came from. Typed locally rather than cast at the
+ * use site, the same way `vault/links` handles `getBacklinksForFile`; a build that
+ * drops it fails the guard below and reports no selection.
+ */
+interface ActiveEditorWithFile {
+	file?: { path?: string } | null;
+}
+
+/**
+ * Reads what the user has selected in the active note.
+ *
+ * `workspace.activeEditor` rather than `getActiveViewOfType(MarkdownView)`, for
+ * the reason `resolveWorkingNotePath` avoids the latter: clicking into the chat
+ * composer makes the chat leaf active, and the focused-view read returns null at
+ * exactly the moment someone types "rewrite the part I selected".
+ *
+ * The path guard is not defensive padding. `activeEditor` reports the most
+ * recently active editor, which after a navigation can still be the note the user
+ * *left*; without the check, a selection made in one note would be attributed to
+ * another. Measured: opening a canvas leaves `activeEditor` null entirely, so the
+ * optional chain is load-bearing too.
+ */
+export function probeSelection(app: App, refs: readonly ContextRef[]): InjectedSelection | null {
+	const activePath = refs.find((ref) => ref.kind === "active")?.path ?? null;
+	if (activePath === null) {
+		return null;
+	}
+	const active = app.workspace.activeEditor;
+	if (!active?.editor || (active as ActiveEditorWithFile).file?.path !== activePath) {
+		return null;
+	}
+	const text = active.editor.getSelection();
+	if (text === "") {
+		return null;
+	}
+	return { path: activePath, text: text.length <= MAX_SELECTION_CHARS ? text : null, length: text.length };
+}
+
+/**
+ * Everything one run freezes, read in one pass.
+ *
+ * One entry point because all four readings are derived from the same ref list,
+ * and one caller means one place where a structural surprise degrades — the
+ * service wraps this, since that is where the logger lives.
+ */
+export function probeRunContext(app: App, refs: readonly ContextRef[]): Omit<FrozenRunContext, "refs"> {
+	return {
+		workspace: probeWorkspaceContext(app, refs),
+		links: probeLinkContext(app, refs),
+		outlines: probeOutlines(app, refs),
+		selection: probeSelection(app, refs),
+	};
 }
