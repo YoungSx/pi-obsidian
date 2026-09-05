@@ -327,6 +327,8 @@ function snapshot(overrides: Partial<ChatSnapshot> = {}): ChatSnapshot {
 		usage: usageTotals(),
 		contextFill: fill(),
 		isCompacting: false,
+		compactionEvent: null,
+		compactionRetained: 0,
 		isRewinding: false,
 		// The metrics these tests assert on live behind the agent-details tier.
 		showAgentDetails: true,

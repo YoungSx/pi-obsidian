@@ -1305,6 +1305,8 @@ function baseSnapshot(): ChatSnapshot {
 		usage: { tokens: 0, cost: 0, requests: 0 },
 		contextFill: null,
 		isCompacting: false,
+		compactionEvent: null,
+		compactionRetained: 0,
 		isRewinding: false,
 		// The state this whole file is about: a target with no credential.
 		isConfigured: false,

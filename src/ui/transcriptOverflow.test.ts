@@ -46,7 +46,15 @@ function declarations(body: string): string {
  * has to scroll rather than wrap. Ablating any one of these was measured to make
  * the column scroll sideways again at one or more panel widths.
  */
-const SCROLLS_IN_PLACE = [".piem-chat__markdown pre", ".piem-chat__markdown table", ".piem-chat__text", ".piem-chat__compaction pre"];
+/*
+ * `.piem-chat__compaction pre` used to be listed separately. It matched the same
+ * element `.piem-chat__text` does — the compaction divider's summary block — and
+ * only existed to add a height bound; the seam row that replaced the divider
+ * carries that bound on its body instead (`.piem-chat__trace--seam >
+ * .piem-chat__trace-body`), so the width half is `.piem-chat__text`'s alone and
+ * a second selector for it would assert the same rule twice.
+ */
+const SCROLLS_IN_PLACE = [".piem-chat__markdown pre", ".piem-chat__markdown table", ".piem-chat__text"];
 
 describe("the transcript column never scrolls sideways", () => {
 	/*

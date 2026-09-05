@@ -1385,6 +1385,43 @@ describe("ObsidianAgentService", () => {
 			expect(last?.isCompacting).toBe(false);
 			expect(last?.isStreaming).toBe(false);
 		});
+
+		it("T3b: hands the transcript a running event, then the retained count that places its row", async () => {
+			// The two halves of the tidying row's material. `isCompacting` is only the
+			// busy flag; what the row is drawn *from* is the event while the request is
+			// in flight and, once pi's summary lands, how much of the tail it kept —
+			// which is where in the transcript the row belongs. Asserted together
+			// because a snapshot that carries one without the other draws either a row
+			// with no position or a position with no row.
+			const { service, snapshots } = await runMidRunService([THRESHOLD + 1_000, 1_010]);
+
+			const inFlight = snapshots.find((snapshot) => snapshot.compactionEvent?.state === "running");
+			expect(inFlight?.isCompacting).toBe(true);
+			/*
+			 * The first attempt of a send is the pre-prompt one, and it runs before the
+			 * user's own message joins the transcript — so its anchor is the empty tail.
+			 * That is why a *running* row is drawn at "now" rather than at its anchor:
+			 * anchoring it would put "Tidying thoughts…" above the prompt that caused
+			 * it. The anchor earns its keep on the failure path, where the row must not
+			 * drift down as the run appends past it.
+			 */
+			expect(inFlight?.compactionEvent?.anchor).toBe(0);
+			const midRun = snapshots.find((snapshot) => snapshot.compactionEvent?.state === "running" && snapshot.isStreaming);
+			expect(midRun?.compactionEvent?.anchor).toBeGreaterThan(0);
+
+			const settled = service.getSnapshot();
+			expect(settled.compactionEvent).toBeNull();
+			expect(settled.messages[0]?.role).toBe("compactionSummary");
+			/*
+			 * The count can never name a row the transcript does not have. Zero is the
+			 * honest answer for this fixture — the transcript is two turns long and pi
+			 * summarized all of it — and zero is a real case, not a missing value: it
+			 * puts the row immediately after the summary's own slot, which is exactly
+			 * where the tidy happened when nothing was kept.
+			 */
+			expect(settled.compactionRetained).toBeGreaterThanOrEqual(0);
+			expect(settled.compactionRetained).toBeLessThanOrEqual(settled.messages.length - 1);
+		});
 		it("T4: a failed compaction does not kill the run", async () => {
 			// 401 matches none of pi-ai's retryable patterns, so the summarization
 			// request fails on the first attempt instead of backing off for seconds.
@@ -1395,11 +1432,14 @@ describe("ObsidianAgentService", () => {
 			expect(requests.length).toBe(2);
 			expect(JSON.stringify(requests[1]?.messages[0])).not.toContain("MID-RUN SUMMARY");
 			const last = snapshots[snapshots.length - 1];
-			// Reported, but quietly: a compaction that fails does not stop the panel,
-			// and the run below is the proof. The red assertive banner it used to
-			// raise overstated a background operation the next turn survives.
+			// Reported on the transcript row the attempt already occupied, not in the
+			// banner and no longer on the notice channel: a compaction that fails does
+			// not stop the panel, and the run below is the proof.
 			expect(last?.errorMessage).toBeUndefined();
-			expect(last?.noticeMessage).toContain("Could not tidy up earlier messages");
+			expect(last?.noticeMessage).toBeUndefined();
+			expect(last?.isCompacting).toBe(false);
+			expect(last?.compactionEvent?.state).toBe("failed");
+			expect(last?.compactionEvent?.error).toBeDefined();
 			// The run still settled with its own reply, and the log has no summary
 			// to replay: a failed compaction must leave the session untouched.
 			expect(last?.messages.at(-1)?.role).toBe("assistant");

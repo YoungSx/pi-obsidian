@@ -23,7 +23,7 @@ import { createObsidianModels, withRequestDefaults, type ObsidianModelsBundle } 
 import { toFetchFunction } from "../net/obsidianFetch";
 import { matchVendorForModel } from "../net/vendorMatch";
 import { vendorIconName } from "../net/vendorIcons";
-import { compactIfNeeded, needsCompaction, DEFAULT_COMPACTION_RETRY } from "./compaction";
+import { compactIfNeeded, needsCompaction, DEFAULT_COMPACTION_RETRY, type CompactionEvent } from "./compaction";
 import { measureContextFill, sumUsage, type ContextFill, type UsageTotals } from "./usage";
 import { resolveCompactionSettings, type CompactionSettings } from "./compactionSettings";
 import { createObsidianTools } from "../tools/obsidianTools";
@@ -255,8 +255,31 @@ export interface ChatSnapshot {
 	 * number as if the provider had measured it.
 	 */
 	contextFill: ContextFill | null;
-	/** True while a compaction request is in flight (a real LLM call), before a prompt or between the turns of a run. */
+	/**
+	 * True while a compaction request is in flight (a real LLM call), before a
+	 * prompt or between the turns of a run.
+	 *
+	 * The busy flag the send controls, the per-message actions and `aria-busy`
+	 * gate on — derived from {@link compactionEvent} rather than tracked beside
+	 * it, so the two cannot disagree about whether a tidy is running.
+	 */
 	isCompacting: boolean;
+	/**
+	 * The compaction attempt the transcript draws, if any: running, or failed and
+	 * held until the next attempt supersedes it. A success leaves pi's summary
+	 * message in the transcript instead of an event here.
+	 */
+	compactionEvent: CompactionEvent | null;
+	/**
+	 * How many messages the last compaction kept, so the transcript can draw its
+	 * row where the cut happened.
+	 *
+	 * pi's context layout puts the summary message at index 0, because that is
+	 * what replaces the history in the *request*. In time it belongs after the
+	 * tail it retained — the tidy ran once those turns had already happened — and
+	 * that is where the row goes. Zero when nothing has been compacted.
+	 */
+	compactionRetained: number;
 	/**
 	 * True while a retry or edit-resend is between its guards and the replacement
 	 * send: the branch-summary request (a real LLM call that can run for seconds),
@@ -2133,6 +2156,9 @@ export class ObsidianAgentService {
 		rt.activeLane = lane;
 		const context = await this.sessionManager.buildSessionContextFor(rt.sessionPath, lane);
 		rt.lastCompaction = await this.sessionManager.getLastCompactionFor(rt.sessionPath, lane);
+		// Per-lane like everything else re-derived here: a tidy that failed on the
+		// branch being left has no row to sit on in this transcript.
+		rt.compactionEvent = null;
 		rt.overheadUsage = [];
 		await this.adoptSessionContext(rt, context);
 		await this.refreshLanes(rt);
@@ -2822,6 +2848,8 @@ export class ObsidianAgentService {
 			usage: sumUsage(messages, rt?.overheadUsage ?? []),
 			contextFill: measureContextFill(messages, contextWindow, this.resolveCompaction(contextWindow)),
 			isCompacting: rt?.isCompacting ?? false,
+			compactionEvent: rt?.compactionEvent ?? null,
+			compactionRetained: rt?.lastCompaction?.retainedTail.length ?? 0,
 			isRewinding: rt?.retryInFlight ?? false,
 			isConfigured: this.hasApiKey(),
 			showAgentDetails: settings.showAgentDetails,
@@ -3675,7 +3703,9 @@ export class ObsidianAgentService {
 			rt.panelError = undefined;
 			rt.noticeMessage = undefined;
 			const compacted = await this.runExclusiveCompaction(rt, agent, { force: true });
-			if (!compacted && !rt.panelError) {
+			// A failure is already on its own transcript row, and "nothing to tidy" on
+			// top of it would contradict it.
+			if (!compacted && !rt.panelError && rt.compactionEvent === null) {
 				this.setNotice(rt, this.t().t("chat.nothingToCompact"));
 			}
 		} finally {
@@ -3720,12 +3750,24 @@ export class ObsidianAgentService {
 	}
 
 	private async trackCompaction(rt: SessionRuntime, agent: Agent, signal: AbortSignal, force: boolean): Promise<boolean> {
-		rt.isCompacting = true;
+		// The anchor is read here rather than in `performCompaction` because the row
+		// has to appear at the tail the reader is looking at *now* — a prompt's
+		// pre-flight tidy runs before the user's own message joins the transcript.
+		rt.compactionEvent = { state: "running", anchor: agent.state.messages.length };
 		try {
 			this.notify();
 			return await this.performCompaction(rt, agent, signal, force);
 		} finally {
-			rt.isCompacting = false;
+			/*
+			 * `performCompaction` has already decided what the row says next: a
+			 * failure worth reporting replaced this record with its own, and every
+			 * other ending — success, nothing to do, abort — leaves the row nothing
+			 * to say. Only the running record is cleared, so a failure recorded
+			 * inside the try survives this block.
+			 */
+			if (rt.compactionEvent?.state === "running") {
+				rt.compactionEvent = null;
+			}
 			this.notify();
 		}
 	}
@@ -3764,14 +3806,24 @@ export class ObsidianAgentService {
 				return false;
 			}
 			/*
-			 * Quiet, not assertive. A compaction that fails does not stop the panel:
-			 * the automatic path runs between turns and the next turn still departs,
-			 * and the manual path is a command whose outcome the user is already
-			 * watching for. There is also nothing to anchor it to — compaction sits
-			 * between two turns rather than inside one — so the notice channel is
-			 * where it belongs rather than the transcript.
+			 * Reported on the row the attempt already occupies, not in the banner.
+			 *
+			 * It used to go to the notice channel, on the reasoning that a compaction
+			 * sits between two turns and so has nothing in the transcript to anchor
+			 * it to. It does now: the attempt draws its own row from the moment it
+			 * starts, so the failure lands where the reader last saw it working —
+			 * which is also what keeps a quiet, non-blocking failure out of the
+			 * banner, where nothing that leaves the panel usable belongs (issue
+			 * #239).
+			 *
+			 * The anchor is the running record's, so the row does not jump on its way
+			 * from working to failed.
 			 */
-			this.setNotice(rt, this.t().t("chat.compactionFailed", { error: outcome.message }));
+			rt.compactionEvent = {
+				state: "failed",
+				anchor: rt.compactionEvent?.anchor ?? agent.state.messages.length,
+				error: outcome.message,
+			};
 			return false;
 		}
 		if (outcome.status === "skipped") {

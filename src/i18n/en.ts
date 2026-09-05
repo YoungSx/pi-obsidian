@@ -24,7 +24,7 @@ export const en = {
 		openChat: "Open chat",
 		newChat: "New chat",
 		stopResponse: "Stop response",
-		tidyUp: "Tidy up earlier messages",
+		tidyUp: "Tidy earlier thoughts",
 		focusInput: "Focus chat input",
 		askAboutSelection: "Ask about selection",
 		askAboutNote: "Ask about this note",
@@ -50,8 +50,8 @@ export const en = {
 		composerAria: "Message Piem",
 		/**
 		 * The stop phase's label while the compactor holds the turn. "Stop compaction"
-		 * named the mechanism and made the button carry two nouns; the status bar
-		 * just above already narrates what is happening, so the button only says
+		 * named the mechanism and made the button carry two nouns; the transcript's
+		 * own tidying row already narrates what is happening, so the button only says
 		 * what it does.
 		 */
 		stop: "Stop",
@@ -68,7 +68,6 @@ export const en = {
 		openChatHistory: "View chat history",
 		newChat: "New chat",
 		moreActions: "More chat actions",
-		compacting: "Compacting context…",
 		openSettings: "Open settings",
 		dismissMessage: "Dismiss message",
 		/**
@@ -77,7 +76,7 @@ export const en = {
 		 * the gauge colours). Announced politely, with the tidy action beside it,
 		 * because a screen reader has no way to notice a colour change.
 		 */
-		contextWall: "Context is almost full. Tidy up earlier messages to keep going longer.",
+		contextWall: "Context is almost full. Tidy earlier thoughts to keep going longer.",
 		contextWallAction: "Tidy up",
 		/**
 		 * The crash-recovery banner and its button: a run the previous session
@@ -216,8 +215,8 @@ export const en = {
 			authSpoken: "the provider rejected the key. Check it in settings, then ask again.",
 			quota: "This account is out of credit with the provider. Top it up, then ask again.",
 			quotaSpoken: "this account is out of credit with the provider. Top it up, then ask again.",
-			contextLength: "This conversation is too long for the model. Tidy up earlier messages, then ask again.",
-			contextLengthSpoken: "this conversation is too long for the model. Tidy up earlier messages, then ask again.",
+			contextLength: "This conversation is too long for the model. Tidy earlier thoughts, then ask again.",
+			contextLengthSpoken: "this conversation is too long for the model. Tidy earlier thoughts, then ask again.",
 			refused: "The provider declined to answer this one. Rewording it usually helps.",
 			refusedSpoken: "the provider declined to answer this one. Rewording it usually helps.",
 			/** "Too busy", not "rate-limiting": the reader here does not read logs. */
@@ -242,14 +241,12 @@ export const en = {
 		 * summary was the loudest thing in the panel saying the least.
 		 */
 		branchSummaryFailed: "The retry went through, but Piem could not summarize the branch it replaced: {error}",
-		/** Uses the panel's own word for compaction, which is "tidy up" everywhere else. */
-		compactionFailed: "Could not tidy up earlier messages: {error}",
 		/**
 		 * The two states that hold the turn exclusively, named rather than
-		 * paraphrased. Both reuse the status bar's own words for what is happening,
-		 * because it is saying them on screen at the same moment.
+		 * paraphrased. Both reuse the words the panel is already showing for what is
+		 * happening — the tidying row in the transcript, the status bar for a resend.
 		 */
-		busyTidying: "Piem is tidying up earlier messages. Send this again in a moment.",
+		busyTidying: "Piem is tidying earlier thoughts. Send this again in a moment.",
 		busyResending: "Piem is resending your message. Send this again in a moment.",
 		/**
 		 * Outcomes of a control the reader just pressed, on Obsidian's own toast.
@@ -269,7 +266,19 @@ export const en = {
 		thoughtItThrough: "Thought it through",
 		/** The thinking row while the model is still producing it; settled, it reads "Thought it through". */
 		thinkingNow: "Thinking…",
-		earlierSummarized: "Earlier history was summarized to fit the context window.",
+		/**
+		 * The tidying row, one label per state.
+		 *
+		 * "Thoughts" rather than "messages": what the tidy consumes is the agent's own
+		 * earlier thinking, and a reader should not have to know that a context window
+		 * is a list of messages to understand what just happened to their chat. The
+		 * settled label reports an event rather than marking a position, which is what
+		 * lets one row carry the whole attempt — it is drawn where the tidy happened,
+		 * not at the head of what survived it.
+		 */
+		tidyRunning: "Tidying thoughts…",
+		tidyDone: "Thoughts tidied",
+		tidyFailed: "Could not tidy thoughts",
 		imagePlaceholder: "[image: {mimeType}]",
 		/** Shown as a banner when the active model lacks image capability. */
 		imagesNotSupported: "{model} does not accept images. Switch models or remove the image.",
@@ -421,7 +430,6 @@ export const en = {
 	 */
 	chatStatus: {
 		opening: "Opening chat…",
-		tidyingUp: "Tidying up earlier messages…",
 		// The retry/edit window: a branch summary request runs before the
 		// replacement send, and the transcript narrates none of it.
 		resending: "Resending your message…",
@@ -499,7 +507,7 @@ export const en = {
 		 * by lacking the tilde the heuristic estimate carries, and the popover is
 		 * an 11–16rem box where a preamble clause costs a wrapped line.
 		 */
-		meterMeasured: "Compaction starts near {percent}%.",
+		meterMeasured: "Tidying starts near {percent}%.",
 		/**
 		 * Names for the tidy control while it cannot act.
 		 *
@@ -507,8 +515,8 @@ export const en = {
 		 * control has no channel but its own name to say why it is inert. Both are
 		 * accessible names, not sentences in the panel.
 		 */
-		tidyWhileCompacting: "Tidying up earlier messages…",
-		tidyWhileStreaming: "Tidy up earlier messages once the reply finishes",
+		tidyWhileCompacting: "Tidying thoughts…",
+		tidyWhileStreaming: "Tidy earlier thoughts once the reply finishes",
 	},
 
 	/**
@@ -1114,7 +1122,7 @@ export const en = {
 	compaction: {
 		groupLabel: "Context tidying",
 		/** Names the default behaviour, so a reader who never opens the group knows it is handled. */
-		groupHint: "Advanced. Piem already summarizes older messages before the context fills.",
+		groupHint: "Advanced. Piem already tidies earlier thoughts away before the context fills.",
 		reserveName: "Headroom before tidying",
 		reserveDesc:
 			"Tokens kept free for writing the summary. Raise it to tidy up earlier, lower it to use more of the window first. Default {default}.",
@@ -1215,7 +1223,7 @@ export const en = {
 		customEndpoint: "The custom endpoint ({modelId})",
 		needsKeyToSend: "{target} needs an API key in plugin settings before sending a prompt.",
 		/** "Tidying up" rather than "compacting": the panel's own word for this everywhere the reader can see it. */
-		needsKeyToCompact: "{target} needs an API key in plugin settings before tidying up earlier messages.",
+		needsKeyToCompact: "{target} needs an API key in plugin settings before tidying earlier thoughts.",
 	},
 
 	/** Delete-confirmation dialog. */

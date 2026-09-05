@@ -86,33 +86,28 @@ export function runProgressText(run: TurnProgress, now: number, t: Translator): 
  * renderer; `ChatStatusBar.tsx` and `ChatComposer.tsx` own the markup.
  *
  * The status bar reports only what cannot be shown as part of the conversation
- * itself: opening, compaction, and the run's measurement — elapsed time and
- * step count, which are not messages and so have no transcript home. A turn's
- * *state* is still not here — the transcript shows that as a typing indicator
+ * itself: opening, the resend window, and the run's measurement — elapsed time
+ * and step count, which are not messages and so have no transcript home. A
+ * turn's *state* is not here — the transcript shows that as a typing indicator
  * at the assistant's own position, the way a chat app names "the other side is
  * typing" rather than labelling a wait. Reporting it in two places said one
  * thing two ways and made the panel shout.
+ *
+ * Tidying used to be here too, and was the clearest case of the same mistake in
+ * reverse: the wait was announced down here while its outcome appeared as a
+ * divider up in the transcript, so neither surface carried the whole event. It is
+ * one transcript row now — see `compactionRow.ts`.
  */
 
 export interface ChatStatusInput {
 	isInitializing: boolean;
-	isCompacting: boolean;
 	/**
 	 * Whether a retry or edit-resend is between its guards and the replacement
-	 * send. Like compaction, this is a real LLM request (the abandoned branch's
-	 * summary) that the transcript does not narrate — nothing streams, so
-	 * without a line here the wait reads as the panel having done nothing.
+	 * send. This is a real LLM request (the abandoned branch's summary) that the
+	 * transcript does not narrate — nothing streams, so without a line here the
+	 * wait reads as the panel having done nothing.
 	 */
 	isRewinding: boolean;
-	/**
-	 * Whether the reader has asked for agent-internal vocabulary.
-	 *
-	 * Only compaction is worded two ways. "Compacting context" names the mechanism
-	 * and is what someone watching token counts wants to read; everyone else is
-	 * told what it means for them, because "context" is a word this panel would
-	 * otherwise be teaching mid-wait for no benefit.
-	 */
-	showAgentDetails: boolean;
 }
 
 /**
@@ -123,15 +118,15 @@ export interface ChatStatusInput {
  * and reserving a row for a line that is absent most of the time would push the
  * composer down for nothing.
  *
- * Opening and compaction stay because neither has a place in the transcript:
- * opening is the panel starting up before there is a conversation, and
- * compaction is a request of its own that the reader did not initiate and the
- * message stream does not narrate. The rewind window belongs here for the same
- * reason — the branch summary it runs is silent, and nothing in the transcript
- * says the edit is being processed. A reply in flight does have a place — the
- * typing indicator at the assistant's position — so its state is not
- * duplicated here; its elapsed-and-steps readout ({@link runProgressText}) is,
- * because that is a measurement of the wait, not a narration of it.
+ * Opening stays because it has no place in the transcript: it is the panel
+ * starting up before there is a conversation to put a row in. The rewind window
+ * belongs here for the same reason — the branch summary it runs is silent, and
+ * nothing in the transcript says the edit is being processed. A reply in flight
+ * does have a place — the typing indicator at the assistant's position — so its
+ * state is not duplicated here; its elapsed-and-steps readout
+ * ({@link runProgressText}) is, because that is a measurement of the wait, not a
+ * narration of it. Tidying has a place too, and took it: the transcript draws
+ * the attempt and its outcome as one row.
  *
  * The idle slot used to carry the send chord. That hint now lives on the Send
  * button itself — see {@link sendShortcutLabel} — where it describes the control
@@ -140,9 +135,6 @@ export interface ChatStatusInput {
 export function chatStatusText(input: ChatStatusInput, t: Translator): string | null {
 	if (input.isInitializing) {
 		return t.t("chatStatus.opening");
-	}
-	if (input.isCompacting) {
-		return t.t(input.showAgentDetails ? "chat.compacting" : "chatStatus.tidyingUp");
 	}
 	if (input.isRewinding) {
 		return t.t("chatStatus.resending");

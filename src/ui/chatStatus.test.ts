@@ -5,7 +5,7 @@ import { getT } from "../i18n";
 const en = getT("en");
 const zh = getT("zh-cn");
 
-const idle = { isInitializing: false, isCompacting: false, isRewinding: false, showAgentDetails: false };
+const idle = { isInitializing: false, isRewinding: false };
 
 describe("chatStatusText", () => {
 	it("reports nothing while idle, so no empty row is reserved", () => {
@@ -13,19 +13,20 @@ describe("chatStatusText", () => {
 		expect(chatStatusText(idle, en)).toBeNull();
 	});
 
-	it("says what compaction is doing in the reader's vocabulary", () => {
-		expect(chatStatusText({ ...idle, isCompacting: true }, en)).toBe("Tidying up earlier messages…");
+	it("names the resend window, which the transcript narrates nowhere", () => {
+		expect(chatStatusText({ ...idle, isRewinding: true }, en)).toBe("Resending your message…");
 	});
 
 	it("prefers opening over every other state, since nothing else is true yet", () => {
-		expect(chatStatusText({ ...idle, isInitializing: true, isCompacting: true }, en)).toBe("Opening chat…");
+		expect(chatStatusText({ ...idle, isInitializing: true, isRewinding: true }, en)).toBe("Opening chat…");
 	});
 
-	it("names compaction by its mechanism once agent details are on", () => {
-		// The tier moved here from the header along with the readout. Someone
-		// watching token counts wants the mechanism; everyone else is told what it
-		// means for them, rather than being taught the word "context" mid-wait.
-		expect(chatStatusText({ ...idle, isCompacting: true, showAgentDetails: true }, en)).toBe("Compacting context…");
+	it("says nothing about a tidy in flight, which is now a transcript row", () => {
+		// The bar reported the wait while its outcome appeared as a divider in the
+		// transcript, so neither surface carried the whole event. `compactionRow.ts`
+		// owns both halves now, and a second announcement here would be the
+		// duplicate this bar exists to avoid.
+		expect(chatStatusText(idle, en)).toBeNull();
 	});
 
 	it("does not report a reply in flight, since the transcript already shows it", () => {
@@ -38,8 +39,7 @@ describe("chatStatusText", () => {
 
 describe("chatStatusText in Chinese", () => {
 	it("translates every state", () => {
-		expect(chatStatusText({ ...idle, isCompacting: true }, zh)).toBe("正在整理较早的消息…");
-		expect(chatStatusText({ ...idle, isCompacting: true, showAgentDetails: true }, zh)).toBe("正在整理上下文…");
+		expect(chatStatusText({ ...idle, isRewinding: true }, zh)).toBe("正在重发您的消息…");
 		expect(chatStatusText({ ...idle, isInitializing: true }, zh)).toBe("正在打开对话…");
 	});
 });

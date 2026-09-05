@@ -279,7 +279,7 @@ button.piem-chat__context-open {
  * trailing edge, opposite the sentence it qualifies. The figures are
  * right-aligned because that is where a reader scans for a duration; the
  * leading sentence gives up width first (min-width rules above), so a long
- * compaction notice clips before the clock does.
+ * resend notice clips before the clock does.
  */
 .piem-chat__run {
 	align-items: center;
@@ -525,36 +525,7 @@ button.piem-chat__context-open {
 	font-size: var(--font-ui-small);
 }
 
-/*
- * Applied to the status text while the summarization request is in flight (it is
- * a real LLM call). A modifier rather than its own element: the bar carries one
- * live line, and compaction is one of the things that line can say. Layout comes
- * from `.piem-chat__status`; this adds only the pulse below.
- */
-
-@keyframes pi-compaction-pulse {
-
-	0%,
-	100% {
-		opacity: 1;
-	}
-
-	50% {
-		opacity: 0.45;
-	}
-}
-
-.piem-chat__compacting .piem-chat__spinner,
-.piem-chat__compacting svg {
-	animation: pi-compaction-pulse 1.2s ease-in-out infinite;
-}
-
 @media (prefers-reduced-motion: reduce) {
-
-	.piem-chat__compacting .piem-chat__spinner,
-	.piem-chat__compacting svg {
-		animation: none;
-	}
 
 	.piem-chat__context-ring-fill {
 		transition: none;
@@ -793,37 +764,117 @@ button.piem-chat__context-open {
 	outline-offset: -2px;
 }
 
-/* --- compaction divider --- */
+/* --- tidying seam (src/ui/compactionRow.ts) --- */
 
 /*
- * Marks where summarized history begins, so scrolling back explains why earlier
- * turns are gone instead of looking like a broken transcript.
+ * Where the conversation was cut, set across the column instead of aligned with
+ * the rows above it.
+ *
+ * Every other trace row reports something the model did *inside* the conversation,
+ * so it reads as one item in the flow: glyph on the text column's left edge, label
+ * beside it. This one is not an item — it is the transcript itself being cut — and
+ * a line across the page with words in the middle of it is how a reader has been
+ * told that since long before there were transcripts. Centring the label is what
+ * keeps the row from reading as one more tool call.
+ *
+ * Dashed rather than solid, and rather than the torn-paper sawtooth the other
+ * candidate drew (issue #278): a broken line is already the convention for "cut
+ * here", and it costs the row nothing to read. The tear was more expressive and
+ * more of a costume — at hairline weight it read as a wavy line rather than as
+ * paper, and it wanted an amplitude this row has no height to spend.
  */
-.piem-chat__compaction {
-	border-top: 1px dashed var(--background-modifier-border-hover);
-	color: var(--text-muted);
-	font-size: var(--font-ui-smaller);
-	margin: var(--size-4-2) 0;
-	padding-top: var(--size-4-2);
+.piem-chat__trace--seam {
+	/*
+	 * How strongly the seam is drawn — which is the one thing about this row that
+	 * carries meaning rather than style. Full strength means the cut happened; the
+	 * fainter token below means it has not, either because the request is still in
+	 * flight or because it failed. A seam is a claim about the transcript, and a
+	 * finished-looking line over a conversation nothing was removed from is the one
+	 * lie this row could tell.
+	 */
+	--piem-seam-ink: var(--background-modifier-border-hover);
 }
 
-.piem-chat__compaction-heading {
-	font-weight: var(--font-semibold);
-	margin-bottom: var(--size-4-1);
+.piem-chat__trace--seam.piem-chat__trace--live,
+.piem-chat__trace--seam-failed {
+	--piem-seam-ink: var(--background-modifier-border);
 }
 
-.piem-chat__compaction pre {
-	font-size: var(--font-ui-smaller);
+.piem-chat__trace--seam > .piem-chat__trace-summary,
+.piem-chat__trace--seam.piem-chat__trace--flat {
+	gap: var(--size-4-2);
+	justify-content: center;
+}
+
+/*
+ * The seam either side of the label.
+ *
+ * Two pseudo-elements rather than one border on the row, because the label has to
+ * interrupt the line rather than sit on top of it: a border would run behind the
+ * words, and a plate to hide it would have to guess the transcript's background,
+ * which the theme owns and a reader may have replaced.
+ *
+ * `min-width` so the seam cannot collapse to nothing in a 300px sidebar; the label
+ * gives up width first (below), which is the order that keeps this a seam even
+ * when the copy is long.
+ */
+.piem-chat__trace--seam > .piem-chat__trace-summary::before,
+.piem-chat__trace--seam > .piem-chat__trace-summary::after,
+.piem-chat__trace--seam.piem-chat__trace--flat::before,
+.piem-chat__trace--seam.piem-chat__trace--flat::after {
+	border-top: 1px dashed var(--piem-seam-ink);
+	content: "";
+	flex: 1 1 auto;
+	min-width: var(--size-4-3);
+}
+
+/*
+ * The label gives up width before the seam does. The base rule refuses to shrink
+ * a trace name at all, which is right for a name that starts a line and wrong for
+ * one that *is* the middle of it: with the name fixed, a long translation would
+ * push the column sideways, and this column never scrolls sideways
+ * (`.piem-chat__messages`). A backstop, not a working state — no shipped label
+ * comes near it.
+ */
+.piem-chat__trace--seam .piem-chat__trace-name {
+	flex-shrink: 1;
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+/*
+ * A failed tidy reads like every other failure the transcript reports. The seam
+ * itself only loses strength (above) rather than turning red: what failed is one
+ * request, and a red line across the column would say the conversation had been
+ * damaged.
+ */
+.piem-chat__trace--seam-failed .piem-chat__trace-icon,
+.piem-chat__trace--seam-failed .piem-chat__trace-name {
+	color: var(--text-error);
+}
+
+/*
+ * What the row reveals: the summary pi wrote, or the provider's own words about a
+ * failure.
+ *
+ * No left rail, unlike every other trace body. That rail says "this belongs to the
+ * row above", which a left-aligned row needs; hung under a centred label it read
+ * as a stray bracket. Bounded height, because a summary of a long conversation is
+ * long — the same bound the divider this replaced carried.
+ */
+.piem-chat__trace--seam > .piem-chat__trace-body {
+	border-left: 0;
+	margin-left: 0;
 	max-height: 12rem;
 	/*
-	 * `max-height` already made this a vertical scroller, which computes the
-	 * horizontal axis to `auto` as well — so the summary's own long tokens were
-	 * free to widen the box and the transcript behind it. Bounding the width is
-	 * what turns that into a scroll inside the block.
+	 * The vertical bound the divider this replaced carried, on the same axis and
+	 * for the same reason the result and harness bodies bound theirs. The block
+	 * inside owns its own width (`.piem-chat__text`), so nothing here has to.
 	 */
-	max-width: 100%;
-	overflow: auto;
-	white-space: pre-wrap;
+	overflow-y: auto;
+	padding: var(--size-4-2) 0 0;
 }
 
 /* --- messages --- */

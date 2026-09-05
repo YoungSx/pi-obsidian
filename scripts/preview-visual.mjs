@@ -107,6 +107,8 @@ const reactDomClient = await import("react-dom/client");
 const React = await import("react");
 
 const { ChatApp } = await import("../src/ui/ChatApp.tsx");
+const { MessageList } = await import("../src/ui/MessageList.tsx");
+const { TranslatorProvider } = await import("../src/ui/TranslatorContext.tsx");
 const { ChatInputController } = await import("../src/ui/ChatInputController.ts");
 const { AskUserBroker } = await import("../src/tools/askUserBroker.ts");
 const { ObsidianAgentService } = await import("../src/agent/ObsidianAgentService.ts");
@@ -753,6 +755,191 @@ SCENARIOS["chat-ask-answered"] = async () => {
 SCENARIOS["subagent-list"] = async () => mountInspector(INSPECTOR_SNAPSHOTS);
 SCENARIOS["subagent-detail"] = async () => mountInspector(INSPECTOR_SNAPSHOTS, { id: "sub-1", token: 1 });
 
+/* ------------------------------------------------------ tidying seam (issue #278) */
+
+/*
+ * The tidying row in all four of its states, as a contact sheet.
+ *
+ * Not a panel page: what has to be judged here is one row's four states beside
+ * each other, in both languages and both themes, which the shared `page()` shape
+ * cannot say. It began as a decision page — a dashed rule against a torn-paper
+ * sawtooth — and stayed after the dashed rule won, because the same sheet is what
+ * shows whether the seam survives a long translation and a light background.
+ */
+
+/** The transcript under the settled seam: two turns kept, one asked afterwards. */
+function seamTranscript(language) {
+	const zh = language === "zh-cn";
+	const assistant = (text) => ({
+		role: "assistant",
+		content: [{ type: "text", text }],
+		api: "openai-completions",
+		provider: "deepseek",
+		model: "deepseek-v4-pro",
+		usage: { input: 100, output: 10, cacheRead: 0, cacheWrite: 0, totalTokens: 110, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } },
+		stopReason: "stop",
+		timestamp: Date.now(),
+	});
+	return [
+		{ role: "user", content: zh ? "合并重复的读书笔记" : "Merge the duplicate notes", timestamp: Date.now() },
+		assistant(zh ? "合并完了，高亮都保留着。" : "Merged them — every highlight kept."),
+		{ role: "user", content: zh ? "再看第三篇" : "Check the third one", timestamp: Date.now() },
+	];
+}
+
+const SEAM_SUMMARY = {
+	"zh-cn": "较早的往来：导入 2025 年阅读 CSV、给每篇书籍笔记打标签，并确认了三处坏链。",
+	en: "Earlier turns covered importing the 2025 reading CSV, tagging every book note, and confirming three broken links.",
+};
+
+const SEAM_ERROR = "429 Too Many Requests — the provider asked us to slow down";
+
+/** One transcript mount, serialized. `state` picks which of the four cells it is. */
+async function mountSeam(state, language) {
+	const summary = {
+		role: "compactionSummary",
+		summary: SEAM_SUMMARY[language],
+		tokensBefore: 41_000,
+		timestamp: Date.now(),
+	};
+	const settled = state === "settled" || state === "open";
+	const host = document.createElement("div");
+	document.body.appendChild(host);
+	const root = reactDomClient.createRoot(host);
+	root.render(
+		React.createElement(
+			TranslatorProvider,
+			{ language },
+			React.createElement(MessageList, {
+				messages: settled ? [summary, ...seamTranscript(language)] : seamTranscript(language),
+				isStreaming: false,
+				pendingToolCalls: [],
+				app: makeAppStub(memoryAdapter()),
+				component: {},
+				sourcePath: "",
+				traceExpand: state === "open" ? "expanded" : "collapsed",
+				// Two kept turns, so the seam draws before the question that followed it.
+				compactionRetained: settled ? 2 : 0,
+				compactionEvent: state === "running" ? { state: "running", anchor: 3 } : state === "failed" ? { state: "failed", anchor: 3, error: SEAM_ERROR } : null,
+			}),
+		),
+	);
+	await flushRender();
+	await flushRender();
+	const element = host.firstElementChild;
+	const markup = element.outerHTML;
+	root.unmount();
+	host.remove();
+	return markup;
+}
+
+/*
+ * Obsidian's default *light* theme, for the tokens this stylesheet reads.
+ *
+ * The rest of this harness is dark-only, which is fine for spacing and alignment
+ * and not fine for a seam: how a hairline reads against the page is the whole
+ * question, and it is the answer that inverts between themes. Layout values are
+ * exact (they are shared with `TOKENS`); colours are close, not exact — enough to
+ * judge whether a line is visible, not enough to settle a contrast figure.
+ */
+const LIGHT_TOKENS = `
+	--icon-color: #5c5c5c;
+	--icon-color-hover: #222;
+	--background-primary: #fff;
+	--background-primary-alt: #f5f6f8;
+	--background-secondary: #f2f3f5;
+	--background-secondary-alt: #e3e5e8;
+	--background-modifier-border: #ddd;
+	--background-modifier-border-hover: #c8c8c8;
+	--background-modifier-border-focus: #999;
+	--background-modifier-hover: rgba(0, 0, 0, 0.05);
+	--background-modifier-error: #e93147;
+	--background-modifier-error-rgb: 233, 49, 71;
+	--text-normal: #222;
+	--text-muted: #5c5c5c;
+	--text-faint: #999;
+	--text-error: #c0304a;
+	--text-accent: #705dcf;
+	--text-on-accent: #fff;
+	--interactive-accent: #7c3aed;
+	--interactive-normal: #f2f3f5;
+	--interactive-hover: #e9e9e9;
+	--code-background: #f2f3f5;
+	--pre-background: #f2f3f5;
+	--tag-background: #e4e4e4;
+	--shadow-s: 0 1px 2px rgba(0, 0, 0, 0.1);
+	--shadow-l: 0 4px 12px rgba(0, 0, 0, 0.12);
+	--scrollbar-thumb-bg: #ccc;
+`;
+
+const SEAM_CELLS = [
+	{ state: "running", label: "in flight" },
+	{ state: "settled", label: "settled" },
+	{ state: "open", label: "settled, opened" },
+	{ state: "failed", label: "failed" },
+];
+
+/** Which widths the sheet shows each cell at, per language. */
+const SEAM_COLUMNS = [
+	{ language: "zh-cn", width: 300 },
+	{ language: "en", width: 300 },
+	{ language: "zh-cn", width: 560 },
+];
+
+async function seamPage() {
+	const markup = new Map();
+	for (const { state } of SEAM_CELLS) {
+		for (const language of ["zh-cn", "en"]) {
+			markup.set(`${state}:${language}`, await mountSeam(state, language));
+		}
+	}
+	const grid = (theme) => `<section class="sheet sheet--${theme}">
+	<h2>${theme === "light" ? "Light theme (approximate colours)" : "Dark theme"}</h2>
+	${SEAM_CELLS.map(
+		({ state, label }) => `<div class="sheet-row">
+		<h3>${label}</h3>
+		<div class="sheet-cells">${SEAM_COLUMNS.map(
+			({ language, width }) => `<figure style="width: ${width}px">
+			<figcaption>${language} · ${width}px</figcaption>
+			<div class="harness-leaf harness-leaf--seam" style="width: ${width}px"><div class="view-content">${markup.get(`${state}:${language}`)}</div></div>
+		</figure>`,
+		).join("")}</div>
+	</div>`,
+	).join("")}
+</section>`;
+	const html = `<!doctype html>
+<html><head><meta charset="utf-8"><title>tidying seam</title><style>
+:root {${TOKENS}}
+.sheet--light { ${LIGHT_TOKENS} }
+body { background: #191919; font-family: var(--font-interface); margin: 0; padding: 16px; }
+h2 { color: #ddd; font-size: 13px; font-weight: 500; margin: 0 0 10px; }
+h3 { color: #999; font-size: 11px; font-weight: 400; margin: 0 0 4px; }
+figcaption { color: #777; font-size: 10px; margin-bottom: 3px; }
+figure { margin: 0; }
+/* The light block scopes its tokens to this section, so a colour resolved at body
+   level would resolve against the dark root and set every word in the light cells
+   in dark-theme grey. Hence the restatement here. */
+.sheet { background: var(--background-primary); border-radius: 8px; color: var(--text-normal); margin-bottom: 16px; padding: 14px; }
+.sheet--light h2 { color: #333; }
+.sheet--light h3, .sheet--light figcaption { color: #777; }
+.sheet-row { margin-bottom: 12px; }
+.sheet-cells { display: flex; gap: 14px; align-items: flex-start; }
+/* The leaf, as app.css builds it, sized to a few rows instead of a full panel. */
+.harness-leaf { background: var(--background-primary); contain: strict; isolation: isolate; }
+.harness-leaf--seam { height: 300px; }
+.view-content { height: 100%; width: 100%; }
+${styles}
+${OBSIDIAN_CORE_SHIM}
+body { background: #191919; }
+</style></head><body>
+${grid("dark")}
+${grid("light")}
+</body></html>`;
+	return { element: null, cleanup: async () => document.body.replaceChildren(), html, width: 300 + 300 + 560 + 3 * 14 + 60, height: 1400 };
+}
+
+SCENARIOS["tidy-seam"] = () => seamPage();
+
 /* ------------------------------------------------------------------ page assembly */
 
 /** Minimal markdown face for the stub renderer: the shapes replies actually carry. */
@@ -960,17 +1147,24 @@ async function main() {
 	const manifest = [];
 	for (const [name, build] of Object.entries(SCENARIOS)) {
 		try {
-			const { element, cleanup } = await build();
+			const built = await build();
+			const { element, cleanup } = built;
 			try {
-				const inner = element.outerHTML;
-				const html = page(name, inner, CHAT_WIDTHS);
+				/*
+				 * A scenario that needs a page shape this harness's own `page()` cannot
+				 * express — a contact sheet across states, languages and themes rather
+				 * than one panel at three widths — hands back finished HTML and its own
+				 * window size. Everything else stays on the shared path, so the eight
+				 * panel pages cannot drift apart.
+				 */
+				const html = built.html ?? page(name, element.outerHTML, CHAT_WIDTHS);
 				const file = join(OUT_DIR, `${name}.html`);
 				writeFileSync(file, html);
 				manifest.push({
 					name,
 					file,
-					width: 3 * 560 + 2 * 20 + 32 + 40,
-					height: 700,
+					width: built.width ?? 3 * 560 + 2 * 20 + 32 + 40,
+					height: built.height ?? 700,
 				});
 				console.log(`wrote ${file}`);
 			} finally {

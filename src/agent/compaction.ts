@@ -35,6 +35,27 @@ export const DEFAULT_COMPACTION_RETRY: RetryPolicy = {
 	baseDelayMs: 1_000,
 };
 
+/**
+ * A tidying attempt as the transcript sees it.
+ *
+ * The panel draws one row for the whole lifecycle — running, then either the
+ * summary it produced or the failure it hit — the way a tool call and its result
+ * share one row. That row needs two things the {@link CompactionOutcome} cannot
+ * carry: where in the transcript the attempt happened, and a failure that has no
+ * message of its own to hang on.
+ *
+ * `anchor` is the transcript length when the attempt started, so the row stays
+ * at the point in time it belongs to instead of floating to the tail as the run
+ * appends past it. A success needs no event at all: pi's summary message *is*
+ * the record, and {@link toCompactedMessages} puts it where the cut happened.
+ */
+export interface CompactionEvent {
+	state: "running" | "failed";
+	anchor: number;
+	/** Why it failed, verbatim from the provider. Absent while running. */
+	error?: string;
+}
+
 /** Outcome of a compaction attempt. */
 export type CompactionOutcome =
 	| { status: "skipped" }
