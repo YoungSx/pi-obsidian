@@ -49,7 +49,6 @@ import {
 	type ActiveSessionInfo,
 	type SessionContext,
 	type SessionDefaults,
-	type SessionLane,
 } from "../session/ObsidianSessionManager";
 import { aggregateSessionSearchHits, type SessionSearchResult } from "../session/sessionSearch";
 import { arrayBufferToBase64, extractImageRefs, mimeTypeForPath, sanitizeMessageForLog, stripImageRefs } from "../vault/image";
@@ -169,16 +168,14 @@ export interface ChatSnapshot {
 	 */
 	canResumeInterrupted?: boolean;
 	/**
-	 * The lane this transcript belongs to, and the lanes the switcher may offer.
+	 * The lane this transcript belongs to.
 	 *
-	 * A conversation that never forked reports `"main"` and a single lane, which
-	 * the switcher reads as "nothing to switch between" and stays unrendered —
-	 * so an ordinary chat is unchanged by the comparison feature existing.
-	 * Retired lanes are already filtered out: what is listed is what can be
-	 * opened.
+	 * `"main"` on every conversation created or opened since the comparison
+	 * feature retired into plain session forking; the field stays because a
+	 * stored log may still carry parked lanes from old sessions, and the
+	 * rewind/append/ledger pipeline is lane-parameterised all the way down to pi.
 	 */
 	activeLane: string;
-	lanes: SessionLane[];
 	provider: string;
 	modelId: string;
 	/**
@@ -1970,21 +1967,18 @@ export class ObsidianAgentService {
 		}
 		// A session with no turns and nothing running is already the blank sheet
 		// a click is asking for: swapping in another one would mint a duplicate
-		// empty session on disk and spend retention budget on it. A comparison
-		// session can show an empty lane while its branches hold real turns, so
-		// any lane beyond main counts as content. Double-clicks that outrun the
-		// first swap fall through to the in-flight latch above. A run in flight
-		// is *not* blank — "new session" mid-run still means abort-and-leave.
-		// `force` bypasses the blank check for the delete-the-last-session
-		// fallback, where the agent still shows the deleted session's state and
-		// must not count as content.
+		// empty session on disk and spend retention budget on it. Double-clicks
+		// that outrun the first swap fall through to the in-flight latch above. A
+		// run in flight is *not* blank — "new session" mid-run still means
+		// abort-and-leave. `force` bypasses the blank check for the
+		// delete-the-last-session fallback, where the agent still shows the
+		// deleted session's state and must not count as content.
 		const previous = this.current();
 		if (
 			!options?.force &&
 			previous?.agent &&
 			!previous.agent.state.isStreaming &&
-			previous.agent.state.messages.length === 0 &&
-			previous.lanes.length <= 1
+			previous.agent.state.messages.length === 0
 		) {
 			return;
 		}
@@ -2008,12 +2002,11 @@ export class ObsidianAgentService {
 			rt.sessionInfo = info;
 			this.sessionInfo = info;
 			rt.messageEntryIds = new WeakMap<object, string>();
-			// A brand-new session has one lane, no ledger, and no stranded reply; any
-			// comparison or offer the session just left was its own.
+			// A brand-new session has no ledger and no stranded reply; any offer the
+			// session just left was its own.
 			rt.activeLane = "main";
 			rt.resumableLanes.clear();
 			rt.activeRunLedger = undefined;
-			await this.refreshLanes(rt);
 			rt.lastCompaction = undefined;
 			rt.overheadUsage = [];
 			// Pins and a dismissed follow belong to the conversation that collected them;
@@ -2029,215 +2022,47 @@ export class ObsidianAgentService {
 	}
 
 	/**
-	 * Forks the conversation at the turn behind `index` into two comparison lanes
-	 * and adopts the first one.
+	 * Copies the conversation up to and including the reply at `index` into a
+	 * brand-new session, leaving the current one untouched.
 	 *
-	 * The fork point is the *durable* entry the message at `index` came from —
-	 * looked up through the same `messageEntryIds` mapping the retry path uses, so
-	 * a turn the log cannot name (one a compaction absorbed) is refused rather
-	 * than forked in memory alone. Both lanes start at that entry's parent, which
-	 * makes them siblings of the turn being redone rather than continuations of it.
+	 * The anchor is the reply's own durable entry — looked up through the same
+	 * `messageEntryIds` mapping the retry path uses, so a turn the log cannot
+	 * name (one a compaction absorbed) is refused rather than forked in memory
+	 * alone. `position: "at"` in the manager makes the copy end *on* that reply,
+	 * which is the reader's mental model of "fork from this answer": the new
+	 * session picks up exactly where this one shows, and continuing there
+	 * appends to the reply rather than redoing the question.
 	 *
-	 * `main` is deliberately untouched. Until the user promotes a winner the
-	 * original conversation is still there, and abandoning the comparison costs
-	 * nothing.
+	 * Adoption reuses {@link openSession}'s sequence by calling it on the copy's
+	 * path: the copy is already hydrated, so the idempotent load branch just
+	 * moves focus, and every per-session rebuild — transcript, tool mapping,
+	 * compaction state, configuration, interrupted-run sweep — happens once, in
+	 * the one place that knows how.
 	 *
-	 * Returns false when there is nothing to fork from, the panel is busy, or the
-	 * log cannot name the turn — the same refusals {@link retryFrom} makes, for
-	 * the same reasons.
+	 * Returns false when there is nothing to fork from or the panel is busy —
+	 * the same refusals {@link retryFrom} makes, for the same reasons.
 	 */
-	async startComparison(index: number): Promise<boolean> {
+	async forkSessionAt(index: number): Promise<boolean> {
 		await this.initialize();
 		const rt = this.runtimeForFocused();
 		const agent = rt.agent;
 		if (!agent || agent.state.isStreaming || rt.isCompacting || rt.retryInFlight || rt.branchSummaryController) {
 			return false;
 		}
-		const promptIndex = agent.state.messages[index]?.role === "user" ? index : findPromptIndex(agent.state.messages, index);
-		if (promptIndex === null) {
+		const replyMessage = agent.state.messages[index];
+		const replyEntryId = replyMessage ? rt.messageEntryIds.get(replyMessage) : undefined;
+		if (!replyEntryId) {
 			return false;
 		}
-		const promptMessage = agent.state.messages[promptIndex];
-		const entryId = promptMessage ? rt.messageEntryIds.get(promptMessage) : undefined;
-		if (!entryId) {
-			return false;
-		}
-		let lanes: [string, string];
+		let forkedPath: string;
 		try {
-			lanes = await this.createComparisonLanes(rt, entryId);
+			forkedPath = (await this.sessionManager.forkSession(rt.sessionPath, replyEntryId)).path;
 		} catch (error) {
-			this.toast("chat.compareFailed", error);
+			this.toast("chat.forkFailed", error);
 			return false;
 		}
-		await this.adoptLane(rt, lanes[0]);
+		await this.openSession(forkedPath);
 		return true;
-	}
-
-	/**
-	 * Switches the panel to another lane.
-	 *
-	 * Refused while anything is in flight: the transcript, the tool mappings, and
-	 * the ledger entry all belong to the lane being left, and swapping them out
-	 * from under a live run would file its writes against the wrong branch.
-	 */
-	async switchLane(lane: string): Promise<boolean> {
-		await this.initialize();
-		const rt = this.runtimeForFocused();
-		if (lane === rt.activeLane) {
-			return true;
-		}
-		const agent = rt.agent;
-		if (agent?.state.isStreaming || rt.isCompacting || rt.retryInFlight || rt.branchSummaryController) {
-			return false;
-		}
-		if (!(await this.readLanes(rt)).some((candidate) => candidate.lane === lane)) {
-			return false;
-		}
-		await this.adoptLane(rt, lane);
-		return true;
-	}
-
-	/**
-	 * Settles a comparison: `lane` becomes the conversation, and the lanes it beat
-	 * are either kept as reference or retired.
-	 *
-	 * Promotion moves `main` onto the winner's leaf, so a reader who never opens
-	 * the switcher again sees the transcript the user chose. Retirement moves the
-	 * loser's pointer to `null` — pi has no lane delete, so the turns stay in the
-	 * append-only log while the lane leaves the switcher and stops accepting
-	 * writes.
-	 *
-	 * The panel lands on `main` afterwards either way: the comparison is over, and
-	 * leaving it parked on a lane that is now a duplicate of `main` would invite
-	 * the next turn to be written somewhere the user no longer thinks of as the
-	 * conversation.
-	 */
-	async chooseLane(lane: string, losers: "keep" | "retire"): Promise<boolean> {
-		await this.initialize();
-		const rt = this.runtimeForFocused();
-		const agent = rt.agent;
-		if (agent?.state.isStreaming || rt.isCompacting || rt.retryInFlight || rt.branchSummaryController) {
-			return false;
-		}
-		const comparison = (await this.readLanes(rt)).filter((candidate) => candidate.lane !== "main");
-		if (!comparison.some((candidate) => candidate.lane === lane)) {
-			return false;
-		}
-		try {
-			await this.promoteLane(rt, lane);
-			// The winner is retired alongside the losers: its content now *is* main,
-			// so keeping it in the switcher would offer two names for one transcript.
-			await this.retireLane(rt, lane);
-			if (losers === "retire") {
-				for (const candidate of comparison) {
-					if (candidate.lane !== lane) {
-						await this.retireLane(rt, candidate.lane);
-					}
-				}
-			}
-		} catch (error) {
-			this.toast("chat.laneChoiceFailed", error);
-			return false;
-		}
-		await this.adoptLane(rt, "main");
-		return true;
-	}
-
-	/**
-	 * Points the panel at `lane` and rebuilds everything scoped to a branch.
-	 *
-	 * The transcript, the durable entry mapping, the compaction state, and the
-	 * continue offer are all per-lane, so they are re-derived from the lane's own
-	 * log rather than carried across. Usage restarts from history for the same
-	 * reason {@link openSession} restarts it: the overhead this panel accumulated
-	 * was spent on the branch being left.
-	 */
-	private async adoptLane(rt: SessionRuntime, lane: string): Promise<void> {
-		rt.activeLane = lane;
-		const context = await this.sessionManager.buildSessionContextFor(rt.sessionPath, lane);
-		rt.lastCompaction = await this.sessionManager.getLastCompactionFor(rt.sessionPath, lane);
-		// Per-lane like everything else re-derived here: a tidy that failed on the
-		// branch being left has no row to sit on in this transcript.
-		rt.compactionEvent = null;
-		rt.overheadUsage = [];
-		await this.adoptSessionContext(rt, context);
-		await this.refreshLanes(rt);
-		// Deliberately no ledger sweep here. The sweep both closes orphans and
-		// works out which lanes may be continued, so running it a second time
-		// finds nothing open — the first pass already closed them — and would
-		// erase every offer it had recorded. `resumableLanes` is per-session state
-		// established at load, and a new orphan can only appear via a crash, which
-		// means a reload; a lane switch just reveals the offer already known for
-		// the lane being adopted.
-		rt.panelError = undefined;
-		this.notify();
-	}
-
-	/**
-	 * The lanes the switcher may offer, for `rt`'s session. Read straight off the
-	 * hydrated pi session rather than the manager's focus-scoped helper, so a
-	 * background runtime's lane list stays its own.
-	 */
-	private async readLanes(rt: SessionRuntime): Promise<SessionLane[]> {
-		const lanes = await this.sessionManager.getSessionFor(rt.sessionPath).getLanes();
-		return lanes
-			.filter(({ lane, leafId }) => lane === "main" || leafId !== null)
-			.map(({ lane, leafId }) => ({ lane, leafId, retired: leafId === null }));
-	}
-
-	/**
-	 * Path-correct lane operations. The manager's lane helpers are focus-scoped
-	 * (single-session surface kept for compatibility), and these must act on
-	 * `rt`'s session even when the panel has moved on, so they go through the
-	 * hydrated pi session directly — the same filter `getLanes` applies.
-	 */
-	private async createComparisonLanes(rt: SessionRuntime, entryId: string): Promise<[string, string]> {
-		const session = this.sessionManager.getSessionFor(rt.sessionPath);
-		const entry = await session.getEntry(entryId);
-		if (!entry) {
-			throw new Error(`Unknown session entry: ${entryId}`);
-		}
-		const at = entry.parentId;
-		const existing = new Set((await session.getLanes()).map(({ lane }) => lane));
-		let index = 1;
-		let left = `ab-a-${index}`;
-		let right = `ab-b-${index}`;
-		while (existing.has(left) || existing.has(right)) {
-			index += 1;
-			left = `ab-a-${index}`;
-			right = `ab-b-${index}`;
-		}
-		await session.createLane(left, at);
-		await session.createLane(right, at);
-		return [left, right];
-	}
-
-	private async promoteLane(rt: SessionRuntime, lane: string): Promise<void> {
-		const session = this.sessionManager.getSessionFor(rt.sessionPath);
-		const pointer = (await session.getLanes()).find((candidate) => candidate.lane === lane);
-		if (!pointer || pointer.leafId === null) {
-			throw new Error(`Lane is not active: ${lane}`);
-		}
-		await session.moveLane("main", pointer.leafId);
-	}
-
-	private async retireLane(rt: SessionRuntime, lane: string): Promise<void> {
-		if (lane === "main") {
-			throw new Error("The main lane cannot be retired");
-		}
-		await this.sessionManager.getSessionFor(rt.sessionPath).moveLane(lane, null);
-	}
-
-	/** Re-reads the lanes the switcher may offer. */
-	private async refreshLanes(rt: SessionRuntime): Promise<void> {
-		try {
-			rt.lanes = await this.readLanes(rt);
-		} catch (error) {
-			this.log.error("Failed to read the session's lanes", () => ({
-				error: error instanceof Error ? error.message : String(error),
-			}));
-			rt.lanes = [];
-		}
 	}
 
 	/** Sessions for this vault, newest first. */
@@ -2304,7 +2129,6 @@ export class ObsidianAgentService {
 		rt.overheadUsage = [];
 		// Follow state and pins are per-runtime and adopted below; nothing to clear.
 		await this.adoptSessionContext(rt, context);
-		await this.refreshLanes(rt);
 		// Same placement as `initializeAgent`: the offer describes the transcript
 		// now on screen, so it is settled only after adoption. The runtime's own
 		// sweep already ran once at creation; this one covers a re-focus of an
@@ -2827,7 +2651,6 @@ export class ObsidianAgentService {
 			noticeMessage: rt?.noticeMessage,
 			canResumeInterrupted: rt ? rt.resumableLanes.has(rt.activeLane) : false,
 			activeLane: rt?.activeLane ?? "main",
-			lanes: rt?.lanes ?? [],
 			provider: model.provider,
 			modelId: model.id,
 			// What the run in flight actually uses. Mid-run the settings already
@@ -3013,13 +2836,12 @@ export class ObsidianAgentService {
 		rt.sessionInfo = info;
 		this.sessionInfo = info;
 		this.currentPath = rt.sessionPath;
-		// A stored session may have been left on a comparison; the panel resumes on
-		// main, which is the branch the conversation's own history lives on.
+		// A stored session may have parked lanes in its log; the panel resumes on
+		// main, which is the line the conversation's own history lives on.
 		rt.activeLane = "main";
 		const context = await this.sessionManager.buildSessionContext(rt.activeLane);
 		rt.lastCompaction = await this.sessionManager.getLastCompaction(rt.activeLane);
 		await this.adoptSessionContext(rt, context);
-		await this.refreshLanes(rt);
 		// After the context is adopted — the offer is about the transcript this
 		// panel now shows, so it must not stand before the messages are in.
 		await this.settleInterruptedRuns(rt, context);

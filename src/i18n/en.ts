@@ -143,35 +143,23 @@ export const en = {
 		/** The composer notice while an edit is armed; see {@link editMessage}. */
 		editingNotice: "Editing your last question — sending replaces this reply.",
 		/**
-		 * Starts an A/B comparison from a question: two branches of the same
-		 * conversation, each continued separately, one of them eventually kept.
+		 * Starts a fork from a reply: a new chat carrying everything up to and
+		 * including that reply, while the conversation it grew from stays as it is.
 		 *
-		 * "Compare" rather than "fork" or "branch": the reader's goal is to see two
-		 * answers side by side, and the tree that makes it possible is an
-		 * implementation detail they never have to hold.
+		 * "Fork" rather than "branch": there is no branching tree to come back to —
+		 * the new chat lives in the session history like any other, and the old one
+		 * is simply left alone.
 		 */
-		compareFromHere: "Compare two ways",
-		/** The lane switcher button's accessible name and tooltip. */
-		lanesLabel: "Comparison branches",
-		/** The switcher group's name, distinct from the button's so one hover does not print the same tooltip twice. */
-		lanesGroupAria: "Comparison branches",
-		/** The original conversation, always the first option in the switcher. */
-		laneMain: "Original",
-		/** Comparison branches, numbered in creation order: "Option A", "Option B". */
-		laneOption: "Option {label}",
-		/** Settles the comparison in favour of the branch on screen. */
-		laneChoose: "Keep this one",
-		/** Title of the dialog that asks what happens to the branches not chosen. */
-		laneChooseTitle: "Keep this branch?",
+		forkFromHere: "Fork a new chat from here",
+		/** Title of the dialog confirming the fork. */
+		forkConfirmTitle: "Fork a new chat from here?",
 		/**
-		 * States both halves of the outcome before either is chosen: this branch
-		 * becomes the conversation, and the other one's fate is the actual question.
+		 * States the whole outcome before it happens: what the new chat carries,
+		 * that the current one is untouched, and that both stay reachable.
 		 */
-		laneChooseBody: "This branch becomes the conversation. What should happen to the other one?",
-		/** Leaves the losing branch switchable, as a reference. */
-		laneChooseKeep: "Keep it for reference",
-		/** Hides the losing branch; its turns stay in the chat log on disk. */
-		laneChooseRetire: "Clean it up",
+		forkConfirmBody: "The new chat carries the whole conversation up to this reply. This one stays as it is, and you can switch between them in your chat history.",
+		/** The confirm button. */
+		forkConfirmAction: "Fork",
 		/** Cancels the armed edit and restores the draft it displaced. */
 		editingCancel: "Cancel edit",
 		/**
@@ -257,8 +245,8 @@ export const en = {
 		 * that was pressed and leaves. One shape for all of them — "Could not X" —
 		 * so the channel reads as one channel.
 		 */
-		compareFailed: "Could not start a comparison from that message: {error}",
-		laneChoiceFailed: "Could not keep that branch: {error}",
+		/** The fork toast's body; the message names what went wrong, this names what did not happen. */
+		forkFailed: "Could not fork a new chat from that reply: {error}",
 		sessionOpenFailed: "Could not open that chat: {error}",
 		sessionDeleteFailed: "Could not delete that chat: {error}",
 		you: "You",

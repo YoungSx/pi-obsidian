@@ -105,12 +105,12 @@ describe("labelled icon buttons space the glyph from the label", () => {
 	});
 
 	/*
-	 * One place decides. These three declared the same `4-1` for themselves while
+	 * One place decides. These two declared the same `4-1` for themselves while
 	 * the tidy row and the inspector's back button declared nothing, which is how
 	 * two rows shipped with a glyph flush against its label — a smudge, since both
 	 * are drawn in the same colour.
 	 */
-	for (const selector of [".piem-chat__model-switcher", ".piem-chat__thinking-switcher", ".piem-chat__lane-switcher-button"]) {
+	for (const selector of [".piem-chat__model-switcher", ".piem-chat__thinking-switcher"]) {
 		it(`does not restate it on ${selector}`, () => {
 			expect(declarations(ruleBody(selector))).not.toContain("gap:");
 		});

@@ -73,6 +73,16 @@ class MemoryAdapter {
 		this.files.delete(path);
 	}
 
+	/** The atomic publish step pi's `repo.fork` finishes a staged file with. */
+	async rename(path: string, newPath: string): Promise<void> {
+		const file = this.files.get(path);
+		if (!file) {
+			throw new Error(`Missing file: ${path}`);
+		}
+		this.files.delete(path);
+		this.files.set(newPath, { ...file, mtime: Date.now() });
+	}
+
 	/**
 	 * Present only to fail. A chat log is the only copy of a conversation, so every
 	 * path that removes one has to go through trash; a call landing here is the
@@ -465,157 +475,78 @@ describe("ObsidianSessionManager chat folder", () => {
 });
 
 /**
- * The A/B lanes issue #184 introduces, exercised through the manager rather
- * than pi's `Session` directly: the lane rules that matter to the product —
- * which lanes are offered, which branch a transcript reads, what promoting and
- * retiring do to the log — are this class's own, and a test against pi would
- * assert pi's behaviour instead.
+ * Session fork, exercised through the manager rather than pi's repo directly:
+ * what a fork copies, what the source keeps, and where the focus lands — the
+ * promises the product makes when the reader presses the fork button on a reply.
  */
-describe("ObsidianSessionManager lanes", () => {
-	it("offers only the main lane before a comparison starts", async () => {
+describe("ObsidianSessionManager session fork", () => {
+	it("copies the conversation up to the reply into a new session", async () => {
 		const manager = await sessionWithTurns(["first", "second"]);
+		const source = manager.getActiveSessionPath()!;
 
-		const lanes = await manager.getLanes();
-		expect(lanes).toHaveLength(1);
-		expect(lanes[0]?.lane).toBe("main");
-		expect(lanes[0]?.retired).toBe(false);
-		expect(typeof lanes[0]?.leafId).toBe("string");
+		const forked = await manager.forkSession(source, await entryIdOfMessage(manager, "second"));
+
+		expect(forked.path).not.toBe(source);
+		// position "at" is the promise: the reply the button was pressed on is
+		// part of the copy, so the new chat continues from that answer.
+		expect(await textsOf(manager, forked.path)).toEqual(["first", "second"]);
 	});
 
-	it("forks two sibling lanes at the entry's parent, leaving main alone", async () => {
+	it("leaves the source conversation and the focus on it untouched", async () => {
 		const manager = await sessionWithTurns(["first", "second"]);
-		const second = await entryIdOfMessage(manager, "second");
-		const mainLeafBefore = (await manager.getLanes())[0]?.leafId;
+		const source = manager.getActiveSessionPath()!;
 
-		const [left, right] = await manager.createComparisonLanes(second);
+		await manager.forkSession(source, await entryIdOfMessage(manager, "second"));
 
-		const lanes = await manager.getLanes();
-		// Both lanes start where the forked turn's *parent* left off: the point the
-		// comparison diverges from, so neither side inherits the turn being redone.
-		const forkPoint = await entryIdOfMessage(manager, "first");
-		expect(lanes.find((lane) => lane.lane === left)?.leafId).toBe(forkPoint);
-		expect(lanes.find((lane) => lane.lane === right)?.leafId).toBe(forkPoint);
-		// Main is untouched until the user picks a winner — that is what makes the
-		// comparison non-destructive.
-		expect(lanes.find((lane) => lane.lane === "main")?.leafId).toBe(mainLeafBefore);
+		// Forking is an offer, not a switch: the reader keeps their current chat
+		// on screen and adopts the copy by opening it.
+		expect(manager.getActiveSessionPath()).toBe(source);
+		expect(await textsOf(manager, source)).toEqual(["first", "second"]);
 	});
 
-	it("keeps each lane's transcript to its own branch", async () => {
+	it("grows only the copy when the forked chat continues", async () => {
 		const manager = await sessionWithTurns(["first", "second"]);
-		const [left, right] = await manager.createComparisonLanes(await entryIdOfMessage(manager, "second"));
+		const source = manager.getActiveSessionPath()!;
+		const forked = await manager.forkSession(source, await entryIdOfMessage(manager, "second"));
 
-		await manager.appendMessage({ role: "user", content: [{ type: "text", text: "down left" }], timestamp: 3 }, left);
-		await manager.appendMessage({ role: "user", content: [{ type: "text", text: "down right" }], timestamp: 4 }, right);
+		await manager.appendMessageFor(forked.path, { role: "user", content: [{ type: "text", text: "onward" }], timestamp: 3 });
 
-		expect(await textsOnLane(manager, left)).toEqual(["first", "down left"]);
-		expect(await textsOnLane(manager, right)).toEqual(["first", "down right"]);
-		// The original conversation still reads as it did, on its own branch.
-		expect(await textsOnLane(manager, "main")).toEqual(["first", "second"]);
+		expect(await textsOf(manager, forked.path)).toEqual(["first", "second", "onward"]);
+		expect(await textsOf(manager, source)).toEqual(["first", "second"]);
 	});
 
-	it("names a fresh pair when one is already in flight", async () => {
-		const manager = await sessionWithTurns(["first", "second"]);
-		const [firstLeft, firstRight] = await manager.createComparisonLanes(await entryIdOfMessage(manager, "second"));
-
-		const [secondLeft, secondRight] = await manager.createComparisonLanes(await entryIdOfMessage(manager, "second"));
-
-		expect(new Set([firstLeft, firstRight, secondLeft, secondRight]).size).toBe(4);
-	});
-
-	it("refuses to fork from an entry the log does not have", async () => {
+	it("refuses to fork a session that is not loaded", async () => {
 		const manager = await sessionWithTurns(["first"]);
 
-		expect(await rejection(() => manager.createComparisonLanes("nope"))).toBe("Unknown session entry: nope");
-	});
-
-	it("promotes a lane by moving main onto its leaf", async () => {
-		const manager = await sessionWithTurns(["first", "second"]);
-		const [left, right] = await manager.createComparisonLanes(await entryIdOfMessage(manager, "second"));
-		await manager.appendMessage({ role: "user", content: [{ type: "text", text: "winner" }], timestamp: 3 }, left);
-		await manager.appendMessage({ role: "user", content: [{ type: "text", text: "loser" }], timestamp: 4 }, right);
-
-		await manager.promoteLane(left);
-
-		// Main now *is* the winning transcript, so a reader who never opens the
-		// switcher again sees the conversation the user chose.
-		expect(await textsOnLane(manager, "main")).toEqual(["first", "winner"]);
-	});
-
-	it("refuses to promote a retired lane", async () => {
-		const manager = await sessionWithTurns(["first", "second"]);
-		const [left] = await manager.createComparisonLanes(await entryIdOfMessage(manager, "second"));
-		await manager.retireLane(left);
-
-		expect(await rejection(() => manager.promoteLane(left))).toBe(`Lane is not active: ${left}`);
-	});
-
-	it("hides a retired lane from the switcher while its history stays on disk", async () => {
-		const manager = await sessionWithTurns(["first", "second"]);
-		const [left, right] = await manager.createComparisonLanes(await entryIdOfMessage(manager, "second"));
-		await manager.appendMessage({ role: "user", content: [{ type: "text", text: "kept" }], timestamp: 3 }, left);
-		await manager.appendMessage({ role: "user", content: [{ type: "text", text: "dropped" }], timestamp: 4 }, right);
-
-		await manager.retireLane(right);
-
-		// pi has no `deleteLane`, so retirement is a pointer move to null: the lane
-		// leaves the switcher and stops accepting writes, and the turns it held are
-		// still findable in the append-only log.
-		expect((await manager.getLanes()).map((lane) => lane.lane)).toEqual(["main", left]);
-		expect((await manager.getAllLanes()).find((lane) => lane.lane === right)).toEqual({ lane: right, leafId: null, retired: true });
-		const session = manager.getSession();
-		const dropped = (await session.findEntries()).some((entry) => entry.type === "message" && JSON.stringify(entry.message).includes("dropped"));
-		expect(dropped).toBe(true);
-	});
-
-	it("never retires main", async () => {
-		const manager = await sessionWithTurns(["first"]);
-
-		expect(await rejection(() => manager.retireLane("main"))).toBe("The main lane cannot be retired");
+		expect(await rejection(() => manager.forkSession("Nowhere/chats/none.jsonl", "e1"))).toBe(
+			"No session loaded: Nowhere/chats/none.jsonl",
+		);
 	});
 });
 
 /**
- * The run ledger, per lane. An A/B comparison leaves two writable branches, and
- * pi refuses a second open operation on a lane that already has one — so a
- * ledger keyed to `"main"` alone would let one side of the comparison block the
- * other and would recover the wrong branch after a crash.
+ * The run ledger. An open entry blocks every later run on the session — pi
+ * refuses a second open operation while one survives — so a crash mid-run has
+ * to be recoverable, and recovery has to find the orphans where they lie.
  */
 describe("ObsidianSessionManager run ledger", () => {
-	it("keeps each lane's open operations to itself", async () => {
-		const manager = await sessionWithTurns(["first", "second"]);
-		const [left, right] = await manager.createComparisonLanes(await entryIdOfMessage(manager, "second"));
+	it("closes the entry it opened", async () => {
+		const manager = await sessionWithTurns(["first"]);
+		const runId = await manager.beginRunOperation([]);
 
-		const leftRun = await manager.beginRunOperation([{ role: "user", content: [{ type: "text", text: "ask" }], timestamp: 1 }], left);
+		await manager.endRunOperation(runId, "completed", undefined);
 
-		expect((await manager.findOpenRunOperations(left)).map((record) => record.id)).toEqual([leftRun]);
-		expect(await manager.findOpenRunOperations(right)).toEqual([]);
-		expect(await manager.findOpenRunOperations("main")).toEqual([]);
+		expect(await manager.findOpenRunOperations()).toEqual([]);
 	});
 
-	it("closes the entry it opened, on the lane it opened it on", async () => {
-		const manager = await sessionWithTurns(["first", "second"]);
-		const [left] = await manager.createComparisonLanes(await entryIdOfMessage(manager, "second"));
-		const runId = await manager.beginRunOperation([], left);
-
-		await manager.endRunOperation(runId, "completed", undefined, left);
-
-		expect(await manager.findOpenRunOperations(left)).toEqual([]);
-	});
-
-	it("sweeps every lane for the runs a crash left open", async () => {
-		const manager = await sessionWithTurns(["first", "second"]);
-		const [left, right] = await manager.createComparisonLanes(await entryIdOfMessage(manager, "second"));
-		const mainRun = await manager.beginRunOperation([], "main");
-		const rightRun = await manager.beginRunOperation([], right);
+	it("sweeps the session for the runs a crash left open", async () => {
+		const manager = await sessionWithTurns(["first"]);
+		const mainRun = await manager.beginRunOperation([]);
 
 		const open = await manager.findAllOpenRunOperations();
 
-		// Recovery has to see the lane the user was *not* looking at: otherwise a
-		// crash there leaves that branch permanently unable to open a run.
-		expect([...open.keys()].sort()).toEqual(["main", right].sort());
+		expect([...open.keys()]).toEqual(["main"]);
 		expect(open.get("main")?.map((record) => record.id)).toEqual([mainRun]);
-		expect(open.get(right)?.map((record) => record.id)).toEqual([rightRun]);
-		expect(open.has(left)).toBe(false);
 	});
 
 	it("keeps image bytes out of the ledger", async () => {
@@ -670,8 +601,9 @@ async function entryIdOfMessage(manager: ObsidianSessionManager, text: string): 
 	return found.id;
 }
 
-async function textsOnLane(manager: ObsidianSessionManager, lane: string): Promise<string[]> {
-	const context = await manager.buildSessionContext(lane);
+/** The text of every message entry on a session's main line, oldest first. */
+async function textsOf(manager: ObsidianSessionManager, path: string): Promise<string[]> {
+	const context = await manager.buildSessionContextFor(path);
 	return context.messages.flatMap((message) => {
 		const { content } = message as { content?: unknown };
 		if (!Array.isArray(content)) {

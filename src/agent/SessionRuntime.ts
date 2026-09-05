@@ -1,6 +1,6 @@
 import { type Agent, type ThinkingLevel } from "@earendil-works/pi-agent-core";
 import { type Usage } from "@earendil-works/pi-ai";
-import { type ActiveSessionInfo, type SessionLane } from "../session/ObsidianSessionManager";
+import { type ActiveSessionInfo } from "../session/ObsidianSessionManager";
 import { type CompactionEvent, type CompactResult } from "./compaction";
 import { type ContextRef } from "./contextRefs";
 import { PromptQueue } from "./promptQueue";
@@ -110,8 +110,6 @@ export class SessionRuntime {
 
 	/** The lane every read and write in this panel is scoped to. */
 	activeLane = "main";
-	/** Lanes the switcher may offer, refreshed whenever the set can have changed. */
-	lanes: SessionLane[] = [];
 	/**
 	 * The run ledger entry opened for the run in flight, and the lane it was
 	 * opened on. pi serializes runs per lane, so the lane travels with the id

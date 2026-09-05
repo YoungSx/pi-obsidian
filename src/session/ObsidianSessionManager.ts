@@ -46,12 +46,6 @@ export interface ActiveSessionInfo {
 	firstMessage: string;
 }
 
-export interface SessionLane {
-	lane: string;
-	leafId: string | null;
-	retired: boolean;
-}
-
 export interface SessionContext {
 	messages: AgentMessage[];
 	messageOrigins: (string | null)[];
@@ -178,6 +172,42 @@ export class ObsidianSessionManager {
 		return this.summarize(liveMetadata, session);
 	}
 
+	/**
+	 * Copies the session at `path` into a brand-new session file whose main lane
+	 * ends at `entryId`, leaving the source untouched. The storage-level answer
+	 * to the fork button: the reply's entry is the boundary, everything before it
+	 * (including the reply itself, `position: "at"`) is carried over, and pi
+	 * derives the new file's lineage automatically via `parentSessionId`.
+	 *
+	 * `entryId` must name a `message` entry — pi's fork mutator rejects anything
+	 * else, so callers resolve their anchor to a message rather than passing a
+	 * raw leaf id (which may be a compaction or model_change entry).
+	 *
+	 * The returned `Session` registers in {@link hydrated} directly, exactly like
+	 * {@link createSession} does: `repo.fork` returns a live session over the new
+	 * file, and re-opening that path through {@link loadSession} would put two
+	 * instances over one log. Focus does not move — {@link activePath} stays on
+	 * the source, because forking is an offer, not a switch; the caller adopts
+	 * the copy explicitly.
+	 */
+	async forkSession(path: string, entryId: string): Promise<ActiveSessionInfo> {
+		const source = this.hydrated.get(path);
+		if (!source) {
+			throw new Error(`No session loaded: ${path}`);
+		}
+		const forked = await this.repo(this.resolveSessionDir()).fork(source.metadata, {
+			scope: "branch",
+			entryId,
+			position: "at",
+			cwd: this.cwd,
+		});
+		const metadata = await forked.getMetadata();
+		this.hydrated.set(metadata.path, { session: forked, metadata });
+		// A fork is as much a new chat as `createSession` is: retention counts it.
+		await this.evictSurplusSessions(this.resolveSessionDir());
+		return this.summarize(metadata, forked);
+	}
+
 	async deleteSession(path: string): Promise<void> {
 		const target = normalizeFolderPath(path, { allowPluginInternals: true });
 		const result = await this.fs.remove(target, { force: true });
@@ -235,58 +265,6 @@ export class ObsidianSessionManager {
 			return 0;
 		}
 		return this.countJsonlFiles(normalized);
-	}
-
-	async getLanes(): Promise<SessionLane[]> {
-		return (await this.getSession().getLanes()).filter(({ lane, leafId }) => lane === "main" || leafId !== null).map(({ lane, leafId }) => ({
-			lane,
-			leafId,
-			retired: leafId === null,
-		}));
-	}
-
-	async getAllLanes(): Promise<SessionLane[]> {
-		return (await this.getSession().getLanes()).map(({ lane, leafId }) => ({ lane, leafId, retired: leafId === null && lane !== "main" }));
-	}
-
-	async createComparisonLanes(entryId: string): Promise<[string, string]> {
-		const session = this.getSession();
-		const entry = await session.getEntry(entryId);
-		if (!entry) {
-			throw new Error(`Unknown session entry: ${entryId}`);
-		}
-		const at = entry.parentId;
-		const existing = new Set((await session.getLanes()).map(({ lane }) => lane));
-		let index = 1;
-		let left = `ab-a-${index}`;
-		let right = `ab-b-${index}`;
-		while (existing.has(left) || existing.has(right)) {
-			index += 1;
-			left = `ab-a-${index}`;
-			right = `ab-b-${index}`;
-		}
-		await session.createLane(left, at);
-		await session.createLane(right, at);
-		return [left, right];
-	}
-
-	async moveLane(lane: string, to: string | null): Promise<void> {
-		await this.getSession().moveLane(lane, to);
-	}
-
-	async promoteLane(lane: string): Promise<void> {
-		const pointer = (await this.getSession().getLanes()).find((candidate) => candidate.lane === lane);
-		if (!pointer || pointer.leafId === null) {
-			throw new Error(`Lane is not active: ${lane}`);
-		}
-		await this.getSession().moveLane("main", pointer.leafId);
-	}
-
-	async retireLane(lane: string): Promise<void> {
-		if (lane === "main") {
-			throw new Error("The main lane cannot be retired");
-		}
-		await this.getSession().moveLane(lane, null);
 	}
 
 	async appendMessage(message: AgentMessage, lane = "main"): Promise<string> {

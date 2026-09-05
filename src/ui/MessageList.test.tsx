@@ -521,22 +521,22 @@ describe("MessageList reply actions", () => {
 	/*
 	 * Issue #273: the fork used to ride the user's question, which read as
 	 * "branch from here" about a question the reader was satisfied with. It
-	 * answers "not satisfied with this reply" — the same urge as regenerate — so
-	 * it lives on the reply's row and the question's row keeps only its edit.
+	 * answers "carry this exchange onward" about the reply it grows from — the
+	 * same row regenerate lives on — so the question's row keeps only its edit.
 	 */
-	it("mounts the compare action on the reply's row, never on the question's", async () => {
+	it("mounts the fork action on the reply's row, never on the question's", async () => {
 		const host = renderMessages([userMessage("the question"), assistantMessage("the answer")], {
 			onRetry: () => undefined,
-			onCompare: () => undefined,
+			onFork: () => undefined,
 			onEditMessage: () => undefined,
 		});
 		await flushRender();
 
 		const question = host.querySelector(".piem-chat__message--user");
 		const reply = host.querySelector(".piem-chat__message--assistant");
-		expect(question?.querySelector('[aria-label="Compare two ways"]')).toBeNull();
+		expect(question?.querySelector('[aria-label="Fork a new chat from here"]')).toBeNull();
 		expect(question?.querySelectorAll(".piem-chat__message-actions button")).toHaveLength(1);
-		expect(reply?.querySelector('[aria-label="Compare two ways"]')).not.toBeNull();
+		expect(reply?.querySelector('[aria-label="Fork a new chat from here"]')).not.toBeNull();
 	});
 
 	it("reports the message index so the regeneration re-asks the right question", async () => {
