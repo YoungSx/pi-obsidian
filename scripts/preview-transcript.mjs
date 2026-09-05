@@ -143,6 +143,13 @@ const TOKENS = `
 const LONG_PATH = "/Users/someone/Library/Mobile Documents/iCloud~md~obsidian/Documents/MyVault/attachments/2026-09-01-screenshot-of-the-settings-pane.png";
 const LONG_TOKEN = "a".repeat(96);
 
+/*
+ * A provider error as the panel receives one: `\n`-joined, with an unbreakable
+ * path and token in it. Both halves of `.piem-chat__cutoff-raw`'s contract are in
+ * here — the breaks it must keep, and the tokens it must break inside.
+ */
+const RAW_ERROR = `request failed: 401 invalid key\nat ${LONG_PATH}\ntoken ${LONG_TOKEN}`;
+
 const MARKDOWN_CASES = {
 	"long-url": `<p>See <a href="#">https://example.com/very/long/path/segment-that-never-breaks-anywhere?query=${LONG_TOKEN}</a> for details.</p>`,
 	"inline-code": `<p>Run <code>bun test --filter ${LONG_TOKEN}</code> and check the output.</p>`,
@@ -176,10 +183,18 @@ function plainBlock(face, text) {
 }
 
 /**
- * A trace row. The `call` variant is the one with no bounded body, which is why
- * it is included: the `result` and `harness` variants bound their own height and
- * so were already scroll containers, while a flat call row had nothing holding
- * its detail span to the panel's width.
+ * A trace row, bodied or flat.
+ *
+ * A call whose payload is hidden is the flat case, and it is here because it is
+ * the one with nothing bounding it: the `result` and `harness` variants bound
+ * their own height and so were already scroll containers on both axes, while a
+ * flat row has only its detail span holding a path to the panel's width.
+ *
+ * `variant` names the case for `data-case` but only reaches the class list when
+ * the row has a body. A flat row wears no variant of its own — `traceClasses` in
+ * `MessageList.tsx` returns nothing for a call with neither a result nor a live
+ * marker — so a `--call` modifier here would be a class the plugin never sets, in
+ * a page whose whole claim is that it renders what the plugin does.
  */
 function traceRow(variant, name, detail, body) {
 	const summary = `<summary class="piem-chat__trace-summary">
@@ -187,7 +202,7 @@ function traceRow(variant, name, detail, body) {
 		<span class="piem-chat__trace-detail">${detail}</span>
 	</summary>`;
 	if (!body) {
-		return `<div class="piem-chat__trace piem-chat__trace--${variant} piem-chat__trace--flat" data-case="trace-${variant}/${name}">
+		return `<div class="piem-chat__trace piem-chat__trace--flat" data-case="trace-${variant}/${name}">
 		<span class="piem-chat__trace-name piem-chat__trace-name--identifier">read_note</span>
 		<span class="piem-chat__trace-detail">${detail}</span>
 	</div>`;
@@ -314,11 +329,63 @@ rows.push(`<section class="piem-ask-card piem-ask-card--answered" data-case="ask
 		</div>
 	</dl>
 </section>`);
-// The compaction divider, whose `max-height` already made it a scroller.
-rows.push(`<section class="piem-chat__compaction" data-case="compaction/long">
-	<div class="piem-chat__compaction-heading">Earlier turns were summarized</div>
-	<pre>${LONG_PATH} ${LONG_TOKEN}</pre>
-</section>`);
+/*
+ * The tidying seam, opened onto the summary it wrote.
+ *
+ * This fixture drew the compaction divider until `e578694` replaced that divider
+ * with a trace row and took `.piem-chat__compaction` out of the stylesheet with
+ * it. The fixture kept emitting the dead class, so its `<pre>` matched no rule the
+ * plugin ships and rendered at browser defaults — and the page reported the
+ * transcript scrolling sideways by 1816px at every width, blaming a stylesheet
+ * that was holding the column still. A fixture bound to a class nothing styles
+ * does not measure nothing; it measures the absence of every rule, and files the
+ * result against the wrong file. `transcriptOverflow.test.ts` pins the pair now.
+ *
+ * The seam is a child of the column rather than of a message, like a bare tool
+ * result: it is the conversation being cut, not something a turn said. Its body
+ * bounds height only — the block inside owns the width — which is the half this
+ * page is here to check.
+ *
+ * `open` because a closed `<details>` renders no body, and the body is where the
+ * unbreakable content is. The glyph holder is empty: `setIcon` paints it in the
+ * app and this page has no icon shim, which `preview-visual.mjs` is the harness
+ * for. It is a flex item on the summary line either way, and 16px cannot decide a
+ * question the fixtures overshoot by hundreds of pixels.
+ */
+rows.push(`<details class="piem-chat__trace piem-chat__trace--seam" data-case="seam/long-summary" open>
+	<summary class="piem-chat__trace-summary">
+		<span class="piem-icon piem-chat__trace-icon" aria-hidden="true"></span>
+		<span class="piem-chat__trace-name piem-chat__trace-name--label">Thoughts tidied</span>
+	</summary>
+	<div class="piem-chat__trace-body"><pre class="piem-chat__text piem-chat__text--prose">${LONG_PATH} ${LONG_TOKEN}</pre></div>
+</details>`);
+/*
+ * The provider's own words, behind a failed reply's pill.
+ *
+ * The one construct in this column that has to *wrap* rather than scroll: its
+ * horizontal extent carries nothing, so it breaks mid-token instead of owning a
+ * scroll box. That makes it the only one with nothing between it and the column —
+ * `.piem-chat__trace--failed` gives its body no overflow of its own — so if the
+ * break stopped biting, the transcript itself is what would move.
+ * `transcriptOverflow.test.ts` asserts the two declarations that make it break;
+ * only a layout engine can say whether they do.
+ *
+ * Nested the way `MessageList` nests it — a sibling of the message's content
+ * inside the bubble, not another block within it — and opened, because it ships
+ * closed and a reader who opens it is the case worth measuring.
+ */
+rows.push(`<article class="piem-chat__message piem-chat__message--assistant" data-case="cutoff/raw" aria-label="assistant">
+	<div class="piem-chat__bubble">
+		<div class="piem-chat__message-content">${markdownBlock("<p>Half an answer, then the provider gave up.</p>")}</div>
+		<details class="piem-chat__trace piem-chat__trace--failed" open>
+			<summary class="piem-chat__trace-summary">
+				<span class="piem-icon piem-chat__trace-icon" aria-hidden="true"></span>
+				<span class="piem-chat__trace-name piem-chat__trace-name--label">The provider rejected the key. Check it in settings, then ask again.</span>
+			</summary>
+			<div class="piem-chat__trace-body"><p class="piem-chat__cutoff-raw">${RAW_ERROR}</p></div>
+		</details>
+	</div>
+</article>`);
 
 rows.push(...rhythmTurn());
 
