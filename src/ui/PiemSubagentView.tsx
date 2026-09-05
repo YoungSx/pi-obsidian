@@ -126,6 +126,10 @@ export class PiemSubagentView extends ItemView {
 					// the user, and `killedBy: "user"` is what the parent later reads.
 					onStop={(id) => this.service.getSubagentRegistry().kill(id, undefined, "user")}
 					onStopAll={() => this.service.getSubagentRegistry().killAllLive("user")}
+					// Tidying, not a lifecycle change: the flag it sets is read by this
+					// panel and by nothing else, so an archived run stays exactly as
+					// collectable, stoppable and re-taskable as it was.
+					onArchiveFinished={() => this.service.getSubagentRegistry().archiveSettled()}
 					app={this.service.getApp()}
 					component={this}
 				/>

@@ -38,6 +38,21 @@ export interface SubagentEntry {
 	 * stopped early.
 	 */
 	killedBy?: "parent" | "teardown" | "tool" | "user";
+	/**
+	 * Whether the reader has put this run away.
+	 *
+	 * Reader-side and reader-side only: no tool reads it, so archiving cannot
+	 * change what the parent can collect, enumerate, stop, or re-task. That is the
+	 * whole reason it is a flag here rather than a removal from the map — a panel
+	 * control that could destroy an uncollected report would be a tidy-up button
+	 * that loses work.
+	 *
+	 * It lives on the entry rather than in the panel's own state because the panel
+	 * unmounts: React state would resurrect every archived row the next time the
+	 * sidebar was opened, which is not what "archived" means in any application.
+	 * Session memory all the same — the registry dies with the service.
+	 */
+	archived?: true;
 	/** The spawn call's run signal; a wait only sees children of its own run. */
 	parentSignal: AbortSignal | undefined;
 	/** The task text the spawn was given, verbatim — what the inspector shows first. */
@@ -252,6 +267,29 @@ export class SubagentRegistry {
 			killed += 1;
 		}
 		return killed;
+	}
+
+	/**
+	 * Puts every finished run away, on the reader's orders, from the panel.
+	 *
+	 * Only settled entries: a running child is not something to tidy, and it would
+	 * reappear as soon as it finished anyway. Returns how many moved, which is what
+	 * lets the control hide itself once the list is clean. Already-archived entries
+	 * are skipped rather than re-stamped, so pressing it twice is not two changes.
+	 */
+	archiveSettled(): number {
+		let archived = 0;
+		for (const entry of this.entries.values()) {
+			if (!entry.settled || entry.archived) {
+				continue;
+			}
+			entry.archived = true;
+			archived += 1;
+		}
+		if (archived > 0) {
+			this.emitChange();
+		}
+		return archived;
 	}
 
 	/**

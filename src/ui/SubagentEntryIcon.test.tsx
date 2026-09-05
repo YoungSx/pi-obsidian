@@ -122,6 +122,20 @@ describe("SubagentEntryIcon states", () => {
 		expect(button(host)?.getAttribute("aria-label")).toContain("2 subagent(s) in this chat");
 	});
 
+	it("stays put when every run has been archived, since it is the way back to them", async () => {
+		/*
+		 * The panel's archive is the panel's own tidying, and this icon is the only
+		 * affordance that opens the panel. Hiding it in sympathy would strand the
+		 * archived record behind the command palette — so archiving is a fact this
+		 * component does not read at all, and the count keeps saying how many
+		 * subagents this chat has had.
+		 */
+		const host = await renderIcon([snapshot({ status: "done", archived: true }), snapshot({ id: "s2", status: "failed", archived: true })]);
+
+		expect(host.querySelector(".piem-chat__subagents")).not.toBeNull();
+		expect(button(host)?.getAttribute("aria-label")).toContain("2 subagent(s) in this chat");
+	});
+
 	it("carries the count in the accessible name and hides the bare digit", async () => {
 		// The button's name already says "2 subagents working" in a sentence;
 		// announcing a bare "2" after that is the same fact twice, badly.

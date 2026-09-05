@@ -1431,12 +1431,13 @@ export const en = {
 	 * The subagent inspector: the side panel, its entry point above the composer,
 	 * and the detail page.
 	 *
-	 * One-way glass by design (issue #153). Every leaf here names or describes
-	 * something; none of them is an action on a running child. There is no "stop"
-	 * label and no reply field, because the panel deliberately offers neither —
-	 * a subagent cannot see this conversation, so a reply would have nowhere to
-	 * land, and a kill switch beside a report the user is still reading is a
-	 * misfire waiting to happen.
+	 * The panel's controls are exactly three, and the shape of that set is the
+	 * design (issues #153, #233, #290): stop one run, stop all of them, put the
+	 * finished ones away. Every other leaf here names or describes something. What
+	 * is missing is missing on purpose — there is no reply field, because a
+	 * subagent cannot see this conversation and a reply would have nowhere to land,
+	 * and no delete, because archiving a run the parent has not collected yet must
+	 * not be able to destroy its report.
 	 */
 	subagents: {
 		tabTitle: "Piem subagents",
@@ -1467,6 +1468,18 @@ export const en = {
 		stopOne: "Stop this run",
 		stopAll: "Stop all",
 		stopAllAria: "Stop every running subagent",
+		/**
+		 * "Finished", not "done": a run that failed or was cut short is finished
+		 * too, and all three are what this puts away. The accessible name spells
+		 * out the sweep, since the label alone does not say how many it takes.
+		 */
+		archiveFinished: "Archive finished",
+		archiveFinishedAria: "Archive every run that has finished",
+		sectionArchived: "Archived",
+		archivedCount: "{count} run(s)",
+		archivedListAria: "Archived subagents, oldest first",
+		/** What is left when the reader has archived everything; the section below still holds them. */
+		allArchived: "Every run is archived. Open Archived below to read one.",
 		status: {
 			running: "working",
 			done: "done",

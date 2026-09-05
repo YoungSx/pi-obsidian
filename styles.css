@@ -3763,12 +3763,14 @@ button.piem-chat__latest--asking {
 }
 
 /*
- * The one control inside the notice, inline where the sentence says stopping is
- * possible. Styled as a quiet text link, not a button: the action is real but
- * rare, and a filled or bordered button would weight the notice like a command
- * bar over the record below.
+ * The list-wide controls, inline in the notice: stop everything, and put the
+ * finished runs away. Styled as quiet text links, not buttons — each action is
+ * real but rare, and a pair of filled or bordered buttons would weight the notice
+ * like a command bar over the record below. The specific classes beside this one
+ * (`__stop-all`, `__archive`) carry no style; they are how the tests and any
+ * future one-off reach a single control.
  */
-.piem-subagents__stop-all {
+.piem-subagents__notice-action {
 	background: none;
 	border: none;
 	color: var(--text-muted);
@@ -3781,7 +3783,7 @@ button.piem-chat__latest--asking {
 }
 
 @media (hover: hover) {
-	.piem-subagents__stop-all:hover {
+	.piem-subagents__notice-action:hover {
 		color: var(--text-normal);
 	}
 }
@@ -4095,13 +4097,15 @@ button.piem-chat__latest--asking {
 	overflow-wrap: anywhere;
 }
 
-/* --- process record --- */
+/* --- the panel's two disclosures: archived runs, and the process record --- */
 
+.piem-subagents__archived,
 .piem-subagents__process {
 	border-top: 1px solid var(--background-modifier-border);
 	padding-top: var(--size-4-2);
 }
 
+.piem-subagents__archived-summary,
 .piem-subagents__process-summary {
 	align-items: baseline;
 	cursor: pointer;
@@ -4111,9 +4115,15 @@ button.piem-chat__latest--asking {
 	list-style: none;
 }
 
+.piem-subagents__archived-count,
 .piem-subagents__process-count {
 	color: var(--text-faint);
 	font-size: var(--font-ui-smaller);
+}
+
+/* The rows inside, spaced off the summary the same way the steps below are. */
+.piem-subagents__archived .piem-subagents__list {
+	margin-top: var(--size-4-2);
 }
 
 /*
