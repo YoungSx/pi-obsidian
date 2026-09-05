@@ -697,19 +697,34 @@ export const en = {
 
 	/** Trace row tool names (reader-facing, not the model's ids). */
 	traceTool: {
+		// In `toolCatalog.ts` order, so a new tool has one obvious place to go in
+		// each file rather than a name to hunt for in this one.
 		read: "Read a note",
-		write: "Wrote a note",
-		edit: "Edited a note",
-		ls: "Listed a folder",
-		find: "Looked for notes",
-		grep: "Searched the vault",
 		getActiveNote: "Checked the open note",
 		noteLinks: "Followed links",
 		noteMetadata: "Read note properties",
-		listTasks: "Listed tasks",
-		summarizeTasks: "Summarized tasks",
+		ls: "Listed a folder",
+		find: "Looked for notes",
+		grep: "Searched the vault",
+		write: "Wrote a note",
+		edit: "Edited a note",
+		updateFrontmatter: "Changed note properties",
+		insertAtCursor: "Inserted text at the cursor",
 		moveNote: "Renamed or moved a note",
 		trashNote: "Sent a note to trash",
+		openNote: "Opened a note",
+		openSidePanel: "Opened a side pane",
+		gotoLocation: "Jumped to a spot in a note",
+		notify: "Sent a notice",
+		askUser: "Asked you a question",
+		readSkill: "Read a skill",
+		listTasks: "Listed tasks",
+		summarizeTasks: "Summarized tasks",
+		webFetch: "Fetched a web page",
+		spawnSubagent: "Started a subagent",
+		listSubagents: "Listed the subagents",
+		killSubagent: "Stopped a subagent",
+		waitSubagent: "Waited for a subagent",
 		failed: "failed",
 		/**
 		 * Both halves of a paired row's detail, when a write reports a diff.

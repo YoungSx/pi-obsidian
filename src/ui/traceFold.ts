@@ -2,6 +2,7 @@ import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import type { AssistantMessage, ToolCall, ToolResultMessage } from "@earendil-works/pi-ai";
 import type { Translator } from "../i18n";
 import { ASK_USER_TOOL } from "./askUserRecord";
+import { categorizeTool, type ToolCategory } from "./toolCatalog";
 import { EMPTY_TOOL_PAIR_PLAN, pairedResult, resultIsPaired, type ToolPairPlan } from "./toolPair";
 import type { TraceExpandSetting } from "./traceExpand";
 
@@ -37,58 +38,17 @@ import type { TraceExpandSetting } from "./traceExpand";
  */
 
 /**
- * What kind of work a folded call did, in the reader's terms.
- *
- * Deliberately coarser than the tool list: the fold line exists to be skimmed,
- * and a category per tool would just re-list the rows it replaced. `other` is
- * the honest bucket — an MCP tool this build has never seen, a screen tool, a
- * task query — and takes the same stance `describeTool` takes on an unmapped id:
- * say something true and unremarkable rather than guess a verb.
- */
-export type TraceFoldCategory = "write" | "web" | "subagent" | "read" | "search" | "other";
-
-/**
  * The order categories are named in, most consequential first.
  *
  * Fixed rather than sorted by count: a reader skimming a folded run wants to
  * meet a vault change before a search, and a line whose word order shifts with
  * the counts is a line that reads differently every turn.
- */
-export const TRACE_FOLD_CATEGORIES: readonly TraceFoldCategory[] = ["write", "web", "subagent", "read", "search", "other"];
-
-/**
- * Which category each tool id falls in.
  *
- * Keyed on the ids the model calls, not on the copy table, so a tool whose
- * reader-facing name changes keeps its category. `insert_at_cursor` counts as a
- * write even though the plugin groups it with the screen tools: it puts text in
- * the note, which is what the reader is being told about.
+ * The categories themselves, and which tool falls in which, live in
+ * `toolCatalog.ts` beside that tool's name and glyph — this is only the order
+ * they are spoken in, which is the fold line's own business.
  */
-const TOOL_CATEGORIES: Readonly<Record<string, TraceFoldCategory>> = {
-	write: "write",
-	edit: "write",
-	update_frontmatter: "write",
-	move_note: "write",
-	trash_note: "write",
-	insert_at_cursor: "write",
-	web_fetch: "web",
-	spawn_subagent: "subagent",
-	wait_subagent: "subagent",
-	list_subagents: "subagent",
-	kill_subagent: "subagent",
-	read: "read",
-	get_active_note: "read",
-	get_note_links: "read",
-	get_note_metadata: "read",
-	ls: "search",
-	find: "search",
-	grep: "search",
-};
-
-/** The category `name` counts toward; `other` for anything the table has not been taught. */
-export function categorizeTool(name: string): TraceFoldCategory {
-	return TOOL_CATEGORIES[name] ?? "other";
-}
+export const TRACE_FOLD_CATEGORIES: readonly ToolCategory[] = ["write", "web", "subagent", "read", "search", "other"];
 
 /**
  * Where a foldable row sits in the transcript.
@@ -112,7 +72,7 @@ export type TraceFoldRow =
 
 /** One category's share of a folded run. */
 export interface TraceFoldTally {
-	category: TraceFoldCategory;
+	category: ToolCategory;
 	count: number;
 }
 
@@ -320,7 +280,7 @@ type CopyKey = Parameters<Translator["t"]>[0];
  * named category it has to be "used 2 *other* tools" or the reader is invited to
  * wonder whether the notes it just read were tools as well.
  */
-const CATEGORY_KEYS: Readonly<Record<TraceFoldCategory, { one: CopyKey; many: CopyKey }>> = {
+const CATEGORY_KEYS: Readonly<Record<ToolCategory, { one: CopyKey; many: CopyKey }>> = {
 	write: { one: "traceFold.writeOne", many: "traceFold.writeMany" },
 	web: { one: "traceFold.webOne", many: "traceFold.webMany" },
 	subagent: { one: "traceFold.subagentOne", many: "traceFold.subagentMany" },
@@ -364,7 +324,7 @@ function sentenceCase(text: string): string {
 }
 
 function tallyCalls(rows: readonly TraceFoldRow[]): TraceFoldTally[] {
-	const counts = new Map<TraceFoldCategory, number>();
+	const counts = new Map<ToolCategory, number>();
 	for (const row of rows) {
 		if (row.kind !== "call") {
 			continue;

@@ -4,7 +4,6 @@ import type { AssistantMessage, ToolCall, ToolResultMessage } from "@earendil-wo
 import { getT } from "../i18n";
 import {
 	blockIsVisible,
-	categorizeTool,
 	describeTraceFold,
 	planTraceFolds,
 	traceFoldSlot,
@@ -16,32 +15,6 @@ import { planToolPairs } from "./toolPair";
 
 const en = getT("en");
 const zh = getT("zh-cn");
-
-describe("categorizeTool", () => {
-	it("groups the vault tools by what the reader would say they did", () => {
-		expect(categorizeTool("read")).toBe("read");
-		expect(categorizeTool("get_note_links")).toBe("read");
-		expect(categorizeTool("grep")).toBe("search");
-		expect(categorizeTool("ls")).toBe("search");
-		expect(categorizeTool("edit")).toBe("write");
-		expect(categorizeTool("trash_note")).toBe("write");
-		expect(categorizeTool("web_fetch")).toBe("web");
-		expect(categorizeTool("spawn_subagent")).toBe("subagent");
-	});
-
-	// It rides the editor rather than the vault API, which is why the plugin files
-	// it with the screen tools — but what it does to the reader's note is write to
-	// it, and that is what the folded line is reporting.
-	it("counts an insert at the cursor as a change to the note", () => {
-		expect(categorizeTool("insert_at_cursor")).toBe("write");
-	});
-
-	it("falls back to the honest bucket for a tool it has never been taught", () => {
-		expect(categorizeTool("mcp__linear__create_issue")).toBe("other");
-		expect(categorizeTool("notify")).toBe("other");
-		expect(categorizeTool("list_tasks")).toBe("other");
-	});
-});
 
 describe("planTraceFolds", () => {
 	it("folds a run of calls and their results into one group anchored at the first call", () => {

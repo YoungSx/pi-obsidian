@@ -15,6 +15,7 @@ import { useT } from "./TranslatorContext";
 import type { Translator } from "../i18n";
 import { suppressOwnTooltip } from "./tooltipSuppression";
 import { IconButton, ObsidianIcon } from "./ObsidianIcon";
+import { GENERIC_TOOL_ICON, toolIcon } from "./toolCatalog";
 import { countDiffLines, describePendingTool, describeTool, isToolIdentifier, summarizeToolPayload, summarizeToolResult } from "./traceSummary";
 import { DEFAULT_TRACE_EXPAND, traceOpensByDefault, type TraceExpandSetting } from "./traceExpand";
 import { AskUserCard, AskUserReceipt } from "./AskUserCard";
@@ -1375,9 +1376,9 @@ function Trace({ icon, name, detail, className, nameIsIdentifier = false, body, 
  * rows inside its body, from calls belonging to messages other than the one
  * being rendered — so the row cannot be a closure over the turn it came from.
  *
- * `live` spins the icon instead of settling on the wrench, so "the turn is
- * working" reads one way everywhere machine traffic appears. Always false
- * inside a fold: a running call is never folded.
+ * `live` spins the icon instead of settling on the tool's own glyph, so "the
+ * turn is working" reads one way everywhere machine traffic appears. Always
+ * false inside a fold: a running call is never folded.
  */
 /**
  * One tool invocation, as one row.
@@ -1390,7 +1391,9 @@ function Trace({ icon, name, detail, className, nameIsIdentifier = false, body, 
  *
  * `result` is the message that answered this call, or `null` while the tool is
  * still out — which is also what a row looks like when the turn was interrupted
- * before the result arrived. That is the only state the wrench is left to mean.
+ * before the result arrived. `circle-slash` is what that state gets: asked and
+ * never answered, the same glyph the transcript already uses for a reply the
+ * reader stopped.
  *
  * A row that has its result wears `--result` so it keeps the height bound on its
  * body: the call's own payload is a few lines of JSON, but a grep's output is not,
@@ -1428,7 +1431,7 @@ function ToolCallTrace({
 	) : null;
 	return (
 		<Trace
-			icon={traceIcon(live, result)}
+			icon={traceIcon(call.name, live, result)}
 			name={describeTool(call.name, showDetails, context.t)}
 			nameIsIdentifier={isToolIdentifier(call.name, showDetails)}
 			detail={pairedDetail(call, result, diff, context.t)}
@@ -1447,20 +1450,24 @@ function ToolCallTrace({
 }
 
 /**
- * The status glyph, which is the whole reason one row beats two.
+ * The one glyph a tool row gets, spent on whichever of two questions is open.
  *
- * A wrench says a call was made, which the row's own text already said. These
- * four states are what the reader actually asks of a tool row, and the paired row
- * can answer all of them where the call row could answer none.
+ * Three states outrank the tool's identity, because each is something the
+ * reader has to act on: it is still going, it never came back, it broke. A row
+ * that did none of those is a row that worked — and "it worked" is the default
+ * a tick spent the slot restating, while the sentence beside it already said
+ * so. So a settled, successful row gives the slot back to the tool, which is
+ * the one thing about it the row was never able to show: reading a note and
+ * trashing one used to be the same picture.
  */
-function traceIcon(live: boolean, result: ToolResultMessage | null): IconName {
+function traceIcon(name: string, live: boolean, result: ToolResultMessage | null): IconName {
 	if (live) {
 		return "loader-circle";
 	}
 	if (!result) {
-		return "wrench";
+		return "circle-slash";
 	}
-	return result.isError ? "alert-triangle" : "check";
+	return result.isError ? "alert-triangle" : toolIcon(name);
 }
 
 /** Modifier classes for a paired row: the body bound, the failure tint, the spinner. */
@@ -1544,7 +1551,7 @@ function ToolResultTrace({ message, context }: { message: ToolResultMessage; con
 			open={traceOpensByDefault(context.traceExpand, "toolResult", diff !== null)}
 		>
 			<summary className="piem-chat__trace-summary">
-				<ObsidianIcon name={message.isError ? "alert-triangle" : "check"} className="piem-chat__trace-icon" />
+				<ObsidianIcon name={message.isError ? "alert-triangle" : toolIcon(message.toolName)} className="piem-chat__trace-icon" />
 				<span className={traceNameClass(isToolIdentifier(message.toolName, context.showAgentDetails))}>
 					{describeTool(message.toolName, context.showAgentDetails, context.t)}
 				</span>
@@ -1578,7 +1585,7 @@ function ToolResultTrace({ message, context }: { message: ToolResultMessage; con
 function FoldedTrace({ group, context }: { group: TraceFoldGroup; context: MessageContext }): React.JSX.Element {
 	return (
 		<Trace
-			icon="wrench"
+			icon={GENERIC_TOOL_ICON}
 			name={describeTraceFold(group.tallies, context.t)}
 			className="piem-chat__trace--fold"
 			/*
