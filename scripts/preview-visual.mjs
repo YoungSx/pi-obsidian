@@ -392,19 +392,26 @@ SCENARIOS["chat-conversation"] = async () => {
 };
 
 /**
- * The flat trace rows: a tool result with a diff (opens itself), a failing one,
- * and the compaction divider. Seeded through a second session so the shapes do
- * not depend on real tool execution, then reloaded the way a vault restart
- * would — `openSession` is the same path the session picker takes.
+ * The flat trace rows: a paired call (the common shape — call and result as one
+ * row), a result with a diff that opens itself, a failing one, and the
+ * compaction divider. Seeded through a second session so the shapes do not
+ * depend on real tool execution, then reloaded the way a vault restart would —
+ * `openSession` is the same path the session picker takes.
+ *
+ * The tool names are the plugin's real ones. They were invented (`edit_note`,
+ * `web_search`) until the glyph work in the icon audit, which is exactly the
+ * kind of thing this page exists to catch: an id no tool ships falls through
+ * `toolCatalog.ts` to a monospace name and the generic wrench, so the page drew
+ * the fallback on every row and none of the real vocabulary.
  */
 SCENARIOS["chat-traces"] = async () => {
 	const { element, cleanup } = await mountChat({
 		streamFn: scriptedStreamFn([CHIPS_JSON]),
 		drive: async (service, sessionManager) => {
 			const info = await sessionManager.createSession({ provider: "p-deepseek", modelId: "m-deepseek-pro" });
-			const assistant = (text) => ({
+			const assistant = (text, calls = []) => ({
 				role: "assistant",
-				content: [{ type: "text", text }],
+				content: [{ type: "text", text }, ...calls],
 				api: "openai-completions",
 				provider: "deepseek",
 				model: "deepseek-v4-pro",
@@ -413,11 +420,25 @@ SCENARIOS["chat-traces"] = async () => {
 				timestamp: Date.now(),
 			});
 			await sessionManager.appendMessage({ role: "user", content: "Update the reading list", timestamp: Date.now() });
-			await sessionManager.appendMessage(assistant("Updating `Books/Deep Work.md` now."));
+			await sessionManager.appendMessage(
+				assistant("Updating `Books/Deep Work.md` now.", [
+					{ type: "toolCall", id: "tc_read", name: "read", arguments: { path: "Books/Deep Work.md" } },
+				]),
+			);
+			// Answers `tc_read`, so the two draw as one row — the shape the reader
+			// meets most, and the only one that shows a settled tool's own glyph.
+			await sessionManager.appendMessage({
+				role: "toolResult",
+				toolCallId: "tc_read",
+				toolName: "read",
+				content: [{ type: "text", text: "# Deep Work\n\n* *Seeing* — 2025 edition" }],
+				isError: false,
+				timestamp: Date.now(),
+			});
 			await sessionManager.appendMessage({
 				role: "toolResult",
 				toolCallId: "tc_1",
-				toolName: "edit_note",
+				toolName: "edit",
 				content: [{ type: "text", text: "Applied the edit." }],
 				details: { diff: "+  * *The Hero with a Thousand Faces* — chapter 3\n-  ~~old highlight~~\n+  * *Seeing* — 2026 edition" },
 				isError: false,
@@ -426,7 +447,7 @@ SCENARIOS["chat-traces"] = async () => {
 			await sessionManager.appendMessage({
 				role: "toolResult",
 				toolCallId: "tc_2",
-				toolName: "web_search",
+				toolName: "web_fetch",
 				content: [{ type: "text", text: "No results for the quoted phrase." }],
 				isError: true,
 				timestamp: Date.now(),
