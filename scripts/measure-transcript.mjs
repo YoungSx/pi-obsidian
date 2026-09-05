@@ -1,20 +1,38 @@
 /*
- * Asserts the transcript never scrolls sideways, in a real layout engine.
+ * Asserts what the transcript's layout actually comes out as, in a real engine.
  *
  * Sibling of `measure-command-menu.mjs`. The stylesheet tests assert
- * declarations; this asserts the consequence the issue was filed about — that a
- * fenced block, a wide table or a pasted screenshot cannot drag the message
- * column horizontally on a phone. No amount of reading CSS answers that: whether
- * `max-width: 100%` bites depends on whether an ancestor's automatic minimum size
- * already grew, which only a layout engine knows.
+ * declarations; this asserts consequences no amount of reading CSS answers.
+ * Two of them, on one axis each.
  *
- * The two assertions below are not the same check twice:
+ * Horizontally: a fenced block, a wide table or a pasted screenshot must not drag
+ * the message column sideways on a phone. Whether `max-width: 100%` bites depends
+ * on whether an ancestor's automatic minimum size already grew, which only a
+ * layout engine knows. The two checks there are not the same check twice:
  *
  *   - The transcript must not scroll sideways. That is the symptom.
  *   - Every element wider than the panel must sit inside something that scrolls.
  *     That is what stops the fix from being a lie: clipping the transcript with
  *     `overflow-x: hidden` and nothing else would satisfy the first check while
  *     making a wide table permanently unreadable.
+ *
+ * Vertically: the gap between two rows must not depend on how `pi` split the turn
+ * into messages. A turn arrives as prose in an assistant message, a tool result as
+ * a row of its own, the next sentence in another message — and `MessageRow` wraps
+ * the first and third in `article.piem-chat__message` while returning the second
+ * as a bare trace row. Every boundary between them still has to read as one 8px
+ * gap, and the blocks inside one message as 4px.
+ *
+ * This half is here because its faults are invisible in a declaration. What
+ * shipped was an 8px block padding on the article — spacing between rows, spent
+ * inside one, so only the wrapped row kinds had it — plus two edge rules meant to
+ * keep a message from spending margin on its outer faces, which tied the trace
+ * row's own `margin-block` on specificity and lost on source order, 500 lines
+ * apart in the file. Every declaration was correct and every value was the one
+ * intended; the sums were 4px, 20px and 32px depending on which boundary you
+ * looked at, and a folded run closing a turn sat 32px above the reply that
+ * followed it. Nothing but computed geometry catches a rule that is right and
+ * outranked.
  */
 import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
@@ -54,8 +72,42 @@ const panels = JSON.parse(payload.replace(/&quot;/g, '"').replace(/&amp;/g, "&")
  */
 const NARROW_ENOUGH_TO_OVERFLOW = 400;
 
+/*
+ * The whole of the transcript's vertical vocabulary. Three numbers, and two
+ * questions decide which one applies: do these blocks share a message, and does
+ * the conversation change hands between them?
+ *
+ * 4px is what a message hands its own blocks (`.piem-chat__message-content` is
+ * block flow, so a margin); 8px is the column's `gap`, which is all there is
+ * between two rows of one turn now that the article carries no padding; 16px is
+ * that gap plus the margin the user's own turn adds on both faces, the one
+ * boundary in the column that marks meaning rather than delivery. A fourth number
+ * means something has started spending spacing of its own again.
+ */
+const WITHIN_MESSAGE = 4;
+const BETWEEN_ROWS = 8;
+const ACROSS_SPEAKERS = 16;
+
 const failures = [];
 for (const panel of panels) {
+	/*
+	 * Asserted at all three widths, though nothing in the container queries touches
+	 * spacing: that is exactly why it is cheap to check, and a narrow-panel rule
+	 * that started to would be caught the day it landed rather than on a phone.
+	 */
+	for (const step of panel.rhythm ?? []) {
+		const kind = step.withinMessage
+			? { want: WITHIN_MESSAGE, name: "two blocks of one message" }
+			: step.speakerChange
+				? { want: ACROSS_SPEAKERS, name: "a boundary where the speaker changes" }
+				: { want: BETWEEN_ROWS, name: "a boundary between rows of one turn" };
+		if (Math.abs(step.gap - kind.want) > 0.5) {
+			failures.push(`${panel.panel}: ${step.from} → ${step.to} sits ${step.gap}px apart, but ${kind.name} is ${kind.want}px`);
+		}
+	}
+	if ((panel.rhythm ?? []).length === 0) {
+		failures.push(`${panel.panel}: no rhythm pairs were measured — the fixture or its data-rhythm marks went missing, and the vertical half of this harness is asserting nothing`);
+	}
 	if (panel.panelScrollsSideways) {
 		const blame = panel.pushers.map((p) => `${p.case} (${p.scrollWidth}px)`).join(", ") || "unknown";
 		failures.push(`${panel.panel}: the transcript scrolls sideways — ${panel.scrollWidth}px of content in a ${panel.client}px column, pushed by ${blame}`);
@@ -100,7 +152,8 @@ for (const panel of panels) {
 	console.log(
 		`${panel.panel.padEnd(16)} column=${String(panel.client).padStart(3)}px scrollWidth=${String(panel.scrollWidth).padStart(4)}px ` +
 			`overflow-x=${panel.overflowX.padEnd(7)} ${panel.panelScrollsSideways ? "SCROLLS SIDEWAYS" : "holds still"} ` +
-			`contained=${panel.contained.length} reachable=${panel.reachable.filter((b) => b.rightInside).length}/${panel.reachable.length}`,
+			`contained=${panel.contained.length} reachable=${panel.reachable.filter((b) => b.rightInside).length}/${panel.reachable.length} ` +
+			`gaps=${[...new Set((panel.rhythm ?? []).map((r) => `${r.gap}px`))].sort().join("/")}`,
 	);
 }
 
@@ -111,4 +164,8 @@ if (failures.length > 0) {
 	}
 	process.exit(1);
 }
-console.log(`\nall ${panels.length} panel widths hold their column still, and every wide construct stays reachable inside its own scroller`);
+console.log(
+	`\nall ${panels.length} panel widths hold their column still, every wide construct stays reachable inside its own scroller,` +
+		` and the gaps are ${WITHIN_MESSAGE}px inside a message, ${BETWEEN_ROWS}px between rows of a turn,` +
+		` ${ACROSS_SPEAKERS}px where the speaker changes`,
+);
