@@ -17,15 +17,27 @@ URL, an API key, and a wire protocol:
 | `openai-responses` | OpenAI's Responses API and compatible endpoints |
 | `anthropic-messages` | Anthropic's Messages API and compatible endpoints |
 
-Model ids are suggested from a bundled catalog of nine providers — Anthropic,
-DeepSeek, Groq, Mistral, Moonshot, OpenAI, OpenRouter, xAI, Z.AI — and, where
-the endpoint supports listing, fetched live from the provider itself.
+**Presets.** The form's first row fills the base URL and protocol in for sixteen
+known services — Anthropic, OpenAI, Google Gemini, DeepSeek, Groq, Mistral,
+Moonshot, xAI, Z.ai, OpenRouter, MiniMax, Qwen, and the mainland-China sites
+four of them run separately. Every option names the host it reaches, since that
+is what tells a vendor's two services apart. **Custom** leads the list and is
+where a new form opens: a preset is a shortcut, not a gate, and every field it
+writes stays editable afterwards. Picking one never touches your key, and
+editing the URL afterwards moves the row back to Custom rather than leaving a
+label that no longer describes it.
+
+Model ids are suggested by the endpoint itself, wherever it implements listing —
+your own server is a better authority on what it will accept than anything this
+plugin could ship, and the only one that knows about a private gateway. The field
+takes any id you type either way.
 
 **Capability suggestions.** For a known model id the form fills in whether it
 accepts image input, its context window, and its max output, from a live
-[models.dev](https://models.dev) index with a bundled snapshot as fallback.
+[models.dev](https://models.dev) index covering every provider it tracks.
 Anything you set by hand outranks the suggestion and stops it from being
-overwritten again.
+overwritten again, and every control has a working default when the index cannot
+be reached.
 
 **The connection test** probes the endpoint through the transport you selected
 for provider requests — the same channel your chat will ride, not a convenient

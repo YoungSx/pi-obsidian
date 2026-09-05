@@ -17,13 +17,21 @@
 | `openai-responses` | OpenAI 的 Responses API 及兼容端点 |
 | `anthropic-messages` | Anthropic 的 Messages API 及兼容端点 |
 
-模型 id 从内置的九家服务商目录里给出建议——Anthropic、DeepSeek、Groq、
-Mistral、Moonshot、OpenAI、OpenRouter、xAI、Z.AI——如果端点支持列举，也会直接
-从服务商那里实时拉取。
+**预设。** 表单第一行为十六个已知服务填好 base URL 和协议——Anthropic、OpenAI、
+Google Gemini、DeepSeek、Groq、Mistral、Moonshot、xAI、Z.ai、OpenRouter、
+MiniMax、Qwen，以及其中四家单独运营的国内站。每个选项都标出它连的 host，因为那
+才是区分一家厂商两个服务的东西。**自定义**排在最前，也是新表单打开时所在的位
+置：预设是捷径而非门槛，它填的每个字段之后都还能改。选预设不会动你的密钥；之后
+你改了 URL，那一行会退回「自定义」，而不是留下一个已经名不副实的标签。
+
+模型 id 的建议来自端点自己——只要它支持列举。你自己的服务器比这个插件能内置的
+任何东西都更清楚它会接受什么，也是唯一知道私有网关的那个。无论如何，这个字段
+你手打任何 id 都收。
 
 **能力建议。** 对已知的模型 id，表单会自动填上它是否接受图片输入、上下文窗口
-多大、最大输出多少，数据来自 [models.dev](https://models.dev) 的实时索引，内
-置快照兜底。你手填的任何值都优先，并且从此不再被建议覆盖。
+多大、最大输出多少，数据来自 [models.dev](https://models.dev) 的实时索引，覆盖
+它追踪的所有服务商。你手填的任何值都优先，并且从此不再被建议覆盖；索引拉不到时
+每个控件都有能用的默认值。
 
 **连接测试**走的是你为模型请求选择的那条传输通道——也就是你聊天时真正会用的那
 条，而不是一条方便的替代。如果测试走 `fetch` 而聊天走 `requestUrl`，那测的就

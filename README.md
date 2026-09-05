@@ -83,7 +83,7 @@ dreading, coffee is a fair trade.
 | **Skills** | reusable instructions from bundled, from your vault, or from the `~/.pi` folders you already use with pi. Type <kbd>/</kbd> — [write one](docs/extending.md#skills) |
 | **Context that follows you** | the note you have open — path and body — rides along with every turn, and the conversation compacts itself when the window fills |
 | **Actions where you need them** | an empty panel offers first moves shaped by your open note; every reply offers copy, insert at cursor, append to the note, or ask again in place |
-| **Your endpoint, your key** | any OpenAI-compatible or Anthropic-messages base URL, nine providers suggested, capabilities auto-filled — [configure it](docs/settings.md#models) |
+| **Your endpoint, your key** | any OpenAI-compatible or Anthropic-messages base URL, sixteen presets to start from, capabilities auto-filled — [configure it](docs/settings.md#models) |
 | **Images** | paste or drop them into the composer and they ride along |
 | **English & 简体中文** | follows Obsidian's own language, with an override when you want otherwise |
 
