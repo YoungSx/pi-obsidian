@@ -76,6 +76,16 @@ export class ProviderModal extends Modal {
 	private nameText: TextComponent | undefined;
 	private baseUrlText: TextComponent | undefined;
 	private protocolDropdown: DropdownComponent | undefined;
+	/**
+	 * The rows those three components live in, hidden while a preset is selected.
+	 *
+	 * A preset owns its endpoint, so there is nothing to decide in these rows: an
+	 * edited OpenRouter URL is not OpenRouter. Showing them anyway would ask the
+	 * user to read and skip three fields to reach the one thing only they have,
+	 * which is the key. Custom brings them back, still holding whatever the preset
+	 * left there, so taking the endpoint over by hand costs one dropdown change.
+	 */
+	private readonly customOnlyRows: HTMLElement[] = [];
 
 	constructor(options: ProviderModalOptions) {
 		super(options.app);
@@ -115,7 +125,9 @@ export class ProviderModal extends Modal {
 				this.presetDropdown = dropdown;
 			});
 
-		new Setting(contentEl)
+		// The three rows a preset owns. Collected so the preset row can hide them:
+		// see `customOnlyRows`.
+		const nameRow = new Setting(contentEl)
 			.setName(t.t("providerModal.name"))
 			.setDesc(t.t("providerModal.nameDesc"))
 			.addText((text) => {
@@ -129,7 +141,7 @@ export class ProviderModal extends Modal {
 				this.nameText = text;
 			});
 
-		new Setting(contentEl)
+		const baseUrlRow = new Setting(contentEl)
 			.setName(t.t("providerModal.baseUrl"))
 			.setDesc(t.t("providerModal.baseUrlDesc"))
 			.addText((text) => {
@@ -145,7 +157,7 @@ export class ProviderModal extends Modal {
 				this.baseUrlText = text;
 			});
 
-		new Setting(contentEl)
+		const protocolRow = new Setting(contentEl)
 			.setName(t.t("providerModal.protocol"))
 			.setDesc(t.t("providerModal.protocolDesc"))
 			.addDropdown((dropdown) => {
@@ -161,6 +173,10 @@ export class ProviderModal extends Modal {
 				});
 				this.protocolDropdown = dropdown;
 			});
+
+		this.customOnlyRows.length = 0;
+		this.customOnlyRows.push(nameRow.settingEl, baseUrlRow.settingEl, protocolRow.settingEl);
+		this.syncCustomRows();
 
 		// The key row changes shape with the tier: a keychain picker where the
 		// device can delegate, the typed field where it cannot (or collapsed
@@ -247,19 +263,20 @@ export class ProviderModal extends Modal {
 	/**
 	 * Applies a dropdown choice.
 	 *
-	 * Picking "Custom" only moves the marker. Clearing the fields would be a
-	 * destructive answer to a navigational click — and the user who lands there
-	 * after a mis-pick would lose a base URL they had just pasted. The row means
-	 * "this is not one of the presets", which is already true of whatever the
-	 * fields hold.
+	 * Picking a preset writes the three fields it owns and hides their rows: the
+	 * form collapses to the preset, the key, and the test. `setValue` does not fire
+	 * `onChange` in Obsidian's components, so the draft is updated here rather than
+	 * left to a callback that will not run — and there is no loop back into
+	 * {@link syncPresetChoice}.
 	 *
-	 * Picking a preset writes all three fields and their inputs. `setValue` does
-	 * not fire `onChange` in Obsidian's components, so the draft is updated here
-	 * rather than left to a callback that will not run — and there is no loop back
-	 * into {@link syncPresetChoice}.
+	 * Picking Custom reveals the rows and changes nothing else. Clearing them would
+	 * be a destructive answer to a navigational click, and it would defeat the
+	 * point: Custom exists so somebody can take a preset's endpoint over by hand,
+	 * which needs the values still there to edit.
 	 */
 	private choosePreset(id: string): void {
 		this.presetChoice = id;
+		this.syncCustomRows();
 		const preset = findProviderPreset(id);
 		if (!preset) {
 			return;
@@ -273,6 +290,19 @@ export class ProviderModal extends Modal {
 		this.protocolDropdown?.setValue(this.draft.protocol);
 		this.onEdit();
 		this.testRow?.reset();
+	}
+
+	/**
+	 * Shows the three preset-owned rows only while Custom is selected.
+	 *
+	 * A class rather than an inline style, so the one rule lives in `styles.css`
+	 * with everything else that decides what this modal looks like.
+	 */
+	private syncCustomRows(): void {
+		const isCustom = this.presetChoice === CUSTOM_PRESET_ID;
+		for (const row of this.customOnlyRows) {
+			row.toggleClass("piem-settings-modal-row-hidden", !isCustom);
+		}
 	}
 
 	/**
@@ -291,6 +321,7 @@ export class ProviderModal extends Modal {
 		}
 		this.presetChoice = id;
 		this.presetDropdown?.setValue(id);
+		this.syncCustomRows();
 	}
 
 	/** One fresh edit clears the old verdict — it no longer describes this draft. */

@@ -3598,6 +3598,29 @@ button.piem-chat__latest--asking {
 }
 
 /*
+ * Rows a preset owns, while a preset is selected.
+ *
+ * The provider form's name, base URL and protocol are decisions only a
+ * hand-configured endpoint has: picking OpenRouter settles all three, and an
+ * edited OpenRouter URL is no longer OpenRouter. So the form collapses to the
+ * preset, the key, and the connection test, and the user reads two rows instead
+ * of skipping three to reach the one thing only they have.
+ *
+ * `display: none` rather than a visibility or height trick, deliberately: these
+ * rows must leave the focus order too. A hidden-but-tabbable Base URL field
+ * would let a keyboard user edit an endpoint the form is telling them it owns —
+ * and land them on a row they cannot see.
+ *
+ * Scoped to the modal rather than left as a bare class, which also buys the
+ * specificity this needs: Obsidian's own `.setting-item { display: flex }` is a
+ * single class too, so a one-class rule here only wins on stylesheet order — and
+ * order is not something a plugin should be betting on. Two classes win outright.
+ */
+.piem-settings-modal .piem-settings-modal-row-hidden {
+	display: none;
+}
+
+/*
  * Verdict from a connection test, rendered under the row's description.
  *
  * The state is carried by the text colour alone — no fill. This block sits

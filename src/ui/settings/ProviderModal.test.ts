@@ -81,6 +81,21 @@ function type(input: HTMLInputElement, value: string): void {
 }
 
 /**
+ * Whether the settings row a control sits in is hidden.
+ *
+ * Asked through the control rather than by row index, for the same reason
+ * {@link selectOffering} exists: a row inserted above must not silently re-point
+ * the assertion.
+ */
+function isRowHidden(control: HTMLElement): boolean {
+	const row = control.closest(".setting-item");
+	if (!row) {
+		throw new Error("control is not inside a .setting-item row");
+	}
+	return row.classList.contains("piem-settings-modal-row-hidden");
+}
+
+/**
  * The preset row's whole job is to write three fields and then keep telling the
  * truth about them.
  *
@@ -126,14 +141,48 @@ describe("ProviderModal preset row", () => {
 		close();
 	});
 
-	it("keeps a name the user typed", () => {
+	it("takes over a name the user typed, and hides the row that held it", () => {
 		const { content, close } = openForm();
 
 		type(nameInput(content), "Work account");
 		choose(presetSelect(content), "openrouter");
 
-		expect(nameInput(content).value).toBe("Work account");
+		expect(nameInput(content).value).toBe("OpenRouter");
 		expect(baseUrlInput(content).value).toBe("https://openrouter.ai/api/v1");
+		expect(isRowHidden(nameInput(content))).toBe(true);
+		close();
+	});
+
+	it("collapses to preset, key and test once a preset is picked", () => {
+		// The whole point of the row: a preset settles the endpoint, so the three
+		// fields describing it stop asking to be read.
+		const { content, close } = openForm();
+
+		choose(presetSelect(content), "anthropic");
+
+		expect(isRowHidden(nameInput(content))).toBe(true);
+		expect(isRowHidden(baseUrlInput(content))).toBe(true);
+		expect(isRowHidden(protocolSelect(content))).toBe(true);
+		// The key and the preset row itself stay, or there would be nothing to fill.
+		expect(isRowHidden(presetSelect(content))).toBe(false);
+		expect(isRowHidden(inputWithPlaceholder(content, t.t("providerModal.apiKeyPlaceholder")))).toBe(false);
+		close();
+	});
+
+	it("reveals the three rows again on Custom, still holding the preset's values", () => {
+		// Custom is how somebody takes a preset's endpoint over by hand, so the
+		// values have to survive the switch — revealing empty fields would make the
+		// round trip lossy.
+		const { content, close } = openForm();
+
+		choose(presetSelect(content), "anthropic");
+		choose(presetSelect(content), "");
+
+		expect(isRowHidden(nameInput(content))).toBe(false);
+		expect(isRowHidden(baseUrlInput(content))).toBe(false);
+		expect(isRowHidden(protocolSelect(content))).toBe(false);
+		expect(baseUrlInput(content).value).toBe("https://api.anthropic.com");
+		expect(protocolSelect(content).value).toBe("anthropic-messages");
 		close();
 	});
 
@@ -191,6 +240,10 @@ describe("ProviderModal preset row", () => {
 		const { content, close } = openForm(saved);
 
 		expect(presetSelect(content).value).toBe("anthropic");
+		// And opens collapsed, so editing a preset row is "change the key" — the
+		// state it was saved in, not one the user has to re-derive.
+		expect(isRowHidden(baseUrlInput(content))).toBe(true);
+		expect(inputWithPlaceholder(content, t.t("providerModal.apiKeyPlaceholder")).value).toBe("sk-existing");
 		close();
 	});
 
@@ -207,6 +260,12 @@ describe("ProviderModal preset row", () => {
 		const { content, close } = openForm(gateway);
 
 		expect(presetSelect(content).value).toBe("");
+		// Its three fields are the only place its endpoint is written down, so they
+		// have to be on screen.
+		expect(isRowHidden(nameInput(content))).toBe(false);
+		expect(isRowHidden(baseUrlInput(content))).toBe(false);
+		expect(isRowHidden(protocolSelect(content))).toBe(false);
+		expect(baseUrlInput(content).value).toBe("https://gw.example.com/v1");
 		close();
 	});
 

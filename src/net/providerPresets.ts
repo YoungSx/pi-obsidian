@@ -177,33 +177,24 @@ export function matchProviderPreset(baseUrl: string, protocol: WireProtocol): Pr
 	);
 }
 
-/** Whether a name is one this table wrote, and therefore safe to overwrite. */
-function isPresetName(name: string): boolean {
-	return PROVIDER_PRESETS.some((preset) => preset.name === name);
-}
-
 /**
- * A draft with one preset applied.
+ * A draft with one preset applied: name, URL and protocol are the preset's.
  *
- * URL and protocol are replaced outright — that is what was asked for. The name
- * is only replaced when it is not the user's own words: blank, or still the name
- * a previously chosen preset wrote. Someone who typed "Work account" and then
- * switched preset keeps their label; someone flipping between presets sees the
- * name follow, instead of a row called OpenRouter that points at Anthropic.
+ * All three unconditionally, because a preset does not merely pre-fill them — it
+ * owns them. The form hides those rows while a preset is selected, since there is
+ * nothing to decide: an edited OpenRouter URL is not OpenRouter, and a row named
+ * something else that points at Anthropic is a label that lies. So there is no
+ * "the user's own value" here to protect. Someone who does want to name or steer
+ * the endpoint themselves picks Custom, which reveals the three rows still
+ * holding whatever the preset left in them.
  *
- * The credential is deliberately untouched. It is almost certainly wrong for
- * the new endpoint, but clearing a just-pasted key on a stray dropdown change
- * costs more than the stale key does — the connection test says so immediately,
- * and the field is right there.
+ * The credential is deliberately untouched. It is almost certainly wrong for the
+ * new endpoint, but clearing a just-pasted key on a stray dropdown change costs
+ * more than the stale key does — the connection test says so immediately, and the
+ * field is right there.
  */
 export function applyProviderPreset(draft: ProviderConfig, preset: ProviderPreset): ProviderConfig {
-	const name = draft.name.trim();
-	return {
-		...draft,
-		name: name === "" || isPresetName(name) ? preset.name : draft.name,
-		baseUrl: preset.baseUrl,
-		protocol: preset.protocol,
-	};
+	return { ...draft, name: preset.name, baseUrl: preset.baseUrl, protocol: preset.protocol };
 }
 
 /** Looks a preset up by dropdown value; undefined for {@link CUSTOM_PRESET_ID}. */

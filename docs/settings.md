@@ -17,15 +17,19 @@ URL, an API key, and a wire protocol:
 | `openai-responses` | OpenAI's Responses API and compatible endpoints |
 | `anthropic-messages` | Anthropic's Messages API and compatible endpoints |
 
-**Presets.** The form's first row fills the base URL and protocol in for sixteen
-known services — Anthropic, OpenAI, Google Gemini, DeepSeek, Groq, Mistral,
-Moonshot, xAI, Z.ai, OpenRouter, MiniMax, Qwen, and the mainland-China sites
-four of them run separately. Every option names the host it reaches, since that
-is what tells a vendor's two services apart. **Custom** leads the list and is
-where a new form opens: a preset is a shortcut, not a gate, and every field it
-writes stays editable afterwards. Picking one never touches your key, and
-editing the URL afterwards moves the row back to Custom rather than leaving a
-label that no longer describes it.
+**Presets.** Pick one of sixteen known services and the only thing left to enter
+is its API key — the form drops the name, base URL and protocol rows, because the
+preset settles all three. Anthropic, OpenAI, Google Gemini, DeepSeek, Groq,
+Mistral, Moonshot, xAI, Z.ai, OpenRouter, MiniMax, Qwen, and the mainland-China
+sites four of them run separately. Every option names the host it reaches, since
+that is what tells a vendor's two services apart.
+
+**Custom** leads the list and is where a new form opens. It is also how you take
+a preset's endpoint over: switch to Custom and the three rows come back, still
+holding what the preset put there, ready to edit. Typing a preset's own URL into
+a Custom row selects that preset, and editing away from one drops back to
+Custom — the label never describes an endpoint the form is not holding. Picking a
+preset never touches your key.
 
 Model ids are suggested by the endpoint itself, wherever it implements listing —
 your own server is a better authority on what it will accept than anything this

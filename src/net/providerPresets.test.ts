@@ -147,18 +147,23 @@ describe("applyProviderPreset", () => {
 		expect(applied.protocol).toBe("openai-completions");
 	});
 
-	it("lets the name follow when it is still a preset's, so the row never contradicts itself", () => {
+	it("switches every owned field when the preset changes", () => {
 		const anthropic = applyProviderPreset(emptyProviderConfig(), findProviderPreset("anthropic")!);
 		const switched = applyProviderPreset(anthropic, preset!);
 
 		expect(switched.name).toBe("OpenRouter");
+		expect(switched.baseUrl).toBe("https://openrouter.ai/api/v1");
 		expect(switched.protocol).toBe("openai-completions");
 	});
 
-	it("keeps a name the user wrote", () => {
+	it("takes over a name the user wrote, because a preset owns it", () => {
+		// The form hides the name row while a preset is selected, so there is no
+		// user value to protect here — keeping "Work account" over OpenRouter's
+		// endpoint would leave a label nobody could correct without switching to
+		// Custom, which is exactly what someone who wants their own name does.
 		const own: ProviderConfig = { ...emptyProviderConfig(), name: "Work account" };
 
-		expect(applyProviderPreset(own, preset!).name).toBe("Work account");
+		expect(applyProviderPreset(own, preset!).name).toBe("OpenRouter");
 	});
 
 	it("leaves the credential alone", () => {
