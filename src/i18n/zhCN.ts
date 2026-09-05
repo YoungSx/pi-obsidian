@@ -771,6 +771,11 @@ export const zhCN: DeepPartial<EnCopy> = {
 	providerModal: {
 		addTitle: "添加提供方",
 		editTitle: "编辑提供方",
+		// 表单第一行，在它填写的字段之上。「自定义」排在最前，因为那本就是表单打开时的
+		// 状态——要接网关的人不该先划过十六个用不上的厂商，才回到原地。
+		preset: "预设",
+		presetDesc: "为已知提供方填好基础 URL 和协议。其他情况选「自定义」——网关、代理，或自托管服务。",
+		presetCustom: "自定义",
 		name: "名称",
 		nameDesc: "在列出该提供方的地方显示。可选——留空时使用基础 URL。",
 		namePlaceholder: "我的网关",

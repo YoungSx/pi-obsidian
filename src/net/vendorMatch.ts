@@ -47,7 +47,14 @@ export type VendorId =
 	| "minimax";
 
 /**
- * Official API hosts, one entry per vendor endpoint pi-ai ships a default for.
+ * Official API hosts: every endpoint pi-ai ships a default for, plus every host
+ * {@link ./providerPresets} offers as a ready-made configuration.
+ *
+ * The two sources are one table because a mark answers one question — is this
+ * the vendor's own server — and a user who picked a preset must see the same
+ * answer as one who typed the URL themselves. `providerPresets.test.ts` asserts
+ * every preset host resolves here, so adding a preset without its host is a
+ * test failure rather than a silently unmarked row.
  *
  * Keys are compared against the parsed URL's host, lowercased, exact — never
  * `endsWith`, never `includes`, so `api.anthropic.com.evil.example` and an
@@ -66,6 +73,13 @@ const VENDOR_BY_HOST: Record<string, VendorId> = {
 	"api.z.ai": "zai",
 	"open.bigmodel.cn": "zai",
 	"openrouter.ai": "openrouter",
+	// Reached only through the preset table: MiniMax and Qwen ship marks and
+	// model-id rules, but pi-ai carries no provider factory for either, so their
+	// hosts had no entry until a preset started handing them out.
+	"api.minimax.io": "minimax",
+	"api.minimaxi.com": "minimax",
+	"token-plan.ap-southeast-1.maas.aliyuncs.com": "qwen",
+	"token-plan.cn-beijing.maas.aliyuncs.com": "qwen",
 };
 
 /**
