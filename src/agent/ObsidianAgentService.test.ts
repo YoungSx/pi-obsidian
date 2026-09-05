@@ -95,6 +95,16 @@ class MemoryAdapter {
 	async trashLocal(path: string): Promise<void> {
 		this.files.delete(path);
 	}
+
+	/** The atomic publish step pi's `repo.fork` finishes a staged file with. */
+	async rename(path: string, newPath: string): Promise<void> {
+		const file = this.files.get(path);
+		if (!file) {
+			throw new Error(`Missing file: ${path}`);
+		}
+		this.files.delete(path);
+		this.files.set(newPath, { ...file, mtime: Date.now() });
+	}
 }
 
 /** A vault whose OS trash is disabled, so deletion has to reach `.trash`. */
@@ -4037,158 +4047,79 @@ describe("quick-action suggestions", () => {
 });
 
 /**
- * The two-lane comparison of issue #184, driven through the service the panel
- * talks to. What is asserted here is the product's own contract — which branch
- * the transcript reads, what a switch carries and what it must not, what
- * choosing a winner does to the conversation — rather than pi's lane mechanics,
+ * Forking a session from a reply, driven through the service the panel talks
+ * to. What is asserted here is the product's own contract — the new chat
+ * carries the conversation up to the reply, the source is left exactly as it
+ * was, and the panel lands in the copy — rather than pi's fork mechanics,
  * which `ObsidianSessionManager.test.ts` covers.
  */
-describe("A/B lanes", () => {
-	it("reports one lane until a comparison starts", async () => {
+describe("session fork", () => {
+	it("copies the conversation into a new session and opens it", async () => {
 		const service = createService();
-		await service.sendPrompt("First question");
-
-		const snapshot = service.getSnapshot();
-		// An ordinary chat is unchanged by the feature existing: one lane is the
-		// switcher's signal to stay unrendered.
-		expect(snapshot.activeLane).toBe("main");
-		expect(snapshot.lanes.map((lane) => lane.lane)).toEqual(["main"]);
-	});
-
-	it("forks two lanes from a turn and lands on the first", async () => {
-		const service = createService();
-		await service.sendPrompt("Which notes mention pi?");
+		await service.sendPrompt("Original question");
+		const sourcePath = service.getSnapshot().session?.path ?? "";
 		const messages = service.getSnapshot().messages;
 
-		expect(await service.startComparison(messages.length - 1)).toBe(true);
+		expect(await service.forkSessionAt(messages.length - 1)).toBe(true);
 
 		const snapshot = service.getSnapshot();
-		expect(snapshot.lanes).toHaveLength(3);
-		expect(snapshot.activeLane).not.toBe("main");
-		// The forked turn is gone from the working transcript: both lanes are
-		// siblings of it, not continuations, so the question is open to be re-asked.
-		expect(snapshot.messages).toHaveLength(0);
+		expect(snapshot.session?.path).not.toBe(sourcePath);
+		// The copy ends *on* the reply: the fork picks up where the source shows,
+		// so continuing there appends to the exchange rather than redoing it.
+		expect(JSON.stringify(snapshot.messages)).toContain("Original question");
+		expect(snapshot.messages).toHaveLength(messages.length);
+		// The turn after the fork lands only in the copy.
+		await service.sendPrompt("Continued in the fork");
+		expect(JSON.stringify(service.getSnapshot().messages)).toContain("Continued in the fork");
 	});
 
-	it("refuses to fork a turn the log cannot name", async () => {
+	it("leaves the source conversation untouched", async () => {
+		const adapter = new MemoryAdapter();
+		const service = createService(adapter);
+		await service.sendPrompt("Original question");
+		const sourcePath = service.getSnapshot().session?.path ?? "";
+		await service.forkSessionAt(service.getSnapshot().messages.length - 1);
+		await service.sendPrompt("Only in the fork");
+
+		// A fresh service on the source path must read the conversation as it
+		// stood when the fork was taken — not the turn that followed in the copy.
+		const reloaded = createService(adapter);
+		await reloaded.openSession(sourcePath);
+		const source = reloaded.getSnapshot().messages;
+		expect(JSON.stringify(source)).toContain("Original question");
+		expect(JSON.stringify(source)).not.toContain("Only in the fork");
+	});
+
+	it("refuses to fork a reply the log cannot name", async () => {
 		const service = createService();
 		await service.initialize();
 
-		expect(await service.startComparison(0)).toBe(false);
-		expect(service.getSnapshot().activeLane).toBe("main");
+		// No messages yet, so no entry id exists to anchor a fork on.
+		expect(await service.forkSessionAt(0)).toBe(false);
+		expect(service.getSnapshot().session?.path).toBe(service.getSnapshot().session?.path);
 	});
 
-	it("keeps each lane's transcript and continuation separate", async () => {
-		const service = createService();
-		await service.sendPrompt("Original question");
-		const messages = service.getSnapshot().messages;
-		await service.startComparison(messages.length - 1);
-		const [left, right] = service.getSnapshot().lanes.filter((lane) => lane.lane !== "main").map((lane) => lane.lane);
-
-		await service.sendPrompt("Take the cautious route");
-		expect(await service.switchLane(right ?? "")).toBe(true);
-		await service.sendPrompt("Take the bold route");
-
-		// The lane just written to holds only its own turn.
-		expect(JSON.stringify(service.getSnapshot().messages)).toContain("Take the bold route");
-		expect(JSON.stringify(service.getSnapshot().messages)).not.toContain("Take the cautious route");
-		// And switching back finds the other side exactly as it was left.
-		expect(await service.switchLane(left ?? "")).toBe(true);
-		expect(JSON.stringify(service.getSnapshot().messages)).toContain("Take the cautious route");
-		expect(JSON.stringify(service.getSnapshot().messages)).not.toContain("Take the bold route");
-		// Main is untouched throughout, which is what makes the comparison free to
-		// abandon.
-		expect(await service.switchLane("main")).toBe(true);
-		expect(JSON.stringify(service.getSnapshot().messages)).toContain("Original question");
-	});
-
-	it("refuses a switch to a lane that does not exist", async () => {
-		const service = createService();
-		await service.sendPrompt("Anything");
-
-		expect(await service.switchLane("ab-a-9")).toBe(false);
-		expect(service.getSnapshot().activeLane).toBe("main");
-	});
-
-	it("promotes the chosen lane into the conversation and returns to main", async () => {
+	it("keeps the interrupted-run ledger on each session's own main line", async () => {
 		const adapter = new MemoryAdapter();
 		const service = createService(adapter);
 		await service.sendPrompt("Original question");
-		const sessionPath = service.getSnapshot().session?.path ?? "";
-		await service.startComparison(service.getSnapshot().messages.length - 1);
-		const [left, right] = service.getSnapshot().lanes.filter((lane) => lane.lane !== "main").map((lane) => lane.lane);
-		await service.sendPrompt("The winning direction");
-		await service.switchLane(right ?? "");
-		await service.sendPrompt("The losing direction");
+		const sourcePath = service.getSnapshot().session?.path ?? "";
 
-		expect(await service.chooseLane(left ?? "", "keep")).toBe(true);
-
-		const snapshot = service.getSnapshot();
-		expect(snapshot.activeLane).toBe("main");
-		expect(JSON.stringify(snapshot.messages)).toContain("The winning direction");
-		// The winner leaves the switcher too: its content *is* main now, so two
-		// names for one transcript would be the confusing outcome.
-		expect(snapshot.lanes.map((lane) => lane.lane)).toEqual(["main", right ?? ""]);
-		// And the promotion is durable, not a view: reopening the session reads the
-		// chosen transcript as the conversation.
-		const reloaded = createService(adapter);
-		await reloaded.openSession(sessionPath);
-		expect(JSON.stringify(reloaded.getSnapshot().messages)).toContain("The winning direction");
-	});
-
-	it("retires the losing lane when asked to clean up", async () => {
-		const service = createService();
-		await service.sendPrompt("Original question");
-		await service.startComparison(service.getSnapshot().messages.length - 1);
-		const [left, right] = service.getSnapshot().lanes.filter((lane) => lane.lane !== "main").map((lane) => lane.lane);
-		await service.sendPrompt("Winner");
-		await service.switchLane(right ?? "");
-		await service.sendPrompt("Loser");
-
-		expect(await service.chooseLane(left ?? "", "retire")).toBe(true);
-
-		// Nothing but the conversation is left to switch to.
-		expect(service.getSnapshot().lanes.map((lane) => lane.lane)).toEqual(["main"]);
-	});
-
-	it("resets to main and one lane on a new chat", async () => {
-		const service = createService();
-		await service.sendPrompt("Original question");
-		await service.startComparison(service.getSnapshot().messages.length - 1);
-
-		await service.newSession();
-
-		const snapshot = service.getSnapshot();
-		expect(snapshot.activeLane).toBe("main");
-		expect(snapshot.lanes.map((lane) => lane.lane)).toEqual(["main"]);
-	});
-
-	it("writes a comparison lane's turns to its own branch on disk", async () => {
-		const adapter = new MemoryAdapter();
-		const service = createService(adapter);
-		await service.sendPrompt("Original question");
-		const sessionPath = service.getSnapshot().session?.path ?? "";
-		await service.startComparison(service.getSnapshot().messages.length - 1);
-		await service.sendPrompt("Only on this lane");
-
-		// A reload lands on main, which must not have inherited the lane's turn —
-		// the failure mode of a service that tracked the branch in memory only.
-		const reloaded = createService(adapter);
-		await reloaded.openSession(sessionPath);
-		expect(JSON.stringify(reloaded.getSnapshot().messages)).toContain("Original question");
-		expect(JSON.stringify(reloaded.getSnapshot().messages)).not.toContain("Only on this lane");
-		// The lane is still offered, and still holds its turn.
-		const lane = reloaded.getSnapshot().lanes.find((candidate) => candidate.lane !== "main")?.lane ?? "";
-		expect(await reloaded.switchLane(lane)).toBe(true);
-		expect(JSON.stringify(reloaded.getSnapshot().messages)).toContain("Only on this lane");
+		expect(await service.forkSessionAt(service.getSnapshot().messages.length - 1)).toBe(true);
+		// The fork is its own file with its own ledger: every run opened there has
+		// been closed, so a reload has nothing to recover.
+		const forkPath = service.getSnapshot().session?.path ?? "";
+		expect(await openLedger(adapter, forkPath).then((ledger) => ledger.findAllOpenRunOperations())).toEqual(new Map());
+		// And the source's ledger is untouched by the copy.
+		expect(await openLedger(adapter, sourcePath).then((ledger) => ledger.findAllOpenRunOperations())).toEqual(new Map());
 	});
 });
 
 /**
- * Crash recovery, per lane. pi refuses a second open operation on a lane that
- * already has one, so an orphan left on the branch the user was *not* watching
- * would silently make that side of a comparison unable to run — the completeness
- * line issue #184 draws.
+ * Crash recovery. pi refuses a second open operation on a lane that already has
+ * one, so an orphan left behind by a dead process would silently make the
+ * conversation unable to run until it is closed — the completeness line issue
+ * #184 draws, now on the single main line every conversation reads and writes.
  */
 describe("interrupted run recovery", () => {
 	it("offers to continue a run the previous process left open", async () => {
@@ -4226,31 +4157,6 @@ describe("interrupted run recovery", () => {
 		// Only the close was lost. Re-offering would invite a duplicate turn.
 		expect(reloaded.getSnapshot().canResumeInterrupted ?? false).toBe(false);
 		expect(await openLedger(adapter, sessionPath).then((ledger) => ledger.findOpenRunOperations())).toEqual([]);
-	});
-
-	it("recovers an orphan on a comparison lane without disturbing main", async () => {
-		const adapter = new MemoryAdapter();
-		const service = createService(adapter);
-		await service.sendPrompt("Original question");
-		const sessionPath = service.getSnapshot().session?.path ?? "";
-		await service.startComparison(service.getSnapshot().messages.length - 1);
-		const lane = service.getSnapshot().activeLane;
-		const manager = new ObsidianSessionManager(asDataAdapter(adapter), SESSION_DIR, "obsidian-vault:Test");
-		await manager.loadSession(sessionPath);
-		await manager.appendMessage({ role: "user", content: [{ type: "text", text: "Cut off on the lane" }], timestamp: 2 }, lane);
-		await manager.beginRunOperation([], lane);
-
-		const reloaded = createService(adapter);
-		await reloaded.openSession(sessionPath);
-
-		// The panel opens on main, which had no interrupted run: no offer there.
-		expect(reloaded.getSnapshot().activeLane).toBe("main");
-		expect(reloaded.getSnapshot().canResumeInterrupted ?? false).toBe(false);
-		// The offer belongs to the lane it happened on, and appears on switching.
-		expect(await reloaded.switchLane(lane)).toBe(true);
-		expect(reloaded.getSnapshot().canResumeInterrupted).toBe(true);
-		// Closed on its own lane, so that side can run again.
-		expect(await openLedger(adapter, sessionPath).then((ledger) => ledger.findOpenRunOperations(lane))).toEqual([]);
 	});
 
 	it("withdraws the offer when the user sends instead", async () => {

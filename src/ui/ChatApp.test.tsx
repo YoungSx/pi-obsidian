@@ -151,25 +151,13 @@ class FakeAgentService {
 		this.editResends.push({ index, prompt, images });
 		return !this.failSends;
 	}
-	/** Recorded so a test can prove the compare action reached the service. */
-	readonly comparisons: number[] = [];
-	readonly laneSwitches: string[] = [];
-	readonly laneChoices: Array<{ lane: string; losers: "keep" | "retire" }> = [];
+	/** Recorded so a test can prove the fork action reached the service. */
+	readonly forkRequests: number[] = [];
 	readonly resumeCalls: number[] = [];
 	readonly resumeDismissals: number[] = [];
 
-	async startComparison(index: number): Promise<boolean> {
-		this.comparisons.push(index);
-		return true;
-	}
-
-	async switchLane(lane: string): Promise<boolean> {
-		this.laneSwitches.push(lane);
-		return true;
-	}
-
-	async chooseLane(lane: string, losers: "keep" | "retire"): Promise<boolean> {
-		this.laneChoices.push({ lane, losers });
+	async forkSessionAt(index: number): Promise<boolean> {
+		this.forkRequests.push(index);
 		return true;
 	}
 
@@ -830,82 +818,66 @@ describe("ChatApp A/B comparison", () => {
 		] as ChatSnapshot["messages"],
 	};
 
-	const forked: Partial<ChatSnapshot> = {
-		...answered,
-		activeLane: "ab-a-1",
-		lanes: [
-			{ lane: "main", leafId: "e1", retired: false },
-			{ lane: "ab-a-1", leafId: "e1", retired: false },
-			{ lane: "ab-b-1", leafId: "e1", retired: false },
-		],
-	};
-
-	function compareButton(host: HTMLElement): HTMLButtonElement {
-		const button = host.querySelector<HTMLButtonElement>('[aria-label="Compare two ways"]');
+	function forkButton(host: HTMLElement): HTMLButtonElement {
+		const button = host.querySelector<HTMLButtonElement>('[aria-label="Fork a new chat from here"]');
 		if (!button) {
-			throw new Error("compare button did not mount");
+			throw new Error("fork button did not mount");
 		}
 		return button;
 	}
 
-	it("offers the compare action beside the newest reply's regenerate", async () => {
-		// Issue #273: the fork answers "not satisfied with this reply", so it
-		// rides the reply's actions row and shares regenerate's bound — the fork
-		// lands at that turn, so an earlier one would strand every turn between
+	it("offers the fork action beside the newest reply's regenerate", async () => {
+		// Issue #273: the fork answers "carry this exchange onward", so it rides
+		// the reply's actions row and shares regenerate's bound — the fork copies
+		// that turn as it ends, so an earlier one would strand every turn between
 		// it and the tail.
 		mounted = await mountChat({ snapshot: answered });
 
-		expect(compareButton(mounted.host)).toBeDefined();
+		expect(forkButton(mounted.host)).toBeDefined();
 		expect(mounted.host.querySelector('[aria-label="Edit and resend"]')).toBeDefined();
 	});
 
-	it("starts the comparison at the reply that was pressed", async () => {
-		// The button passes the reply's index; the service walks back from it to
-		// the question the fork actually lands on.
+	it("forks at the reply that was pressed, after the confirm dialog", async () => {
+		// The button opens the confirmation first; only its press reaches the
+		// service, with the reply's index.
 		mounted = await mountChat({ snapshot: answered });
 
-		compareButton(mounted.host).click();
+		forkButton(mounted.host).click();
 		await flushRender();
 
-		expect(mounted.service.comparisons).toEqual([1]);
+		// By text rather than class: the composer's send button carries mod-cta too.
+		const confirm = Array.from(document.querySelectorAll<HTMLButtonElement>(".mod-cta")).find(
+			(button) => button.textContent === "Fork",
+		);
+		expect(confirm?.textContent).toBe("Fork");
+		confirm?.click();
+		await flushRender();
+
+		expect(mounted.service.forkRequests).toEqual([1]);
 	});
 
-	it("hides the compare action while a turn is in flight", async () => {
-		// It rewrites which branch the next turn lands on; queueing that behind a
-		// running reply would file the reply against a branch the reader left.
+	it("reaches the service only once the dialog is confirmed", async () => {
+		mounted = await mountChat({ snapshot: answered });
+
+		forkButton(mounted.host).click();
+		await flushRender();
+
+		// Cancelling leaves the conversation alone.
+		const cancel = Array.from(document.querySelectorAll<HTMLButtonElement>("button")).find(
+			(button) => button.textContent === "Cancel",
+		);
+		cancel?.click();
+		await flushRender();
+
+		expect(mounted.service.forkRequests).toEqual([]);
+	});
+
+	it("hides the fork action while a turn is in flight", async () => {
+		// It swaps which session the panel is writing to; queueing that behind a
+		// running reply would file the reply against a chat the reader left.
 		mounted = await mountChat({ snapshot: { ...answered, isStreaming: true } });
 
-		expect(mounted.host.querySelector('[aria-label="Compare two ways"]')).toBeNull();
-	});
-
-	it("shows no switcher until a comparison exists", async () => {
-		mounted = await mountChat({ snapshot: answered });
-
-		expect(mounted.host.querySelector(".piem-chat__lane-switcher")).toBeNull();
-	});
-
-	it("shows the branch on screen once forked", async () => {
-		mounted = await mountChat({ snapshot: forked });
-
-		expect(mounted.host.querySelector(".piem-chat__lane-switcher-name")?.textContent).toBe("Option A");
-	});
-
-	it("carries the draft per branch, not per chat", async () => {
-		// The A/B case of issue #184: one session, two writable branches. A
-		// half-written question for one side must not surface in the other's
-		// composer — the same isolation keying on the session gave chats.
-		mounted = await mountChat({ withDraftStore: true, snapshot: forked });
-		await typeDraft(composer(mounted.host), "Cautious phrasing");
-
-		mounted.service.emit({ activeLane: "ab-b-1" });
-		await flushRender();
-
-		expect(composer(mounted.host).value).toBe("");
-		await typeDraft(composer(mounted.host), "Bold phrasing");
-		mounted.service.emit({ activeLane: "ab-a-1" });
-		await flushRender();
-		// Switching back finds the outgoing branch's words where they were left.
-		expect(composer(mounted.host).value).toBe("Cautious phrasing");
+		expect(mounted.host.querySelector('[aria-label="Fork a new chat from here"]')).toBeNull();
 	});
 });
 

@@ -18,8 +18,7 @@ import { countRunSteps } from "./chatStatus";
 import { ContextGauge } from "./ContextGauge";
 import { contextLevel } from "./headerCopy";
 import { ContextRow } from "./ContextRow";
-import { LaneSwitcher } from "./LaneSwitcher";
-import { openChooseLane } from "./chooseLaneModal";
+import { openForkConfirm } from "./forkConfirmModal";
 import { SubagentEntryIcon } from "./SubagentEntryIcon";
 import { MessageList } from "./MessageList";
 import { ModelSwitcher } from "./ModelSwitcher";
@@ -65,11 +64,11 @@ interface ChatAppProps {
 
 export function ChatApp({ service, inputController, component, draftStore, onOpenSubagents, askUserBroker }: ChatAppProps): React.JSX.Element {
 	const [snapshot, setSnapshot] = useState<ChatSnapshot>(() => service.getSnapshot());
-	// Keyed by session *and* lane: an A/B comparison has two writable branches at
-	// once, and a half-written question for one side must not surface in the
-	// other's composer. `draftKey` keeps the main lane on the bare session id, so
-	// drafts written before lanes existed are still found.
-	const draftScope = snapshot.session ? draftKey(snapshot.session.id, snapshot.activeLane) : undefined;
+	// Keyed by session: a half-written question belongs to the chat it was typed
+	// in, not to whatever is on screen when the reader comes back. `draftKey`
+	// keeps a main-lane scope on the bare session id, so drafts written while
+	// lane switching existed are still found.
+	const draftScope = snapshot.session ? draftKey(snapshot.session.id) : undefined;
 	const { draft: input, setDraft: setInput, clearDraft } = useSessionDraft(draftStore, draftScope);
 	const [sessions, setSessions] = useState<ActiveSessionInfo[]>([]);
 	const [isInitializing, setIsInitializing] = useState(true);
@@ -375,34 +374,25 @@ export function ChatApp({ service, inputController, component, draftStore, onOpe
 	}, [snapshot.canResumeInterrupted, snapshot.isStreaming, snapshot.isCompacting, snapshot.isRewinding, service]);
 
 	/*
-	 * Starting a comparison empties the composer's staged images: the fork lands
-	 * on a branch where the turn they were staged for no longer exists, so
-	 * carrying them would attach them to whatever the reader types next.
+	 * Forking a session hands the index the reply row pinned, and the confirm
+	 * modal does the gate-keeping. Armed edits let go: after the fork opens the
+	 * new chat, the index they stood for names a different transcript. Staged
+	 * images go too — the fork switches this panel to a new chat, and pictures
+	 * gathered for the old one must not ride along into whatever is typed next.
 	 */
-	const handleCompare = useCallback(
+	const handleFork = useCallback(
 		(index: number): void => {
-			setEditArmed(null);
-			setPendingImages([]);
-			void service.startComparison(index);
+			openForkConfirm(app, {
+				t: getT(snapshot.language),
+				onConfirm: () => {
+					setEditArmed(null);
+					setPendingImages([]);
+					return service.forkSessionAt(index).then(() => undefined);
+				},
+			});
 		},
-		[service],
+		[app, service, snapshot.language],
 	);
-
-	/*
-	 * Choosing a winner asks about the losing branch first — see
-	 * `openChooseLane`, whose two buttons *are* the two outcomes. Armed edits let
-	 * go: the index they stood for belongs to the branch being left behind.
-	 */
-	const handleChooseLane = useCallback((): void => {
-		const lane = snapshot.activeLane;
-		openChooseLane(app, {
-			t: getT(snapshot.language),
-			onChoose: (losers) => {
-				setEditArmed(null);
-				return service.chooseLane(lane, losers).then(() => undefined);
-			},
-		});
-	}, [app, service, snapshot.activeLane, snapshot.language]);
 
 	/*
 	 * Whether an armed edit still names its turn. A session switch leaves the
@@ -688,9 +678,7 @@ export function ChatApp({ service, inputController, component, draftStore, onOpe
 					onEditMessage={
 						snapshot.isStreaming || snapshot.isCompacting || snapshot.isRewinding ? undefined : handleEditMessage
 					}
-					onCompare={
-						snapshot.isStreaming || snapshot.isCompacting || snapshot.isRewinding ? undefined : handleCompare
-					}
+					onFork={snapshot.isStreaming || snapshot.isCompacting || snapshot.isRewinding ? undefined : handleFork}
 					app={app}
 					component={component}
 					sourcePath={sourcePath}
@@ -750,15 +738,6 @@ export function ChatApp({ service, inputController, component, draftStore, onOpe
 							// defers the choice until the run lands.
 							target={snapshot}
 							onSelect={(level) => void service.setThinkingLevel(level)}
-						/>
-					}
-					laneSwitcher={
-						<LaneSwitcher
-							lanes={snapshot.lanes}
-							activeLane={snapshot.activeLane}
-							onSwitch={(lane) => void service.switchLane(lane)}
-							onChoose={handleChooseLane}
-							isBusy={snapshot.isStreaming || snapshot.isCompacting || snapshot.isRewinding}
 						/>
 					}
 					pendingImages={pendingImages}
