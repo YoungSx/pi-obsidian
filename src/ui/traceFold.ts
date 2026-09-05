@@ -2,6 +2,7 @@ import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import type { AssistantMessage, ToolCall, ToolResultMessage } from "@earendil-works/pi-ai";
 import type { Translator } from "../i18n";
 import { ASK_USER_TOOL } from "./askUserRecord";
+import { EMPTY_TOOL_PAIR_PLAN, pairedResult, resultIsPaired, type ToolPairPlan } from "./toolPair";
 import type { TraceExpandSetting } from "./traceExpand";
 
 /**
@@ -176,6 +177,18 @@ export interface TraceFoldOptions {
 	 * without bound.
 	 */
 	liveRow?: TraceRowRef | null;
+	/**
+	 * Which result answered which call, so a call whose result failed can break the
+	 * run the same way the failure itself does.
+	 *
+	 * A failed result has always interrupted a fold — a row the reader must not have
+	 * to open to see cannot be folded away. That was enough while the two halves of
+	 * an invocation were two rows: the result broke the run and drew itself. Now that
+	 * the call draws the result (see `toolPair.ts`), a run that swallowed the call
+	 * would swallow the failure with it, and the one row the fold rules exist to keep
+	 * out would be the one row inside it that mattered.
+	 */
+	pairs?: ToolPairPlan;
 }
 
 /**
@@ -221,7 +234,12 @@ export function planTraceFolds(messages: readonly AgentMessage[], options: Trace
 				 * above, and it must break the run rather than join it — the payload
 				 * that mode exists to show is the whole reason the row is on screen.
 				 */
-				if (block.type !== "toolCall" || block.name === ASK_USER_TOOL || isLiveRow(options.liveRow, index, blockIndex)) {
+				if (
+					block.type !== "toolCall" ||
+					block.name === ASK_USER_TOOL ||
+					isLiveRow(options.liveRow, index, blockIndex) ||
+					pairedResult(options.pairs ?? EMPTY_TOOL_PAIR_PLAN, index, blockIndex)?.isError
+				) {
 					flush();
 					return;
 				}
@@ -231,6 +249,16 @@ export function planTraceFolds(messages: readonly AgentMessage[], options: Trace
 			return;
 		}
 		if (message.role === "toolResult") {
+			/*
+			 * Transparent, like a suppressed `ask_user` call: its own call row draws it
+			 * (see `toolPair.ts`), so it is not a row here to fold or to break a run
+			 * with. Left in the run it would be counted as a row the fold swallowed and
+			 * could become the run's *head* — the position the summary draws at — which
+			 * is a position nothing occupies, so the whole run would vanish.
+			 */
+			if (resultIsPaired(options.pairs ?? EMPTY_TOOL_PAIR_PLAN, index)) {
+				return;
+			}
 			if (message.isError || message.toolName === ASK_USER_TOOL) {
 				flush();
 				return;
