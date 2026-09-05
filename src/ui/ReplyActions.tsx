@@ -34,9 +34,10 @@ interface ReplyActionsProps {
 	onRetry?: () => void;
 	/**
 	 * Forks a new chat that carries everything up to and including this reply.
-	 * Shares {@link onRetry}'s bound — the same newest-reply gate, the same
-	 * in-flight gate — because it too assumes a settled turn, and it sits beside
-	 * that button so the two ways out of a turn read together.
+	 * Carries {@link onRetry}'s gates — the same newest-reply one, the same
+	 * in-flight one — because it sits beside that button, so the two ways out of
+	 * a turn read together. Only the in-flight half is a real constraint on
+	 * forking; the copy itself would be just as sound from an earlier reply.
 	 */
 	onFork?: () => void;
 	/**

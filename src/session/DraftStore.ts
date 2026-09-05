@@ -15,26 +15,19 @@ import { NOOP_LOGGER, type LoggerLike } from "../logging/Logger";
  * Drafts live in their own file rather than in plugin settings: they change on
  * a keystroke cadence, and `saveSettings` re-seals API keys and refreshes the
  * agent configuration on every call.
+ *
+ * One key per chat: the session's own id, verbatim. The A/B comparison of issue
+ * #184 briefly needed more — one session held two writable branches, and a
+ * half-written question for one side must not appear in the other's composer —
+ * so a branch other than main took a `#lane` suffix through a `draftKey` helper.
+ * Forking mints a whole session now, each with its own id, so one session is one
+ * composer again and nothing composes a key. Suffixed keys an older release
+ * left in the file are simply never read; {@link MAX_DRAFTS} eviction retires
+ * them.
  */
 
 /** How long typing must pause before a draft is written. */
 const WRITE_DEBOUNCE_MS = 700;
-
-/**
- * The key one composer's text is filed under.
- *
- * A session id alone stopped being enough with the A/B comparison of issue #184:
- * a session can hold several writable branches at once, and a half-written
- * question for one side must not appear in the other's composer — the same
- * mistake, one level down, that keying on the session fixed for chats.
- *
- * The main lane keeps the bare session id so drafts written before lanes
- * existed are still found: the stored file is the compatibility surface, and a
- * suffix on every key would silently drop every draft on first upgrade.
- */
-export function draftKey(sessionId: string, lane = "main"): string {
-	return lane === "main" ? sessionId : `${sessionId}#${lane}`;
-}
 
 /**
  * Longest draft persisted. A pasted note body can be enormous, and the draft

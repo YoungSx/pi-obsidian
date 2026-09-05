@@ -787,7 +787,7 @@ describe("ChatApp model-suggested quick actions", () => {
 	});
 });
 
-describe("ChatApp A/B comparison", () => {
+describe("ChatApp session fork", () => {
 	let mounted: Mounted | undefined;
 
 	beforeEach(() => {
@@ -828,9 +828,8 @@ describe("ChatApp A/B comparison", () => {
 
 	it("offers the fork action beside the newest reply's regenerate", async () => {
 		// Issue #273: the fork answers "carry this exchange onward", so it rides
-		// the reply's actions row and shares regenerate's bound — the fork copies
-		// that turn as it ends, so an earlier one would strand every turn between
-		// it and the tail.
+		// the reply's actions row beside regenerate and inherits that button's
+		// newest-reply gate.
 		mounted = await mountChat({ snapshot: answered });
 
 		expect(forkButton(mounted.host)).toBeDefined();
@@ -1256,8 +1255,6 @@ function baseSnapshot(): ChatSnapshot {
 		messages: [],
 		isStreaming: false,
 		pendingToolCalls: [],
-		activeLane: "main",
-		lanes: [{ lane: "main", leafId: null, retired: false }],
 		provider: DEFAULT_SETTINGS.provider,
 		modelId: DEFAULT_SETTINGS.modelId,
 		runningModelId: DEFAULT_SETTINGS.modelId,

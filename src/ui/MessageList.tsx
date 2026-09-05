@@ -104,10 +104,12 @@ export interface MessageListProps {
 	/**
 	 * Forks a new chat that carries everything up to the reply at `index`.
 	 *
-	 * Offered on the newest reply, next to {@link onRetry} — both assume a
-	 * settled turn, so both carry the same bound: the fork copies the turn as it
-	 * ends, so on an earlier reply it would strand the turns between it and the
-	 * tail out of the copy. Absent while anything is in flight.
+	 * Offered on the newest reply only, which is where {@link onRetry} sits: the
+	 * fork shares that row rather than that constraint. Copying from an earlier
+	 * reply would be sound — the source keeps every turn it had — so this bound
+	 * is the scope the control was introduced at, not something the copy cannot
+	 * do. Absent while anything is in flight, because the turn it would copy is
+	 * still being written.
 	 */
 	onFork?: (index: number) => void;
 	/** Render context for `MarkdownRenderer.render`; supplied by the view. */
@@ -829,8 +831,8 @@ interface MessageRowProps {
 	/** Opens this question in the composer; supplied only for the newest answered one. */
 	onEdit?: () => void;
 	/**
-	 * Forks a new chat that carries everything up to this reply; same bound as
-	 * {@link onRetry}, and it travels with the reply's own actions row so the
+	 * Forks a new chat that carries everything up to this reply; supplied only
+	 * for the newest one, and it travels with the reply's own actions row so the
 	 * two turn-level controls sit together.
 	 */
 	onFork?: () => void;

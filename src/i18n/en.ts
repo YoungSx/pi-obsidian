@@ -147,8 +147,8 @@ export const en = {
 		 * including that reply, while the conversation it grew from stays as it is.
 		 *
 		 * "Fork" rather than "branch": there is no branching tree to come back to —
-		 * the new chat lives in the session history like any other, and the old one
-		 * is simply left alone.
+		 * the new chat lives in the chat history like any other, and the old one is
+		 * simply left alone.
 		 */
 		forkFromHere: "Fork a new chat from here",
 		/** Title of the dialog confirming the fork. */

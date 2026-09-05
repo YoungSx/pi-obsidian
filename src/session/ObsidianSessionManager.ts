@@ -203,8 +203,19 @@ export class ObsidianSessionManager {
 		});
 		const metadata = await forked.getMetadata();
 		this.hydrated.set(metadata.path, { session: forked, metadata });
-		// A fork is as much a new chat as `createSession` is: retention counts it.
-		await this.evictSurplusSessions(this.resolveSessionDir());
+		// A fork is as much a new chat as `createSession` is: retention counts it,
+		// and the copy has to survive the pass its own creation triggers. Neither
+		// thing that spares a session covers it — focus stays on the source by
+		// contract, and no runtime has claimed the copy yet — and being newest is
+		// not enough: with no slot left for an unclaimed file the cap keeps none of
+		// them, the copy included. So it holds a claim for the length of the sweep,
+		// which is what `createSession` gets for free by moving focus first.
+		this.retainSession(metadata.path);
+		try {
+			await this.evictSurplusSessions(this.resolveSessionDir());
+		} finally {
+			this.releaseSession(metadata.path);
+		}
 		return this.summarize(metadata, forked);
 	}
 
@@ -386,10 +397,12 @@ export class ObsidianSessionManager {
 	 * survives without its finish — is exactly the signature a later load looks
 	 * for via {@link findOpenRunOperations}.
 	 *
-	 * The lane is explicit because an A/B comparison runs each side
-	 * independently: pi refuses a second open operation on a lane that already
-	 * has one, so a ledger that always said `"main"` would let one lane's run
-	 * block the other's and would recover the wrong branch.
+	 * The lane is explicit because pi scopes the refusal to one: a second open
+	 * operation on a lane that already has one is rejected, so the entry has to
+	 * be filed and found under the same name. Only main is written today — the
+	 * A/B comparison that wrote to two at once has retired into session forking —
+	 * but a log from that release can still hold entries on another lane, and
+	 * hard-coding `"main"` would look right up until it read one.
 	 *
 	 * `originalPrompt` is the caller's input as the caller shaped it, pi's
 	 * "normalized caller input" — deliberately not a claim about transcript
@@ -478,9 +491,10 @@ export class ObsidianSessionManager {
 	 * Every lane's unfinished operations, keyed by lane.
 	 *
 	 * Recovery has to sweep the whole session rather than just the lane on
-	 * screen: an A/B comparison leaves two writable branches, and a crash
-	 * during the lane the user was *not* looking at would otherwise leave that
-	 * lane permanently unable to open a run.
+	 * screen. Every conversation reads and writes main now, but the A/B
+	 * comparison that preceded forking left two writable branches, so a log
+	 * written then can hold an orphan on a lane nothing opens anymore — and an
+	 * unswept orphan is a lane, and eventually a file, that never runs again.
 	 */
 	async findAllOpenRunOperations(): Promise<Map<string, OperationStartedRecord[]>> {
 		return this.findAllOpenRunOperationsFor(this.requireActivePath());

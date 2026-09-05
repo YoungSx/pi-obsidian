@@ -159,13 +159,6 @@ describe("icon contrast in the resting state (WCAG 1.4.11)", () => {
 	});
 
 	/*
-	 * The model-switcher test above is the living specimen of this treatment. The
-	 * comparison-branch switcher that once sat beside it in the send bar retired
-	 * with the A/B lanes (the fork is now a confirmed dialog and a new session),
-	 * so its copy of the assertions retired with it.
-	 */
-
-	/*
 	 * Focus and hover are separate rules, not one selector list: the hover half is
 	 * gated on `@media (hover: hover)` (see the touch-hover block below) while the
 	 * focus half has to apply everywhere. Merging them would have swept keyboard

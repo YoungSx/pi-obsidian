@@ -90,10 +90,16 @@ export const zhCN: DeepPartial<EnCopy> = {
 		youStoppedSpoken: "你已停止这条回复。",
 		editMessage: "编辑并重发",
 		editingNotice: "正在编辑上一条提问——发送后将替换这条回复。",
-		/** 从一条回复分叉：复制出一个新会话，原会话原封不动。用「分叉」不用「分支」，因为没有树要回来爬——新会话就在历史列表里，跟别的会话一样。 */
-		forkFromHere: "从此处分叉新会话",
-		forkConfirmTitle: "从此处分叉新的会话？",
-		forkConfirmBody: "新会话会带上到这里为止的全部对话。当前会话原封不动，两个会话随时可以在会话历史里切换。",
+		/**
+		 * 从一条回复分叉：复制出一个新对话，原对话原封不动。用「分叉」不用「分支」，
+		 * 因为没有树要回来爬——新对话就在历史列表里，跟别的对话一样。
+		 *
+		 * 叫「对话」不叫「会话」：面板里每一处都这么叫（新建对话、删除对话、查看历史
+		 * 对话、保留的对话数），两个词指同一样东西时，读者会以为是两样东西。
+		 */
+		forkFromHere: "从此处分叉新对话",
+		forkConfirmTitle: "从此处分叉新的对话？",
+		forkConfirmBody: "新对话会带上到这里为止的全部内容。当前对话原封不动，两个对话随时可以在「历史对话」里切换。",
 		forkConfirmAction: "分叉",
 		editingCancel: "取消编辑",
 		replyTruncated: "这条回复达到模型的长度上限，提前结束了。",
@@ -122,7 +128,7 @@ export const zhCN: DeepPartial<EnCopy> = {
 		branchSummaryFailed: "重试已经发出去了，只是没能为被替换掉的分支生成摘要：{error}",
 		busyTidying: "Piem 正在整理思维。过一会儿再发这条。",
 		busyResending: "Piem 正在重发你的消息。过一会儿再发这条。",
-		forkFailed: "没能从那条回复分叉新会话：{error}",
+		forkFailed: "没能从那条回复分叉新对话：{error}",
 		sessionOpenFailed: "没能打开那个对话：{error}",
 		sessionDeleteFailed: "没能删除那个对话：{error}",
 		you: "你",
