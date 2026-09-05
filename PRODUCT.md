@@ -106,14 +106,21 @@ truthfully copy today:
 - **Real rendered UI, no photography needed:** `scripts/preview-visual.mjs`
   mounts the shipped React components against the shipped `styles.css` and
   writes standalone pages; `scripts/measure-visual.mjs` screenshots them with
-  Chromium. Eight current scenarios (`chat-empty`, `chat-conversation`,
-  `chat-traces`, `chat-streaming`, `chat-error`, `chat-editing`,
-  `subagent-list`, `subagent-detail`). Caveat: the pages render three panel
-  widths side by side for measurement, and carry no Obsidian chrome (no
-  ribbon, no tab bar), so they read as diagnostics rather than product shots.
-- **No real-device screenshots, no demo video, no install counts, no user
-  numbers.** Decided 2026-09-02: the author will capture real Obsidian
-  screenshots; docs and README carry labelled placeholders until then.
+  Chromium. Between them they cover the empty screen, a conversation, trace
+  rows, streaming, a failed turn, a panel blocked on a missing key, an armed
+  edit, the context popover, the three `ask_user` states, both subagent
+  surfaces, and the tidying seam. The list itself lives in that script's
+  `SCENARIOS` and is deliberately not copied here — a second copy goes stale
+  the first time someone adds one. Caveat: most pages render three panel
+  widths side by side for measurement and carry no Obsidian chrome (no ribbon,
+  no tab bar), so they read as diagnostics rather than product shots; the
+  `tidy-seam` page is the exception, a contact sheet across one row's states,
+  both languages and both themes.
+- **Four real captures, from a real vault** (`assets/screenshots/`, embedded in
+  both READMEs): one errand carried out on desktop and again on a phone, plus
+  the transcript alone. Decided 2026-09-02 and shot since. Still absent: a demo
+  video, install counts, user numbers, and a capture of the subagent inspector —
+  `docs/tools.md` carries a labelled placeholder for that one.
 - Must not be invented: download or user counts, benchmarks, latency figures,
   named users, comparative claims against other plugins, or any capability the
   tool list does not contain.

@@ -52,7 +52,7 @@ tidy as a seam you can open to read the summary it wrote.
   step further, into a single row that says what the run did — "changed a note
   and read 5 notes" — with the rows it replaced inside it. A failed call and an
   answered question stay outside the fold: neither should cost a click to see.
-- **Compaction** — the reserve and retention budgets that decide when the
+- **Context tidying** — the reserve and retention budgets that decide when the
   conversation gets summarized to make room. Piem plans against the context
   window you configured for the model.
 - **Chats to keep** — a retention limit. When you start a new chat past the

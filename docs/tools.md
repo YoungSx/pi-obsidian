@@ -107,7 +107,8 @@ keeps working between waits. You can stop a run yourself from the subagent
 panel — the parent is told when that happens.
 
 <!-- SCREENSHOT: subagents.png — the subagent inspector with two or three
-     subagents running. See assets/screenshots/SHOOTING.md -->
+     subagents running. See assets/screenshots/README.md for the widths, theme
+     and conversion this folder expects. -->
 
 ## What the agent cannot do
 
