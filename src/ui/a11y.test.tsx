@@ -169,22 +169,22 @@ describe("ChatComposer accessibility", () => {
 		expect(send?.getAttribute("aria-label")).toBe("Add an API key to send");
 	});
 
-	it("names the streamed phase Stop and routes the draft through the queue entry", async () => {
+	it("names the streamed phase Stop and routes the draft through the mid-run entry", async () => {
 		const host = await renderComposer({ isStreaming: true });
 
 		const stop = host.querySelector<HTMLButtonElement>(".piem-chat__stop-button");
 		expect(stop?.getAttribute("aria-label")).toBe("Stop response");
 		expect(stop?.disabled).toBe(false);
 		// The draft's send path survives the run, but not through a second turn
-		// button: mid-reply queueing lives on the quiet text entry beside the
+		// button: the mid-reply send lives on the quiet text entry beside the
 		// slot, so a screen reader hears two controls with disjoint jobs, not
 		// two buttons both claiming to send.
-		const queue = host.querySelector<HTMLButtonElement>(".piem-chat__queue-button");
+		const queue = host.querySelector<HTMLButtonElement>(".piem-chat__send-now");
 		expect(queue?.getAttribute("aria-label")).toBeNull();
-		expect(queue?.textContent).toBe("Queue draft");
+		expect(queue?.textContent).toBe("Send now");
 	});
 
-	it("withdraws Send during a compaction, which has no run to queue into", async () => {
+	it("withdraws Send during a compaction, which has no run to interrupt", async () => {
 		// The one window where the composer still refuses: a compaction holds
 		// the turn with no run behind it, so there is nothing to steer and a
 		// send would race the compactor. The slot stays, becomes Stop, and says
@@ -193,7 +193,7 @@ describe("ChatComposer accessibility", () => {
 
 		expect(host.querySelector(".piem-chat__stop-button")?.getAttribute("aria-label")).toBe("Stop");
 		expect(host.querySelector(".piem-chat__send-button")).toBeNull();
-		expect(host.querySelector(".piem-chat__queue-button")).toBeNull();
+		expect(host.querySelector(".piem-chat__send-now")).toBeNull();
 	});
 
 	it("keeps the send hint out of any live region, so a settled turn does not re-announce it", async () => {

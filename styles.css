@@ -2825,9 +2825,10 @@ button.piem-chat__latest--asking {
 
 /*
  * Queued mid-run sends, between the composer's notice rows and the textarea.
- * One chip per waiting message, oldest first, each with its own retract
- * button — a queue of three is three decisions, not one. Muted text keeps the
- * row from competing with the running reply it belongs to.
+ * One chip per waiting message, oldest first, each with its own pair of
+ * actions — take back to edit, or discard — because a queue of three is three
+ * decisions, not one. Muted text keeps the row from competing with the running
+ * reply it belongs to.
  */
 .piem-chat__queue {
 	display: flex;
@@ -2858,7 +2859,15 @@ button.piem-chat__latest--asking {
 	margin-inline-start: var(--size-4-1);
 }
 
-.piem-chat__queue-cancel {
+/*
+ * Both chip actions, styled as one: they are the same weight of decision and
+ * sit in the same row, so the pencil must not read as louder than the x. Muted
+ * until hover, like the transcript's own message actions.
+ *
+ * `flex-shrink: 0` is what makes the ellipsis on the text work — without it the
+ * two buttons give up their width first and the row's words never truncate.
+ */
+.piem-chat__queue-action {
 	--icon-color: var(--text-muted);
 	--icon-color-hover: var(--text-normal);
 	flex-shrink: 0;
@@ -2909,13 +2918,13 @@ button.piem-chat__latest--asking {
 }
 
 /*
- * The mid-run queue entry for pointer users. Text, not an icon: an affordance
+ * The mid-run send entry for pointer users. Text, not an icon: an affordance
  * this rare and momentary would spend a glyph the reader first has to learn.
  * Muted by default — it must not pull the eye off the turn slot — and it lifts
  * on hover to admit it is clickable. Obsidian themes every bare `button` as an
  * interactive fill, so the fill, shadow, and border are reset back to text.
  */
-.piem-chat__queue-button {
+.piem-chat__send-now {
 	flex-shrink: 0;
 	min-height: var(--size-4-8);
 	padding-inline: var(--size-4-2);
@@ -2932,7 +2941,7 @@ button.piem-chat__latest--asking {
 /* Hover only: a tap latches :hover on touch, and the entry would read as
  * stuck-activated between taps. */
 @media (hover: hover) {
-	.piem-chat__queue-button:hover {
+	.piem-chat__send-now:hover {
 		color: var(--text-normal);
 		background: var(--background-modifier-hover);
 	}
@@ -3075,7 +3084,7 @@ button.piem-chat__latest--asking {
 	 * above never reaches it. It only appears mid-reply with a draft waiting,
 	 * which on a touch device is exactly the thumb zone.
 	 */
-	.piem-chat__queue-button {
+	.piem-chat__send-now {
 		min-height: var(--size-4-12);
 	}
 
