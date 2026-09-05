@@ -183,3 +183,54 @@ describe("intrinsically sized media comes down to the column", () => {
 		expect(styles).toContain(`.piem-chat__markdown ${tag}`);
 	});
 });
+
+/*
+ * Whether the measurement is looking at the plugin's markup at all.
+ *
+ * `scripts/preview-transcript.mjs` writes its fixtures by hand, so a construct can
+ * be renamed in `styles.css` and in the component while the fixture keeps emitting
+ * the old class. That is not a quiet failure — it is a loud, misdirected one. When
+ * the tidying seam replaced the compaction divider it took `.piem-chat__compaction`
+ * out of the stylesheet and left the fixture naming it, so that fixture's `<pre>`
+ * matched no rule the plugin ships and laid out at browser defaults: the harness
+ * reported the transcript scrolling sideways by 1816px at all three widths, and the
+ * file it pointed at was holding the column still the whole time.
+ *
+ * Pinned from both ends deliberately. Requiring only that the harness name a class
+ * would pass a rename that moved the stylesheet on without it; requiring only the
+ * stylesheet is what every rule above already does. The pair is what makes such a
+ * rename fail here — in a suite CI runs — rather than in a browser run that needs a
+ * Chromium nobody has in CI and a reader to interpret it.
+ *
+ * One entry per subject the rules above take: the two text faces, the seam whose
+ * body carries the height bound the divider used to, and the provider's own words.
+ */
+const MEASURED_CONSTRUCTS = ["piem-chat__markdown", "piem-chat__text", "piem-chat__trace--seam", "piem-chat__cutoff-raw"];
+
+/**
+ * Classes the harness writes into a `class="…"` attribute.
+ *
+ * Attributes rather than every `piem-` mention in the file, so the harness's own
+ * guard list — which names classes as bare strings — cannot satisfy a pin that is
+ * supposed to be about a fixture. Interpolated names (`piem-chat__trace--${variant}`)
+ * are skipped rather than half-matched: their bases are covered by the rows that
+ * spell a class out.
+ */
+function fixtureClasses(harness: string): string[] {
+	const classes = new Set<string>();
+	for (const attribute of harness.matchAll(/class="([^"]*)"/g)) {
+		for (const token of (attribute[1] ?? "").split(/\s+/)) {
+			if (token.startsWith("piem-") && !token.includes("$")) classes.add(token);
+		}
+	}
+	return [...classes];
+}
+
+describe("the harness measures the markup the plugin ships", () => {
+	const harness = readFileSync(new URL("../../scripts/preview-transcript.mjs", import.meta.url), "utf8");
+
+	it.each(MEASURED_CONSTRUCTS)("%s is a class the stylesheet defines and the fixtures wear", (construct) => {
+		expect(styles).toContain(`.${construct}`);
+		expect(fixtureClasses(harness)).toContain(construct);
+	});
+});
