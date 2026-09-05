@@ -6,7 +6,7 @@ import type { ChatSnapshot, ObsidianAgentService } from "../agent/ObsidianAgentS
 import type { SuggestionScope } from "../agent/quickActionSuggestionRequest";
 import type { QuickAction } from "./quickActionSuggestions";
 import type { ActiveSessionInfo } from "../session/ObsidianSessionManager";
-import { draftKey, type DraftStore } from "../session/DraftStore";
+import { type DraftStore } from "../session/DraftStore";
 import { snapshotSubagents, type SubagentSnapshot } from "../subagent/inspectorModel";
 import type { ChatInputController } from "./ChatInputController";
 import { getActiveNotePath } from "./activeNotePath";
@@ -65,10 +65,8 @@ interface ChatAppProps {
 export function ChatApp({ service, inputController, component, draftStore, onOpenSubagents, askUserBroker }: ChatAppProps): React.JSX.Element {
 	const [snapshot, setSnapshot] = useState<ChatSnapshot>(() => service.getSnapshot());
 	// Keyed by session: a half-written question belongs to the chat it was typed
-	// in, not to whatever is on screen when the reader comes back. `draftKey`
-	// keeps a main-lane scope on the bare session id, so drafts written while
-	// lane switching existed are still found.
-	const draftScope = snapshot.session ? draftKey(snapshot.session.id) : undefined;
+	// in, not to whatever is on screen when the reader comes back.
+	const draftScope = snapshot.session?.id;
 	const { draft: input, setDraft: setInput, clearDraft } = useSessionDraft(draftStore, draftScope);
 	const [sessions, setSessions] = useState<ActiveSessionInfo[]>([]);
 	const [isInitializing, setIsInitializing] = useState(true);

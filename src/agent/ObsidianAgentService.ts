@@ -167,15 +167,6 @@ export interface ChatSnapshot {
 	 * "no", the same reading a fresh install has.
 	 */
 	canResumeInterrupted?: boolean;
-	/**
-	 * The lane this transcript belongs to.
-	 *
-	 * `"main"` on every conversation created or opened since the comparison
-	 * feature retired into plain session forking; the field stays because a
-	 * stored log may still carry parked lanes from old sessions, and the
-	 * rewind/append/ledger pipeline is lane-parameterised all the way down to pi.
-	 */
-	activeLane: string;
 	provider: string;
 	modelId: string;
 	/**
@@ -1151,9 +1142,9 @@ export class ObsidianAgentService {
 			const dispatch = stranded.length > 0 ? [...stranded.map((entry) => entry.message), message] : [message];
 			// The ledger entry opens before the run departs: a crash between
 			// this write and the run's own finish is the orphan signature
-			// recovery reads on the next load. Filed against the active lane, so
-			// an A/B side's crash recovers that side rather than whichever one is
-			// on screen later.
+			// recovery reads on the next load. Filed against the lane it departs
+			// on, so recovery reads the entry back where the run left it rather
+			// than against a name assumed later.
 			await this.beginRunOperation(rt, dispatch);
 			if (stranded.length === 0) {
 				await agent.prompt([message]);
@@ -1428,11 +1419,12 @@ export class ObsidianAgentService {
 	 * An open entry means a crash — or a killed Obsidian — cut a run mid-flight.
 	 * pi's storage refuses a second `operation_started` on a lane while one is
 	 * open, so these must close before anything new can depart *on that lane*.
-	 * The sweep covers all of them rather than only the one on screen: an A/B
-	 * comparison leaves two writable branches, and a crash on the lane the user
-	 * was not watching would otherwise leave that side permanently unable to run.
-	 * The close records `aborted`: the run reached no outcome, and neither
-	 * `completed` nor `failed` would be honest.
+	 * The sweep covers every lane rather than the one the panel reads: the A/B
+	 * comparison that once wrote to two at a time is gone, but a log written by
+	 * that release can still carry an orphan on a lane nothing opens anymore, and
+	 * an unswept one is a file that never runs again. The close records `aborted`:
+	 * the run reached no outcome, and neither `completed` nor `failed` would be
+	 * honest.
 	 *
 	 * When the cut run's words are still that lane's transcript tail, the
 	 * continue offer stands for it. pi persists the prompt before streaming
@@ -1708,9 +1700,9 @@ export class ObsidianAgentService {
 	 */
 	private async summarizeAbandonedBranch(rt: SessionRuntime, entryId: string): Promise<AgentMessage | null> {
 		const session = this.sessionManager.getSessionFor(rt.sessionPath);
-		// Lane-scoped: a retry inside a comparison rewinds *that* branch, and the
-		// leaf `collectEntriesForBranchSummary` walks back from has to be the one
-		// the lane is pointing at rather than main's.
+		// Read through the panel's own lane rather than assuming main: the leaf
+		// `collectEntriesForBranchSummary` walks back from has to be the one that
+		// lane points at, which is what makes the rewind rewind this transcript.
 		const oldLeafId = await session.view(rt.activeLane).getLeafId();
 		// No leaf means a fresh log with nothing to abandon; `oldLeafId === entryId`
 		// means the rewind targets the current tip, so there is no fork below it.
@@ -2650,7 +2642,6 @@ export class ObsidianAgentService {
 			supportsImages: modelSupportsImages(model),
 			noticeMessage: rt?.noticeMessage,
 			canResumeInterrupted: rt ? rt.resumableLanes.has(rt.activeLane) : false,
-			activeLane: rt?.activeLane ?? "main",
 			provider: model.provider,
 			modelId: model.id,
 			// What the run in flight actually uses. Mid-run the settings already

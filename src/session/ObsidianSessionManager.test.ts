@@ -347,6 +347,27 @@ describe("ObsidianSessionManager retention", () => {
 		expect(manager.getActiveSessionPath()).toBe(newest);
 	});
 
+	it("never evicts the copy a fork just made", async () => {
+		const adapter = new MemoryAdapter();
+		const manager = new ObsidianSessionManager(
+			adapter as unknown as DataAdapter,
+			mutablePolicy(VAULT_SESSION_DIR, 1),
+			"obsidian-vault:Test",
+		);
+		const source = await createStampedSession(manager, FUTURE_MS);
+
+		// The mirror of the test above, for the other way a chat is minted. At a
+		// cap of 1 the focused source fills the only slot, so nothing unprotected
+		// is spared by being recent — and a fork deliberately leaves focus where
+		// it is. Without a claim of its own the copy would be trashed by the very
+		// sweep its creation triggers, and the panel would open a gone file.
+		const forked = await manager.forkSession(source, await entryIdOfMessage(manager, "Hello"));
+
+		expect(adapter.trashed).not.toContain(forked.path);
+		expect(await adapter.exists(forked.path)).toBe(true);
+		expect(manager.getActiveSessionPath()).toBe(source);
+	});
+
 	it("keeps a claimed session alive across a switch and an eviction sweep", async () => {
 		const adapter = new MemoryAdapter();
 		const manager = new ObsidianSessionManager(

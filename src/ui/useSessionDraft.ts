@@ -11,18 +11,16 @@ export interface SessionDraft {
 }
 
 /**
- * Composer text, scoped to one conversation branch and persisted across reloads.
+ * Composer text, scoped to one conversation and persisted across reloads.
  *
  * The draft used to be plain component state, which lost it whenever the leaf
  * unmounted, and switching chats left it in place — so a half-written question
  * for one conversation could be sent to another. Keying on a scope makes the
  * draft follow the conversation rather than the panel.
  *
- * `scope` is an opaque key from `draftKey`, which composes the session with its
- * lane: an A/B comparison keeps two writable branches at once, and switching
- * between them has to carry each side's unsent text the same way switching chats
- * does. This hook never parses the key — a switch is a switch, whichever level it
- * happened at.
+ * `scope` is the store's key for one composer — the session's own id, as
+ * `DraftStore` records. Opaque here on purpose: this hook never parses it, so a
+ * scope change is a scope change whatever it was derived from.
  *
  * Written on unmount as well as on a pause: teardown cancels the store's
  * debounce, which is precisely the case (closing the panel mid-sentence) that

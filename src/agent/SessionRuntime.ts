@@ -108,7 +108,16 @@ export class SessionRuntime {
 
 	// --- lane state ---
 
-	/** The lane every read and write in this panel is scoped to. */
+	/**
+	 * The lane every read and write in this panel is scoped to.
+	 *
+	 * Always `"main"` since the A/B comparison retired into plain session
+	 * forking, and never leaves the service: pi's session API is
+	 * lane-parameterised at every call the rewind, append, compaction and ledger
+	 * paths make, so the name has to be carried even though only one is in use.
+	 * A stored log may still hold lanes parked by an older release; opening it
+	 * lands on main, which is where that conversation's own history lives.
+	 */
 	activeLane = "main";
 	/**
 	 * The run ledger entry opened for the run in flight, and the lane it was
@@ -173,7 +182,7 @@ export class SessionRuntime {
 	/**
 	 * Abort controller for a branch-summary request in flight, separate from
 	 * {@link compactionController} so cancelling one never cancels the other.
-	 * Doubles as the busy flag the rewind/comparison/lane guards check.
+	 * Doubles as the busy flag the rewind, fork and compaction guards check.
 	 */
 	branchSummaryController: AbortController | null = null;
 	/**

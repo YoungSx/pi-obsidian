@@ -8,7 +8,7 @@ installObsidianStub();
 const document = installDom();
 
 // Dynamic imports so the mocked `obsidian` module wins over any cached real one.
-const { DraftStore, draftKey } = await import("../session/DraftStore");
+const { DraftStore } = await import("../session/DraftStore");
 const { useSessionDraft } = await import("./useSessionDraft");
 const { createRoot } = await import("react-dom/client");
 
@@ -114,37 +114,24 @@ describe("useSessionDraft", () => {
 		expect(await store.get("session-a")).toBe("");
 	});
 
-	it("keeps each comparison lane's unsent text to itself", async () => {
-		// The A/B case of issue #184: two writable branches of one chat, so the
-		// scope changes without the session changing. A half-written question for
-		// one side must not appear in the other's composer — the same isolation
-		// keying on the session gave chats, one level down.
+	it("keeps each chat's unsent text to itself", async () => {
+		// Why the scope exists at all: a half-written question for one chat must
+		// not appear in another's composer, and switching back has to find it
+		// where it was left. Forking makes this the everyday case — the copy is a
+		// new session, so it opens on an empty composer of its own.
 		const store = createStore();
-		const mounted = await mount(store, draftKey("chat-1", "ab-a-1"));
+		const mounted = await mount(store, "chat-1");
 
 		mounted.harness.current.setDraft("Cautious phrasing");
-		await mounted.render(draftKey("chat-1", "ab-b-1"));
+		await mounted.render("chat-2");
 
 		expect(mounted.harness.current.draft).toBe("");
 		mounted.harness.current.setDraft("Bold phrasing");
-		await mounted.render(draftKey("chat-1", "ab-a-1"));
+		await mounted.render("chat-1");
 
-		// Switching back finds the outgoing lane's text where it was left.
 		expect(mounted.harness.current.draft).toBe("Cautious phrasing");
-		await mounted.render(draftKey("chat-1", "ab-b-1"));
+		await mounted.render("chat-2");
 		expect(mounted.harness.current.draft).toBe("Bold phrasing");
-	});
-
-	it("finds a draft written before lanes existed on the main lane", async () => {
-		// The stored file is the compatibility surface: `draftKey` leaves the main
-		// lane on the bare session id precisely so an upgrade does not silently
-		// discard every draft on disk.
-		const store = createStore();
-		await store.set("chat-1", "Typed before the upgrade");
-
-		const mounted = await mount(store, draftKey("chat-1"));
-
-		expect(mounted.harness.current.draft).toBe("Typed before the upgrade");
 	});
 
 	it("holds an empty draft while no chat is active", async () => {

@@ -4093,10 +4093,14 @@ describe("session fork", () => {
 	it("refuses to fork a reply the log cannot name", async () => {
 		const service = createService();
 		await service.initialize();
+		const before = service.getSnapshot().session?.path;
 
 		// No messages yet, so no entry id exists to anchor a fork on.
 		expect(await service.forkSessionAt(0)).toBe(false);
-		expect(service.getSnapshot().session?.path).toBe(service.getSnapshot().session?.path);
+		// A refusal is a no-op, not a half-done fork: the panel is still on the
+		// chat it was on, and no copy was minted for it to land in.
+		expect(service.getSnapshot().session?.path).toBe(before);
+		expect(await service.listSessions()).toHaveLength(1);
 	});
 
 	it("keeps the interrupted-run ledger on each session's own main line", async () => {

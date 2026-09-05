@@ -314,7 +314,6 @@ function snapshot(overrides: Partial<ChatSnapshot> = {}): ChatSnapshot {
 		messages: [],
 		isStreaming: false,
 		pendingToolCalls: [],
-		activeLane: "main",
 		provider: "deepseek",
 		modelId: "deepseek-v4-pro",
 		runningModelId: "deepseek-v4-pro",
