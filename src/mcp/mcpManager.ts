@@ -19,17 +19,21 @@ import { slugifyServerName, type McpServerConfig } from "./mcpConfig";
  *
  * Three deliberate degradations, each disclosed rather than hidden:
  *
- * 1. **GET stream disabled on the buffered transport only.** Streamable HTTP
- *    servers may hold a GET SSE stream open for server→client notifications.
- *    Under Obsidian's `requestUrl` transport nothing is readable until the
- *    response completes, so a stream meant to stay open would never resolve at
- *    all — the SDK reads a 405 on that GET as "no server stream, carry on", and
- *    the fetch handed to the transport short-circuits it with exactly that.
- *    Tool calls (POST) are unaffected. Cost, and only on that transport: no
- *    server push and no `tools/list_changed`, so the list refreshes when
- *    settings are saved. Under the `fetch` transport the stream is left alone
- *    and both come back — the workaround is scoped to the problem it solves,
- *    not applied unconditionally.
+ * 1. **GET stream disabled, and mounting pinned to the buffered transport.**
+ *    Streamable HTTP servers may hold a GET SSE stream open for
+ *    server→client notifications, but mounting always rides `requestUrl`, under
+ *    which nothing is readable until the response completes — a stream meant to
+ *    stay open would never resolve at all. The fetch handed to the transport
+ *    short-circuits that GET with the 405 the SDK already reads as "no server
+ *    stream, carry on", and tool calls (POST) are unaffected. Cost, on every
+ *    transport: no server push and no `tools/list_changed`, so the list
+ *    refreshes when settings are saved.
+ *
+ *    The pin buys reach: a handshake is a few one-shot POSTs that streaming
+ *    buys nothing for, while the buffered stack reaches servers that send no
+ *    CORS headers — the ones a bare `fetch` cannot mount at all. Tool calls
+ *    invert it and follow the user's transport at call time; see
+ *    {@link McpManager.openMountedClient}.
  * 2. **No OAuth flow.** A static bearer token covers the servers a personal
  *    vault realistically talks to; OAuth providers can be added behind the same
  *    `authProvider` seam later.
@@ -108,8 +112,8 @@ interface McpServerEntry {
 	tools: McpTool[];
 	status: McpServerStatus;
 	error?: string;
-	/** The url+token+transport this entry was connected with, for skip-if-unchanged. */
-	connection?: { url: string; token: string; transport: NetworkTransport };
+	/** The url+token this entry was connected with, for skip-if-unchanged. */
+	connection?: { url: string; token: string };
 }
 
 /** Converts a JSON Schema object into the TypeBox type pi's tool signatures use. */
@@ -188,17 +192,16 @@ function uniqueToolName(base: string, taken: ReadonlySet<string>): string {
  * Wraps a fetch so the transport's GET SSE probe always gets the 405 answer
  * that means "no server stream".
  *
- * For the buffered transport only — {@link McpManager.openClient} applies it
- * when the user's transport is `requestUrl` and hands the bare fetch through
- * otherwise. The wrapper exists because `requestUrl` exposes no incremental
- * read, so a GET the server intends to hold open resolves when the server
- * finally closes it, or never; a 405 is the one status the SDK already reads as
- * "this server has no GET stream", which makes it the honest answer to give on
- * behalf of a channel that cannot carry one.
+ * The wrapper exists because the mounting transport — `requestUrl`, always —
+ * exposes no incremental read, so a GET the server intends to hold open
+ * resolves when the server finally closes it, or never; a 405 is the one status
+ * the SDK already reads as "this server has no GET stream", which makes it the
+ * honest answer to give on behalf of a channel that cannot carry one. Since
+ * mounting is pinned to that channel, the wrapper is always on.
  *
- * Everything else — the POSTs that carry the protocol — passes through
- * untouched, so the user's chosen transport stays the one and only outbound
- * channel. Throwing never enters the picture.
+ * Tool calls (POST) pass through untouched — they are the one MCP request
+ * category that still follows the user's transport, and they never carried the
+ * held stream. Throwing never enters the picture.
  */
 export function createNoGetStreamFetch(baseFetch: FetchLike): FetchLike {
 	return async (url, init) => {
@@ -251,15 +254,16 @@ export class McpManager {
 	 * handshake. Passed in rather than read here so this module keeps knowing
 	 * nothing about Obsidian, and so the release version has exactly one home.
 	 *
-	 * `fetchFactory` exists for tests: the transport selection is runtime state,
-	 * but a test has no network to ride, so it injects a fetch double here and
-	 * the manager cannot tell the difference.
+	 * `fetchFactory` exists for tests: which transport answers a request is
+	 * runtime state, but a test has no network to ride, so it injects a fetch
+	 * double here — asked per request category (`requestUrl` for mounting, the
+	 * user's choice for tool calls) — and the manager cannot tell the difference.
 	 */
 	constructor(
 		servers: () => McpServerConfig[],
 		transport: () => NetworkTransport,
 		private readonly pluginVersion: string,
-		private readonly fetchFactory: () => FetchLike = () => createFetchForTransport(transport()),
+		private readonly fetchFactory: (transport: NetworkTransport) => FetchLike = (t) => createFetchForTransport(t),
 	) {
 		this.servers = servers;
 		this.transport = transport;
@@ -324,13 +328,9 @@ export class McpManager {
 	 * the save.
 	 */
 	async testServer(server: McpServerConfig): Promise<number> {
-		const client = await this.openClient(server);
-		try {
-			const { tools } = await withTimeout(client.listTools(), CONNECT_TIMEOUT_MS, "Listing tools");
-			return tools.length;
-		} finally {
-			await this.closeClient(client);
-		}
+		const { client, tools } = await this.openMountedClient(server);
+		await this.closeClient(client);
+		return tools.length;
 	}
 
 	/** Closes every client. Idempotent; safe at plugin unload. */
@@ -341,68 +341,90 @@ export class McpManager {
 	}
 
 	private async connectServer(server: McpServerConfig): Promise<void> {
-		// `connect` runs on every settings save (it is how refreshed tools reach the
-		// agent), so an already-connected server with the same url+token+transport is
+		// `connect` runs on every settings save (it is how refreshed tools reach
+		// the agent), so an already-mounted server with the same url+token is
 		// left alone — name edits need no reconnect either, since tool names are
-		// derived from the live config in `buildAgentTools`. Transport is part of the
-		// key because the client rides the transport it was born on: skipping the
-		// reconnect after a switch would leave calls on the old transport, disagreeing
-		// with what the settings Test button just proved. A failed server is always
-		// retried; that is the only path a temporarily down endpoint recovers on.
+		// derived from the live config in `buildAgentTools`. Transport is not in
+		// the key: the mount is pinned regardless of the setting, and tool calls
+		// re-read it per call, so a switch needs no re-handshake (see
+		// {@link openMountedClient}). A failed server is always retried; that is
+		// the only path a temporarily down endpoint recovers on.
 		const existing = this.entries.get(server.id);
 		if (
 			existing?.status === "ok" &&
 			existing.connection?.url === server.url &&
-			existing.connection?.token === server.token &&
-			existing.connection?.transport === this.transport()
+			existing.connection?.token === server.token
 		) {
 			return;
 		}
 		try {
-			const client = await this.openClient(server);
-			const { tools } = await withTimeout(client.listTools(), CONNECT_TIMEOUT_MS, "Listing tools");
+			const { client, tools } = await this.openMountedClient(server);
 			this.entries.set(server.id, {
 				client,
 				tools,
 				status: "ok",
-				connection: { url: server.url, token: server.token, transport: this.transport() },
+				connection: { url: server.url, token: server.token },
 			});
 			if (existing && existing.client !== client) {
 				await this.closeClient(existing.client);
 			}
 		} catch (error) {
-			// A partial client can exist after a failed listTools; keep it so dispose
-			// still closes its transport, but mark the server failed.
+			// A failed mount leaves no client of its own worth keeping: the caller
+			// closed it, and only a previous entry's client survives here so
+			// dispose still closes it. The server is marked failed either way.
 			this.entries.set(server.id, {
 				client: existing?.client ?? null,
 				tools: [],
 				status: "error",
 				error: error instanceof Error ? error.message : String(error),
-				connection: { url: server.url, token: server.token, transport: this.transport() },
+				connection: { url: server.url, token: server.token },
 			});
 		}
 	}
 
 	/**
-	 * Opens a connected client for `server`.
+	 * Opens a client whose handshake is guaranteed mounted, with the tool list
+	 * the mount served.
 	 *
-	 * Public to tests through {@link testServer}; the returned client is expected
-	 * to be closed by the caller.
+	 * One client, one fetch, two dispatch rules — MCP has no way to tell a
+	 * mounting POST from a tool-call POST after the fact, so the fetch decides
+	 * per request: while `mounted` is false (connect, `tools/list`, the Test
+	 * probe) everything rides the buffered `requestUrl` stack, which reaches
+	 * CORS-less servers and resolves without a held stream; once the handshake
+	 * lands, `mounted` flips and every later POST — the actual tool calls —
+	 * re-reads `this.transport()` at call time, so a settings switch takes
+	 * effect without a reconnect.
+	 *
+	 * The flip waits for a *successful* list on purpose: a mount that failed its
+	 * first list is closed by the caller and never gets to send anything on the
+	 * user's transport. The GET probe is suppressed on both sides of the flip
+	 * (see {@link createNoGetStreamFetch}) — server push was already gone under
+	 * the buffered transport, and a call-time re-handshake on the user's
+	 * transport has no use for a held stream either.
+	 *
+	 * Public to tests through {@link testServer}; the returned client is
+	 * expected to be closed by the caller.
 	 */
-	private async openClient(server: McpServerConfig): Promise<Client> {
-		const baseFetch = this.fetchFactory();
-		// Suppressing the GET stream is a workaround for a buffered transport, so
-		// it applies to exactly that transport. On `fetch` the stream resolves
-		// incrementally like any other, and letting it open is what buys server
-		// push and `tools/list_changed`. See {@link createNoGetStreamFetch}.
-		const clientFetch = this.transport() === "requestUrl" ? createNoGetStreamFetch(baseFetch) : baseFetch;
+	private async openMountedClient(server: McpServerConfig): Promise<{ client: Client; tools: McpTool[] }> {
+		let mounted = false;
+		// Per-request dispatch, in one line: GET never leaves; POSTs ride
+		// `requestUrl` until the mount lands, then the user's transport — read
+		// at call time, so a settings switch applies to the very next call.
+		const dispatch: FetchLike = (url, init) =>
+			createNoGetStreamFetch(this.fetchFactory(mounted ? this.transport() : "requestUrl"))(url, init);
 		const transport = new StreamableHTTPClientTransport(new URL(server.url), {
-			fetch: clientFetch,
+			fetch: dispatch,
 			requestInit: server.token === "" ? undefined : { headers: { Authorization: `Bearer ${server.token}` } },
 		});
 		const client = new Client(mcpClientInfo(this.pluginVersion));
 		await withTimeout(client.connect(transport), CONNECT_TIMEOUT_MS, `Connecting to ${serverLabel(server)}`);
-		return client;
+		const { tools } = await withTimeout(
+			client.listTools(),
+			CONNECT_TIMEOUT_MS,
+			`Listing tools from ${serverLabel(server)}`,
+		);
+		mounted = true;
+		return { client, tools };
 	}
 
 	private async closeClient(client: Client | null): Promise<void> {
