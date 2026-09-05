@@ -1469,7 +1469,11 @@ describe("inspector data", () => {
 		}
 	});
 
-	it("a failed child snapshots its error and an empty process record", async () => {
+	it("a failed child keeps the transcript it died holding, not only its error", async () => {
+		// The whole point of {@link SubagentRunError}: a run that broke partway
+		// still learned something, and both readers of the record need it — the
+		// panel, which would otherwise word a real run as "nothing recorded", and
+		// a follow-up errand, which resumes from exactly this.
 		const extension = createSubagentExtension(
 			{
 				...makeHost(scriptedStreamFn([{ toolCall: { id: "t1", name: "grep" } }, { text: "" }])),
@@ -1483,7 +1487,7 @@ describe("inspector data", () => {
 			const snapshots = snapshotSubagents(extension.registry, Date.now());
 			expect(snapshots[0]!.status).toBe("failed");
 			expect(snapshots[0]!.errorMessage).toContain("vault exploded");
-			expect(snapshots[0]!.messages).toEqual([]);
+			expect(snapshots[0]!.messages.map((message) => message.role)).toEqual(["user", "assistant", "toolResult", "assistant"]);
 			expect(anyRunning(snapshots)).toBe(false);
 		} finally {
 			extension.disposeAll();

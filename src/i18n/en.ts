@@ -1499,7 +1499,7 @@ export const en = {
 		failureLabel: "What went wrong",
 		processCount: "{count} step(s)",
 		processPending: "The transcript is kept when the run ends.",
-		processNone: "Nothing recorded: the run failed before its transcript could be kept.",
+		processNone: "Nothing recorded: the run ended before it did anything.",
 		/** What each transcript step was. */
 		line: {
 			user: "Brief",
