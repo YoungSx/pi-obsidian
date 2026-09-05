@@ -197,6 +197,55 @@ function traceRow(variant, name, detail, body) {
 </details>`;
 }
 
+/**
+ * One assistant turn, split across rows the way `pi` splits it.
+ *
+ * This is the fixture for the *vertical* half of what this page measures, and it
+ * has to be built by hand rather than out of `messageRow` because the shape that
+ * misrendered is specifically a message whose first and last children are trace
+ * rows, followed by a bare trace row, followed by another such message. Three
+ * boundaries, each between a different pair of row kinds, and every one of them
+ * has to come out at the same 8px.
+ *
+ * `data-rhythm` marks the blocks whose spacing is asserted; the page's script
+ * reads consecutive pairs of them and reports each gap along with whether the
+ * pair shares a message. `data-case` stays on the rows for the horizontal checks,
+ * which walk the same markup.
+ */
+function rhythmTurn() {
+	const thinking = (mark) => `<details class="piem-chat__trace piem-chat__trace--thinking" data-rhythm="${mark}">
+		<summary class="piem-chat__trace-summary"><span class="piem-chat__trace-name piem-chat__trace-name--label">Thought it through</span></summary>
+		<div class="piem-chat__trace-body"><pre>weighing two endpoints</pre></div>
+	</details>`;
+	const said = (mark, text) => `<div class="piem-chat__markdown piem-chat__text--prose" data-rhythm="${mark}"><p>${text}</p></div>`;
+	const asked = (mark, text) => `<div class="piem-chat__markdown piem-chat__text--prose" data-rhythm="${mark}"><p>${text}</p></div>`;
+	const fold = (mark) => `<details class="piem-chat__trace piem-chat__trace--fold" data-rhythm="${mark}">
+		<summary class="piem-chat__trace-summary"><span class="piem-chat__trace-name piem-chat__trace-name--label">Fetched 3 pages</span></summary>
+		<div class="piem-chat__trace-body"><div class="piem-chat__trace piem-chat__trace--flat"><span class="piem-chat__trace-name piem-chat__trace-name--identifier">web_fetch</span></div></div>
+	</details>`;
+	return [
+		`<article class="piem-chat__message piem-chat__message--user" data-case="rhythm/asks" aria-label="you">
+	<div class="piem-chat__bubble">
+		<div class="piem-chat__message-content">${asked("asks", "Which endpoint does Cline use?")}</div>
+	</div>
+</article>`,
+		`<article class="piem-chat__message piem-chat__message--assistant" data-case="rhythm/opens" aria-label="assistant">
+	<div class="piem-chat__bubble">
+		<div class="piem-chat__message-content">${thinking("opens/thinking")}${said("opens/prose", "Looking up the endpoint now.")}${fold("opens/fold")}</div>
+	</div>
+</article>`,
+		`<details class="piem-chat__trace piem-chat__trace--result" data-case="rhythm/result" data-rhythm="result">
+	<summary class="piem-chat__trace-summary"><span class="piem-chat__trace-name piem-chat__trace-name--label">Edited a note</span><span class="piem-chat__trace-detail">+8 -0</span></summary>
+	<div class="piem-chat__trace-body"><pre>@@ -1 +1 @@</pre></div>
+</details>`,
+		`<article class="piem-chat__message piem-chat__message--assistant" data-case="rhythm/closes" aria-label="assistant">
+	<div class="piem-chat__bubble">
+		<div class="piem-chat__message-content">${thinking("closes/thinking")}${said("closes/prose", "Written back to the note.")}</div>
+	</div>
+</article>`,
+	];
+}
+
 const rows = [];
 for (const [name, html] of Object.entries(MARKDOWN_CASES)) {
 	rows.push(messageRow("assistant", name, markdownBlock(html)));
@@ -270,6 +319,8 @@ rows.push(`<section class="piem-chat__compaction" data-case="compaction/long">
 	<div class="piem-chat__compaction-heading">Earlier turns were summarized</div>
 	<pre>${LONG_PATH} ${LONG_TOKEN}</pre>
 </section>`);
+
+rows.push(...rhythmTurn());
 
 /*
  * Three panels, each a real leaf.
@@ -391,8 +442,52 @@ for (const leaf of document.querySelectorAll(".harness-leaf")) {
 		reachable.push({ case: row ? row.dataset.case : "(none)", tag: el.tagName.toLowerCase(),
 			rightInside: Math.round(m.right - r.right) >= -1, overhang: Math.round(r.right - m.right) });
 	}
+	/*
+	 * The vertical half. Consecutive data-rhythm blocks, with the gap the engine
+	 * left between them and whether the pair shares a message — which is the only
+	 * thing that should change the answer. Everything else about a boundary (which
+	 * row kinds meet at it, whether either side is wrapped in an article, how pi
+	 * chose to split the turn) must not.
+	 *
+	 * Read off border boxes rather than text boxes on purpose: a trace row is
+	 * padded to a touch target on coarse pointers, and asserting text-to-text
+	 * distance would fold that floor into a spacing number and make the same
+	 * stylesheet measure differently per device.
+	 *
+	 * The third question a boundary can answer is whether the conversation changed
+	 * hands across it — true when exactly one side sits inside the user's turn,
+	 * which is where the transcript is allowed to spend more than a seam.
+	 *
+	 * Which pair of boxes gets measured depends on the answer to the first, and has
+	 * to: inside a message the blocks are what the spacing is between, but across a
+	 * boundary the rows are, and a row can hold its blocks off its own edge. The
+	 * user's turn does exactly that — its bubble is the box with the fill, so it
+	 * carries 8px of padding and a border that are the bubble's inset and not the
+	 * column's spacing. Measuring block-to-block there would read 25px for what the
+	 * eye and the stylesheet both call 16px.
+	 */
+	const marks = [...msgs.querySelectorAll("[data-rhythm]")];
+	const rhythm = [];
+	for (let i = 0; i < marks.length - 1; i++) {
+		const a = marks[i], b = marks[i + 1];
+		const contentOf = (el) => el.closest(".piem-chat__message-content");
+		const asksIn = (el) => el.closest(".piem-chat__message--user") !== null;
+		// The row this block belongs to: the child of the column that contains it,
+		// which for a bare trace row is the block itself.
+		const rowOf = (el) => { let p = el; while (p.parentElement && p.parentElement !== msgs) p = p.parentElement; return p; };
+		const within = contentOf(a) !== null && contentOf(a) === contentOf(b);
+		const [boxA, boxB] = within ? [a, b] : [rowOf(a), rowOf(b)];
+		rhythm.push({
+			from: a.dataset.rhythm,
+			to: b.dataset.rhythm,
+			speakerChange: asksIn(a) !== asksIn(b),
+			withinMessage: within,
+			gap: Math.round((boxB.getBoundingClientRect().top - boxA.getBoundingClientRect().bottom) * 10) / 10,
+		});
+	}
 	out.push({
 		panel: label,
+		rhythm,
 		reachable,
 		width: Number(leaf.dataset.width),
 		client: msgs.clientWidth,
