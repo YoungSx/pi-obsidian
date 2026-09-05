@@ -105,7 +105,7 @@ describe("extensionsDefinitions", () => {
 		expect(lists[1]?.addItem?.name).toBe(en.t("mcp.add"));
 	});
 
-	it("discloses the buffered transport's lack of server push, and only while it is selected", async () => {
+	it("discloses the pinned mount's lack of server push to every reader", async () => {
 		const readNote = (host: SettingsPanelHost): string => {
 			const lists = extensionsDefinitions(host, new SettingsPanelState()).filter(
 				(entry) => (entry as { type?: string }).type === "list",
@@ -116,11 +116,10 @@ describe("extensionsDefinitions", () => {
 		const buffered = stubHost();
 		expect(readNote(buffered)).toContain(en.t("mcp.bufferedNoPush"));
 
-		// On `fetch` the GET stream is left open and push works, so the same line
-		// would be describing a limitation this reader does not have.
+		// Mounting is pinned regardless of the reader's transport, so the same
+		// limitation describes the fetch reader too — only tool calls follow it.
 		const streaming = stubHost({ settings: { ...buffered.settings, networkTransport: "fetch" } });
-		expect(readNote(streaming)).not.toContain(en.t("mcp.bufferedNoPush"));
-		// The unconditional half of the note survives either way.
+		expect(readNote(streaming)).toContain(en.t("mcp.bufferedNoPush"));
 		expect(readNote(streaming)).toContain(en.t("mcp.desc"));
 		await settle();
 	});

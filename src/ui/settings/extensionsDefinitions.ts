@@ -434,10 +434,10 @@ function mcpList(host: SettingsPanelHost): SettingDefinitionItem {
 		items: [
 			sectionNote(
 				t.t("mcp.desc"),
-				// Only while the transport that causes it is the one selected: on
-				// `fetch` the GET stream is left open and push works, so the line
-				// would be describing a limitation the reader does not have.
-				host.settings.networkTransport === "requestUrl" ? t.t("mcp.bufferedNoPush") : undefined,
+				// Unconditional now: mounting is pinned to the buffered transport
+				// regardless of what this reader selected, so the limitation it
+				// describes belongs to every reader (see mcpManager's mount).
+				t.t("mcp.bufferedNoPush"),
 				states.length === 0 ? t.t("mcp.empty") : undefined,
 			),
 			...states.map((state) => mcpRow(host, state)),

@@ -1033,16 +1033,16 @@ export const en = {
 		heading: "MCP servers",
 		desc: "Connect tools served by remote MCP (Model Context Protocol) servers. Their tools appear in chat with an mcp_ prefix; requests leave the vault to the URL you enter.",
 		/**
-		 * Shown only while the buffered transport is selected, because that is the
-		 * only state it describes.
+		 * Shown unconditionally, because mounting is pinned to the buffered
+		 * transport no matter what this reader selected.
 		 *
 		 * The degradation is real and was previously disclosed nowhere a user
-		 * looks — only in a source comment. Naming the transport and the tab it
-		 * lives under makes it actionable rather than merely honest: the reader
-		 * can go turn it off.
+		 * looks — only in a source comment. It no longer tells the reader to
+		 * switch transports: switching changes how tool calls travel, but the
+		 * mount — and with it the lack of push — stays pinned.
 		 */
 		bufferedNoPush:
-			"With the buffered network transport, a server cannot push to you: its tool list refreshes when you save settings, not when the server changes it. Switch the transport to Fetch under Models to get server push back.",
+			"MCP mounting always rides the buffered transport, so a server cannot push to you: its tool list refreshes when you save settings, not when the server changes it.",
 		add: "Add server",
 		edit: "Edit",
 		delete: "Delete",

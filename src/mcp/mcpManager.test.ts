@@ -1,11 +1,22 @@
-import { describe, expect, it, vi } from "bun:test";
+import { afterAll, describe, expect, it, vi } from "bun:test";
 import { installObsidianStub } from "../testUtils/obsidianStub";
+import { stubWindowTimers } from "../testUtils/windowStub";
 import type { McpServerConfig } from "./mcpConfig";
 
 // The manager transitively imports obsidianFetch, which imports Obsidian's
 // API. The stub registers first; the real imports stay dynamic so the mock is
 // in place when the module graph evaluates.
 installObsidianStub();
+
+// The manager arms `window.setTimeout` in its connect timeout wrapper. These
+// tests run without a DOM, so the platform timers go on `window` directly —
+// without this, a solo run of this file red-outs on the first `window.setTimeout`
+// and only passes because some other file installed one first.
+const restoreWindowTimers = stubWindowTimers();
+
+afterAll(() => {
+	restoreWindowTimers();
+});
 
 const { createMcpServerConfig } = await import("./mcpConfig");
 const { createNoGetStreamFetch, McpManager } = await import("./mcpManager");
@@ -72,7 +83,7 @@ type FetchLike = (url: string | URL, init?: RequestInit) => Promise<Response>;
 
 function makeManager(
 	servers: McpServerConfig[],
-	fetchFactory: () => FetchLike,
+	fetchFactory: (transport: "requestUrl" | "fetch") => FetchLike,
 	transport: "requestUrl" | "fetch" = "requestUrl",
 ): InstanceType<typeof McpManager> {
 	return new McpManager(
@@ -113,6 +124,48 @@ function handshakeRecorder(): { methods: string[]; fetch: FetchLike } {
 		});
 	};
 	return { methods, fetch };
+}
+
+/**
+ * One fetch double behind two logs, chosen by which transport the manager asked
+ * for. Serves a full handshake, a tool list, and a tool call on either side, so
+ * a test can read off exactly which transport saw which request. A POST is
+ * logged as its JSON-RPC method when it is a `tools/call` — the one request
+ * whose transport is the whole point of the split.
+ */
+function splitFactory() {
+	const seen = { mount: [] as string[], call: [] as string[] };
+	const factory = (transport: "requestUrl" | "fetch"): FetchLike =>
+		async (url: string | URL, init?: RequestInit): Promise<Response> => {
+			const method = (init?.method ?? "GET").toUpperCase();
+			const body = typeof init?.body === "string" ? init.body : "";
+			const label = body.includes('"method":"tools/call"') ? "tools/call" : method;
+			(transport === "requestUrl" ? seen.mount : seen.call).push(label);
+			if (method === "GET") {
+				return new Response(null, { status: 405 });
+			}
+			if (body.includes('"method":"initialize"')) {
+				return handshakeResponses("session-split")[0]!;
+			}
+			if (body.includes("notifications/initialized")) {
+				return new Response(null, { status: 202 });
+			}
+			if (body.includes('"method":"tools/list"')) {
+				return new Response(
+					JSON.stringify({
+						jsonrpc: "2.0",
+						id: 1,
+						result: { tools: [{ name: "finish", inputSchema: { type: "object" } }] },
+					}),
+					{ status: 200, headers: { "content-type": "application/json" } },
+				);
+			}
+			return new Response(
+				JSON.stringify({ jsonrpc: "2.0", id: 2, result: { content: [{ type: "text", text: "done" }] } }),
+				{ status: 200, headers: { "content-type": "application/json" } },
+			);
+		};
+	return { seen, factory };
 }
 
 describe("createNoGetStreamFetch", () => {
@@ -288,31 +341,22 @@ describe("McpManager", () => {
 		await manager.dispose();
 	});
 
-	it("keeps the GET stream off the wire on the buffered transport", async () => {
-		const server = serverFixture({ name: "buffered", url: "https://b.example.com" });
-		const { methods, fetch } = handshakeRecorder();
-		const manager = makeManager([server], () => fetch, "requestUrl");
-		await manager.connect();
+	it("keeps the GET stream off the wire on every transport, since mounting is pinned", async () => {
+		// The mount always rides the buffered transport, whose fetch cannot
+		// resolve a held stream, so the wrapper short-circuits GET before it
+		// leaves — on both dispatch rules, because it wraps both of them.
+		for (const transport of ["requestUrl", "fetch"] as const) {
+			const server = serverFixture({ name: transport, url: `https://${transport}.example.com` });
+			const { methods, fetch } = handshakeRecorder();
+			const manager = makeManager([server], () => fetch, transport);
+			await manager.connect();
 
-		expect(manager.getServerStates()[0]?.status).toBe("ok");
-		// The wrapper answered the probe itself, so nothing GET-shaped was ever
-		// handed to a transport that could not have resolved it.
-		expect(methods).not.toContain("GET");
-		await manager.dispose();
-	});
-
-	it("lets the GET stream reach a streaming transport", async () => {
-		const server = serverFixture({ name: "streaming", url: "https://s.example.com" });
-		const { methods, fetch } = handshakeRecorder();
-		const manager = makeManager([server], () => fetch, "fetch");
-		await manager.connect();
-
-		expect(manager.getServerStates()[0]?.status).toBe("ok");
-		// The workaround is scoped to the transport that needs it: on `fetch` the
-		// SDK gets to ask for server push, and a 405 back is the server's answer
-		// rather than ours.
-		expect(methods).toContain("GET");
-		await manager.dispose();
+			expect(manager.getServerStates()[0]?.status).toBe("ok");
+			// wrapper-answered, not server-declined: nothing GET-shaped was ever
+			// handed to a transport that could not have resolved it.
+			expect(methods).not.toContain("GET");
+			await manager.dispose();
+		}
 	});
 
 	it("offers the model a timeout dial on every tool, and keeps it off the wire", async () => {
@@ -491,11 +535,12 @@ describe("McpManager", () => {
 		await rotated.dispose();
 	});
 
-	it("re-handshakes when the transport changes even though url and token did not", async () => {
-		// The client rides the transport it was born on. Skipping the reconnect on a
-		// transport switch would leave calls on the old transport — which is how a
-		// server unreachable over `fetch` (CORS) could look "fine" after being
-		// tested on requestUrl and switched back: the cache never re-checked.
+	it("skips the handshake when only the transport changed", async () => {
+		// Mounting is pinned to one transport and tool calls re-read the setting
+		// per call, so nothing transport-dependent remains at connect time — a
+		// switch needs no re-handshake. The old rule (transport in the cache
+		// key) described a client that rode the transport it was born on; that
+		// client is gone.
 		const server = serverFixture({ name: "x", url: "https://x.example.com", token: "t" });
 		let postCount = 0;
 		let currentTransport: "requestUrl" | "fetch" = "requestUrl";
@@ -525,15 +570,38 @@ describe("McpManager", () => {
 		await manager.connect();
 		const afterFirst = postCount;
 
-		// Same url+token, transport flipped: a reconnect, not the skip.
+		// Same url+token, transport flipped: still the skip.
 		currentTransport = "fetch";
 		await manager.connect();
-		expect(postCount).toBeGreaterThan(afterFirst);
+		expect(postCount).toBe(afterFirst);
 
-		// And once settled on the new transport, the skip works there too.
-		const afterSecond = postCount;
+		// And flipping back changes nothing either.
+		currentTransport = "requestUrl";
 		await manager.connect();
-		expect(postCount).toBe(afterSecond);
+		expect(postCount).toBe(afterFirst);
+		await manager.dispose();
+	});
+
+	it("mounts on the buffered transport and lets tool calls follow the setting", async () => {
+		// The split, end to end: with the global setting on `fetch`, the
+		// handshake is logged only on the mount side (the factory never saw
+		// "fetch"), and a `tools/call` is logged only on the call side — the
+		// mount side never serves one.
+		const server = serverFixture({ name: "split", url: "https://sp.example.com" });
+		const { seen, factory } = splitFactory();
+		const manager = makeManager([server], factory, "fetch");
+
+		await manager.connect();
+		expect(seen.call).toEqual([]);
+		expect(seen.mount).toContain("POST");
+		expect(seen.mount).not.toContain("GET");
+
+		const [tool] = manager.buildAgentTools();
+		const result = await tool!.execute("call_1", {}, undefined);
+		expect((result.content[0] as { text: string }).text).toBe("done");
+
+		expect(seen.call).toEqual(["tools/call"]);
+		expect(seen.mount).not.toContain("tools/call");
 		await manager.dispose();
 	});
 });
