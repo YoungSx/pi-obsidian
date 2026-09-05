@@ -44,11 +44,12 @@ export interface SubagentSnapshot {
 	turns?: number;
 	usage?: UsageTotals;
 	/**
-	 * The full transcript as it stood at settlement.
+	 * The child's context as its last run left it.
 	 *
-	 * Empty for a failed run — the failure path throws, and the registry keeps
-	 * the error but not the messages — which the detail page words as "nothing
-	 * recorded" rather than pretending the process was clean.
+	 * Present for a failed run too: the failure carries the transcript out with it,
+	 * so a run that died to a network fault shows every step it had taken rather
+	 * than reading as though nothing happened. Empty only for a run that ended
+	 * before its first turn, which the detail page words as "nothing recorded".
 	 */
 	messages: readonly AgentMessage[];
 }
@@ -73,7 +74,7 @@ function toSnapshot(entry: SubagentEntry, now: number): SubagentSnapshot {
 		errorMessage: entry.error?.message,
 		turns: entry.result?.turns,
 		usage: entry.result?.usage,
-		messages: entry.result?.messages ?? [],
+		messages: entry.transcript,
 	};
 }
 

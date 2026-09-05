@@ -103,6 +103,31 @@ export interface SubagentRunResult {
 	messages: readonly AgentMessage[];
 }
 
+/**
+ * A run-ending failure that still carries the transcript the child died holding.
+ *
+ * The transcript is the whole reason this type exists. A failed run's messages
+ * are what another errand resumes from — the network-interruption case
+ * `follow_up_subagent` was added for — and what the panel's process record shows
+ * instead of claiming nothing was recorded. Before this, every failure path threw
+ * a bare `Error` and the messages went out of scope with the stack frame.
+ *
+ * Every failure the runner raises travels as one of these, including the wrapped
+ * ones: a path that threw something else would be a path where a resume silently
+ * starts the child over, and that is exactly the failure mode this is here to
+ * prevent.
+ */
+export class SubagentRunError extends Error {
+	/** The child's context when the run died; empty when it died before its first turn. */
+	readonly messages: readonly AgentMessage[];
+
+	constructor(message: string, messages: readonly AgentMessage[]) {
+		super(message);
+		this.name = "SubagentRunError";
+		this.messages = messages;
+	}
+}
+
 export interface LinkedSignals {
 	signal: AbortSignal;
 	/** Fires the controller; how external callers kill the linked run. */
@@ -214,7 +239,6 @@ function textOfBlocks(content: ReadonlyArray<{ type: string; text?: string }>): 
 export async function runSubagent(options: SubagentRunOptions): Promise<SubagentRunResult> {
 	const { task, role, tools, model, streamFn, thinkingLevel } = options;
 	const linked = linkSignals(options.signal);
-	const abortError = (): Error => new Error("Subagent aborted");
 	// Compaction bookkeeping, run-local because the run is one function call: the
 	// parent needs fields on a service for the same state because its run outlives
 	// any single method.
@@ -339,10 +363,13 @@ export async function runSubagent(options: SubagentRunOptions): Promise<Subagent
 		await agent.prompt(task);
 	} catch (error) {
 		// An abort is not a failure to report — the salvage path below decides
-		// whether the run left anything worth handing back. Anything else is a
-		// real fault and travels as itself.
+		// whether the run left anything worth handing back. Anything else is a real
+		// fault, and travels on under its own words rather than its own type: what
+		// a later reader and a later resume both need is the transcript, and pi's
+		// `StreamFn` contract keeps genuine exceptions off this path anyway
+		// (provider failures arrive as a `stopReason: "error"` turn, below).
 		if (!linked.signal.aborted) {
-			throw error;
+			throw new SubagentRunError(error instanceof Error ? error.message : String(error), agent.state.messages);
 		}
 	} finally {
 		// On the happy path the signal never fires, so the listener must come
@@ -371,7 +398,7 @@ export async function runSubagent(options: SubagentRunOptions): Promise<Subagent
 		// `incomplete` flag is what stops the parent reading it as the answer.
 		const salvaged = extractAssistantText(lastAssistant);
 		if (!salvaged) {
-			throw abortError();
+			throw new SubagentRunError("Subagent aborted", messages);
 		}
 		return { text: salvaged, ...accounting, messages, incomplete: true };
 	}
@@ -389,7 +416,7 @@ export async function runSubagent(options: SubagentRunOptions): Promise<Subagent
 		// itself and the wait tool words it as "no report".
 		const failure = lastToolError(messages) ?? agent.state.errorMessage;
 		if (failure) {
-			throw new Error(`Subagent failed: ${describeFailure(failure, lastAssistant, model, accounting.turns)}`);
+			throw new SubagentRunError(`Subagent failed: ${describeFailure(failure, lastAssistant, model, accounting.turns)}`, messages);
 		}
 		return { text: "", ...accounting, messages };
 	}

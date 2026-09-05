@@ -1,4 +1,5 @@
-import type { SubagentRunResult } from "./runner";
+import type { AgentMessage } from "@earendil-works/pi-agent-core";
+import { SubagentRunError, type SubagentRunResult } from "./runner";
 
 /** One spawned subagent's bookkeeping, from spawn to settlement. */
 export interface SubagentEntry {
@@ -14,6 +15,18 @@ export interface SubagentEntry {
 	settled: boolean;
 	result?: SubagentRunResult;
 	error?: Error;
+	/**
+	 * The child's context as its last run left it — the process record the panel
+	 * reads, and the history another errand would continue from.
+	 *
+	 * Kept on the entry rather than read off `result` because a failed run has no
+	 * result and its transcript is the most useful thing it produced: a run that
+	 * died to a network fault mid-sweep still holds everything it had learned. The
+	 * failure path carries it out through {@link SubagentRunError}, so both
+	 * outcomes land here and the panel never has to word a failure as "nothing
+	 * happened". Empty until the first settlement.
+	 */
+	transcript: readonly AgentMessage[];
 	/**
 	 * Why this child was cut short, when something cut it short.
 	 *
@@ -134,6 +147,7 @@ export class SubagentRegistry {
 			dispose: spec.dispose,
 			promise: null as unknown as Promise<SubagentRunResult>,
 			settled: false,
+			transcript: [],
 			parentSignal: spec.parentSignal,
 			task: spec.task,
 			instructions: spec.instructions,
@@ -146,6 +160,7 @@ export class SubagentRegistry {
 			(result) => {
 				entry.settled = true;
 				entry.result = result;
+				entry.transcript = result.messages;
 				entry.settledAt = Date.now();
 				entry.dispose();
 				this.emitChange();
@@ -154,6 +169,12 @@ export class SubagentRegistry {
 			(error) => {
 				entry.settled = true;
 				entry.error = error instanceof Error ? error : new Error(String(error));
+				// Only a runner failure knows the transcript; anything else that
+				// rejected got no further than assembling the run, so what the entry
+				// already holds is still the truest record of this child.
+				if (error instanceof SubagentRunError) {
+					entry.transcript = error.messages;
+				}
 				entry.settledAt = Date.now();
 				entry.dispose();
 				this.emitChange();
